@@ -1,4 +1,5 @@
-use crate::rules::RuleRegistry;
+use crate::rules::python_aliases::ImportAliases;
+use crate::rules::{FileContext, RuleRegistry};
 use crate::{Finding, Language};
 use ignore::WalkBuilder;
 use rayon::prelude::*;
@@ -155,11 +156,23 @@ fn scan_files(
         let relative_path = relative_scan_path(scan_root, path);
         let rules = registry.rules_for_language(*language);
 
+        // Per-file analysis context. Python builds an import alias table so
+        // rules can resolve aliased callees (`import pickle as p; p.loads(x)`)
+        // back to their canonical dotted paths before sink matching.
+        let python_aliases = if matches!(language, Language::Python) {
+            Some(ImportAliases::from_tree(&source, &tree))
+        } else {
+            None
+        };
+        let ctx = FileContext {
+            python_aliases: python_aliases.as_ref(),
+        };
+
         for rule in rules {
             if !rule.applies_to_path(&relative_path) {
                 continue;
             }
-            let mut rule_findings = rule.check(&source, &tree);
+            let mut rule_findings = rule.check_with_context(&source, &tree, &ctx);
             for f in &mut rule_findings {
                 f.file = file_str.clone();
             }

@@ -209,6 +209,85 @@ fn test_vulnerable_py_finds_all_rules() {
     }
 }
 
+/// Regression test for issue #7: Python rules used to string-match callee
+/// text against a fixed sink list, so `import pickle as p; p.loads(x)` and
+/// every other aliased form slipped past. With the per-file import alias
+/// table, each call site should resolve back to its canonical dotted path
+/// and fire.
+#[test]
+fn test_vulnerable_py_aliases_catches_all_bypass_forms() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/vulnerable_py_aliases.py", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    assert!(!output.status.success());
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    assert_eq!(
+        findings.len(),
+        18,
+        "vulnerable_py_aliases.py should have 18 findings, got {}",
+        findings.len()
+    );
+
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for f in &findings {
+        if let Some(rule) = f["rule_id"].as_str() {
+            *counts.entry(rule).or_insert(0) += 1;
+        }
+    }
+
+    // One row per rule that should be exercised by the aliased fixture,
+    // with the exact number of bypass forms we expect it to catch.
+    let expected: &[(&str, usize)] = &[
+        ("py/no-pickle", 4),
+        ("py/no-yaml-load", 2),
+        ("py/no-weak-crypto", 4),
+        ("py/no-ssrf", 2),
+        ("py/no-command-injection", 4),
+        ("py/no-path-traversal", 2),
+    ];
+
+    for (rule, want) in expected {
+        let got = counts.get(rule).copied().unwrap_or(0);
+        assert_eq!(
+            got, *want,
+            "rule {} caught {} bypass forms, expected {}",
+            rule, got, want
+        );
+    }
+}
+
+/// Negative regression for issue #7: aliased imports of the *same* sensitive
+/// modules, but called in safe shapes (static literals, SafeLoader, sha256,
+/// write-only pickle methods). Alias resolution must not silently widen the
+/// match surface — this file should still produce zero findings.
+#[test]
+fn test_safe_py_aliases_no_findings() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/safe_py_aliases.py", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    assert!(
+        output.status.success(),
+        "safe_py_aliases.py should exit zero"
+    );
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    assert_eq!(
+        findings.len(),
+        0,
+        "safe_py_aliases.py should have 0 findings, got {:?}",
+        findings
+    );
+}
+
 #[test]
 fn test_vulnerable_go_finds_all_rules() {
     let output = foxguard_cmd()

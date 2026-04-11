@@ -4,6 +4,7 @@ pub mod java;
 pub mod javascript;
 pub mod php;
 pub mod python;
+pub mod python_aliases;
 pub mod ruby;
 pub mod rust_lang;
 pub mod semgrep_compat;
@@ -11,6 +12,17 @@ pub mod swift;
 
 use crate::{Finding, Language, Severity};
 use std::path::Path;
+
+/// Per-file analysis context shared across all rules running on a single file.
+///
+/// Computed once after parsing in the scanner and handed to each rule via
+/// `check_with_context`. Rules that need nothing from it can continue to
+/// implement `check` directly and rely on the default trait method.
+#[derive(Default)]
+pub struct FileContext<'a> {
+    /// Python import alias table. `None` for non-Python files.
+    pub python_aliases: Option<&'a python_aliases::ImportAliases>,
+}
 
 /// A security rule that checks parsed source code for vulnerabilities.
 pub trait Rule: Send + Sync {
@@ -23,6 +35,18 @@ pub trait Rule: Send + Sync {
         true
     }
     fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding>;
+
+    /// Context-aware variant. Defaults to calling `check` so every existing
+    /// rule works unchanged. Rules that need the per-file context (e.g.
+    /// Python import aliases) override this instead of `check`.
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        _ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        self.check(source, tree)
+    }
 }
 
 /// Registry holding all available rules.

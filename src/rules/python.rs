@@ -1,8 +1,21 @@
-use crate::rules::Rule;
+use crate::rules::{FileContext, Rule};
 use crate::{Finding, Language, Severity};
 use regex::Regex;
+use std::borrow::Cow;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Resolve a raw callee text through the per-file Python import alias table.
+/// Returns the canonical dotted path when an alias matches, otherwise the
+/// input unchanged. Falls back to the raw text when no alias table is
+/// available (e.g. under the legacy `check` entry point used by some unit
+/// tests).
+fn resolve_callee<'a>(func_text: &'a str, ctx: &'a FileContext<'_>) -> Cow<'a, str> {
+    match ctx.python_aliases {
+        Some(aliases) => aliases.resolve(func_text),
+        None => Cow::Borrowed(func_text),
+    }
+}
 
 fn get_source_line(source: &str, byte_offset: usize) -> String {
     let start = source[..byte_offset].rfind('\n').map_or(0, |p| p + 1);
@@ -70,20 +83,30 @@ impl Rule for NoEval {
     }
 
     fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call" {
                 if let Some(func) = node.child_by_field_name("function") {
                     let func_text = &src[func.byte_range()];
-                    if func_text == "eval" || func_text == "exec" {
+                    let resolved = resolve_callee(func_text, ctx);
+                    if resolved.as_ref() == "eval" || resolved.as_ref() == "exec" {
                         findings.push(make_finding(
                             self.id(),
                             self.severity(),
                             self.cwe(),
                             &format!(
                                 "{}() allows arbitrary code execution — avoid using it with untrusted input",
-                                func_text
+                                resolved
                             ),
                             node,
                             src,
@@ -304,6 +327,15 @@ impl Rule for NoCommandInjection {
     }
 
     fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
         let mut findings = Vec::new();
         let dangerous_fns = [
             "os.system",
@@ -319,7 +351,8 @@ impl Rule for NoCommandInjection {
             if node.kind() == "call" {
                 if let Some(func) = node.child_by_field_name("function") {
                     let func_text = &src[func.byte_range()];
-                    if dangerous_fns.contains(&func_text) {
+                    let resolved = resolve_callee(func_text, ctx);
+                    if dangerous_fns.contains(&resolved.as_ref()) {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
                                 // Flag if argument is not a plain string literal
@@ -341,7 +374,7 @@ impl Rule for NoCommandInjection {
                                         self.cwe(),
                                         &format!(
                                             "{}() called with dynamic argument — risk of command injection",
-                                            func_text
+                                            resolved
                                         ),
                                         node,
                                         src,
@@ -379,14 +412,24 @@ impl Rule for NoPathTraversal {
     }
 
     fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call" {
                 if let Some(func) = node.child_by_field_name("function") {
                     let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
                     let sink_fns = ["open", "os.remove", "os.unlink", "os.listdir", "os.scandir"];
-                    if sink_fns.contains(&func_text) {
+                    if sink_fns.contains(&resolved.as_ref()) {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
                                 // Flag if path uses concatenation or f-string
@@ -407,7 +450,7 @@ impl Rule for NoPathTraversal {
                                         self.cwe(),
                                         &format!(
                                             "{}() called with dynamic path — validate and sanitize to prevent path traversal",
-                                            func_text
+                                            resolved
                                         ),
                                         node,
                                         src,
@@ -445,6 +488,15 @@ impl Rule for NoSsrf {
     }
 
     fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
         let mut findings = Vec::new();
         let request_fns = [
             "requests.get",
@@ -471,7 +523,8 @@ impl Rule for NoSsrf {
                 return;
             };
             let func_text = &src[func.byte_range()];
-            if !request_fns.contains(&func_text) {
+            let resolved = resolve_callee(func_text, ctx);
+            if !request_fns.contains(&resolved.as_ref()) {
                 return;
             }
 
@@ -479,7 +532,9 @@ impl Rule for NoSsrf {
                 return;
             };
 
-            let url_arg = if func_text == "requests.request" || func_text == "httpx.request" {
+            let url_arg = if resolved.as_ref() == "requests.request"
+                || resolved.as_ref() == "httpx.request"
+            {
                 args.named_child(1)
             } else {
                 args.named_child(0)
@@ -504,7 +559,7 @@ impl Rule for NoSsrf {
                     self.cwe(),
                     &format!(
                         "{} called with dynamic URL — validate and allowlist outbound destinations to prevent SSRF",
-                        func_text
+                        resolved
                     ),
                     node,
                     src,
@@ -538,14 +593,24 @@ impl Rule for NoWeakCrypto {
     }
 
     fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call" {
                 if let Some(func) = node.child_by_field_name("function") {
                     let func_text = &src[func.byte_range()];
-                    if func_text == "hashlib.md5" || func_text == "hashlib.sha1" {
-                        let algo = if func_text.contains("md5") {
+                    let resolved = resolve_callee(func_text, ctx);
+                    if resolved.as_ref() == "hashlib.md5" || resolved.as_ref() == "hashlib.sha1" {
+                        let algo = if resolved.as_ref().contains("md5") {
                             "MD5"
                         } else {
                             "SHA1"
@@ -564,7 +629,7 @@ impl Rule for NoWeakCrypto {
                     }
 
                     // hashlib.new('md5') / hashlib.new('sha1')
-                    if func_text == "hashlib.new" {
+                    if resolved.as_ref() == "hashlib.new" {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
                                 if first_arg.kind() == "string" {
@@ -616,6 +681,15 @@ impl Rule for NoPickle {
     }
 
     fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
         let mut findings = Vec::new();
         let dangerous_fns = [
             "pickle.loads",
@@ -628,14 +702,15 @@ impl Rule for NoPickle {
             if node.kind() == "call" {
                 if let Some(func) = node.child_by_field_name("function") {
                     let func_text = &src[func.byte_range()];
-                    if dangerous_fns.contains(&func_text) {
+                    let resolved = resolve_callee(func_text, ctx);
+                    if dangerous_fns.contains(&resolved.as_ref()) {
                         findings.push(make_finding(
                             self.id(),
                             self.severity(),
                             self.cwe(),
                             &format!(
                                 "{}() deserializes untrusted data — can execute arbitrary code",
-                                func_text
+                                resolved
                             ),
                             node,
                             src,
@@ -670,13 +745,23 @@ impl Rule for NoYamlLoad {
     }
 
     fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call" {
                 if let Some(func) = node.child_by_field_name("function") {
                     let func_text = &src[func.byte_range()];
-                    if func_text == "yaml.load" {
+                    let resolved = resolve_callee(func_text, ctx);
+                    if resolved.as_ref() == "yaml.load" {
                         // Check if SafeLoader or safe_load is used
                         if let Some(args) = node.child_by_field_name("arguments") {
                             let args_text = &src[args.byte_range()];
