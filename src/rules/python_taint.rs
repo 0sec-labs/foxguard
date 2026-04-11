@@ -1,0 +1,741 @@
+//! Intraprocedural, flow-insensitive taint analysis for Python.
+//!
+//! # Scope
+//!
+//! The engine walks a single function body in source order and reports
+//! every sink call whose arguments are reachable from a configured source.
+//! It is deliberately small:
+//!
+//! - **Per function.** No cross-function analysis. Each function is analyzed
+//!   independently; taint does not cross call boundaries.
+//! - **Per file.** No cross-file analysis. Callers of helper functions in
+//!   other modules are on their own.
+//! - **Flow-insensitive.** Statements are processed in source order. When a
+//!   variable is reassigned to a non-tainted expression the old taint is
+//!   dropped, but control flow is not modeled — taint observed in one branch
+//!   of an `if` is treated as taint in the fall-through. Over-approximation
+//!   is the whole point.
+//! - **No container sensitivity.** `d["key"]` is tainted if `d` is tainted.
+//!   Individual keys are not tracked.
+//! - **No attribute propagation beyond one level.** `x.y` is tainted if `x`
+//!   is tainted, but taint does not persist on `x.y` as a distinct name.
+//! - **No sanitizers yet.** The [`TaintSpec`] has a field for sanitizers so
+//!   the API is forward-compatible, but the engine does not consult it in
+//!   this POC.
+//!
+//! Everything the engine knows about *which* patterns are sources, sinks, or
+//! sanitizers is expressed declaratively via [`TaintSpec`] — nothing is
+//! hardcoded about Flask, pickle, or any other library. The POC ships one
+//! built-in rule as the first consumer; future rules (including
+//! Semgrep-compatible `mode: taint` YAML) will plug into the same API.
+
+use crate::rules::python_aliases::ImportAliases;
+use std::collections::HashMap;
+use tree_sitter::{Node, TreeCursor};
+
+// ─── Public API ───────────────────────────────────────────────────────────
+
+/// A pattern that matches an AST node for the purposes of taint analysis.
+///
+/// Kept intentionally narrow so that the YAML bridge in the follow-up PR
+/// has a finite target to compile into. Every match returns a short human
+/// description that is propagated to findings so the report can say
+/// *why* something was tainted.
+#[derive(Debug, Clone)]
+pub enum NodeMatcher {
+    /// Match an attribute access like `request.data` or `request.form`.
+    ///
+    /// The match is conservative: it triggers whenever the *leftmost*
+    /// identifier in a dotted chain equals `root` and the *final* attribute
+    /// segment equals `field`. This catches both `request.data` and
+    /// `flask.request.data`-style forms after alias resolution, without
+    /// over-fitting to a specific depth.
+    Attribute {
+        root: String,
+        field: String,
+        description: String,
+    },
+
+    /// Match a function or method call by its canonical dotted callee
+    /// path, after resolution through the per-file import alias table.
+    ///
+    /// Example: `canonical: "request.get_json"` matches `request.get_json()`,
+    /// `req.get_json()` where `req` is an alias for `request`, and
+    /// `from flask import request; request.get_json()`.
+    Call {
+        canonical: String,
+        description: String,
+    },
+
+    /// Match any use of a function parameter whose name is in this list.
+    ///
+    /// Useful for marking `request`-typed parameters as implicit sources:
+    /// `def handler(request): pickle.loads(request.data)` flags without
+    /// requiring an explicit assignment from a known source.
+    ParamName {
+        names: Vec<String>,
+        description: String,
+    },
+}
+
+impl NodeMatcher {
+    /// Short human description used in findings.
+    pub fn description(&self) -> &str {
+        match self {
+            NodeMatcher::Attribute { description, .. } => description,
+            NodeMatcher::Call { description, .. } => description,
+            NodeMatcher::ParamName { description, .. } => description,
+        }
+    }
+}
+
+/// Declarative taint specification consumed by the engine. Each rule that
+/// wants to use taint analysis builds one of these and passes it to
+/// [`analyze_function`].
+#[derive(Debug, Clone, Default)]
+pub struct TaintSpec {
+    pub sources: Vec<NodeMatcher>,
+    pub sinks: Vec<NodeMatcher>,
+    /// Reserved for the next PR — sanitizers are not consulted yet, but the
+    /// field exists so the YAML bridge has a slot to fill.
+    pub sanitizers: Vec<NodeMatcher>,
+}
+
+/// A single source→sink flow reported by the engine.
+#[derive(Debug, Clone)]
+pub struct TaintFinding {
+    /// Byte range of the sink node within the source string.
+    pub sink_start_byte: usize,
+    pub sink_end_byte: usize,
+    /// 1-indexed line of the sink.
+    pub sink_line: usize,
+    /// 1-indexed column of the sink.
+    pub sink_column: usize,
+    pub sink_end_line: usize,
+    pub sink_end_column: usize,
+    /// Description of the source matcher that tainted this flow.
+    pub source_description: String,
+    /// Description of the sink matcher that flagged this flow.
+    pub sink_description: String,
+}
+
+/// Run the taint engine over every function definition inside `root` and
+/// return one [`TaintFinding`] per source→sink flow discovered.
+///
+/// The root can be a whole file tree. The engine finds every
+/// `function_definition` inside it (including nested ones) and analyzes
+/// each independently.
+pub fn analyze_tree(
+    root: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&ImportAliases>,
+) -> Vec<TaintFinding> {
+    let mut findings = Vec::new();
+    collect_function_defs(root, &mut |func_node| {
+        analyze_function(func_node, source, spec, aliases, &mut findings);
+    });
+    findings
+}
+
+// ─── Internals ────────────────────────────────────────────────────────────
+
+fn collect_function_defs<'tree, F>(node: Node<'tree>, visit: &mut F)
+where
+    F: FnMut(Node<'tree>),
+{
+    if node.kind() == "function_definition" {
+        visit(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_function_defs(child, visit);
+    }
+}
+
+/// State maintained while walking a single function body. Maps local
+/// identifier names to a description of the source that tainted them.
+#[derive(Default)]
+struct TaintState {
+    tainted: HashMap<String, String>,
+}
+
+impl TaintState {
+    fn taint(&mut self, name: String, description: String) {
+        self.tainted.insert(name, description);
+    }
+
+    fn clear(&mut self, name: &str) {
+        self.tainted.remove(name);
+    }
+
+    fn describe(&self, name: &str) -> Option<&str> {
+        self.tainted.get(name).map(String::as_str)
+    }
+}
+
+fn analyze_function(
+    func_node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&ImportAliases>,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let mut state = TaintState::default();
+
+    // Seed the state with any parameters marked as implicit sources.
+    if let Some(params) = func_node.child_by_field_name("parameters") {
+        seed_param_sources(params, source, spec, &mut state);
+    }
+
+    // Walk the body in source order, updating taint state at assignments
+    // and reporting flows at sink calls.
+    let Some(body) = func_node.child_by_field_name("body") else {
+        return;
+    };
+    walk_body(body, source, spec, aliases, &mut state, findings);
+}
+
+fn seed_param_sources(
+    params: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    state: &mut TaintState,
+) {
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        let param_name = match child.kind() {
+            "identifier" => node_text(child, source),
+            "typed_parameter" | "default_parameter" | "typed_default_parameter" => {
+                // Drill to the first identifier inside.
+                let mut inner_cursor = child.walk();
+                let mut found: Option<&str> = None;
+                for inner in child.children(&mut inner_cursor) {
+                    if inner.kind() == "identifier" {
+                        found = Some(node_text(inner, source));
+                        break;
+                    }
+                }
+                match found {
+                    Some(n) => n,
+                    None => continue,
+                }
+            }
+            _ => continue,
+        };
+
+        for matcher in &spec.sources {
+            if let NodeMatcher::ParamName { names, description } = matcher {
+                if names.iter().any(|n| n == param_name) {
+                    state.taint(param_name.to_string(), description.clone());
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn walk_body(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&ImportAliases>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    // Nested function definitions have their own scope. Skip them — they'll
+    // be picked up independently by analyze_tree.
+    if node.kind() == "function_definition" {
+        return;
+    }
+
+    if node.kind() == "assignment" {
+        handle_assignment(node, source, spec, aliases, state);
+    }
+
+    if node.kind() == "call" {
+        handle_call(node, source, spec, aliases, state, findings);
+    }
+
+    // Tree-sitter's cursor walks in document order, which is exactly the
+    // "process statements in source order, unioning taint across branches"
+    // semantics the POC wants.
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_body(child, source, spec, aliases, state, findings);
+    }
+}
+
+fn handle_assignment(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&ImportAliases>,
+    state: &mut TaintState,
+) {
+    let (Some(left), Some(right)) = (
+        node.child_by_field_name("left"),
+        node.child_by_field_name("right"),
+    ) else {
+        return;
+    };
+
+    // Only track simple identifier LHS. Tuple/subscript LHS are out of
+    // scope for the POC.
+    if left.kind() != "identifier" {
+        return;
+    }
+    let lhs_name = node_text(left, source).to_string();
+
+    if let Some(desc) = expression_taint(right, source, spec, aliases, state) {
+        state.taint(lhs_name, desc);
+    } else {
+        // Reassignment with a clean RHS kills any previous taint on LHS.
+        state.clear(&lhs_name);
+    }
+}
+
+fn handle_call(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&ImportAliases>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let Some(func) = node.child_by_field_name("function") else {
+        return;
+    };
+    let callee_text = node_text(func, source);
+    let resolved = match aliases {
+        Some(a) => a.resolve(callee_text).into_owned(),
+        None => callee_text.to_string(),
+    };
+
+    // Is this a sink?
+    let sink_desc = spec.sinks.iter().find_map(|m| match m {
+        NodeMatcher::Call {
+            canonical,
+            description,
+        } if *canonical == resolved => Some(description.clone()),
+        _ => None,
+    });
+    let Some(sink_desc) = sink_desc else {
+        return;
+    };
+
+    // Check each argument for taint.
+    let Some(args) = node.child_by_field_name("arguments") else {
+        return;
+    };
+    let mut cursor = args.walk();
+    for arg in args.named_children(&mut cursor) {
+        if let Some(source_desc) = expression_taint(arg, source, spec, aliases, state) {
+            let start = node.start_position();
+            let end = node.end_position();
+            findings.push(TaintFinding {
+                sink_start_byte: node.start_byte(),
+                sink_end_byte: node.end_byte(),
+                sink_line: start.row + 1,
+                sink_column: start.column + 1,
+                sink_end_line: end.row + 1,
+                sink_end_column: end.column + 1,
+                source_description: source_desc,
+                sink_description: sink_desc.clone(),
+            });
+            // One finding per sink call is enough — don't double-report
+            // when multiple args are tainted.
+            break;
+        }
+    }
+}
+
+/// Returns the source description if `expr` evaluates to (or references) a
+/// tainted value, otherwise `None`.
+fn expression_taint(
+    expr: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&ImportAliases>,
+    state: &TaintState,
+) -> Option<String> {
+    // Direct source match on this expression.
+    if let Some(desc) = match_source(expr, source, spec, aliases) {
+        return Some(desc);
+    }
+
+    // Tainted identifier reference.
+    if expr.kind() == "identifier" {
+        let name = node_text(expr, source);
+        if let Some(desc) = state.describe(name) {
+            return Some(desc.to_string());
+        }
+    }
+
+    // Tainted attribute access on a tainted root (x.y where x is tainted).
+    if expr.kind() == "attribute" {
+        if let Some(object) = expr.child_by_field_name("object") {
+            if object.kind() == "identifier" {
+                let name = node_text(object, source);
+                if let Some(desc) = state.describe(name) {
+                    return Some(desc.to_string());
+                }
+            }
+        }
+    }
+
+    // Tainted subscript (d[k] where d is tainted — no key sensitivity).
+    if expr.kind() == "subscript" {
+        if let Some(value) = expr.child_by_field_name("value") {
+            if value.kind() == "identifier" {
+                let name = node_text(value, source);
+                if let Some(desc) = state.describe(name) {
+                    return Some(desc.to_string());
+                }
+            }
+            // Also: subscript whose value is itself a source attribute
+            // like `request.form["x"]`.
+            if let Some(desc) = match_source(value, source, spec, aliases) {
+                return Some(desc);
+            }
+        }
+    }
+
+    // Recurse one level for wrapping expressions (e.g. `bytes(request.data)`),
+    // so the taint survives trivial type conversions without requiring
+    // full interprocedural tracking.
+    if expr.kind() == "call" {
+        if let Some(args) = expr.child_by_field_name("arguments") {
+            let mut cursor = args.walk();
+            for arg in args.named_children(&mut cursor) {
+                if let Some(desc) = expression_taint(arg, source, spec, aliases, state) {
+                    return Some(desc);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn match_source(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&ImportAliases>,
+) -> Option<String> {
+    for matcher in &spec.sources {
+        match matcher {
+            NodeMatcher::Attribute {
+                root,
+                field,
+                description,
+            } => {
+                if node.kind() != "attribute" {
+                    continue;
+                }
+                let Some(final_attr) = node.child_by_field_name("attribute") else {
+                    continue;
+                };
+                if node_text(final_attr, source) != field.as_str() {
+                    continue;
+                }
+                let Some(raw_root) = leftmost_identifier(node, source) else {
+                    continue;
+                };
+                // Match against both the raw leftmost identifier (e.g.
+                // `request` from `from flask import request`) and its
+                // alias-resolved canonical (e.g. `flask.request`). This lets
+                // one spec cover both imported and parameter-introduced
+                // `request` names without requiring callers to duplicate
+                // their source list.
+                if raw_root == root.as_str() {
+                    return Some(description.clone());
+                }
+                if let Some(a) = aliases {
+                    if a.resolve(raw_root).as_ref() == root.as_str() {
+                        return Some(description.clone());
+                    }
+                }
+            }
+            NodeMatcher::Call {
+                canonical,
+                description,
+            } => {
+                if node.kind() != "call" {
+                    continue;
+                }
+                let Some(func) = node.child_by_field_name("function") else {
+                    continue;
+                };
+                let callee_text = node_text(func, source);
+                if callee_text == canonical.as_str() {
+                    return Some(description.clone());
+                }
+                if let Some(a) = aliases {
+                    if a.resolve(callee_text).as_ref() == canonical.as_str() {
+                        return Some(description.clone());
+                    }
+                }
+            }
+            NodeMatcher::ParamName { .. } => {
+                // ParamName matchers are applied when seeding the state
+                // from the function's parameter list, not when walking
+                // expressions.
+            }
+        }
+    }
+    None
+}
+
+/// Walk an attribute chain leftward and return the leftmost identifier text.
+/// For `request.form.get`, returns `"request"`. For `x.y`, returns `"x"`.
+/// Returns `None` if the leftmost node is not a simple identifier.
+fn leftmost_identifier<'a>(mut node: Node<'_>, source: &'a str) -> Option<&'a str> {
+    loop {
+        match node.kind() {
+            "identifier" => return Some(node_text(node, source)),
+            "attribute" => {
+                node = node.child_by_field_name("object")?;
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
+    &source[node.byte_range()]
+}
+
+#[allow(dead_code)]
+fn debug_tree(node: Node<'_>, depth: usize) {
+    let mut cursor: TreeCursor = node.walk();
+    for _ in 0..depth {
+        eprint!("  ");
+    }
+    eprintln!("{}", node.kind());
+    for child in node.children(&mut cursor) {
+        debug_tree(child, depth + 1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::parser::parse_file;
+    use crate::Language;
+
+    fn spec_pickle_from_request() -> TaintSpec {
+        TaintSpec {
+            sources: vec![
+                NodeMatcher::Attribute {
+                    root: "request".into(),
+                    field: "data".into(),
+                    description: "flask.request.data".into(),
+                },
+                NodeMatcher::Attribute {
+                    root: "request".into(),
+                    field: "form".into(),
+                    description: "flask.request.form".into(),
+                },
+                NodeMatcher::Attribute {
+                    root: "request".into(),
+                    field: "args".into(),
+                    description: "flask.request.args".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "request.get_json".into(),
+                    description: "flask.request.get_json()".into(),
+                },
+                NodeMatcher::ParamName {
+                    names: vec!["request".into()],
+                    description: "function parameter named request".into(),
+                },
+            ],
+            sinks: vec![
+                NodeMatcher::Call {
+                    canonical: "pickle.loads".into(),
+                    description: "pickle.loads".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "pickle.load".into(),
+                    description: "pickle.load".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+
+    fn run(source: &str) -> Vec<TaintFinding> {
+        let tree = parse_file(source, Language::Python).expect("parse");
+        let aliases = ImportAliases::from_tree(source, &tree);
+        analyze_tree(tree.root_node(), source, &spec_pickle_from_request(), Some(&aliases))
+    }
+
+    #[test]
+    fn direct_flow_request_data_to_pickle_loads() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.data
+    return pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.data"));
+        assert_eq!(f[0].sink_description, "pickle.loads");
+    }
+
+    #[test]
+    fn chained_assignment_propagates_taint() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    a = request.form
+    b = a
+    c = b
+    return pickle.loads(c)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn reassignment_to_literal_kills_taint() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.data
+    data = b"static"
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn taint_survives_branch_over_approximation() {
+        // Flow-insensitive: taint observed in one branch persists into the
+        // fall-through. The POC deliberately over-approximates.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler(cond):
+    if cond:
+        data = request.data
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn function_parameter_named_request_is_tainted() {
+        let src = r#"
+import pickle
+
+def handler(request):
+    return pickle.loads(request.data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn nested_function_has_independent_taint() {
+        // The outer function taints `data`, but the inner function never
+        // sees it — each function body is analyzed independently.
+        let src = r#"
+import pickle
+from flask import request
+
+def outer():
+    data = request.data
+    def inner():
+        return pickle.loads(data)
+    return inner
+"#;
+        // outer() has no sink call; inner() has a sink call on `data`
+        // which is not in its own scope, so zero findings.
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn no_source_no_finding() {
+        let src = r#"
+import pickle
+
+def handler():
+    data = b"trusted"
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn source_call_get_json_flows_to_sink() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    payload = request.get_json()
+    return pickle.loads(payload)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn direct_source_as_sink_argument_without_intermediate() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    return pickle.loads(request.data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn subscript_on_tainted_root_is_tainted() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    form = request.form
+    return pickle.loads(form["payload"])
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn wrapping_call_preserves_taint() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    return pickle.loads(bytes(request.data))
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn alias_resolution_through_import_table() {
+        // import pickle as p; p.loads(...) must still be recognized as the
+        // pickle.loads sink when the alias table is supplied.
+        let src = r#"
+import pickle as p
+from flask import request
+
+def handler():
+    return p.loads(request.data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+}

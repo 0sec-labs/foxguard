@@ -49,6 +49,7 @@ const pyRules: Rule[] = [
   { id: 'py/no-ssrf', cwe: 'CWE-918', desc: 'SSRF via dynamic outbound request URL', severity: 'high' },
   { id: 'py/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic hash (MD5/SHA1)', severity: 'medium' },
   { id: 'py/no-pickle', cwe: 'CWE-502', desc: 'Deserialization of untrusted data via pickle', severity: 'high' },
+  { id: 'py/taint-pickle-deserialization', cwe: 'CWE-502', desc: 'Untrusted input reaches pickle deserialization (intraprocedural taint)', severity: 'critical' },
   { id: 'py/no-yaml-load', cwe: 'CWE-502', desc: 'Unsafe yaml.load() without SafeLoader', severity: 'high' },
   { id: 'py/no-debug-true', cwe: 'CWE-489', desc: 'DEBUG=True left enabled in production config', severity: 'medium' },
   { id: 'py/no-open-redirect', cwe: 'CWE-601', desc: 'Open redirect via user-controlled URL', severity: 'medium' },

@@ -1803,3 +1803,144 @@ impl Rule for SecureSslRedirectDisabled {
         findings
     }
 }
+
+// ─── Rule: taint-pickle-deserialization ────────────────────────────────────
+//
+// Proof-of-concept rule exercising the new per-function taint engine.
+// Fires when Flask-style untrusted input reaches a pickle deserialization
+// sink within a single function body. Coexists with `py/no-pickle`:
+//
+//   - `py/no-pickle` is the conservative direct-sink rule. It fires on any
+//     call to `pickle.loads(...)` regardless of what the argument is.
+//   - `py/taint-pickle-deserialization` fires only when the argument is
+//     provably reachable from a known untrusted source within the same
+//     function. Higher precision, lower recall.
+//
+// Scope and limitations are documented in `docs/taint-tracking.md` and in
+// the doc comment on `python_taint`. Intraprocedural only, flow-insensitive,
+// no sanitizers yet.
+
+use crate::rules::python_taint::{self, NodeMatcher, TaintSpec};
+
+pub struct TaintPickleDeserialization;
+
+impl TaintPickleDeserialization {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: vec![
+                NodeMatcher::Attribute {
+                    root: "request".into(),
+                    field: "data".into(),
+                    description: "flask.request.data".into(),
+                },
+                NodeMatcher::Attribute {
+                    root: "request".into(),
+                    field: "form".into(),
+                    description: "flask.request.form".into(),
+                },
+                NodeMatcher::Attribute {
+                    root: "request".into(),
+                    field: "args".into(),
+                    description: "flask.request.args".into(),
+                },
+                NodeMatcher::Attribute {
+                    root: "request".into(),
+                    field: "values".into(),
+                    description: "flask.request.values".into(),
+                },
+                NodeMatcher::Attribute {
+                    root: "request".into(),
+                    field: "json".into(),
+                    description: "flask.request.json".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "request.get_data".into(),
+                    description: "flask.request.get_data()".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "request.get_json".into(),
+                    description: "flask.request.get_json()".into(),
+                },
+                NodeMatcher::ParamName {
+                    names: vec!["request".into()],
+                    description: "untrusted request parameter".into(),
+                },
+            ],
+            sinks: vec![
+                NodeMatcher::Call {
+                    canonical: "pickle.loads".into(),
+                    description: "pickle.loads".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "pickle.load".into(),
+                    description: "pickle.load".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "cPickle.loads".into(),
+                    description: "cPickle.loads".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "cPickle.load".into(),
+                    description: "cPickle.load".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintPickleDeserialization {
+    fn id(&self) -> &str {
+        "py/taint-pickle-deserialization"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-502")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches pickle deserialization sink"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let spec = Self::spec();
+        let taint_findings = python_taint::analyze_tree(
+            tree.root_node(),
+            source,
+            &spec,
+            ctx.python_aliases,
+        );
+
+        taint_findings
+            .into_iter()
+            .map(|t| Finding {
+                rule_id: self.id().to_string(),
+                severity: self.severity(),
+                cwe: self.cwe().map(|s| s.to_string()),
+                description: format!(
+                    "{} reaches {} — untrusted input can execute arbitrary code via pickle",
+                    t.source_description, t.sink_description
+                ),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+            })
+            .collect()
+    }
+}

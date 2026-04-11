@@ -114,7 +114,7 @@ To reproduce: `./benchmarks/run.sh` (add `BENCH_SKIP_LARGE=1` for the quick matr
 | Language | Rules | Frameworks |
 |----------|-------|------------|
 | JavaScript/TypeScript | 25 | Express, JWT, cookies, XSS, log injection |
-| Python | 26 | Flask, Django, CSRF, session |
+| Python | 27 | Flask, Django, CSRF, session, intraprocedural taint |
 | Go | 8 | Gin, net/http, TLS |
 | Ruby | 10 | Rails, mass assignment, CSRF |
 | Java | 10 | Spring, XXE, deserialization |

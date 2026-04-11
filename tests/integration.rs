@@ -261,6 +261,82 @@ fn test_vulnerable_py_aliases_catches_all_bypass_forms() {
     }
 }
 
+/// POC for issue #10 intraprocedural taint tracking. Every function in
+/// `vulnerable_py_taint.py` shows a different shape of untrusted Flask
+/// input reaching `pickle.loads`. The taint rule must catch each flow,
+/// and the existing conservative `py/no-pickle` rule must keep firing
+/// alongside it (the two rules coexist by design).
+#[test]
+fn test_vulnerable_py_taint_catches_every_flow() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/vulnerable_py_taint.py", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    assert!(!output.status.success());
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for f in &findings {
+        if let Some(rule) = f["rule_id"].as_str() {
+            *counts.entry(rule).or_insert(0) += 1;
+        }
+    }
+
+    // Ten function bodies, each with one source→sink flow: one taint
+    // finding per function. The conservative NoPickle rule fires on the
+    // same ten calls because its scope is "any pickle.loads", so we
+    // should see exactly ten of each.
+    assert_eq!(
+        counts.get("py/taint-pickle-deserialization").copied(),
+        Some(10),
+        "taint rule should fire ten times, one per handler. counts={:?}",
+        counts
+    );
+    assert_eq!(
+        counts.get("py/no-pickle").copied(),
+        Some(10),
+        "NoPickle should still fire ten times alongside the taint rule. counts={:?}",
+        counts
+    );
+    assert_eq!(
+        findings.len(),
+        20,
+        "expected 20 total findings (10 taint + 10 NoPickle), got {}",
+        findings.len()
+    );
+}
+
+/// Negative counterpart for the taint POC. Every pickle.loads call in
+/// `safe_py_taint.py` receives a non-tainted argument (static literal,
+/// reassignment kills taint, local variable named `request`, cross-function
+/// taint that the engine intentionally does not track). The taint rule
+/// must not fire at all. NoPickle still fires on every call — that's the
+/// intended division of labor between the conservative and precision
+/// rules.
+#[test]
+fn test_safe_py_taint_has_no_taint_findings() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/safe_py_taint.py", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let taint_findings = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("py/taint-pickle-deserialization"))
+        .count();
+    assert_eq!(
+        taint_findings, 0,
+        "taint rule should not fire on safe_py_taint.py, got {} findings: {:?}",
+        taint_findings, findings
+    );
+}
+
 /// Negative regression for issue #7: aliased imports of the *same* sensitive
 /// modules, but called in safe shapes (static literals, SafeLoader, sha256,
 /// write-only pickle methods). Alias resolution must not silently widen the

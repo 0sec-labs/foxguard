@@ -5,6 +5,7 @@ pub mod javascript;
 pub mod php;
 pub mod python;
 pub mod python_aliases;
+pub mod python_taint;
 pub mod ruby;
 pub mod rust_lang;
 pub mod semgrep_compat;
@@ -123,6 +124,7 @@ impl RuleRegistry {
         registry.register(Box::new(python::WtfCsrfCheckDefaultDisabled));
         registry.register(Box::new(python::DjangoAllowedHostsWildcard));
         registry.register(Box::new(python::SecureSslRedirectDisabled));
+        registry.register(Box::new(python::TaintPickleDeserialization));
 
         // Register Go rules
         registry.register(Box::new(go::NoSqlInjection));
