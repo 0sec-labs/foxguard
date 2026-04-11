@@ -119,9 +119,36 @@ Taint rules do not replace direct-sink rules. In the POC, `py/no-pickle` fires o
 
 The taint engine runs once per file, only on Python, and only when the file contains function definitions. The walk is a single pass over the AST with a small `HashMap` as state. No additional parsing, no network, no disk. On the existing `vulnerable.py` fixture the taint rule adds microseconds to a run that was already sub-millisecond.
 
+## Semgrep-compatible YAML bridge
+
+Issue #17 added a narrow YAML bridge so existing Semgrep `mode: taint` rules can be loaded with `--rules` and compiled into the same `TaintSpec` that native rules build by hand. The bridge lives in [`src/rules/semgrep_taint.rs`](../src/rules/semgrep_taint.rs); see [COMPATIBILITY.md](../COMPATIBILITY.md) for the exact subset of Semgrep's taint schema that is supported and what falls back to "skip with warning".
+
+A minimum working YAML rule looks like this:
+
+```yaml
+rules:
+  - id: semgrep-pickle-taint
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: "Untrusted Flask input reaches pickle.loads"
+    metadata:
+      cwe: "CWE-502"
+    pattern-sources:
+      - pattern: request.data
+      - pattern: request.form
+      - pattern: request.get_json($X)
+      - pattern: request
+    pattern-sinks:
+      - pattern: pickle.loads($X)
+      - pattern: pickle.load($X)
+```
+
+Load it with `foxguard --no-builtins --rules path/to/rule.yml target/` and each compiled rule becomes a regular foxguard `Rule` backed by the same intraprocedural engine described above.
+
 ## Open questions for the full #10
 
 - **Cross-function propagation.** The first step beyond intraprocedural is probably "trust the return type of helpers whose body we can see in the same file", then cross-file via module symbol tables. Each step adds real complexity and should be its own issue.
-- **YAML bridge.** The next PR will map Semgrep-style `pattern-sources` / `pattern-sinks` YAML into `TaintSpec`. The main open question is how much of Semgrep's pattern language we need to support for real-world taint rules to work — probably just `pattern:` and `pattern-either:` to start.
+- **Broader pattern surface in the YAML bridge.** `pattern-either` inside source/sink blocks, `pattern-inside` / `metavariable-pattern` constraints, and per-finding sanitization semantics are still unsupported. The bridge skips such rules with a warning rather than partially loading them.
 
 Contributions and concrete counter-examples welcome on #10.

@@ -63,6 +63,17 @@ Metavariable filtering:
 
 - `metavariable-regex`
 
+Taint rules (`mode: taint`):
+
+- `mode: taint` on Python rules only; non-Python taint rules are skipped with a warning
+- `pattern-sources`, `pattern-sinks`, `pattern-sanitizers` — each entry must be a single `pattern:` string
+- Supported `pattern:` shapes:
+  - bare identifier (`request`) — a source-only shape compiled to a parameter-name match
+  - dotted attribute chain (`request.data`, `request.json`) — nested chains flatten to `leftmost root + outermost field` (matches the engine's one-level attribute propagation)
+  - call forms with any arguments (`pickle.loads($X)`, `pickle.loads(...)`, `pickle.loads()`, `eval($X)`) — arguments are stripped, the dotted callee path is what matches
+- Severity mapping matches the pattern-rule bridge (`ERROR` → Critical, `WARNING` → High, `INFO` → Medium) and `metadata.cwe` is propagated to findings
+- Rules that use anything outside this subset (`pattern-either` / `pattern-inside` / `metavariable-pattern` inside a source/sink/sanitizer block, unsupported pattern shapes, non-Python languages, missing sources or sinks) are skipped with a warning — other rules in the same file still load
+
 Language mapping:
 
 - JavaScript / TypeScript

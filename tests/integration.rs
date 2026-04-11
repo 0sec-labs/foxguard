@@ -1660,3 +1660,77 @@ fn test_sarif_output_valid() {
         .expect("missing results array");
     assert!(!results.is_empty(), "SARIF results should not be empty");
 }
+
+/// Semgrep-compatible `mode: taint` YAML rules should load via `--rules`
+/// and fire on the same flows as the native `py/taint-pickle-deserialization`
+/// rule. See issue #17.
+#[test]
+fn test_semgrep_taint_yaml_bridge_vulnerable() {
+    let output = foxguard_cmd()
+        .args([
+            "tests/fixtures/vulnerable_py_taint.py",
+            "-f",
+            "json",
+            "--no-builtins",
+            "--rules",
+            "tests/fixtures/semgrep_taint/pickle_taint.yml",
+        ])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let lines: Vec<u64> = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("semgrep/semgrep-pickle-taint"))
+        .filter_map(|f| f["line"].as_u64())
+        .collect();
+
+    assert!(
+        !lines.is_empty(),
+        "semgrep taint rule should fire at least once on vulnerable_py_taint.py, got: {:?}",
+        findings
+    );
+
+    // Every pickle handler in the fixture (14 flows, matching the native
+    // py/taint-pickle-deserialization rule) should be caught by the YAML
+    // bridge. Asserting the exact count keeps the bridge honest: regressions
+    // in pattern translation or the taint engine will flip this number.
+    assert_eq!(
+        lines.len(),
+        14,
+        "semgrep taint rule should fire on all 14 pickle flows, got {} (lines: {:?})",
+        lines.len(),
+        lines
+    );
+}
+
+#[test]
+fn test_semgrep_taint_yaml_bridge_safe() {
+    let output = foxguard_cmd()
+        .args([
+            "tests/fixtures/safe_py_taint.py",
+            "-f",
+            "json",
+            "--no-builtins",
+            "--rules",
+            "tests/fixtures/semgrep_taint/pickle_taint.yml",
+        ])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let n = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("semgrep/semgrep-pickle-taint"))
+        .count();
+
+    assert_eq!(
+        n, 0,
+        "semgrep taint rule should not fire on safe_py_taint.py, got {} findings",
+        n
+    );
+}

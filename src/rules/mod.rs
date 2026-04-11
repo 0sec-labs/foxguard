@@ -9,6 +9,7 @@ pub mod python_taint;
 pub mod ruby;
 pub mod rust_lang;
 pub mod semgrep_compat;
+pub mod semgrep_taint;
 pub mod swift;
 
 use crate::{Finding, Language, Severity};
