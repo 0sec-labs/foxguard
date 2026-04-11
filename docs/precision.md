@@ -235,6 +235,12 @@ within their scope** but higher false negatives than their conservative
 counterparts — anything interprocedural, cross-file, or involving a flow
 shape the engine does not model will be missed.
 
+Python source coverage spans Flask, Django, and FastAPI/Starlette request
+attributes, plus common CLI-tool inputs (`sys.argv`, `sys.stdin`, `input()`,
+`os.environ`, `os.getenv`). Handler parameters named `request` or `req` are
+treated as implicit sources. See `python_taint_sources()` in
+`src/rules/python_taint.rs` for the canonical list.
+
 - `py/taint-pickle-deserialization`
 - `py/taint-eval`
 - `py/taint-command-injection`

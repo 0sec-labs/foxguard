@@ -780,15 +780,28 @@ fn match_source(
     None
 }
 
-/// Canonical set of untrusted-input sources for Python web handlers.
+/// Canonical set of untrusted-input sources for Python web handlers
+/// and CLI entry points.
 ///
 /// Shared across every `py/taint-*` rule so that "what counts as
-/// untrusted" is defined once and stays consistent. Currently covers
-/// Flask-style `request.*` access plus handler parameters named
-/// `request`. Django is intentionally out of scope for the first batch
-/// of taint rules.
+/// untrusted" is defined once and stays consistent. Covers Flask,
+/// Django, FastAPI/Starlette request attributes, plus common CLI
+/// sources (`sys.argv`, `sys.stdin`, `input()`, `os.environ`,
+/// `os.getenv`).
+///
+/// Note on method calls: entries like `request.GET.get("x")` or
+/// `os.environ.get("X")` are method calls on a tainted attribute.
+/// The v1 engine only taints the *subject* of such a call when the
+/// subject itself is an attribute source (one-level attribute
+/// propagation); a method call *on top of* that attribute is not
+/// recognized as a source today. Subscript access
+/// (`request.GET["x"]`, `os.environ["X"]`) works correctly via the
+/// subscript-on-tainted-root propagation rule. The method-call path
+/// will be picked up once issue #27 (taint through method calls on
+/// tainted receivers) lands.
 pub fn python_taint_sources() -> Vec<NodeMatcher> {
     vec![
+        // ─── Flask ────────────────────────────────────────────────
         NodeMatcher::Attribute {
             root: "request".into(),
             field: "data".into(),
@@ -832,8 +845,114 @@ pub fn python_taint_sources() -> Vec<NodeMatcher> {
             canonical: "request.get_json".into(),
             description: "flask.request.get_json()".into(),
         },
+        // ─── Django ───────────────────────────────────────────────
+        // `request.GET`, `request.POST`, etc. are QueryDict attributes
+        // on Django's HttpRequest. Subscript access taints; method
+        // calls like `.get("key")` need issue #27.
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "POST".into(),
+            description: "django.request.POST".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "GET".into(),
+            description: "django.request.GET".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "COOKIES".into(),
+            description: "django.request.COOKIES".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "FILES".into(),
+            description: "django.request.FILES".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "META".into(),
+            description: "django.request.META".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "headers".into(),
+            description: "django/fastapi.request.headers".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "body".into(),
+            description: "django/fastapi.request.body".into(),
+        },
+        // ─── FastAPI / Starlette ──────────────────────────────────
+        // Starlette's Request exposes `query_params`, `path_params`,
+        // `cookies`, `headers`; body access goes through awaitable
+        // method calls (`await request.json()`, etc.). The Call
+        // entries below match the bare callee shape; `await` is a
+        // wrapper the engine sees through.
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "query_params".into(),
+            description: "fastapi/starlette.request.query_params".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "path_params".into(),
+            description: "fastapi/starlette.request.path_params".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.body".into(),
+            description: "fastapi/starlette.request.body()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.json".into(),
+            description: "fastapi/starlette.request.json()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.form".into(),
+            description: "fastapi/starlette.request.form()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.stream".into(),
+            description: "fastapi/starlette.request.stream()".into(),
+        },
+        // ─── CLI: sys.argv / sys.stdin / input() ──────────────────
+        NodeMatcher::Attribute {
+            root: "sys".into(),
+            field: "argv".into(),
+            description: "sys.argv".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "sys.stdin.read".into(),
+            description: "sys.stdin.read()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "sys.stdin.readline".into(),
+            description: "sys.stdin.readline()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "input".into(),
+            description: "input()".into(),
+        },
+        // ─── CLI: os.environ / os.getenv ──────────────────────────
+        // `os.environ["X"]` works via subscript; `os.environ.get("X")`
+        // depends on issue #27 (method calls on tainted receivers).
+        NodeMatcher::Attribute {
+            root: "os".into(),
+            field: "environ".into(),
+            description: "os.environ".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "os.getenv".into(),
+            description: "os.getenv(...)".into(),
+        },
+        // ─── Handler-parameter sources ────────────────────────────
+        // Covers `def view(request): ...` across Flask/Django and
+        // `async def handler(request: Request): ...` in
+        // FastAPI/Starlette. `req` is the idiomatic short alias in
+        // FastAPI and express-style examples.
         NodeMatcher::ParamName {
-            names: vec!["request".into()],
+            names: vec!["request".into(), "req".into()],
             description: "untrusted request parameter".into(),
         },
     ]

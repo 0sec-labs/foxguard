@@ -22,6 +22,7 @@ In scope:
 - **Alias-aware sinks and sources**: the engine resolves callees and source roots through the per-file import alias table already introduced for issue #7.
 - **Sanitizer support (collapsed to "clean")**: calls whose callee matches a `TaintSpec.sanitizers` entry produce a clean value even when their arguments were tainted. See the section below for the exact semantics.
 - **Same-file interprocedural return propagation (v1)**: a helper whose body returns a tainted expression marks its return as tainted, and bare calls to that helper elsewhere in the same file propagate the taint into the caller. See the dedicated section below for the exact scope.
+- **Supported Python source frameworks**: Flask (`request.data|form|args|values|json|files|cookies`, `request.get_data|get_json`), Django (`request.POST|GET|COOKIES|FILES|META|headers|body`), FastAPI/Starlette (`request.query_params|path_params|headers|cookies`, `await request.body|json|form|stream`), plus CLI-tool sources (`sys.argv`, `sys.stdin.read|readline`, `input()`, `os.environ`, `os.getenv`). Handler parameters named `request` or `req` are treated as implicit sources. Method calls on tainted receivers (e.g. `request.GET.get("x")`, `os.environ.get("X")`) are tracked via subscript access today; the method-call path is handled once issue #27 lands.
 
 Out of scope for this PR, tracked under #10 as follow-ups:
 
