@@ -18,12 +18,13 @@ In scope:
 - **One level of attribute and subscript propagation**: `x.y` and `x[k]` are tainted when `x` is tainted.
 - **One level of wrapping-call propagation**: `bytes(x)` is tainted when `x` is tainted. This covers the common "sanitize by retype" anti-pattern.
 - **Alias-aware sinks and sources**: the engine resolves callees and source roots through the per-file import alias table already introduced for issue #7.
+- **Sanitizer support (collapsed to "clean")**: calls whose callee matches a `TaintSpec.sanitizers` entry produce a clean value even when their arguments were tainted. See the section below for the exact semantics.
 
 Out of scope for this PR, tracked under #10 as follow-ups:
 
 - **Interprocedural**: no cross-function analysis. A helper `def get_data(): return request.data` will not taint callers.
 - **Cross-file**: no module boundary crossing.
-- **Sanitizer support**: `TaintSpec.sanitizers` exists on the struct so the YAML bridge in the next PR has a slot to fill, but the engine does not consult it yet. Every flow is reported.
+- **Per-finding sanitization**: Semgrep's `mode: taint` distinguishes "this specific flow was sanitized" from "the value is now clean"; it can still fire on secondary flows that bypassed the sanitizer along a different path. foxguard's v1 collapses both cases into "clean" and does not track per-finding sanitization state.
 - **Field sensitivity**: `d["key"]` is tainted because `d` is. Different keys are not distinguished.
 - **Object attribute propagation beyond one level**: `x.y.z` is tainted when `x` is tainted, but the engine does not persist taint on `x.y` as a distinct name.
 - **Dynamic import forms**: `importlib.import_module(...)` does not interact with the alias table, so sinks reached through it are not recognized.
@@ -43,7 +44,7 @@ pub enum NodeMatcher {
 pub struct TaintSpec {
     pub sources: Vec<NodeMatcher>,
     pub sinks: Vec<NodeMatcher>,
-    pub sanitizers: Vec<NodeMatcher>, // reserved — see "Scope"
+    pub sanitizers: Vec<NodeMatcher>, // see "Sanitizers" below
 }
 
 pub struct TaintFinding { /* sink location + source/sink descriptions */ }
@@ -63,6 +64,39 @@ Nothing about Flask, pickle, or any other library is baked into the engine. A ru
 - **`Attribute { root, field, description }`** — matches `root.field` and `root.intermediate.field` chains where the leftmost identifier equals `root`. The engine also tries the alias-resolved form of the leftmost, so one spec entry with `root: "request"` covers both `from flask import request` and `def handler(request)`.
 - **`Call { canonical, description }`** — matches a call whose callee resolves (raw *or* alias-resolved) to `canonical`. Use for method-call sources like `request.get_json()` and for sinks like `pickle.loads`.
 - **`ParamName { names, description }`** — matches function parameters whose name is in `names`. Used to mark implicit sources (e.g. a Flask handler signature `def handler(request):` should treat `request` as untrusted without any assignment).
+
+## Sanitizers
+
+A sanitizer is a call that turns a tainted value into a clean one. Populate `TaintSpec.sanitizers` with `NodeMatcher::Call` entries whose `canonical` is the dotted callee path you want the engine to recognize:
+
+```rust
+TaintSpec {
+    sources: vec![/* ... */],
+    sinks:   vec![/* ... */],
+    sanitizers: vec![NodeMatcher::Call {
+        canonical: "html.escape".into(),
+        description: "html.escape".into(),
+    }],
+}
+```
+
+With that spec:
+
+```python
+raw = request.data            # tainted
+clean = html.escape(raw)      # sanitized → clean
+document.write(clean)         # NOT reported
+document.write(raw)           # still reported — `raw` was never rewritten
+```
+
+Semantics:
+
+- **Collapse to clean.** When a call's callee resolves (raw *or* alias-resolved) to a sanitizer's `canonical`, the engine treats the whole call expression as producing a clean value, regardless of whether any argument was tainted.
+- **The input variable is unaffected.** `clean = sanitize(raw)` does not clear `raw`; only the RHS expression is "clean", so subsequent uses of `raw` still flow.
+- **Only `NodeMatcher::Call` is meaningful as a sanitizer.** `Attribute` and `ParamName` matchers in the `sanitizers` list are ignored — sanitizers are always calls.
+- **Wrapping-call propagation is bypassed for sanitizers.** `bytes(tainted)` preserves taint (by the wrapping-call rule) *unless* `bytes` is in the sanitizer list, in which case it is treated as clean.
+
+Per-finding sanitization (Semgrep's `mode: taint` style, where a sanitizer cleans one flow but secondary flows bypassing it still fire) is still out of scope. If that matters for a rule, open an issue describing the concrete case.
 
 ## Adding a new taint rule
 
@@ -85,7 +119,6 @@ The taint engine runs once per file, only on Python, and only when the file cont
 
 ## Open questions for the full #10
 
-- **Sanitizer semantics.** Semgrep's `mode: taint` distinguishes "sanitized value" from "killed taint". Do we track the difference, or collapse them into "clean" for v1?
 - **Cross-function propagation.** The first step beyond intraprocedural is probably "trust the return type of helpers whose body we can see in the same file", then cross-file via module symbol tables. Each step adds real complexity and should be its own issue.
 - **YAML bridge.** The next PR will map Semgrep-style `pattern-sources` / `pattern-sinks` YAML into `TaintSpec`. The main open question is how much of Semgrep's pattern language we need to support for real-world taint rules to work — probably just `pattern:` and `pattern-either:` to start.
 

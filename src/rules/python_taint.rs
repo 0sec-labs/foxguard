@@ -19,9 +19,10 @@
 //!   Individual keys are not tracked.
 //! - **No attribute propagation beyond one level.** `x.y` is tainted if `x`
 //!   is tainted, but taint does not persist on `x.y` as a distinct name.
-//! - **No sanitizers yet.** The [`TaintSpec`] has a field for sanitizers so
-//!   the API is forward-compatible, but the engine does not consult it in
-//!   this POC.
+//! - **Sanitizers collapse to "clean".** When a call whose callee matches a
+//!   [`TaintSpec::sanitizers`] entry is applied to a tainted value, the
+//!   result is treated as clean — the engine does not track a separate
+//!   "sanitized" state the way Semgrep's `mode: taint` does.
 //!
 //! Everything the engine knows about *which* patterns are sources, sinks, or
 //! sanitizers is expressed declaratively via [`TaintSpec`] — nothing is
@@ -96,8 +97,9 @@ impl NodeMatcher {
 pub struct TaintSpec {
     pub sources: Vec<NodeMatcher>,
     pub sinks: Vec<NodeMatcher>,
-    /// Reserved for the next PR — sanitizers are not consulted yet, but the
-    /// field exists so the YAML bridge has a slot to fill.
+    /// Calls whose callee matches one of these matchers are treated as
+    /// producing a clean value, even if their arguments were tainted. See
+    /// the module-level docs for the collapsed-to-clean semantics.
     pub sanitizers: Vec<NodeMatcher>,
 }
 
@@ -399,7 +401,14 @@ fn expression_taint(
     // Recurse one level for wrapping expressions (e.g. `bytes(request.data)`),
     // so the taint survives trivial type conversions without requiring
     // full interprocedural tracking.
+    //
+    // BUT: if the callee matches a configured sanitizer, the result is
+    // clean regardless of whether any argument was tainted. This is the
+    // "collapse to clean" semantics documented at the top of the module.
     if expr.kind() == "call" {
+        if is_sanitizer_call(expr, source, spec, aliases) {
+            return None;
+        }
         if let Some(args) = expr.child_by_field_name("arguments") {
             let mut cursor = args.walk();
             for arg in args.named_children(&mut cursor) {
@@ -411,6 +420,36 @@ fn expression_taint(
     }
 
     None
+}
+
+/// Returns `true` if `call_node` is a call whose callee matches any of the
+/// configured sanitizer matchers in `spec`. Only `NodeMatcher::Call` entries
+/// are meaningful as sanitizers today; other kinds are ignored.
+fn is_sanitizer_call(
+    call_node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&ImportAliases>,
+) -> bool {
+    if call_node.kind() != "call" {
+        return false;
+    }
+    let Some(func) = call_node.child_by_field_name("function") else {
+        return false;
+    };
+    let callee_text = node_text(func, source);
+    let resolved: std::borrow::Cow<'_, str> = match aliases {
+        Some(a) => a.resolve(callee_text),
+        None => std::borrow::Cow::Borrowed(callee_text),
+    };
+    for matcher in &spec.sanitizers {
+        if let NodeMatcher::Call { canonical, .. } = matcher {
+            if callee_text == canonical.as_str() || resolved.as_ref() == canonical.as_str() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn match_source(
@@ -723,6 +762,138 @@ def handler():
     return pickle.loads(bytes(request.data))
 "#;
         assert_eq!(run(src).len(), 1);
+    }
+
+    fn spec_pickle_with_html_escape_sanitizer() -> TaintSpec {
+        let mut spec = spec_pickle_from_request();
+        spec.sanitizers = vec![NodeMatcher::Call {
+            canonical: "html.escape".into(),
+            description: "html.escape".into(),
+        }];
+        spec
+    }
+
+    fn run_with(source: &str, spec: &TaintSpec) -> Vec<TaintFinding> {
+        let tree = parse_file(source, Language::Python).expect("parse");
+        let aliases = ImportAliases::from_tree(source, &tree);
+        analyze_tree(tree.root_node(), source, spec, Some(&aliases))
+    }
+
+    #[test]
+    fn sanitizer_call_kills_taint() {
+        let src = r#"
+import pickle
+import html
+from flask import request
+
+def handler():
+    raw = request.data
+    clean = html.escape(raw)
+    return pickle.loads(clean)
+"#;
+        assert_eq!(
+            run_with(src, &spec_pickle_with_html_escape_sanitizer()).len(),
+            0
+        );
+    }
+
+    #[test]
+    fn sanitizer_bypassed_still_flows() {
+        // html.escape is applied to `raw` and stored in `escaped`, but the
+        // sink reads the still-tainted `raw`. Must still fire.
+        let src = r#"
+import pickle
+import html
+from flask import request
+
+def handler():
+    raw = request.data
+    escaped = html.escape(raw)
+    return pickle.loads(raw)
+"#;
+        assert_eq!(
+            run_with(src, &spec_pickle_with_html_escape_sanitizer()).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn non_sanitizer_wrapping_call_preserves_taint() {
+        // bytes() is not listed as a sanitizer, so the wrapping-call rule
+        // still applies and taint survives.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = bytes(request.data)
+    return pickle.loads(data)
+"#;
+        assert_eq!(
+            run_with(src, &spec_pickle_with_html_escape_sanitizer()).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn sanitizer_result_assigned_to_new_variable() {
+        // The assignment `data = html.escape(request.args["q"])` must not
+        // add `data` to the taint set.
+        let src = r#"
+import pickle
+import html
+from flask import request
+
+def handler():
+    data = html.escape(request.args["q"])
+    return pickle.loads(data)
+"#;
+        assert_eq!(
+            run_with(src, &spec_pickle_with_html_escape_sanitizer()).len(),
+            0
+        );
+    }
+
+    #[test]
+    fn multiple_sanitizers_in_spec() {
+        let mut spec = spec_pickle_from_request();
+        spec.sanitizers = vec![
+            NodeMatcher::Call {
+                canonical: "html.escape".into(),
+                description: "html.escape".into(),
+            },
+            NodeMatcher::Call {
+                canonical: "shlex.quote".into(),
+                description: "shlex.quote".into(),
+            },
+        ];
+
+        let src_escape = r#"
+import pickle
+import html
+from flask import request
+
+def handler():
+    return pickle.loads(html.escape(request.data))
+"#;
+        let src_quote = r#"
+import pickle
+import shlex
+from flask import request
+
+def handler():
+    return pickle.loads(shlex.quote(request.data))
+"#;
+        let src_neither = r#"
+import pickle
+from flask import request
+
+def handler():
+    return pickle.loads(urllib.parse.quote(request.data))
+"#;
+        assert_eq!(run_with(src_escape, &spec).len(), 0);
+        assert_eq!(run_with(src_quote, &spec).len(), 0);
+        assert_eq!(run_with(src_neither, &spec).len(), 1);
     }
 
     #[test]
