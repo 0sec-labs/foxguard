@@ -1,49 +1,45 @@
-use foxguard::rules::RuleRegistry;
-use foxguard::Language;
-use regex::Regex;
-use std::collections::HashMap;
+//! Parity test: the committed `www/src/data/rules.ts` must be byte-identical
+//! to the output of `cargo run --bin gen_rules_ts`.
+//!
+//! The generator is the source of truth — edit Rust rules, then regenerate.
+//! This test (and the matching `rule-inventory-check` CI job) guards against
+//! drift between the Rust rule registry and the website rule inventory.
+
 use std::path::Path;
+use std::process::Command;
 
 #[test]
-fn website_rule_inventory_matches_registry_counts() {
-    let inventory_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+fn website_rule_inventory_matches_generator_output() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let inventory_path = Path::new(manifest_dir)
         .join("www")
         .join("src")
         .join("data")
         .join("rules.ts");
 
-    let source =
-        std::fs::read_to_string(&inventory_path).expect("failed to read website rule inventory");
+    let committed =
+        std::fs::read_to_string(&inventory_path).expect("failed to read www/src/data/rules.ts");
 
-    let rule_id_re = Regex::new(r"id:\s*'([a-z]+?)/").expect("invalid regex");
-    let mut website_counts: HashMap<&str, usize> = HashMap::new();
-    for captures in rule_id_re.captures_iter(&source) {
-        let slug = captures.get(1).expect("missing slug").as_str();
-        *website_counts.entry(slug).or_default() += 1;
-    }
+    let output = Command::new(env!("CARGO"))
+        .args(["run", "--quiet", "--bin", "gen_rules_ts"])
+        .current_dir(manifest_dir)
+        .output()
+        .expect("failed to run gen_rules_ts");
 
-    let registry = RuleRegistry::new();
-    let actual_counts = HashMap::from([
-        (
-            "js",
-            registry.rules_for_language(Language::JavaScript).len(),
-        ),
-        ("py", registry.rules_for_language(Language::Python).len()),
-        ("go", registry.rules_for_language(Language::Go).len()),
-        ("rb", registry.rules_for_language(Language::Ruby).len()),
-        ("java", registry.rules_for_language(Language::Java).len()),
-        ("php", registry.rules_for_language(Language::Php).len()),
-        ("rs", registry.rules_for_language(Language::Rust).len()),
-        ("cs", registry.rules_for_language(Language::CSharp).len()),
-        ("swift", registry.rules_for_language(Language::Swift).len()),
-    ]);
+    assert!(
+        output.status.success(),
+        "gen_rules_ts failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-    for (slug, count) in actual_counts {
-        let website_count = website_counts.get(slug).copied().unwrap_or_default();
-        assert_eq!(
-            website_count, count,
-            "website inventory count mismatch for {}: expected {}, found {}",
-            slug, count, website_count
+    let generated = String::from_utf8(output.stdout).expect("gen_rules_ts output not UTF-8");
+
+    if committed != generated {
+        panic!(
+            "www/src/data/rules.ts is out of sync with the Rust rule registry.\n\
+             Regenerate with:\n\
+             \n\
+             \tcargo run --bin gen_rules_ts > www/src/data/rules.ts\n"
         );
     }
 }

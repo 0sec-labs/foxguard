@@ -7,7 +7,10 @@ Each language has its own rule file in `src/rules/`. To add a new rule:
 1. Add a struct implementing the `Rule` trait in the appropriate language file (e.g., `src/rules/javascript.rs`)
 2. Register it in `src/rules/mod.rs` inside `RuleRegistry::new()`
 3. Add a test case to the corresponding fixture in `tests/fixtures/`
-4. Run `cargo test` and `cargo clippy -- -D warnings`
+4. Regenerate the website rule inventory: `cargo run --bin gen_rules_ts > www/src/data/rules.ts`
+5. Run `cargo test` and `cargo clippy -- -D warnings`
+
+The Rust registry is the single source of truth for rule metadata. `www/src/data/rules.ts` is generated from it by `src/bin/gen_rules_ts.rs` and must not be hand-edited. The `rule-inventory-check` CI job and the `rule_inventory` cargo test both fail if the committed file drifts from the generator output.
 
 Look at any existing rule in `src/rules/go.rs` for the pattern — each rule is a struct with `id()`, `severity()`, `cwe()`, `description()`, `language()`, and `check()`.
 
@@ -82,4 +85,4 @@ Required GitHub repository secrets:
 - One feature or fix per PR
 - Include tests for new rules
 - Run `cargo fmt` and `cargo clippy` before submitting
-- Update website data files if rule counts change (`www/src/data/`)
+- If you added or modified rules, regenerate `www/src/data/rules.ts` with `cargo run --bin gen_rules_ts > www/src/data/rules.ts` and commit the result

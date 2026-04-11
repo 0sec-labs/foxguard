@@ -61,6 +61,30 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-test-
       - run: cargo test
 
+  rule-inventory-check:
+    name: Rule Inventory
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-gen-rules-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-gen-rules-
+      - name: Regenerate rules.ts
+        run: cargo run --quiet --bin gen_rules_ts > /tmp/rules.ts.generated
+      - name: Diff against committed file
+        run: |
+          if ! diff -u www/src/data/rules.ts /tmp/rules.ts.generated; then
+            echo "::error::www/src/data/rules.ts is out of sync with the Rust rule registry."
+            echo "Regenerate with: cargo run --bin gen_rules_ts > www/src/data/rules.ts"
+            exit 1
+          fi
+
   semgrep-parity:
     name: Semgrep Parity
     runs-on: ubuntu-latest
