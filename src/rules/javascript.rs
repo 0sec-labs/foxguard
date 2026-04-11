@@ -1870,3 +1870,88 @@ impl Rule for TaintXssInnerHtml {
             .collect()
     }
 }
+
+// ─── js/taint-sql-injection ───────────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted Express/Next/etc input
+// (`req.body`, `req.query`, `searchParams.get(...)`, ...) reaches a SQL
+// execute sink. Sinks are identified by method name on any receiver,
+// matching the common JS SQL client conventions (`db.query`, `pool.query`,
+// `connection.execute`, `sequelize.query`, `knex.raw`). This is noisier
+// than the canonical-callee approach but catches the realistic shape of
+// server-side JS apps where database handles are ad-hoc variables.
+
+pub struct TaintSqlInjection;
+
+impl TaintSqlInjection {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::MethodName {
+                    method: "query".into(),
+                    description: "SQL .query() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "execute".into(),
+                    description: "SQL .execute() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "raw".into(),
+                    description: "SQL .raw() call (knex-style)".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintSqlInjection {
+    fn id(&self) -> &str {
+        "js/taint-sql-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-89")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches a SQL execute sink — possible SQL injection"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let spec = Self::spec();
+        let raw =
+            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
+        raw.into_iter()
+            .map(|t| Finding {
+                rule_id: self.id().to_string(),
+                severity: self.severity(),
+                cwe: self.cwe().map(|s| s.to_string()),
+                description: format!(
+                    "{} reaches {} — untrusted input can inject SQL",
+                    t.source_description, t.sink_description
+                ),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+            })
+            .collect()
+    }
+}

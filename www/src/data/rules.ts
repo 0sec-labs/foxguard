@@ -42,6 +42,7 @@ const jsRules: Rule[] = [
   { id: 'js/no-unsafe-regex', cwe: 'CWE-1333', desc: 'Potentially catastrophic backtracking regex pattern', severity: 'medium' },
   { id: 'js/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic hash (MD5/SHA1)', severity: 'medium' },
   { id: 'js/no-xss-innerhtml', cwe: 'CWE-79', desc: 'Assignment to innerHTML may lead to XSS', severity: 'high' },
+  { id: 'js/taint-sql-injection', cwe: 'CWE-89', desc: 'Untrusted input reaches a SQL execute sink — possible SQL injection', severity: 'critical' },
   { id: 'js/taint-xss-innerhtml', cwe: 'CWE-79', desc: 'Untrusted input reaches innerHTML or document.write sink', severity: 'high' },
 ];
 

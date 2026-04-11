@@ -8,18 +8,20 @@
 // fixture need to be updated to include the new cross-file findings.
 //
 // Hand-counted expected findings under the current engine:
-//   js/taint-xss-innerhtml : 1  (in-file, /render)
+//   js/taint-sql-injection : 1  (in-file /user handler)
 
 const express = require("express");
 const services = require("./services");
 
 const app = express();
+const db = { query(_q) { return []; } };
 
 // ─── In-file flow — should fire today ────────────────────────────────
-app.get("/render", (req, res) => {
-    // js/taint-xss-innerhtml — source and sink in the same function
-    const html = req.query.html;
-    res.send(`<div>${html}</div>`);
+app.get("/user", (req, res) => {
+    // js/taint-sql-injection — source and sink in the same function
+    const name = req.query.name;
+    db.query("SELECT * FROM users WHERE name = '" + name + "'");
+    res.send("ok");
 });
 
 // ─── Cross-file flows — should fire after #46 lands ──────────────────
@@ -42,11 +44,12 @@ app.get("/healthz", (_req, res) => {
     res.send("<div>ok</div>");
 });
 
-app.get("/static-render", (req, res) => {
+app.get("/static-query", (req, res) => {
     // tainted read and discarded; sink receives a literal
-    const _ignored = req.query.html;
+    const _ignored = req.query.name;
     void _ignored;
-    res.send("<div>static</div>");
+    db.query("SELECT * FROM users WHERE name = 'admin'");
+    res.send("ok");
 });
 
 module.exports = app;

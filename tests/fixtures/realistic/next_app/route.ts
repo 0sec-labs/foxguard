@@ -6,19 +6,20 @@
 // and will fire after issue #46 (cross-file summaries) lands.
 //
 // Hand-counted expected findings under the current engine:
-//   js/taint-xss-innerhtml : 1  (in-file render handler)
+//   js/taint-sql-injection : 1  (in-file GET handler)
 
 import { NextRequest, NextResponse } from "next/server";
 import { runQuery, evalExpression } from "./actions";
 
+const db = { query(_q: string): unknown[] { return []; } };
+
 // ─── In-file flow — should fire today ────────────────────────────────
 export async function GET(request: NextRequest) {
-    // js/taint-xss-innerhtml — source and sink in the same function
-    const { searchParams } = new URL(request.url);
-    const html = searchParams.get("html") ?? "";
-    return new NextResponse(`<div>${html}</div>`, {
-        headers: { "content-type": "text/html" },
-    });
+    // js/taint-sql-injection — source and sink in the same function.
+    // Uses the canonical Next.js App Router source: request.nextUrl.
+    const name = request.nextUrl.searchParams.get("name") ?? "";
+    db.query("SELECT * FROM users WHERE name = '" + name + "'");
+    return NextResponse.json({ ok: true });
 }
 
 // ─── Cross-file flow — should fire after #46 ─────────────────────────

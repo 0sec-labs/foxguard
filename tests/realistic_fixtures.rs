@@ -172,24 +172,23 @@ fn realistic_django_shop_multifile() {
     );
 }
 
-/// Multi-file Express fixture (issue #48). Server-side Express has no
-/// in-file JS taint rule coverage today (the engine targets client-side
-/// innerHTML sinks), so this fixture only fires the non-taint AST
-/// rules on `services.js`. When issue #46 (cross-file summaries) lands
-/// and JS taint sinks cover server-side SQL/eval, new cross-file
-/// taint findings will light up and the expected counts need updating.
+/// Multi-file Express fixture (issue #48). In-file SQL injection in
+/// `routes.js::/user` fires under `js/taint-sql-injection`. The
+/// cross-file flows via `services.runQuery` and `services.evalExpression`
+/// do not fire today and will light up after issue #46 (cross-file
+/// summaries).
 #[test]
 fn realistic_express_api_multifile() {
-    assert_fixture("express_api", 3, &[]);
+    assert_fixture("express_api", 5, &[("js/taint-sql-injection", 1)]);
 }
 
 /// Multi-file Next.js App Router fixture (issue #48). Same shape as
-/// the Express fixture: cross-file flows from `route.ts` into
-/// `actions.ts` do not fire today and will light up after #46 + JS
-/// server-side taint sink coverage.
+/// the Express fixture: in-file SQL injection via `request.nextUrl`
+/// → `db.query` fires; cross-file flows into `actions.ts` do not
+/// fire yet and will light up after issue #46.
 #[test]
 fn realistic_next_app_multifile() {
-    assert_fixture("next_app", 3, &[]);
+    assert_fixture("next_app", 5, &[("js/taint-sql-injection", 1)]);
 }
 
 /// Multi-file Gin fixture (issue #48). `handlers.go` holds request
