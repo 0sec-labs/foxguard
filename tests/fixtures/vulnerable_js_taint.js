@@ -57,3 +57,10 @@ const getInputArrow = () => req.body.arrow;
 function interproceduralArrow() {
     document.write(getInputArrow());
 }
+
+// ─── Method call on a tainted root (issue #27) ────────────────────────
+// `req.body.toString()` — receiver is a source, method-call result
+// carries the taint into the innerHTML sink.
+function methodCallOnTaintedRoot(req) {
+    document.getElementById("x").innerHTML = req.body.toString();
+}

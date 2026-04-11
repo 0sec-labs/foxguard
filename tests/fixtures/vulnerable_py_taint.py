@@ -160,3 +160,26 @@ def sql_injection_from_request():
     conn = sqlite3.connect(":memory:")
     cur = conn.cursor()
     cur.execute(name)
+
+
+# ═══ Method-call propagation (issue #27) ═══════════════════════════════
+# `request.args.get("cmd")` is a method call on a tainted root
+# (`request.args`). The method-call rule taints the result conservatively
+# and the taint rule must fire on the downstream sink.
+def command_injection_from_args_get():
+    cmd = request.args.get("cmd")
+    os.system(cmd)
+
+
+def eval_from_args_get():
+    expr = request.args.get("expr")
+    return eval(expr)
+
+
+# ═══ F-string interpolation propagation (issue #28) ════════════════════
+# An f-string containing an interpolation whose inner expression is a
+# tainted method call propagates taint through the string into the sink.
+def sql_injection_from_fstring():
+    conn = sqlite3.connect(":memory:")
+    cur = conn.cursor()
+    cur.execute(f"SELECT * FROM users WHERE id = {request.args.get('id')}")

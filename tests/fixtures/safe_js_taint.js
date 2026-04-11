@@ -41,3 +41,8 @@ function cleanLiteralHelper() {
 function interproceduralCleanHelper() {
     document.write(cleanLiteralHelper());
 }
+
+// Method call on a literal receiver is not tainted (issue #27).
+function literalMethodCall() {
+    document.getElementById("x").innerHTML = "literal".toUpperCase();
+}

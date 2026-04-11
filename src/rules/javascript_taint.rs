@@ -982,6 +982,25 @@ fn expression_taint(
             }
         }
 
+        // Method-call propagation on a tainted root: `x.foo(...)` is
+        // tainted when the receiver `x` (or any member/subscript chain
+        // rooted at a tainted value) is tainted. Conservative: tainted-in
+        // → tainted-out, mirroring the wrapping-call rule. Method calls
+        // on literal receivers (e.g. `"foo".toUpperCase()`) are NOT
+        // tainted because the recursive `expression_taint` on the object
+        // returns None for a bare string literal.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "member_expression" {
+                if let Some(object) = func.child_by_field_name("object") {
+                    if let Some(desc) =
+                        expression_taint(object, source, spec, aliases, state, summaries)
+                    {
+                        return Some(desc);
+                    }
+                }
+            }
+        }
+
         // Same-file interprocedural v1: a bare identifier callee whose
         // name is in the return-summary map propagates the summary's
         // taint description through the call result. Method calls
@@ -1531,6 +1550,54 @@ function handler() {
         let f = run(src);
         assert_eq!(f.len(), 1);
         assert!(f[0].source_description.contains("getInput"));
+    }
+
+    #[test]
+    fn method_call_on_tainted_source_propagates() {
+        // `req.body.get("x")` — receiver `req.body` is a source, method
+        // call result must carry the taint into the sink.
+        let src = r#"
+function handler(req) {
+    const data = req.body.get("x");
+    document.write(data);
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("req.body"));
+    }
+
+    #[test]
+    fn method_call_with_args_still_tainted() {
+        let src = r#"
+function handler(req) {
+    const data = req.body.get("x", "default");
+    document.write(data);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn chained_method_calls_preserve_taint() {
+        let src = r#"
+function handler(req) {
+    const data = req.body.get("x").trim().toUpperCase();
+    document.write(data);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn to_string_on_tainted_value_is_tainted() {
+        let src = r#"
+function handler(req) {
+    const data = req.body.toString();
+    document.write(data);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
     }
 
     #[test]

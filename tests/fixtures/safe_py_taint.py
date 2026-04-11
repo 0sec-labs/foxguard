@@ -108,3 +108,16 @@ def clean_sql_injection():
     conn = sqlite3.connect(":memory:")
     cur = conn.cursor()
     cur.execute("SELECT 1")
+
+
+# ─── Method call on a literal root is not tainted (issue #27) ──────────
+def clean_literal_method_call():
+    data = "literal".upper()
+    return pickle.loads(data)
+
+
+# ─── F-string with no interpolation is a plain string (issue #28) ──────
+def clean_fstring_no_interpolation():
+    q = f"hello world"  # noqa: F541
+    cur = sqlite3.connect(":memory:").cursor()
+    cur.execute(q)

@@ -303,21 +303,25 @@ fn test_vulnerable_py_taint_catches_every_flow() {
         counts
     );
 
-    // Each new py/taint-* rule has one dedicated positive handler and
-    // must fire exactly once. Its conservative py/no-* counterpart must
-    // coexist and keep firing on the same call.
-    for (taint_rule, conservative_rule) in [
-        ("py/taint-eval", "py/no-eval"),
-        ("py/taint-command-injection", "py/no-command-injection"),
-        ("py/taint-ssrf", "py/no-ssrf"),
-        ("py/taint-yaml-load", "py/no-yaml-load"),
-        ("py/taint-sql-injection", "py/no-sql-injection"),
+    // Each py/taint-* rule has one or more dedicated positive handlers
+    // and must fire the expected number of times. Its conservative
+    // py/no-* counterpart must coexist and keep firing on the same call.
+    // Counts bumped by issues #27/#28: command-injection and eval each
+    // gain a `request.args.get("...")` handler; sql-injection gains an
+    // f-string handler.
+    for (taint_rule, conservative_rule, expected) in [
+        ("py/taint-eval", "py/no-eval", 2usize),
+        ("py/taint-command-injection", "py/no-command-injection", 2),
+        ("py/taint-ssrf", "py/no-ssrf", 1),
+        ("py/taint-yaml-load", "py/no-yaml-load", 1),
+        ("py/taint-sql-injection", "py/no-sql-injection", 2),
     ] {
         assert_eq!(
             counts.get(taint_rule).copied(),
-            Some(1),
-            "{} should fire exactly once on vulnerable_py_taint.py. counts={:?}",
+            Some(expected),
+            "{} should fire exactly {} time(s) on vulnerable_py_taint.py. counts={:?}",
             taint_rule,
+            expected,
             counts
         );
         assert!(
@@ -392,15 +396,14 @@ fn test_vulnerable_js_taint_catches_every_flow() {
         }
     }
 
-    // Eight handlers, each with exactly one source→sink flow (six
+    // Nine handlers, each with exactly one source→sink flow (six
     // original + two added by #19 for same-file interprocedural return
-    // propagation: `interproceduralDirect` via a function_declaration
-    // helper and `interproceduralArrow` via an arrow-function helper
-    // assigned to a const).
+    // propagation + one added by #27 for method-call propagation on a
+    // tainted root `req.body.toString()`).
     assert_eq!(
         counts.get("js/taint-xss-innerhtml").copied(),
-        Some(8),
-        "js/taint-xss-innerhtml should fire exactly eight times. counts={:?}",
+        Some(9),
+        "js/taint-xss-innerhtml should fire exactly nine times. counts={:?}",
         counts
     );
     // The conservative rules must still coexist on the same fixture.

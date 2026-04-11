@@ -636,6 +636,28 @@ fn expression_taint(
         }
     }
 
+    // F-string / formatted-string interpolation. In tree-sitter-python both
+    // plain and f-strings are `string` nodes; f-strings are distinguished by
+    // carrying one or more `interpolation` children. Each `interpolation`
+    // wraps an inner expression between literal `{` / `}` tokens. If any
+    // interpolated expression is tainted, the whole f-string is tainted.
+    // Plain strings with no interpolation children fall through clean.
+    if expr.kind() == "string" {
+        let mut cursor = expr.walk();
+        for child in expr.children(&mut cursor) {
+            if child.kind() == "interpolation" {
+                let mut inner = child.walk();
+                for inner_child in child.named_children(&mut inner) {
+                    if let Some(desc) =
+                        expression_taint(inner_child, source, spec, aliases, state, summaries)
+                    {
+                        return Some(desc);
+                    }
+                }
+            }
+        }
+    }
+
     // Recurse one level for wrapping expressions (e.g. `bytes(request.data)`),
     // so the taint survives trivial type conversions without requiring
     // full interprocedural tracking.
@@ -652,6 +674,25 @@ fn expression_taint(
             for arg in args.named_children(&mut cursor) {
                 if let Some(desc) = expression_taint(arg, source, spec, aliases, state, summaries) {
                     return Some(desc);
+                }
+            }
+        }
+
+        // Method-call propagation on a tainted root: `x.foo(...)` is
+        // tainted when the receiver `x` (or any attribute/subscript chain
+        // rooted at a tainted value) is tainted. Conservative: tainted-in
+        // → tainted-out, mirroring the wrapping-call rule. Method calls
+        // on literal receivers (e.g. `"foo".upper()`) are NOT tainted
+        // because the recursive `expression_taint` on the object returns
+        // None for a bare string literal.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "attribute" {
+                if let Some(object) = func.child_by_field_name("object") {
+                    if let Some(desc) =
+                        expression_taint(object, source, spec, aliases, state, summaries)
+                    {
+                        return Some(desc);
+                    }
                 }
             }
         }
@@ -1377,6 +1418,129 @@ def get_user_input():
 
 def handler():
     return pickle.loads(get_user_input())
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn method_call_on_tainted_source_propagates() {
+        // `request.args.get("x")` — the receiver `request.args` is a
+        // source, so the method-call result is tainted and must flow
+        // into the sink.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.args.get("x")
+    return pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.args"));
+    }
+
+    #[test]
+    fn method_call_on_tainted_subscript_propagates() {
+        // `request.args["x"].upper()` — the receiver is a subscript
+        // chain on a tainted source.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.args["x"].upper()
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn method_call_on_literal_root_is_clean() {
+        // `"literal".upper()` is not tainted — the object is a string
+        // literal with no interpolation, so `expression_taint` on it
+        // returns None.
+        let src = r#"
+import pickle
+
+def handler():
+    data = "literal".upper()
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn method_call_with_args_still_tainted() {
+        // Extra positional / keyword args must not defeat the
+        // propagation.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.args.get("x", "default")
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn chained_method_calls_preserve_taint() {
+        // `request.args.get("x").strip().upper()` — three levels of
+        // method call on a tainted root, all must propagate.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.args.get("x").strip().upper()
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn fstring_with_tainted_interpolation_is_tainted() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = f"{request.data}"
+    return pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.data"));
+    }
+
+    #[test]
+    fn fstring_with_literal_only_is_clean() {
+        // No interpolation → no propagation path. `f"hello {1+2}"` has
+        // an interpolation but its inner expression is a pure literal,
+        // so no taint is found.
+        let src = r#"
+import pickle
+
+def handler():
+    data = f"hello {1+2}"
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn fstring_with_tainted_mixed_with_literals_is_tainted() {
+        // `f"a {x} b"` where `x` carries taint from a prior assignment.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    x = request.args["q"]
+    data = f"a {x} b"
+    return pickle.loads(data)
 "#;
         assert_eq!(run(src).len(), 1);
     }
