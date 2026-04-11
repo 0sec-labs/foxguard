@@ -1,3 +1,4 @@
+use crate::rules::go_taint::GoImportAliases;
 use crate::rules::javascript_taint::JsImportAliases;
 use crate::rules::python_aliases::ImportAliases;
 use crate::rules::{FileContext, RuleRegistry};
@@ -321,9 +322,15 @@ fn scan_files(
         } else {
             None
         };
+        let go_aliases = if matches!(language, Language::Go) {
+            Some(GoImportAliases::from_tree(&source, &tree))
+        } else {
+            None
+        };
         let ctx = FileContext {
             python_aliases: python_aliases.as_ref(),
             javascript_aliases: javascript_aliases.as_ref(),
+            go_aliases: go_aliases.as_ref(),
         };
 
         for rule in rules {

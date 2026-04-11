@@ -1,5 +1,6 @@
 pub mod csharp;
 pub mod go;
+pub mod go_taint;
 pub mod java;
 pub mod javascript;
 pub mod javascript_taint;
@@ -27,6 +28,8 @@ pub struct FileContext<'a> {
     pub python_aliases: Option<&'a python_aliases::ImportAliases>,
     /// JavaScript/TypeScript import alias table. `None` for non-JS files.
     pub javascript_aliases: Option<&'a javascript_taint::JsImportAliases>,
+    /// Go import alias table. `None` for non-Go files.
+    pub go_aliases: Option<&'a go_taint::GoImportAliases>,
 }
 
 /// A security rule that checks parsed source code for vulnerabilities.
@@ -145,6 +148,9 @@ impl RuleRegistry {
         registry.register(Box::new(go::InsecureTlsSkipVerify));
         registry.register(Box::new(go::GinNoTrustedProxies));
         registry.register(Box::new(go::NetHttpNoTimeout));
+        registry.register(Box::new(go::TaintCommandInjection));
+        registry.register(Box::new(go::TaintSqlInjection));
+        registry.register(Box::new(go::TaintSsrf));
 
         // Register Java rules
         registry.register(Box::new(java::NoSqlInjection));

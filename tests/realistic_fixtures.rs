@@ -154,3 +154,22 @@ fn realistic_nextjs_handlers() {
 fn realistic_hono_app() {
     assert_fixture("hono_app.ts", 7, &[("js/taint-xss-innerhtml", 3)]);
 }
+
+#[test]
+fn realistic_gin_app() {
+    // Three planted vulnerabilities (command injection, SQL
+    // injection, SSRF) — one per go/taint-* rule. The conservative
+    // go/no-* counterparts coexist on the same lines, plus the
+    // go/gin-no-trusted-proxies rule fires on gin.Default() in
+    // main(). Total = 3 taint + 3 conservative injection + 1
+    // gin-no-trusted-proxies = 7.
+    assert_fixture(
+        "gin_app.go",
+        7,
+        &[
+            ("go/taint-command-injection", 1),
+            ("go/taint-sql-injection", 1),
+            ("go/taint-ssrf", 1),
+        ],
+    );
+}

@@ -89,6 +89,9 @@ const goRules: Rule[] = [
   { id: 'go/no-sql-injection', cwe: 'CWE-89', desc: 'Potential SQL injection via string concatenation or fmt.Sprintf', severity: 'critical' },
   { id: 'go/no-ssrf', cwe: 'CWE-918', desc: 'Potential SSRF via http.Get/http.Post with variable URL', severity: 'high' },
   { id: 'go/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic hash (MD5/SHA1)', severity: 'medium' },
+  { id: 'go/taint-command-injection', cwe: 'CWE-78', desc: 'Untrusted input reaches os/exec command execution sink', severity: 'critical' },
+  { id: 'go/taint-sql-injection', cwe: 'CWE-89', desc: 'Untrusted input reaches database Query/Exec sink', severity: 'critical' },
+  { id: 'go/taint-ssrf', cwe: 'CWE-918', desc: 'Untrusted input reaches outbound net/http sink (potential SSRF)', severity: 'high' },
 ];
 
 const rubyRules: Rule[] = [

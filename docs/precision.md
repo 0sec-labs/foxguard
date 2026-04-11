@@ -262,6 +262,21 @@ treated as implicit sources. See `python_taint_sources()` in
 - `py/taint-yaml-load`
 - `py/taint-sql-injection`
 - `js/taint-xss-innerhtml`
+- `go/taint-command-injection`
+- `go/taint-sql-injection`
+- `go/taint-ssrf`
+
+Go source coverage spans net/http handler parameters (`r`, `req`,
+`request`), Gin `*Context` methods (`c.Query`, `c.PostForm`, `c.Param`,
+`c.GetHeader`, `c.FormValue`, ...), Echo `c.QueryParam`, Fiber
+`c.Params` / `c.Query`, and generic `os.Getenv` / `os.Args`. The
+engine propagates taint through method calls on tainted receivers,
+`fmt.Sprintf` wrapping, `+` string concatenation, one-level selector
+and index chains, and Go's native multi-return destructuring
+(`a, b := f()`). Interprocedural return summaries are computed per
+file and keyed by function / method simple name. See
+`go_taint_sources()` in `src/rules/go_taint.rs` for the canonical
+source list and `docs/taint-tracking.md` for the full scope.
 
 The taint rules and the Tier-2 conservative rules are meant to coexist. If
 you want loud-and-safe, keep the Tier-2 rules on. If you want

@@ -12,7 +12,7 @@ The taint engine answers the second, on a narrower footprint. It lets us ship ru
 
 In scope:
 
-- **Two languages**: Python and JavaScript/TypeScript, each with its own engine (`src/rules/python_taint.rs` and `src/rules/javascript_taint.rs`) sharing an identical surface (`TaintSpec`, `NodeMatcher`, `TaintFinding`, `analyze_tree`). `.ts` files are parsed through tree-sitter-javascript, so the JS engine also covers TypeScript source.
+- **Three languages**: Python, JavaScript/TypeScript, and Go, each with its own engine (`src/rules/python_taint.rs`, `src/rules/javascript_taint.rs`, `src/rules/go_taint.rs`) sharing an identical surface (`TaintSpec`, `NodeMatcher`, `TaintFinding`, `analyze_tree`). `.ts` files are parsed through tree-sitter-javascript, so the JS engine also covers TypeScript source.
 - **Intraprocedural**: each function body is analyzed independently.
 - **Flow-insensitive**: statements are processed in source order. Reassigning a tainted variable to a clean value drops the taint. Branches are not modeled — taint observed in one branch of an `if` persists through the fall-through.
 - **One level of attribute propagation**: `x.y` is tainted when `x` is tainted.
@@ -36,7 +36,7 @@ Out of scope for this PR, tracked under #10 as follow-ups:
 - **Field sensitivity**: `d["key"]` is tainted because `d` is. Different keys are not distinguished.
 - **Object attribute propagation beyond one level**: `x.y.z` is tainted when `x` is tainted, but the engine does not persist taint on `x.y` as a distinct name.
 - **Dynamic import forms**: `importlib.import_module(...)` does not interact with the alias table, so sinks reached through it are not recognized.
-- **Other languages**: Go, Java, Ruby, PHP, C#, Swift, Rust etc. have no taint engine yet. Adding one per language is expected — the shape of the Python and JavaScript engines is intended to serve as a template. JavaScript/TypeScript uses the same scope as Python (intraprocedural, flow-insensitive, one-level subscript propagation, template-literal and wrapping-call propagation, collapse-to-clean sanitizers) with a `JsImportAliases` table for `import`/`require` forms.
+- **Other languages**: Java, Ruby, PHP, C#, Swift, Rust etc. have no taint engine yet. Adding one per language is expected — the shape of the Python, JavaScript, and Go engines is intended to serve as a template. JavaScript/TypeScript uses the same scope as Python (intraprocedural, flow-insensitive, one-level subscript propagation, template-literal and wrapping-call propagation, collapse-to-clean sanitizers) with a `JsImportAliases` table for `import`/`require` forms. Go (see "Supported Go frameworks" below) uses `GoImportAliases` for grouped / aliased import specs and the same flow-insensitive, one-level propagation semantics, plus native multi-return destructuring and binary `+` string-concatenation propagation.
 
 ## API
 
@@ -222,6 +222,71 @@ Two deliberate non-additions:
 
 Because the engine only walks function bodies, Deno top-level scripts
 that want taint coverage should wrap their logic in a named function.
+
+## Supported Go frameworks
+
+Issue #31 added a third engine (`src/rules/go_taint.rs`) and three
+first-consumer rules: `go/taint-command-injection` (CWE-78),
+`go/taint-sql-injection` (CWE-89), and `go/taint-ssrf` (CWE-918). The
+sources are shared across every rule via `go_taint_sources()`.
+
+| Framework    | Sources that work today                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------------------ |
+| net/http     | `ParamName: r`/`req`/`request`; attribute access on `r.URL`, `r.Header`, `r.Body`, `r.Form`; method calls `r.FormValue`, `r.PostFormValue`, `r.URL.Query` |
+| Gin          | `c.Query`, `c.PostForm`, `c.Param`, `c.GetHeader`, `c.GetQuery`, `c.GetString`, `c.FormValue`, `c.Request` attribute chain |
+| Echo         | `c.QueryParam`, `c.Param`, `c.FormValue` (Param/FormValue shared with Gin)                                    |
+| Fiber        | `c.Params`, `c.Query`, `c.FormValue` (Query/FormValue shared with Gin)                                        |
+| Generic      | `os.Getenv`, `os.Args`                                                                                        |
+
+Gin / Echo / Fiber handlers all bind the context to `c`. `c` is
+intentionally **not** seeded as a `ParamName` source because
+single-letter locals named `c` are extremely common in generic Go.
+We rely on the explicit method-call matchers above instead. The
+`r`/`req`/`request` pattern in net/http handlers IS seeded via
+`ParamName` because those names are idiomatic for the
+`*http.Request` parameter.
+
+### Go-specific engine notes
+
+- **Interprocedural summary keying.** Pass 1 records a summary keyed
+  by each function / method's simple name. Method declarations use
+  the bare method name, so a file that defines both `func foo()` and
+  `func (s *S) foo()` will last-write-wins. A call site finds a
+  matching entry for either a bare `foo()` identifier call or a
+  selector-expression call whose trailing field is `foo`
+  (`anything.foo(...)`). This intentionally over-approximates
+  method-call propagation for v1.
+- **Multi-return destructuring.** Go's native `a, b := f()` shape is
+  handled in `short_var_declaration`, `var_spec`, and
+  `assignment_statement` uniformly. If the RHS expression list and
+  LHS identifier list have matching arity, taint is paired
+  element-wise; otherwise (the typical `a, b := f()` case where the
+  RHS is a single multi-return call) the policy is conservative: if
+  the single RHS expression is tainted at all, every LHS name is
+  tainted.
+- **String concatenation.** Go uses `+` for string concatenation just
+  like JavaScript, so `binary_expression` propagates taint from
+  either operand. `fmt.Sprintf("prefix %s", tainted)` is handled by
+  the generic wrapping-call rule — any tainted argument taints the
+  result unless the callee matches a declared sanitizer.
+
+### Go-specific out-of-scope
+
+- **Dot imports** (`import . "fmt"`): names become unqualified and
+  the alias table would need full unqualified-name rewriting.
+  Documented out of scope for v1.
+- **Side-effect imports** (`import _ "foo"`): introduce no names, so
+  the alias table records nothing.
+- **Interface dispatch**: a call through an interface type
+  (`handler.ServeHTTP(w, r)`) is resolved as a method-name lookup
+  only. Concrete implementers of the interface are not considered.
+- **Closure bodies**: only top-level `function_declaration` and
+  `method_declaration` are summarized. `func_literal` closures are
+  skipped by the walker.
+- **Cross-package imports**: alias resolution only covers the
+  file-local `import` statement; calls to functions in imported
+  packages are matched by canonical dotted path, not by tracing into
+  their source.
 
 ## Open questions for the full #10
 

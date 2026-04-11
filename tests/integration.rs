@@ -2232,3 +2232,125 @@ fn test_semgrep_taint_yaml_bridge_pattern_either_safe() {
         n
     );
 }
+
+// ─── Go taint engine (issue #31) ───────────────────────────────────────────
+
+/// Positive fixture for the Go taint engine: each handler flows an
+/// untrusted source (Gin/net/http/Echo/Fiber/env) into a
+/// command-injection, SQL-injection, or SSRF sink. Each go/taint-*
+/// rule must fire the expected number of times and its conservative
+/// go/no-* counterpart must coexist.
+#[test]
+fn test_vulnerable_go_taint_catches_every_flow() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/vulnerable_go_taint.go", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    assert!(!output.status.success());
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for f in &findings {
+        if let Some(rule) = f["rule_id"].as_str() {
+            *counts.entry(rule).or_insert(0) += 1;
+        }
+    }
+
+    // Five command-injection handlers, three SQL, three SSRF.
+    for (taint_rule, conservative_rule, expected) in [
+        (
+            "go/taint-command-injection",
+            "go/no-command-injection",
+            5usize,
+        ),
+        ("go/taint-sql-injection", "go/no-sql-injection", 3),
+        ("go/taint-ssrf", "go/no-ssrf", 3),
+    ] {
+        assert_eq!(
+            counts.get(taint_rule).copied(),
+            Some(expected),
+            "{} should fire exactly {} time(s) on vulnerable_go_taint.go. counts={:?}",
+            taint_rule,
+            expected,
+            counts
+        );
+        assert!(
+            counts.get(conservative_rule).copied().unwrap_or(0) >= 1,
+            "conservative {} must coexist with {}. counts={:?}",
+            conservative_rule,
+            taint_rule,
+            counts
+        );
+    }
+}
+
+/// Negative counterpart for the Go taint engine. Every handler in
+/// `safe_go_taint.go` either uses a literal argument, has its
+/// taint killed by reassignment, or relies on cross-function
+/// isolation. No go/taint-* rule may fire.
+#[test]
+fn test_safe_go_taint_has_no_taint_findings() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/safe_go_taint.go", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    for taint_rule in [
+        "go/taint-command-injection",
+        "go/taint-sql-injection",
+        "go/taint-ssrf",
+    ] {
+        let n = findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some(taint_rule))
+            .count();
+        assert_eq!(
+            n, 0,
+            "{} should not fire on safe_go_taint.go, got {} findings",
+            taint_rule, n
+        );
+    }
+}
+
+/// End-to-end validation: a small realistic Gin service with three
+/// planted vulnerabilities (command injection, SQL injection, SSRF)
+/// must produce exactly one finding per go/taint-* rule.
+#[test]
+fn test_realistic_gin_app_findings() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/realistic/gin_app.go", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    assert!(!output.status.success());
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for f in &findings {
+        if let Some(rule) = f["rule_id"].as_str() {
+            *counts.entry(rule).or_insert(0) += 1;
+        }
+    }
+
+    for rule in [
+        "go/taint-command-injection",
+        "go/taint-sql-injection",
+        "go/taint-ssrf",
+    ] {
+        assert_eq!(
+            counts.get(rule).copied(),
+            Some(1),
+            "{} should fire exactly once on realistic/gin_app.go. counts={:?}",
+            rule,
+            counts
+        );
+    }
+}
