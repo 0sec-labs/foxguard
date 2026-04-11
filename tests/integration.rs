@@ -442,6 +442,147 @@ fn test_safe_js_taint_has_no_taint_findings() {
     );
 }
 
+/// Issue #32 — Next.js App Router taint sources. `request` is the
+/// ParamName-seeded handler input and `request.nextUrl` is a Next.js
+/// specific Attribute source. Both handlers must fire exactly once.
+#[test]
+fn test_vulnerable_nextjs_taint_catches_flow() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/vulnerable_nextjs_taint.ts", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    assert!(!output.status.success());
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let n = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("js/taint-xss-innerhtml"))
+        .count();
+    assert_eq!(
+        n, 2,
+        "js/taint-xss-innerhtml should fire exactly twice on vulnerable_nextjs_taint.ts, got {} findings: {:?}",
+        n, findings
+    );
+}
+
+#[test]
+fn test_safe_nextjs_taint_has_no_taint_findings() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/safe_nextjs_taint.ts", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let n = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("js/taint-xss-innerhtml"))
+        .count();
+    assert_eq!(
+        n, 0,
+        "js/taint-xss-innerhtml should not fire on safe_nextjs_taint.ts, got {} findings",
+        n
+    );
+}
+
+/// Issue #32 — Hono taint sources. `c` is intentionally NOT a ParamName
+/// matcher; the engine must pick up `c.req.query(...)` / `c.req.param(...)`
+/// through the explicit `Call` matchers.
+#[test]
+fn test_vulnerable_hono_taint_catches_flow() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/vulnerable_hono_taint.ts", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    assert!(!output.status.success());
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let n = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("js/taint-xss-innerhtml"))
+        .count();
+    assert_eq!(
+        n, 2,
+        "js/taint-xss-innerhtml should fire exactly twice on vulnerable_hono_taint.ts, got {} findings: {:?}",
+        n, findings
+    );
+}
+
+#[test]
+fn test_safe_hono_taint_has_no_taint_findings() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/safe_hono_taint.ts", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let n = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("js/taint-xss-innerhtml"))
+        .count();
+    assert_eq!(
+        n, 0,
+        "js/taint-xss-innerhtml should not fire on safe_hono_taint.ts, got {} findings",
+        n
+    );
+}
+
+/// Issue #32 — Deno taint sources. `Deno.args` is an Attribute source,
+/// `Deno.env.get(...)` is a Call source. The engine only analyzes
+/// function bodies, so the fixture wraps its sinks accordingly.
+#[test]
+fn test_vulnerable_deno_taint_catches_flow() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/vulnerable_deno_taint.ts", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    assert!(!output.status.success());
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let n = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("js/taint-xss-innerhtml"))
+        .count();
+    assert_eq!(
+        n, 2,
+        "js/taint-xss-innerhtml should fire exactly twice on vulnerable_deno_taint.ts, got {} findings: {:?}",
+        n, findings
+    );
+}
+
+#[test]
+fn test_safe_deno_taint_has_no_taint_findings() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/safe_deno_taint.ts", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let n = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("js/taint-xss-innerhtml"))
+        .count();
+    assert_eq!(
+        n, 0,
+        "js/taint-xss-innerhtml should not fire on safe_deno_taint.ts, got {} findings",
+        n
+    );
+}
+
 /// Negative regression for issue #7: aliased imports of the *same* sensitive
 /// modules, but called in safe shapes (static literals, SafeLoader, sha256,
 /// write-only pickle methods). Alias resolution must not silently widen the

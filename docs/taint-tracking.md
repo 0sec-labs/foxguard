@@ -178,6 +178,33 @@ rules:
 
 Load it with `foxguard --no-builtins --rules path/to/rule.yml target/` and each compiled rule becomes a regular foxguard `Rule` backed by the same intraprocedural engine described above.
 
+## Supported JavaScript / TypeScript frameworks
+
+Issue #32 extended `javascript_taint_sources()` with framework-specific
+sources beyond the original Express surface. The helper is organized
+top-to-bottom by framework; add new entries to the matching section.
+
+| Framework    | Sources that work today                                                                 | Requires #27 (method-call receiver propagation)                                                          |
+| ------------ | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Express      | `req.body`, `req.query`, `req.params`, `req.headers`, `req.cookies` (same for `request`), `ParamName: req`/`request` | —                                                                                                        |
+| Next.js      | `request.nextUrl.*` (via `Attribute` + `ParamName: request`)                            | `request.headers.get(...)`, `request.cookies.get(...)`, `request.json()`, `request.formData()`          |
+| Hono         | `c.req.query()`, `c.req.param()`, `c.req.header()`, `c.req.json()`, `c.req.formData()`, `c.req.parseBody()`, `c.req` attribute access | —                                                                                                        |
+| Fastify      | Shares the Express attribute surface (`request.body` / `.query` / `.params` / `.headers` / `.cookies`) | Method-based Fastify helpers (none commonly used) would need #27                                         |
+| SvelteKit    | `event.request`, `event.params`, `event.url` attribute chains                            | `event.request.json()`, `event.request.formData()`                                                      |
+| Deno         | `Deno.args[...]`, `Deno.env.get(...)`                                                   | —                                                                                                        |
+
+Two deliberate non-additions:
+
+- **Hono's `c`** is not a `ParamName` source. `c` is too common a local
+  identifier in generic JS to be treated as an untrusted receiver
+  without type information.
+- **SvelteKit's `event`** is not a `ParamName` source either. DOM event
+  handlers (`onClick(event)`, `addEventListener("click", (event) => ...)`)
+  use the same name and would flood false positives.
+
+Because the engine only walks function bodies, Deno top-level scripts
+that want taint coverage should wrap their logic in a named function.
+
 ## Open questions for the full #10
 
 - **Cross-function propagation.** The first step — "trust the return of helpers whose body we can see in the same file" — landed in issue #19 as a single-hop, name-keyed summary pass. Next steps: multi-hop propagation via fixed-point iteration over the summary map, scope-aware keys that distinguish nested definitions, argument-based taint threading so callers' tainted arguments influence helper summaries, then cross-file via module symbol tables. Each is its own issue.

@@ -1092,10 +1092,42 @@ fn match_source(
 }
 
 /// Canonical set of untrusted-input sources for JavaScript/TypeScript web
-/// handlers. Currently covers Express-style `req.*` access plus parameters
-/// named `req` / `request`.
+/// handlers. Organized by framework; add new sources to the matching
+/// section and keep the layout stable so future contributors know where
+/// their entries belong.
+///
+/// Frameworks covered today:
+/// 1. Generic handler parameters (`req`, `request`) — Express / Fastify /
+///    Next.js App Router share this convention.
+/// 2. Express-style `req.*` / `request.*` attribute access.
+/// 3. Next.js App Router (`request.nextUrl.*`, `request.cookies.*`).
+/// 4. Hono (`c.req.*` call / attribute patterns — `c` is intentionally
+///    NOT added as a `ParamName` matcher because single-letter locals
+///    named `c` are extremely common in generic JS and would explode
+///    false positives).
+/// 5. Fastify — largely overlaps with Express sources above; no new
+///    matchers needed today, but future Fastify-only fields go here.
+/// 6. SvelteKit (`event.request`, `event.params`, `event.url`). `event`
+///    is intentionally NOT a `ParamName` matcher — browser DOM event
+///    handlers use the same name and would flood false positives.
+/// 7. Deno (`Deno.args`, `Deno.env.get`).
+///
+/// Several method-call sources (`request.headers.get(...)`,
+/// `request.cookies.get(...)`, `request.formData()`, `request.json()`)
+/// require the engine to propagate taint from a method-call *receiver*
+/// into the call expression's result. That is tracked as issue #27 and
+/// is not expressible with the `NodeMatcher` variants today. Once #27
+/// lands, those patterns will fire automatically for any handler whose
+/// parameter is already seeded as `request` / `req` — no new matchers
+/// required here.
 pub fn javascript_taint_sources() -> Vec<NodeMatcher> {
     vec![
+        // ─── 1. Generic handler parameters ────────────────────────────
+        NodeMatcher::ParamName {
+            names: vec!["req".into(), "request".into()],
+            description: "untrusted request parameter".into(),
+        },
+        // ─── 2. Express / general `req.*` and `request.*` ────────────
         NodeMatcher::Attribute {
             root: "req".into(),
             field: "body".into(),
@@ -1146,9 +1178,87 @@ pub fn javascript_taint_sources() -> Vec<NodeMatcher> {
             field: "cookies".into(),
             description: "request.cookies".into(),
         },
-        NodeMatcher::ParamName {
-            names: vec!["req".into(), "request".into()],
-            description: "untrusted request parameter".into(),
+        // ─── 3. Next.js App Router ───────────────────────────────────
+        // `request.nextUrl` exposes a parsed URL — `.searchParams`,
+        // `.pathname`, `.href` are all untrusted when `request` is the
+        // handler input. `request.cookies` overlaps with Express above.
+        // Method-call variants (`request.headers.get`, `request.json`,
+        // `request.formData`, `request.cookies.get`) depend on issue
+        // #27 — see the header comment above.
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "nextUrl".into(),
+            description: "Next.js request.nextUrl".into(),
+        },
+        // ─── 4. Hono ─────────────────────────────────────────────────
+        // Hono handlers receive a context `c` whose `c.req` is the
+        // untrusted request. Direct `c.req` attribute access is covered
+        // by the `Attribute` matcher below; the most common call forms
+        // are enumerated explicitly so the engine picks them up even
+        // though `c` is never seeded via `ParamName` (see header
+        // comment for the rationale).
+        NodeMatcher::Attribute {
+            root: "c".into(),
+            field: "req".into(),
+            description: "Hono c.req".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.query".into(),
+            description: "Hono c.req.query()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.param".into(),
+            description: "Hono c.req.param()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.header".into(),
+            description: "Hono c.req.header()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.json".into(),
+            description: "Hono c.req.json()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.formData".into(),
+            description: "Hono c.req.formData()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.parseBody".into(),
+            description: "Hono c.req.parseBody()".into(),
+        },
+        // ─── 5. Fastify ──────────────────────────────────────────────
+        // Fastify uses the same `request.body` / `.query` / `.params` /
+        // `.headers` / `.cookies` surface as Express, so the section 2
+        // matchers already cover it. Add Fastify-specific fields here
+        // if any ever diverge.
+        // ─── 6. SvelteKit ────────────────────────────────────────────
+        // `event` is intentionally NOT a `ParamName` matcher — DOM
+        // event handlers use the same name. Rely on explicit
+        // attribute paths from the request event object.
+        NodeMatcher::Attribute {
+            root: "event".into(),
+            field: "request".into(),
+            description: "SvelteKit event.request".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "event".into(),
+            field: "params".into(),
+            description: "SvelteKit event.params".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "event".into(),
+            field: "url".into(),
+            description: "SvelteKit event.url".into(),
+        },
+        // ─── 7. Deno ─────────────────────────────────────────────────
+        NodeMatcher::Attribute {
+            root: "Deno".into(),
+            field: "args".into(),
+            description: "Deno.args".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "Deno.env.get".into(),
+            description: "Deno.env.get()".into(),
         },
     ]
 }
