@@ -1820,69 +1820,60 @@ impl Rule for SecureSslRedirectDisabled {
 // the doc comment on `python_taint`. Intraprocedural only, flow-insensitive,
 // no sanitizers yet.
 
-use crate::rules::python_taint::{self, NodeMatcher, TaintSpec};
+use crate::rules::python_taint::{self, python_taint_sources, NodeMatcher, TaintSpec};
+
+/// Convenience: build a `Call` sink matcher where the canonical path and
+/// the finding description are the same string. Used by every taint rule
+/// below to keep spec definitions short.
+fn call_sink(canonical: &str) -> NodeMatcher {
+    NodeMatcher::Call {
+        canonical: canonical.into(),
+        description: canonical.into(),
+    }
+}
+
+/// Shared mapper from engine-level `TaintFinding` to the public `Finding`
+/// shape, parameterized by the rule's metadata and a description template
+/// that receives the source and sink descriptions.
+#[allow(clippy::too_many_arguments)]
+fn map_taint_findings(
+    rule_id: &str,
+    severity: Severity,
+    cwe: Option<&str>,
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &FileContext<'_>,
+    spec: &TaintSpec,
+    format_description: impl Fn(&str, &str) -> String,
+) -> Vec<Finding> {
+    let raw = python_taint::analyze_tree(tree.root_node(), source, spec, ctx.python_aliases);
+    raw.into_iter()
+        .map(|t| Finding {
+            rule_id: rule_id.to_string(),
+            severity,
+            cwe: cwe.map(|s| s.to_string()),
+            description: format_description(&t.source_description, &t.sink_description),
+            file: String::new(),
+            line: t.sink_line,
+            column: t.sink_column,
+            end_line: t.sink_end_line,
+            end_column: t.sink_end_column,
+            snippet: get_source_line(source, t.sink_start_byte),
+        })
+        .collect()
+}
 
 pub struct TaintPickleDeserialization;
 
 impl TaintPickleDeserialization {
     fn spec() -> TaintSpec {
         TaintSpec {
-            sources: vec![
-                NodeMatcher::Attribute {
-                    root: "request".into(),
-                    field: "data".into(),
-                    description: "flask.request.data".into(),
-                },
-                NodeMatcher::Attribute {
-                    root: "request".into(),
-                    field: "form".into(),
-                    description: "flask.request.form".into(),
-                },
-                NodeMatcher::Attribute {
-                    root: "request".into(),
-                    field: "args".into(),
-                    description: "flask.request.args".into(),
-                },
-                NodeMatcher::Attribute {
-                    root: "request".into(),
-                    field: "values".into(),
-                    description: "flask.request.values".into(),
-                },
-                NodeMatcher::Attribute {
-                    root: "request".into(),
-                    field: "json".into(),
-                    description: "flask.request.json".into(),
-                },
-                NodeMatcher::Call {
-                    canonical: "request.get_data".into(),
-                    description: "flask.request.get_data()".into(),
-                },
-                NodeMatcher::Call {
-                    canonical: "request.get_json".into(),
-                    description: "flask.request.get_json()".into(),
-                },
-                NodeMatcher::ParamName {
-                    names: vec!["request".into()],
-                    description: "untrusted request parameter".into(),
-                },
-            ],
+            sources: python_taint_sources(),
             sinks: vec![
-                NodeMatcher::Call {
-                    canonical: "pickle.loads".into(),
-                    description: "pickle.loads".into(),
-                },
-                NodeMatcher::Call {
-                    canonical: "pickle.load".into(),
-                    description: "pickle.load".into(),
-                },
-                NodeMatcher::Call {
-                    canonical: "cPickle.loads".into(),
-                    description: "cPickle.loads".into(),
-                },
-                NodeMatcher::Call {
-                    canonical: "cPickle.load".into(),
-                    description: "cPickle.load".into(),
-                },
+                call_sink("pickle.loads"),
+                call_sink("pickle.load"),
+                call_sink("cPickle.loads"),
+                call_sink("cPickle.load"),
             ],
             sanitizers: vec![],
         }
@@ -1916,27 +1907,344 @@ impl Rule for TaintPickleDeserialization {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        let spec = Self::spec();
-        let taint_findings =
-            python_taint::analyze_tree(tree.root_node(), source, &spec, ctx.python_aliases);
-
-        taint_findings
-            .into_iter()
-            .map(|t| Finding {
-                rule_id: self.id().to_string(),
-                severity: self.severity(),
-                cwe: self.cwe().map(|s| s.to_string()),
-                description: format!(
+        map_taint_findings(
+            self.id(),
+            self.severity(),
+            self.cwe(),
+            source,
+            tree,
+            ctx,
+            &Self::spec(),
+            |src, sink| {
+                format!(
                     "{} reaches {} — untrusted input can execute arbitrary code via pickle",
-                    t.source_description, t.sink_description
-                ),
-                file: String::new(),
-                line: t.sink_line,
-                column: t.sink_column,
-                end_line: t.sink_end_line,
-                end_column: t.sink_end_column,
-                snippet: get_source_line(source, t.sink_start_byte),
-            })
-            .collect()
+                    src, sink
+                )
+            },
+        )
+    }
+}
+
+// ─── py/taint-eval ────────────────────────────────────────────────────────
+pub struct TaintEvalFromRequest;
+
+impl TaintEvalFromRequest {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![call_sink("eval"), call_sink("exec")],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintEvalFromRequest {
+    fn id(&self) -> &str {
+        "py/taint-eval"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-95")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches eval/exec sink"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        map_taint_findings(
+            self.id(),
+            self.severity(),
+            self.cwe(),
+            source,
+            tree,
+            ctx,
+            &Self::spec(),
+            |src, sink| {
+                format!(
+                    "{} reaches {} — untrusted input can execute arbitrary Python code",
+                    src, sink
+                )
+            },
+        )
+    }
+}
+
+// ─── py/taint-command-injection ──────────────────────────────────────────
+pub struct TaintCommandInjectionFromRequest;
+
+impl TaintCommandInjectionFromRequest {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("os.system"),
+                call_sink("os.popen"),
+                call_sink("subprocess.run"),
+                call_sink("subprocess.Popen"),
+                call_sink("subprocess.call"),
+                call_sink("subprocess.check_call"),
+                call_sink("subprocess.check_output"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintCommandInjectionFromRequest {
+    fn id(&self) -> &str {
+        "py/taint-command-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-78")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches OS command execution sink"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        map_taint_findings(
+            self.id(),
+            self.severity(),
+            self.cwe(),
+            source,
+            tree,
+            ctx,
+            &Self::spec(),
+            |src, sink| {
+                format!(
+                    "{} reaches {} — untrusted input can inject OS commands",
+                    src, sink
+                )
+            },
+        )
+    }
+}
+
+// ─── py/taint-ssrf ────────────────────────────────────────────────────────
+pub struct TaintSsrfFromRequest;
+
+impl TaintSsrfFromRequest {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("urllib.request.urlopen"),
+                call_sink("requests.get"),
+                call_sink("requests.post"),
+                call_sink("requests.put"),
+                call_sink("requests.delete"),
+                call_sink("requests.request"),
+                call_sink("httpx.get"),
+                call_sink("httpx.post"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintSsrfFromRequest {
+    fn id(&self) -> &str {
+        "py/taint-ssrf"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-918")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches outbound HTTP sink (potential SSRF)"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        map_taint_findings(
+            self.id(),
+            self.severity(),
+            self.cwe(),
+            source,
+            tree,
+            ctx,
+            &Self::spec(),
+            |src, sink| {
+                format!(
+                    "{} reaches {} — untrusted input can drive server-side request forgery",
+                    src, sink
+                )
+            },
+        )
+    }
+}
+
+// ─── py/taint-yaml-load ──────────────────────────────────────────────────
+pub struct TaintYamlLoadFromRequest;
+
+impl TaintYamlLoadFromRequest {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("yaml.load"),
+                call_sink("yaml.unsafe_load"),
+                call_sink("yaml.full_load"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintYamlLoadFromRequest {
+    fn id(&self) -> &str {
+        "py/taint-yaml-load"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-502")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches unsafe YAML loader"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        map_taint_findings(
+            self.id(),
+            self.severity(),
+            self.cwe(),
+            source,
+            tree,
+            ctx,
+            &Self::spec(),
+            |src, sink| {
+                format!(
+                    "{} reaches {} — untrusted input can execute arbitrary code via YAML deserialization",
+                    src, sink
+                )
+            },
+        )
+    }
+}
+
+// ─── py/taint-sql-injection ──────────────────────────────────────────────
+pub struct TaintSqlInjectionFromRequest;
+
+impl TaintSqlInjectionFromRequest {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            // DB execute APIs can live on any object (`cursor`, `conn`,
+            // `db`, `session`…). Rather than enumerate every plausible
+            // receiver name, match the final method name via `MethodName`.
+            // This intentionally over-approximates — any `.execute(...)`
+            // called with tainted input is flagged.
+            sinks: vec![
+                NodeMatcher::MethodName {
+                    method: "execute".into(),
+                    description: "cursor/connection.execute".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "executemany".into(),
+                    description: "cursor/connection.executemany".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "executescript".into(),
+                    description: "sqlite3.Cursor.executescript".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintSqlInjectionFromRequest {
+    fn id(&self) -> &str {
+        "py/taint-sql-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-89")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches DB execute sink"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        map_taint_findings(
+            self.id(),
+            self.severity(),
+            self.cwe(),
+            source,
+            tree,
+            ctx,
+            &Self::spec(),
+            |src, sink| format!("{} reaches {} — untrusted input can inject SQL", src, sink),
+        )
     }
 }

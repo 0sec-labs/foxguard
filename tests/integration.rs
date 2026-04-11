@@ -285,14 +285,14 @@ fn test_vulnerable_py_taint_catches_every_flow() {
         }
     }
 
-    // Fourteen function bodies, each with one source→sink flow: one
-    // taint finding per function. The conservative NoPickle rule fires
-    // on the same fourteen calls because its scope is "any pickle.loads",
-    // so we should see exactly fourteen of each.
+    // Fourteen pickle handlers (10 original + 4 added by #15 for nested
+    // subscripts and tuple/list destructuring). Each has one flow: one
+    // py/taint-pickle-deserialization finding per handler. The conservative
+    // py/no-pickle rule coexists on the same fourteen calls.
     assert_eq!(
         counts.get("py/taint-pickle-deserialization").copied(),
         Some(14),
-        "taint rule should fire fourteen times, one per handler. counts={:?}",
+        "pickle taint rule should fire fourteen times. counts={:?}",
         counts
     );
     assert_eq!(
@@ -301,12 +301,32 @@ fn test_vulnerable_py_taint_catches_every_flow() {
         "NoPickle should still fire fourteen times alongside the taint rule. counts={:?}",
         counts
     );
-    assert_eq!(
-        findings.len(),
-        28,
-        "expected 28 total findings (14 taint + 14 NoPickle), got {}",
-        findings.len()
-    );
+
+    // Each new py/taint-* rule has one dedicated positive handler and
+    // must fire exactly once. Its conservative py/no-* counterpart must
+    // coexist and keep firing on the same call.
+    for (taint_rule, conservative_rule) in [
+        ("py/taint-eval", "py/no-eval"),
+        ("py/taint-command-injection", "py/no-command-injection"),
+        ("py/taint-ssrf", "py/no-ssrf"),
+        ("py/taint-yaml-load", "py/no-yaml-load"),
+        ("py/taint-sql-injection", "py/no-sql-injection"),
+    ] {
+        assert_eq!(
+            counts.get(taint_rule).copied(),
+            Some(1),
+            "{} should fire exactly once on vulnerable_py_taint.py. counts={:?}",
+            taint_rule,
+            counts
+        );
+        assert!(
+            counts.get(conservative_rule).copied().unwrap_or(0) >= 1,
+            "conservative {} must coexist with {}. counts={:?}",
+            conservative_rule,
+            taint_rule,
+            counts
+        );
+    }
 }
 
 /// Negative counterpart for the taint POC. Every pickle.loads call in
@@ -326,15 +346,24 @@ fn test_safe_py_taint_has_no_taint_findings() {
     let findings: Vec<serde_json::Value> =
         serde_json::from_slice(&output.stdout).expect("invalid JSON output");
 
-    let taint_findings = findings
-        .iter()
-        .filter(|f| f["rule_id"].as_str() == Some("py/taint-pickle-deserialization"))
-        .count();
-    assert_eq!(
-        taint_findings, 0,
-        "taint rule should not fire on safe_py_taint.py, got {} findings: {:?}",
-        taint_findings, findings
-    );
+    for taint_rule in [
+        "py/taint-pickle-deserialization",
+        "py/taint-eval",
+        "py/taint-command-injection",
+        "py/taint-ssrf",
+        "py/taint-yaml-load",
+        "py/taint-sql-injection",
+    ] {
+        let n = findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some(taint_rule))
+            .count();
+        assert_eq!(
+            n, 0,
+            "{} should not fire on safe_py_taint.py, got {} findings",
+            taint_rule, n
+        );
+    }
 }
 
 /// Negative regression for issue #7: aliased imports of the *same* sensitive

@@ -77,6 +77,14 @@ pub enum NodeMatcher {
         names: Vec<String>,
         description: String,
     },
+
+    /// Match any method call whose final attribute name equals `method`,
+    /// regardless of receiver. Useful for sinks like `cursor.execute`,
+    /// `connection.execute`, `db.execute`, etc., where the receiver can be
+    /// any DB-like object and enumerating every plausible name is
+    /// impractical. Only meaningful as a *sink* matcher; the source path
+    /// ignores it.
+    MethodName { method: String, description: String },
 }
 
 impl NodeMatcher {
@@ -86,6 +94,7 @@ impl NodeMatcher {
             NodeMatcher::Attribute { description, .. } => description,
             NodeMatcher::Call { description, .. } => description,
             NodeMatcher::ParamName { description, .. } => description,
+            NodeMatcher::MethodName { description, .. } => description,
         }
     }
 }
@@ -394,12 +403,21 @@ fn handle_call(
         None => callee_text.to_string(),
     };
 
+    // The final attribute segment of the callee, used by `MethodName`
+    // sink matching. For `cursor.execute` this is `"execute"`; for a bare
+    // `eval` it's `"eval"`.
+    let final_segment = resolved.rsplit('.').next().unwrap_or(resolved.as_str());
+
     // Is this a sink?
     let sink_desc = spec.sinks.iter().find_map(|m| match m {
         NodeMatcher::Call {
             canonical,
             description,
         } if *canonical == resolved => Some(description.clone()),
+        NodeMatcher::MethodName {
+            method,
+            description,
+        } if method == final_segment => Some(description.clone()),
         _ => None,
     });
     let Some(sink_desc) = sink_desc else {
@@ -599,9 +617,72 @@ fn match_source(
                 // from the function's parameter list, not when walking
                 // expressions.
             }
+            NodeMatcher::MethodName { .. } => {
+                // MethodName is a sink-only matcher. Ignore in source
+                // matching — sources match on precise callee shapes.
+            }
         }
     }
     None
+}
+
+/// Canonical set of untrusted-input sources for Python web handlers.
+///
+/// Shared across every `py/taint-*` rule so that "what counts as
+/// untrusted" is defined once and stays consistent. Currently covers
+/// Flask-style `request.*` access plus handler parameters named
+/// `request`. Django is intentionally out of scope for the first batch
+/// of taint rules.
+pub fn python_taint_sources() -> Vec<NodeMatcher> {
+    vec![
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "data".into(),
+            description: "flask.request.data".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "form".into(),
+            description: "flask.request.form".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "args".into(),
+            description: "flask.request.args".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "values".into(),
+            description: "flask.request.values".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "json".into(),
+            description: "flask.request.json".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "files".into(),
+            description: "flask.request.files".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "cookies".into(),
+            description: "flask.request.cookies".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.get_data".into(),
+            description: "flask.request.get_data()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.get_json".into(),
+            description: "flask.request.get_json()".into(),
+        },
+        NodeMatcher::ParamName {
+            names: vec!["request".into()],
+            description: "untrusted request parameter".into(),
+        },
+    ]
 }
 
 /// Walk an attribute chain leftward and return the leftmost identifier text.

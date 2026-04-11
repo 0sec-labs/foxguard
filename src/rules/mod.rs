@@ -125,6 +125,11 @@ impl RuleRegistry {
         registry.register(Box::new(python::DjangoAllowedHostsWildcard));
         registry.register(Box::new(python::SecureSslRedirectDisabled));
         registry.register(Box::new(python::TaintPickleDeserialization));
+        registry.register(Box::new(python::TaintEvalFromRequest));
+        registry.register(Box::new(python::TaintCommandInjectionFromRequest));
+        registry.register(Box::new(python::TaintSsrfFromRequest));
+        registry.register(Box::new(python::TaintYamlLoadFromRequest));
+        registry.register(Box::new(python::TaintSqlInjectionFromRequest));
 
         // Register Go rules
         registry.register(Box::new(go::NoSqlInjection));

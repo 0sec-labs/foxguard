@@ -65,3 +65,36 @@ def safe_tuple():
 def safe_tuple_other_slot_tainted():
     a, b = b"clean", request.args["x"]
     return pickle.loads(a)
+# ─── Clean calls for every new taint rule ──────────────────────────────
+# Each handler below calls a sink with a constant argument. The taint
+# rule must stay silent; the conservative `py/no-*` counterpart still
+# fires because it's sink-shape-only.
+
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import yaml  # noqa: E402
+import requests  # noqa: E402
+import sqlite3  # noqa: E402
+
+
+def clean_eval():
+    return eval("2 + 2")
+
+
+def clean_command_injection():
+    os.system("ls /tmp")
+    subprocess.run(["ls", "/tmp"])
+
+
+def clean_ssrf():
+    return requests.get("https://example.com/")
+
+
+def clean_yaml_load():
+    return yaml.load("key: value")
+
+
+def clean_sql_injection():
+    conn = sqlite3.connect(":memory:")
+    cur = conn.cursor()
+    cur.execute("SELECT 1")

@@ -92,3 +92,45 @@ def tuple_unpack_conservative():
 def list_unpack_elementwise():
     [x, y] = [b"static", request.form["payload"]]
     return pickle.loads(y)
+# ═══ py/taint-eval ══════════════════════════════════════════════════════
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import yaml  # noqa: E402
+import requests  # noqa: E402
+import sqlite3  # noqa: E402
+
+
+def eval_from_request():
+    expr = request.args["expr"]
+    return eval(expr)
+
+
+# ═══ py/taint-command-injection ════════════════════════════════════════
+def command_injection_from_request():
+    cmd = request.form["cmd"]
+    os.system(cmd)
+
+
+# ═══ py/taint-ssrf ══════════════════════════════════════════════════════
+def ssrf_from_request():
+    url = request.args["url"]
+    return requests.get(url)
+
+
+# ═══ py/taint-yaml-load ════════════════════════════════════════════════
+def yaml_load_from_request():
+    payload = request.data
+    return yaml.load(payload)
+
+
+# ═══ py/taint-sql-injection ════════════════════════════════════════════
+def sql_injection_from_request():
+    # Tainted `name` flows directly into `.execute(...)` — that's what
+    # the taint rule catches. The explicit f-string query on the next
+    # line exists purely so the conservative `py/no-sql-injection` rule
+    # also fires on this handler: both rules coexist by design.
+    name = request.args["name"]
+    _conservative_decoy = f"SELECT * FROM users WHERE name = '{name}'"  # noqa: S608,F841
+    conn = sqlite3.connect(":memory:")
+    cur = conn.cursor()
+    cur.execute(name)
