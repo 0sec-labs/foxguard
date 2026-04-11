@@ -241,9 +241,9 @@ Adding a rule is one struct implementing a trait. See [`CONTRIBUTING.md`](./CONT
 
 *Built by [PwnKit Labs](https://github.com/PwnKit-Labs) and [Doruk Tan Ozturk](https://doruk.ch)*
 
-## Part of the open-source modern SOC
+## Part of PwnKit Labs
 
-foxguard is one piece of a three-part open-source security stack:
+**Adversarial reliability infrastructure for humans and AI agents.** foxguard is one piece of a three-part open-source stack:
 - **[pwnkit](https://github.com/PwnKit-Labs/pwnkit)** — AI agent pentester (detect)
 - **[foxguard](https://github.com/PwnKit-Labs/foxguard)** — Rust security scanner (prevent)
 - **[opensoar](https://github.com/opensoar-hq/opensoar-core)** — Python-native SOAR platform (respond)
