@@ -1,0 +1,48 @@
+name: Deploy www
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "www/**"
+      - "src/rules/**"
+      - "src/bin/gen_rules_ts.rs"
+      - ".github/workflows/deploy-www.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: deploy-www-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy foxguard.dev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: www/package-lock.json
+
+      - name: Install dependencies
+        working-directory: www
+        run: npm ci
+
+      - name: Build site
+        working-directory: www
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy www/dist --project-name=foxguard --branch=main
