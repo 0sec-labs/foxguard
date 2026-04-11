@@ -96,17 +96,18 @@ cargo install foxguard                 # crates.io
 
 ## Benchmarks
 
-Real-world benchmarks on local codebases:
+Reproducible benchmarks via `./benchmarks/run.sh`. Numbers below are from a local run on an Apple Silicon laptop with `foxguard 0.3.3`, `semgrep 1.156.0`, `tokei 14.0.0`. LoC is counted by tokei, scoped to the target language only (no vendored HTML/JSON).
 
-| Repo | Files | foxguard | Semgrep (cached) | Speedup |
-|------|-------|----------|-------------------|---------|
-| youtube-reader (Next.js) | 41 | **0.03s** | 4.6s | **153x** |
-| doruk.ch (Astro) | 28 | **0.04s** | 5.4s | **134x** |
-| SwissPriceScraper (Python) | 17 | **0.01s** | 4.8s | **482x** |
-| express (framework) | 141 | **0.28s** | 17.4s | **61x** |
-| flask (framework) | 83 | **0.08s** | 7.3s | **87x** |
+| Repo | Files | LoC | foxguard | Semgrep | Speedup |
+|------|-------|-----|----------|---------|---------|
+| express (framework) | 141 | 15,804 JS | **0.11s** | 4.80s | **45x** |
+| flask (framework) | 83 | 14,029 Py | **0.08s** | 5.70s | **73x** |
+| gin (framework) | 99 | 17,669 Go | **0.07s** | 4.61s | **63x** |
+| **sentry (production)** | **8,539** | **1,291,606 Py** | **12.19s** | 164.53s | **13x** |
 
-Semgrep times measured with cached rules (second run). foxguard has no cache — it's just fast.
+Sentry is the larger-corpus stress target added under issue #8: a real production monitoring platform at ~1.3M Python LoC. foxguard scans the whole tree in ~12 seconds (~106k LoC/sec); Semgrep with `--config auto` takes ~2m45s on the same tree. Run on one machine — your numbers will vary; reproduce locally with `./benchmarks/run.sh`.
+
+To reproduce: `./benchmarks/run.sh` (add `BENCH_SKIP_LARGE=1` for the quick matrix only). See `benchmarks/README.md` for the reproduction recipe.
 
 ## Built-in coverage
 

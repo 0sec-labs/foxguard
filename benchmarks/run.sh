@@ -30,11 +30,17 @@ cleanup() {
 trap cleanup EXIT
 
 # Repos to benchmark: name, url, language
+# `sentry` is included as a larger-corpus target (~500k Python LoC) to stress
+# the benchmark beyond small framework repos. Disable it with BENCH_SKIP_LARGE=1
+# when running the quick matrix locally.
 REPOS=(
   "express|https://github.com/expressjs/express.git|javascript"
   "flask|https://github.com/pallets/flask.git|python"
   "gin|https://github.com/gin-gonic/gin.git|go"
 )
+if [ -z "${BENCH_SKIP_LARGE:-}" ]; then
+  REPOS+=("sentry|https://github.com/getsentry/sentry.git|python")
+fi
 
 echo -e "${CYAN}=== foxguard benchmark suite ===${NC}"
 echo ""
@@ -98,6 +104,17 @@ if [ "$HAS_OPENGREP" = true ]; then
 else
   echo -e "${YELLOW}opengrep not installed — skipping opengrep benchmarks${NC}"
 fi
+
+# Check tokei for LoC counting. Benchmarks fall back to "N/A" if missing,
+# but the LoC column is the whole point of the upgrade so we complain loudly.
+HAS_TOKEI=false
+if command -v tokei &>/dev/null; then
+  HAS_TOKEI=true
+  echo -e "tokei: $(command -v tokei)"
+  echo -e "tokei version: $(tokei --version 2>/dev/null || echo 'unknown')"
+else
+  echo -e "${YELLOW}tokei not installed — LoC column will show N/A. Install with: brew install tokei${NC}"
+fi
 echo ""
 
 # Clone repos
@@ -116,6 +133,41 @@ echo ""
 count_files() {
   local dir="$1"
   find "$dir" -type f \( -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.go" \) | wc -l | tr -d ' '
+}
+
+# Map benchmark `lang` field to the tokei --type argument set. Keeps the
+# LoC count scoped to languages foxguard actually scans on each repo, so
+# `express` doesn't balloon its LoC by counting vendored HTML/JSON fixtures.
+tokei_types_for_lang() {
+  case "$1" in
+    javascript) echo "JavaScript,TypeScript,Jsx,Tsx" ;;
+    python)     echo "Python" ;;
+    go)         echo "Go" ;;
+    *)          echo "" ;;
+  esac
+}
+
+count_loc() {
+  local dir="$1"
+  local lang="$2"
+  if [ "$HAS_TOKEI" != true ]; then
+    echo "N/A"
+    return
+  fi
+  local types
+  types="$(tokei_types_for_lang "$lang")"
+  if [ -z "$types" ]; then
+    echo "N/A"
+    return
+  fi
+  tokei -t "$types" "$dir" --output json 2>/dev/null \
+    | python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    print(d.get("Total", {}).get("code", "N/A"))
+except Exception:
+    print("N/A")' \
+    || echo "N/A"
 }
 
 TMP_RESULTS="$(mktemp "$SCRIPT_DIR/results.tmp.XXXXXX")"
@@ -143,15 +195,16 @@ echo "" >> "$TMP_RESULTS"
 
 echo "## Results" >> "$TMP_RESULTS"
 echo "" >> "$TMP_RESULTS"
-echo "| Repository | Language | Files | foxguard Time | foxguard Findings | semgrep Time | semgrep Findings | opengrep Time | opengrep Findings |" >> "$TMP_RESULTS"
-echo "|------------|----------|-------|---------------|-------------------|--------------|------------------|---------------|-------------------|" >> "$TMP_RESULTS"
+echo "| Repository | Language | Files | LoC | foxguard Time | foxguard Findings | semgrep Time | semgrep Findings | opengrep Time | opengrep Findings |" >> "$TMP_RESULTS"
+echo "|------------|----------|-------|-----|---------------|-------------------|--------------|------------------|---------------|-------------------|" >> "$TMP_RESULTS"
 
 for entry in "${REPOS[@]}"; do
   IFS='|' read -r name url lang <<< "$entry"
   repo_path="$REPOS_DIR/$name"
   file_count=$(count_files "$repo_path")
+  loc_count=$(count_loc "$repo_path" "$lang")
 
-  echo -e "${CYAN}--- Benchmarking: $name ($lang, $file_count files) ---${NC}"
+  echo -e "${CYAN}--- Benchmarking: $name ($lang, $file_count files, $loc_count LoC) ---${NC}"
 
   echo -n "  foxguard... "
   fox_start=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
@@ -201,7 +254,7 @@ for entry in "${REPOS[@]}"; do
     echo "  opengrep: skipped"
   fi
 
-  echo "| $name | $lang | $file_count | ${fox_time}s | $fox_findings | $sem_time | $sem_findings | $open_time | $open_findings |" >> "$TMP_RESULTS"
+  echo "| $name | $lang | $file_count | $loc_count | ${fox_time}s | $fox_findings | $sem_time | $sem_findings | $open_time | $open_findings |" >> "$TMP_RESULTS"
 done
 
 echo "" >> "$TMP_RESULTS"

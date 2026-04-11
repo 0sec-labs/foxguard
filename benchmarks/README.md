@@ -8,31 +8,64 @@ Comparative benchmarks for foxguard against other security linters.
 # Build foxguard first
 cargo build --release
 
-# Product comparison: foxguard built-ins vs Semgrep/OpenGrep auto rules
+# Product comparison: foxguard built-ins vs Semgrep/OpenGrep auto rules.
+# Includes the large-corpus target (sentry) — expect tens of minutes
+# on the semgrep leg if semgrep is installed.
 ./benchmarks/run.sh
 
-# Same-rules engine comparison
+# Quick matrix: skip the large-corpus target (sentry).
+BENCH_SKIP_LARGE=1 ./benchmarks/run.sh
+
+# Same-rules engine comparison.
 BENCH_MODE=compat ./benchmarks/run.sh
 
-# Pin tool paths explicitly if needed
+# Pin tool paths explicitly if needed.
 SEMGREP=/opt/homebrew/bin/semgrep OPENGREP=/path/to/opengrep ./benchmarks/run.sh
 ```
 
+### Required and optional tools
+
+| Tool | Purpose | If missing |
+|------|---------|------------|
+| `cargo` | Build foxguard | Required |
+| `python3` | Parse JSON findings output from each tool | Required |
+| `tokei` | Compute LoC column | Install via `brew install tokei` (or `cargo install tokei`). LoC column shows `N/A` if absent. |
+| `semgrep` | Comparison leg | Corresponding columns show `N/A`. |
+| `opengrep` | Comparison leg | Corresponding columns show `N/A`. |
+
 ## Methodology
 
-The benchmark suite measures foxguard, Semgrep, and OpenGrep against three popular open-source repositories covering different languages:
+The benchmark suite measures foxguard, Semgrep, and OpenGrep against small and large open-source repositories covering different languages:
 
-| Repository | Language | Description |
-|------------|----------|-------------|
-| [express](https://github.com/expressjs/express) | JavaScript | Fast, unopinionated web framework for Node.js |
-| [flask](https://github.com/pallets/flask) | Python | Lightweight WSGI web application framework |
-| [gin](https://github.com/gin-gonic/gin) | Go | HTTP web framework written in Go |
+| Repository | Language | Scale | Description |
+|------------|----------|-------|-------------|
+| [express](https://github.com/expressjs/express) | JavaScript | small | Fast, unopinionated web framework for Node.js |
+| [flask](https://github.com/pallets/flask) | Python | small | Lightweight WSGI web application framework |
+| [gin](https://github.com/gin-gonic/gin) | Go | small | HTTP web framework written in Go |
+| [sentry](https://github.com/getsentry/sentry) | Python | large (~500k LoC) | Production application monitoring platform — larger-corpus stress target |
+
+The small targets stay in the matrix for a fast local loop; `sentry` is the larger-corpus target added under #8 to stress the benchmark beyond framework-sized repos. Skip it with `BENCH_SKIP_LARGE=1` when you want a fast run.
 
 ### What is measured
 
 - **Wall time** — Total elapsed time for the scan
 - **Files scanned** — Count of source files in the repository (`.js`, `.ts`, `.py`, `.go`)
+- **LoC** — Lines of code (comments and blanks excluded) as reported by `tokei`, scoped to the language foxguard scans on that repo. `express` counts `JavaScript,TypeScript,Jsx,Tsx` only; `flask`/`sentry` count `Python`; `gin` counts `Go`. Vendored HTML/CSS/JSON is not counted. See `tokei_types_for_lang` in `run.sh`.
 - **Findings count** — Number of findings reported by each tool
+
+### Reproduction recipe
+
+When publishing numbers from `results-default.md` or `results-compat.md`, include the following so the run is reproducible:
+
+- **Machine**: model, CPU, RAM (e.g. `Apple M2 Pro, 32GB`)
+- **OS**: `uname -sr`
+- **foxguard**: `foxguard --version`
+- **semgrep**: `semgrep --version`
+- **opengrep**: `opengrep --version | tail -1`
+- **tokei**: `tokei --version`
+- **Run command**: the exact `BENCH_MODE=... ./benchmarks/run.sh` invocation
+- **Repo SHAs**: `git -C benchmarks/repos/<name> rev-parse HEAD` for each target (the benchmark uses `--depth 1` clones, so these change over time)
+- **Cache state**: note whether semgrep rules were already cached locally (first run vs. second run of `--config auto` has materially different timings)
 
 ### Modes
 
