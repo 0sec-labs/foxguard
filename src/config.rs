@@ -71,7 +71,7 @@ pub fn load_for_scan(
 
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read config {}: {}", path.display(), e))?;
-    let raw: RawFoxguardConfig = serde_yaml::from_str(&content)
+    let raw: RawFoxguardConfig = serde_yml::from_str(&content)
         .map_err(|e| format!("Failed to parse config {}: {}", path.display(), e))?;
 
     Ok(Some(FoxguardConfig::from_raw(

@@ -28,7 +28,7 @@ walkdir = "2"
 rayon = "1"
 ignore = "0.4"
 regex = "1"
-serde_yaml = "0.9"
+serde_yml = "0.0.12"
 sha2 = "0.10"
 globset = "0.4"
 

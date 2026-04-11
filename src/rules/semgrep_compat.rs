@@ -947,7 +947,7 @@ fn extract_cwe(yaml: &SemgrepRuleYaml) -> Option<String> {
 /// Parse a single Semgrep YAML file into foxguard rules.
 pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
     use crate::rules::semgrep_taint::{self, TaintRuleParse};
-    use serde_yaml::Value as YamlValue;
+    use serde_yml::Value as YamlValue;
 
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
@@ -955,7 +955,7 @@ pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
     // First pass: parse as an untyped Value so we can detect `mode: taint`
     // rules and route them to the taint bridge without breaking the strict
     // `SemgrepRuleYaml` schema used for pattern rules.
-    let raw_doc: YamlValue = serde_yaml::from_str(&content)
+    let raw_doc: YamlValue = serde_yml::from_str(&content)
         .map_err(|e| format!("Failed to parse YAML {}: {}", path.display(), e))?;
 
     let mut rules: Vec<Box<dyn Rule>> = Vec::new();
@@ -975,14 +975,14 @@ pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
     // deserialization path. Re-serialize them into a minimal `SemgrepFile`
     // so we reuse `build_matcher`, path filters, language mapping, etc.
     let pattern_file = YamlValue::Mapping({
-        let mut m = serde_yaml::Mapping::new();
+        let mut m = serde_yml::Mapping::new();
         m.insert(
             YamlValue::String("rules".into()),
             YamlValue::Sequence(pattern_rule_nodes),
         );
         m
     });
-    let semgrep_file: SemgrepFile = serde_yaml::from_value(pattern_file)
+    let semgrep_file: SemgrepFile = serde_yml::from_value(pattern_file)
         .map_err(|e| format!("Failed to parse YAML {}: {}", path.display(), e))?;
 
     for yaml_rule in semgrep_file.rules {
