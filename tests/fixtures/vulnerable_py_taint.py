@@ -69,3 +69,26 @@ def through_wrapping():
 def through_sink_alias():
     data = request.data
     return p_alias.loads(data)
+
+
+# ─── Nested subscript chain: taint must propagate through every level ──
+def nested_subscript_chain():
+    return pickle.loads(request.json["data"]["payload"])
+
+
+# ─── Tuple unpack with element-wise taint from a tuple RHS ─────────────
+def tuple_unpack_elementwise():
+    a, b = request.args["a"], request.args["b"]
+    return pickle.loads(a)
+
+
+# ─── Tuple unpack with opaque RHS: conservative taint of both targets ──
+def tuple_unpack_conservative():
+    a, b = request.get_json()
+    return pickle.loads(b)
+
+
+# ─── List unpack: same semantics as tuple unpack ───────────────────────
+def list_unpack_elementwise():
+    [x, y] = [b"static", request.form["payload"]]
+    return pickle.loads(y)

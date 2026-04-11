@@ -51,3 +51,17 @@ class NotPickle:
 def not_pickle_loads():
     fake = NotPickle()
     return fake.loads(request.data)
+
+
+# Tuple destructuring with two clean literal elements. Neither target
+# should be tainted — element-wise unpack kills any prior taint.
+def safe_tuple():
+    a, b = b"clean1", b"clean2"
+    return pickle.loads(a)
+
+
+# Element-wise unpack where only the OTHER slot is tainted. The sink
+# reads the clean slot, so the taint rule must stay silent.
+def safe_tuple_other_slot_tainted():
+    a, b = b"clean", request.args["x"]
+    return pickle.loads(a)

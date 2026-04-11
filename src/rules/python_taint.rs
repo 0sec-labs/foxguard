@@ -275,18 +275,103 @@ fn handle_assignment(
         return;
     };
 
-    // Only track simple identifier LHS. Tuple/subscript LHS are out of
-    // scope for the POC.
-    if left.kind() != "identifier" {
+    // Simple identifier LHS: the common case.
+    if left.kind() == "identifier" {
+        let lhs_name = node_text(left, source).to_string();
+        if let Some(desc) = expression_taint(right, source, spec, aliases, state) {
+            state.taint(lhs_name, desc);
+        } else {
+            // Reassignment with a clean RHS kills any previous taint on LHS.
+            state.clear(&lhs_name);
+        }
         return;
     }
-    let lhs_name = node_text(left, source).to_string();
 
-    if let Some(desc) = expression_taint(right, source, spec, aliases, state) {
-        state.taint(lhs_name, desc);
-    } else {
-        // Reassignment with a clean RHS kills any previous taint on LHS.
-        state.clear(&lhs_name);
+    // Tuple/list destructuring LHS: `a, b = ...` or `[a, b] = ...`.
+    // Tree-sitter-python uses `pattern_list` for bare `a, b`, and
+    // `tuple_pattern` / `list_pattern` for parenthesized/bracketed forms.
+    // We walk the LHS targets and pair them with RHS elements when the
+    // RHS is also a tuple/list literal of the same arity. Otherwise we
+    // fall back to conservative semantics: if the RHS is tainted at all,
+    // taint every LHS target (we lack type info to pick the slot).
+    if is_destructuring_pattern(left) {
+        let lhs_targets = collect_destructuring_targets(left, source);
+        if lhs_targets.is_empty() {
+            return;
+        }
+
+        if let Some(rhs_elems) = tuple_like_elements(right) {
+            if rhs_elems.len() == lhs_targets.len() {
+                for (target, rhs) in lhs_targets.iter().zip(rhs_elems.iter()) {
+                    if let Some(desc) = expression_taint(*rhs, source, spec, aliases, state) {
+                        state.taint(target.clone(), desc);
+                    } else {
+                        state.clear(target);
+                    }
+                }
+                return;
+            }
+        }
+
+        // Arity mismatch or opaque RHS: apply conservative semantics.
+        if let Some(desc) = expression_taint(right, source, spec, aliases, state) {
+            for target in &lhs_targets {
+                state.taint(target.clone(), desc.clone());
+            }
+        } else {
+            for target in &lhs_targets {
+                state.clear(target);
+            }
+        }
+    }
+}
+
+fn is_destructuring_pattern(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "pattern_list" | "tuple_pattern" | "list_pattern"
+    )
+}
+
+/// Collect the identifier names that are direct targets of a destructuring
+/// LHS. Nested patterns (`(a, (b, c)) = ...`) recurse; non-identifier
+/// targets like `obj.attr` or `d[k]` are skipped because the engine only
+/// tracks plain names in its taint state.
+fn collect_destructuring_targets(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "identifier" => out.push(node_text(child, source).to_string()),
+            "pattern_list" | "tuple_pattern" | "list_pattern" => {
+                out.extend(collect_destructuring_targets(child, source));
+            }
+            // `*rest` captures in unpacking: tree-sitter-python wraps the
+            // inner name in a list_splat_pattern.
+            "list_splat_pattern" => {
+                let mut inner = child.walk();
+                for c in child.named_children(&mut inner) {
+                    if c.kind() == "identifier" {
+                        out.push(node_text(c, source).to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// If `node` is a tuple/list literal or an `expression_list`, return its
+/// element nodes in order. Otherwise return `None`.
+fn tuple_like_elements<'tree>(node: Node<'tree>) -> Option<Vec<Node<'tree>>> {
+    match node.kind() {
+        "expression_list" | "tuple" | "list" => {
+            let mut cursor = node.walk();
+            let elems: Vec<Node<'tree>> = node.named_children(&mut cursor).collect();
+            Some(elems)
+        }
+        _ => None,
     }
 }
 
@@ -380,17 +465,14 @@ fn expression_taint(
     }
 
     // Tainted subscript (d[k] where d is tainted — no key sensitivity).
+    // Recurse into the subject so that nested subscript chains like
+    // `request.json["a"]["b"]` propagate taint: if any link in the chain
+    // (or its root) is tainted, the whole chain is. This also naturally
+    // handles attribute-then-subscript (`request.form["x"]`) and
+    // identifier roots via the recursive call.
     if expr.kind() == "subscript" {
         if let Some(value) = expr.child_by_field_name("value") {
-            if value.kind() == "identifier" {
-                let name = node_text(value, source);
-                if let Some(desc) = state.describe(name) {
-                    return Some(desc.to_string());
-                }
-            }
-            // Also: subscript whose value is itself a source attribute
-            // like `request.form["x"]`.
-            if let Some(desc) = match_source(value, source, spec, aliases) {
+            if let Some(desc) = expression_taint(value, source, spec, aliases, state) {
                 return Some(desc);
             }
         }
@@ -721,6 +803,84 @@ from flask import request
 
 def handler():
     return pickle.loads(bytes(request.data))
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn nested_subscript_propagates_through_chain() {
+        // `request.form["a"]["b"]["c"]` must be tainted: the innermost
+        // subject `request.form` is a source, and every outer subscript
+        // preserves taint regardless of the keys.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    return pickle.loads(request.form["a"]["b"]["c"])
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.form"));
+    }
+
+    #[test]
+    fn tuple_unpack_literal_rhs_taints_matching_element() {
+        // `a, b = request.args["a"], request.args["b"]`: both a and b are
+        // tainted because each RHS element is a subscript on a source.
+        // The sink reads `a`, so we should see exactly one finding.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    a, b = request.args["a"], request.args["b"]
+    return pickle.loads(a)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn tuple_unpack_literal_rhs_leaves_clean_element_clean() {
+        // Precise pairing: only the first element of the RHS is tainted,
+        // the sink reads `b` which pairs with the clean literal, so the
+        // taint rule must stay silent.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    a, b = request.args["a"], b"static"
+    return pickle.loads(b)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn tuple_unpack_tainted_rhs_conservatively_taints_all_targets() {
+        // When the RHS is a single opaque expression we can't know which
+        // slot is tainted without type info, so both targets are tainted.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    a, b = request.get_json()
+    return pickle.loads(b)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn list_unpack_similar_to_tuple_unpack() {
+        // `[a, b] = ...` should behave the same as `a, b = ...`.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    [a, b] = [request.args["a"], b"static"]
+    return pickle.loads(a)
 "#;
         assert_eq!(run(src).len(), 1);
     }

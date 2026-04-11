@@ -15,8 +15,10 @@ In scope:
 - **One language**: Python.
 - **Intraprocedural**: each function body is analyzed independently.
 - **Flow-insensitive**: statements are processed in source order. Reassigning a tainted variable to a clean value drops the taint. Branches are not modeled — taint observed in one branch of an `if` persists through the fall-through.
-- **One level of attribute and subscript propagation**: `x.y` and `x[k]` are tainted when `x` is tainted.
+- **One level of attribute propagation**: `x.y` is tainted when `x` is tainted.
+- **Nested subscript chains**: `x[k1][k2]...[kn]` is tainted whenever any link in the chain (or its root) is tainted. Keys are not distinguished — taint is propagated regardless of which key is read.
 - **One level of wrapping-call propagation**: `bytes(x)` is tainted when `x` is tainted. This covers the common "sanitize by retype" anti-pattern.
+- **Tuple/list destructuring with flow-insensitive conservative semantics**: `a, b = expr1, expr2` and `[a, b] = [expr1, expr2]` pair targets with RHS elements when the arities match, so only the matching slot carries taint. When the RHS is a single opaque expression (e.g. `a, b = helper()`), the engine conservatively taints *every* LHS target — we lack the type info to pick the right slot.
 - **Alias-aware sinks and sources**: the engine resolves callees and source roots through the per-file import alias table already introduced for issue #7.
 
 Out of scope for this PR, tracked under #10 as follow-ups:

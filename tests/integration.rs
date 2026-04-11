@@ -285,26 +285,26 @@ fn test_vulnerable_py_taint_catches_every_flow() {
         }
     }
 
-    // Ten function bodies, each with one source→sink flow: one taint
-    // finding per function. The conservative NoPickle rule fires on the
-    // same ten calls because its scope is "any pickle.loads", so we
-    // should see exactly ten of each.
+    // Fourteen function bodies, each with one source→sink flow: one
+    // taint finding per function. The conservative NoPickle rule fires
+    // on the same fourteen calls because its scope is "any pickle.loads",
+    // so we should see exactly fourteen of each.
     assert_eq!(
         counts.get("py/taint-pickle-deserialization").copied(),
-        Some(10),
-        "taint rule should fire ten times, one per handler. counts={:?}",
+        Some(14),
+        "taint rule should fire fourteen times, one per handler. counts={:?}",
         counts
     );
     assert_eq!(
         counts.get("py/no-pickle").copied(),
-        Some(10),
-        "NoPickle should still fire ten times alongside the taint rule. counts={:?}",
+        Some(14),
+        "NoPickle should still fire fourteen times alongside the taint rule. counts={:?}",
         counts
     );
     assert_eq!(
         findings.len(),
-        20,
-        "expected 20 total findings (10 taint + 10 NoPickle), got {}",
+        28,
+        "expected 28 total findings (14 taint + 14 NoPickle), got {}",
         findings.len()
     );
 }
