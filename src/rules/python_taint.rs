@@ -196,12 +196,7 @@ fn analyze_function(
     walk_body(body, source, spec, aliases, &mut state, findings);
 }
 
-fn seed_param_sources(
-    params: Node<'_>,
-    source: &str,
-    spec: &TaintSpec,
-    state: &mut TaintState,
-) {
+fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &mut TaintState) {
     let mut cursor = params.walk();
     for child in params.children(&mut cursor) {
         let param_name = match child.kind() {
@@ -569,7 +564,12 @@ mod tests {
     fn run(source: &str) -> Vec<TaintFinding> {
         let tree = parse_file(source, Language::Python).expect("parse");
         let aliases = ImportAliases::from_tree(source, &tree);
-        analyze_tree(tree.root_node(), source, &spec_pickle_from_request(), Some(&aliases))
+        analyze_tree(
+            tree.root_node(),
+            source,
+            &spec_pickle_from_request(),
+            Some(&aliases),
+        )
     }
 
     #[test]

@@ -1917,12 +1917,8 @@ impl Rule for TaintPickleDeserialization {
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
         let spec = Self::spec();
-        let taint_findings = python_taint::analyze_tree(
-            tree.root_node(),
-            source,
-            &spec,
-            ctx.python_aliases,
-        );
+        let taint_findings =
+            python_taint::analyze_tree(tree.root_node(), source, &spec, ctx.python_aliases);
 
         taint_findings
             .into_iter()
