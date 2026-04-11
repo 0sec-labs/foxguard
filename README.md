@@ -53,6 +53,8 @@ WARNING 2 issues in 5 files (0.03s): 1 critical, 1 high, 0 medium, 0 low
 - **Useful before you tune anything.** The default value is built-in framework-aware rules for common real-world mistakes across JavaScript, Python, Go, Ruby, Java, PHP, Rust, C#, and Swift.
 - **Adoption-friendly.** If you already have Semgrep/OpenGrep YAML, foxguard can load a focused compatible subset on top of built-ins so migration is incremental instead of all-or-nothing.
 
+See [docs/precision.md](docs/precision.md) for per-rule precision tiers and our false-positive methodology.
+
 ## Quick start
 
 ```sh
