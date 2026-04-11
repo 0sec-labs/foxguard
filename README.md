@@ -12,8 +12,6 @@
   <a href="https://foxguard.dev">foxguard.dev</a> &middot; <a href="https://www.npmjs.com/package/foxguard">npm</a> &middot; <a href="https://crates.io/crates/foxguard">crates.io</a>
 </p>
 
-<p align="center"><strong>A PwnKit Labs product.</strong></p>
-
 <p align="center">
   <a href="https://github.com/PwnKit-Labs/foxguard/actions/workflows/ci.yml"><img src="https://github.com/PwnKit-Labs/foxguard/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://github.com/PwnKit-Labs/foxguard"><img src="https://img.shields.io/badge/foxguard-clean-2dd4bf?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSI+PHBhdGggZD0iTTggOEwyMCAyOEwzMiAyMEw0NCAyOEw1NiA4TDUyIDMyTDQ0IDQ0TDM2IDUySDI4TDIwIDQ0TDEyIDMyTDggOFoiIGZpbGw9IiNGNTlFMEIiIGZpbGwtb3BhY2l0eT0iMC4zIiBzdHJva2U9IiNGNTlFMEIiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjI0IiBjeT0iMzIiIHI9IjIuNSIgZmlsbD0iI0Y1OUUwQiIvPjxjaXJjbGUgY3g9IjQwIiBjeT0iMzIiIHI9IjIuNSIgZmlsbD0iI0Y1OUUwQiIvPjwvc3ZnPg==" alt="foxguard: clean" /></a>
@@ -237,13 +235,9 @@ Notes:
 
 Adding a rule is one struct implementing a trait. See [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
----
-
-*Built by [PwnKit Labs](https://github.com/PwnKit-Labs) and [Doruk Tan Ozturk](https://doruk.ch)*
-
 ## Part of PwnKit Labs
 
-**Adversarial reliability infrastructure for humans and AI agents.** foxguard is one piece of a three-part open-source stack:
+**Open-source adversarial security for the agentic AI era.** foxguard is one piece of the open-source PwnKit Labs stack:
 - **[pwnkit](https://github.com/PwnKit-Labs/pwnkit)** — AI agent pentester (detect)
 - **[foxguard](https://github.com/PwnKit-Labs/foxguard)** — Rust security scanner (prevent)
 - **[opensoar](https://github.com/opensoar-hq/opensoar-core)** — Python-native SOAR platform (respond)
