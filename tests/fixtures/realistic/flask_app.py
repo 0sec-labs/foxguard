@@ -50,9 +50,10 @@ def calc():
 
 @app.route("/ping")
 def ping():
-    # py/taint-command-injection — tainted value flows directly into sink
-    host = request.args["host"]
-    os.system(host)
+    # py/taint-command-injection — string concat with tainted operand
+    # (exercises the binary `+` propagation path)
+    host = request.args.get("host", "localhost")
+    os.system("ping -c 1 " + host)
     return "ok"
 
 

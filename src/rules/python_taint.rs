@@ -658,6 +658,33 @@ fn expression_taint(
         }
     }
 
+    // Binary `+` propagation: `"prefix " + tainted` or `tainted + "suffix"`
+    // is tainted. This mirrors the JS engine's string-concat rule and
+    // covers the most common SQL/command injection pattern in Python.
+    // Conservative: if EITHER operand is tainted, the result is tainted.
+    // Integer arithmetic on clean values short-circuits naturally because
+    // both recursive calls return None.
+    if expr.kind() == "binary_operator" {
+        if let Some(op) = expr.child_by_field_name("operator") {
+            if node_text(op, source) == "+" {
+                if let Some(left) = expr.child_by_field_name("left") {
+                    if let Some(desc) =
+                        expression_taint(left, source, spec, aliases, state, summaries)
+                    {
+                        return Some(desc);
+                    }
+                }
+                if let Some(right) = expr.child_by_field_name("right") {
+                    if let Some(desc) =
+                        expression_taint(right, source, spec, aliases, state, summaries)
+                    {
+                        return Some(desc);
+                    }
+                }
+            }
+        }
+    }
+
     // Recurse one level for wrapping expressions (e.g. `bytes(request.data)`),
     // so the taint survives trivial type conversions without requiring
     // full interprocedural tracking.
@@ -1676,5 +1703,77 @@ def handler():
     return p.loads(request.data)
 "#;
         assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn string_concat_with_tainted_right_operand_is_tainted() {
+        // "prefix " + request.data → tainted. The most common SQL/command
+        // injection pattern in Python.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = "prefix " + request.data
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn string_concat_with_tainted_left_operand_is_tainted() {
+        // request.data + " suffix" → tainted (symmetric to the above).
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.data + " suffix"
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn chained_string_concat_with_tainted_operand_is_tainted() {
+        // ("a" + "b") + request.data → tainted. Left-associative, so the
+        // engine sees `binary_operator("+", binary_operator("+", "a", "b"), request.data)`.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = "a" + "b" + request.data
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn string_concat_with_both_literal_is_clean() {
+        // "a" + "b" → no taint.
+        let src = r#"
+import pickle
+
+def handler():
+    data = "a" + "b"
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn integer_arithmetic_is_clean() {
+        // 1 + 2 → no taint. The engine's `+` handler must not over-fire
+        // on integer arithmetic. Clean operands short-circuit naturally.
+        let src = r#"
+import pickle
+
+def handler():
+    x = 1 + 2
+    data = b"trusted" + bytes([x])
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
     }
 }
