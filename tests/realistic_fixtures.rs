@@ -155,6 +155,23 @@ fn realistic_hono_app() {
     assert_fixture("hono_app.ts", 7, &[("js/taint-xss-innerhtml", 3)]);
 }
 
+/// Multi-file Django fixture (issue #48). Scans a directory rather
+/// than a single file. The current engine is intraprocedural +
+/// same-file interprocedural only, so cross-file flows from
+/// `views.py` into `queries.py` helpers do NOT fire yet. This test
+/// pins that limit explicitly: in-file taint flows fire, cross-file
+/// ones do not. Once issue #46 (cross-file summaries) lands, the
+/// expected total and taint counts below will need to be updated to
+/// reflect the new cross-file sql-injection and pickle findings.
+#[test]
+fn realistic_django_shop_multifile() {
+    assert_fixture(
+        "django_shop",
+        6,
+        &[("py/taint-command-injection", 1), ("py/taint-ssrf", 1)],
+    );
+}
+
 #[test]
 fn realistic_gin_app() {
     // Three planted vulnerabilities (command injection, SQL
