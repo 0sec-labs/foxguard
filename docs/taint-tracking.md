@@ -181,6 +181,6 @@ Load it with `foxguard --no-builtins --rules path/to/rule.yml target/` and each 
 ## Open questions for the full #10
 
 - **Cross-function propagation.** The first step — "trust the return of helpers whose body we can see in the same file" — landed in issue #19 as a single-hop, name-keyed summary pass. Next steps: multi-hop propagation via fixed-point iteration over the summary map, scope-aware keys that distinguish nested definitions, argument-based taint threading so callers' tainted arguments influence helper summaries, then cross-file via module symbol tables. Each is its own issue.
-- **Broader pattern surface in the YAML bridge.** `pattern-either` inside source/sink blocks, `pattern-inside` / `metavariable-pattern` constraints, and per-finding sanitization semantics are still unsupported. The bridge skips such rules with a warning rather than partially loading them.
+- **Broader pattern surface in the YAML bridge.** `pattern-either` inside source/sink/sanitizer blocks is supported (including nested `pattern-either:` flattening). `pattern-inside` / `metavariable-pattern` constraints and per-finding sanitization semantics are still unsupported; the bridge drops such entries with a warning rather than partially loading them.
 
 Contributions and concrete counter-examples welcome on #10.

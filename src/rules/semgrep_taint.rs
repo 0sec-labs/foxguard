@@ -10,15 +10,16 @@
 //!   with a warning and the rule is skipped; non-taint rules fall through to
 //!   the regular Semgrep bridge).
 //! - `pattern-sources`, `pattern-sinks`, `pattern-sanitizers` as lists of
-//!   single-`pattern:` entries.
+//!   single-`pattern:` entries *or* `pattern-either:` lists (which may nest
+//!   recursively and flatten into multiple matchers for the same role).
 //! - Severity mapping via the same `map_severity` used by the pattern-rule
 //!   bridge (`ERROR` → Critical, `WARNING` → High, `INFO` → Medium).
 //! - `metadata.cwe` propagated to findings.
 //!
 //! # Unsupported (rule is skipped with a warning)
 //!
-//! - `pattern-either:` lists inside source/sink/sanitizer entries.
-//! - `pattern-inside:`, `metavariable-pattern:` inside source/sink blocks.
+//! - `pattern-inside:`, `metavariable-pattern:`, `patterns:` inside
+//!   source/sink blocks.
 //! - Any `mode: taint` rule that does not target Python.
 //! - Any `pattern:` string whose shape is not one of:
 //!   - bare identifier (`request`) — compiled to `ParamName`
@@ -171,24 +172,28 @@ pub fn parse_taint_rule(yaml: &YamlValue) -> TaintRuleParse {
     let cwe = extract_cwe(yaml);
 
     // ── Compile sources ────────────────────────────────────────────────
-    let sources = match compile_matcher_list(yaml.get("pattern-sources"), MatcherRole::Source) {
+    let sources = match compile_matcher_list(yaml.get("pattern-sources"), MatcherRole::Source, &id)
+    {
         Ok(v) => v,
         Err(e) => return TaintRuleParse::Skip(format!("taint rule `{}` skipped: {}", id, e)),
     };
     if sources.is_empty() {
-        return TaintRuleParse::Skip(format!("taint rule `{}` has no `pattern-sources`", id));
+        return TaintRuleParse::Skip(format!(
+            "taint rule `{}` has no valid `pattern-sources`",
+            id
+        ));
     }
 
-    let sinks = match compile_matcher_list(yaml.get("pattern-sinks"), MatcherRole::Sink) {
+    let sinks = match compile_matcher_list(yaml.get("pattern-sinks"), MatcherRole::Sink, &id) {
         Ok(v) => v,
         Err(e) => return TaintRuleParse::Skip(format!("taint rule `{}` skipped: {}", id, e)),
     };
     if sinks.is_empty() {
-        return TaintRuleParse::Skip(format!("taint rule `{}` has no `pattern-sinks`", id));
+        return TaintRuleParse::Skip(format!("taint rule `{}` has no valid `pattern-sinks`", id));
     }
 
     let sanitizers =
-        match compile_matcher_list(yaml.get("pattern-sanitizers"), MatcherRole::Sanitizer) {
+        match compile_matcher_list(yaml.get("pattern-sanitizers"), MatcherRole::Sanitizer, &id) {
             Ok(v) => v,
             Err(e) => return TaintRuleParse::Skip(format!("taint rule `{}` skipped: {}", id, e)),
         };
@@ -224,9 +229,25 @@ impl MatcherRole {
     }
 }
 
+/// Compile a top-level `pattern-sources` / `pattern-sinks` /
+/// `pattern-sanitizers` list.
+///
+/// Each entry is allowed to be either:
+///
+/// - a mapping with a single `pattern:` key (compiled to one [`NodeMatcher`]),
+/// - a mapping with a single `pattern-either:` key whose value is itself a
+///   list of entries following the same rules (flattened recursively into
+///   multiple matchers).
+///
+/// Any other key (`patterns:`, `pattern-inside:`, `metavariable-pattern:`,
+/// …) is rejected with a warning that names the rule and the offending key,
+/// and the individual entry is skipped. If the role ends up with *no* valid
+/// entries the caller decides whether that is fatal for the whole rule
+/// (sources and sinks are required; sanitizers may legitimately be empty).
 fn compile_matcher_list(
     node: Option<&YamlValue>,
     role: MatcherRole,
+    rule_id: &str,
 ) -> Result<Vec<NodeMatcher>, String> {
     let Some(node) = node else {
         return Ok(Vec::new());
@@ -237,43 +258,95 @@ fn compile_matcher_list(
 
     let mut out = Vec::new();
     for entry in entries {
-        // Each entry is expected to be a mapping with a `pattern:` key.
-        // Reject `pattern-either`, `pattern-inside`, `metavariable-pattern`
-        // etc. explicitly so users get a clear error instead of a silent
-        // no-op match.
-        let Some(map) = entry.as_mapping() else {
-            return Err(format!(
-                "{} entries must be mappings with a `pattern:` key",
-                role.label()
-            ));
-        };
-
-        for (k, _) in map {
-            match k.as_str() {
-                Some("pattern") => {}
-                Some(other) => {
-                    return Err(format!(
-                        "{} uses unsupported key `{}` (only `pattern:` is supported today)",
-                        role.label(),
-                        other
-                    ));
-                }
-                None => {
-                    return Err(format!("{} has a non-string key", role.label()));
-                }
-            }
-        }
-
-        let pattern = map
-            .get(YamlValue::String("pattern".into()))
-            .and_then(YamlValue::as_str)
-            .ok_or_else(|| format!("{} entry missing `pattern:`", role.label()))?;
-
-        let matcher = compile_pattern(pattern, role)
-            .ok_or_else(|| format!("{}: unsupported pattern shape `{}`", role.label(), pattern))?;
-        out.push(matcher);
+        compile_entry(entry, role, rule_id, &mut out);
     }
     Ok(out)
+}
+
+/// Compile a single entry from a source/sink/sanitizer list, flattening
+/// nested `pattern-either:` blocks. Invalid entries emit a warning and are
+/// skipped rather than aborting the whole rule.
+fn compile_entry(entry: &YamlValue, role: MatcherRole, rule_id: &str, out: &mut Vec<NodeMatcher>) {
+    let Some(map) = entry.as_mapping() else {
+        eprintln!(
+            "Warning: taint rule `{}` {} entry is not a mapping; skipping",
+            rule_id,
+            role.label()
+        );
+        return;
+    };
+
+    // Entries are expected to carry exactly one top-level key. Having more
+    // than one suggests the user meant `patterns:` semantics, which we
+    // don't support inside taint blocks — warn and skip.
+    if map.len() != 1 {
+        eprintln!(
+            "Warning: taint rule `{}` {} entry has {} keys (expected a single `pattern:` or `pattern-either:`); skipping entry",
+            rule_id,
+            role.label(),
+            map.len(),
+        );
+        return;
+    }
+
+    let (k, v) = map.iter().next().expect("map.len() == 1");
+    match k.as_str() {
+        Some("pattern") => {
+            let Some(pattern) = v.as_str() else {
+                eprintln!(
+                    "Warning: taint rule `{}` {} `pattern:` value must be a string; skipping entry",
+                    rule_id,
+                    role.label()
+                );
+                return;
+            };
+            match compile_pattern(pattern, role) {
+                Some(m) => out.push(m),
+                None => eprintln!(
+                    "Warning: taint rule `{}` {} unsupported pattern shape `{}`; skipping entry",
+                    rule_id,
+                    role.label(),
+                    pattern
+                ),
+            }
+        }
+        Some("pattern-either") => {
+            let Some(inner) = v.as_sequence() else {
+                eprintln!(
+                    "Warning: taint rule `{}` {} `pattern-either:` must be a list; skipping",
+                    rule_id,
+                    role.label()
+                );
+                return;
+            };
+            if inner.is_empty() {
+                eprintln!(
+                    "Warning: taint rule `{}` {} `pattern-either:` is empty; producing no matchers",
+                    rule_id,
+                    role.label()
+                );
+                return;
+            }
+            for nested in inner {
+                compile_entry(nested, role, rule_id, out);
+            }
+        }
+        Some(other) => {
+            eprintln!(
+                "Warning: taint rule `{}` {} uses unsupported key `{}` (only `pattern:` and `pattern-either:` are supported); skipping entry",
+                rule_id,
+                role.label(),
+                other
+            );
+        }
+        None => {
+            eprintln!(
+                "Warning: taint rule `{}` {} entry has a non-string key; skipping",
+                rule_id,
+                role.label()
+            );
+        }
+    }
 }
 
 /// Compile a single Semgrep pattern string into a [`NodeMatcher`].
@@ -527,9 +600,19 @@ pattern-sinks: [{pattern: eval($X)}]
         assert!(matches!(parse_taint_rule(&v), TaintRuleParse::Skip(_)));
     }
 
+    fn compiled(yaml: &str) -> SemgrepTaintRule {
+        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        match parse_taint_rule(&v) {
+            TaintRuleParse::Compiled(r) => r,
+            TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
+            TaintRuleParse::NotTaint => panic!("expected taint rule"),
+        }
+    }
+
     #[test]
-    fn pattern_either_inside_source_is_rejected() {
-        let yaml = r#"
+    fn pattern_either_flattens_into_multiple_matchers() {
+        let r = compiled(
+            r#"
 id: x
 mode: taint
 languages: [python]
@@ -538,10 +621,206 @@ message: m
 pattern-sources:
   - pattern-either:
       - pattern: request.data
+      - pattern: request.form
+      - pattern: request.args
+pattern-sinks:
+  - pattern: pickle.loads($X)
+"#,
+        );
+        assert_eq!(r.spec.sources.len(), 3);
+        assert_eq!(r.spec.sinks.len(), 1);
+    }
+
+    #[test]
+    fn nested_pattern_either_flattens_recursively() {
+        let r = compiled(
+            r#"
+id: x
+mode: taint
+languages: [python]
+severity: ERROR
+message: m
+pattern-sources:
+  - pattern-either:
+      - pattern-either:
+          - pattern: request.data
+          - pattern: request.form
+      - pattern: request.args
+pattern-sinks:
+  - pattern: pickle.loads($X)
+"#,
+        );
+        assert_eq!(r.spec.sources.len(), 3);
+    }
+
+    #[test]
+    fn pattern_either_in_sinks_flattens() {
+        let r = compiled(
+            r#"
+id: x
+mode: taint
+languages: [python]
+severity: ERROR
+message: m
+pattern-sources:
+  - pattern: request.data
+pattern-sinks:
+  - pattern-either:
+      - pattern: pickle.loads($X)
+      - pattern: pickle.load($X)
+"#,
+        );
+        assert_eq!(r.spec.sinks.len(), 2);
+    }
+
+    #[test]
+    fn pattern_either_in_sanitizers_flattens() {
+        let r = compiled(
+            r#"
+id: x
+mode: taint
+languages: [python]
+severity: ERROR
+message: m
+pattern-sources:
+  - pattern: request.data
+pattern-sinks:
+  - pattern: pickle.loads($X)
+pattern-sanitizers:
+  - pattern-either:
+      - pattern: sanitize($X)
+      - pattern: escape($X)
+"#,
+        );
+        assert_eq!(r.spec.sanitizers.len(), 2);
+    }
+
+    #[test]
+    fn mixed_pattern_and_pattern_either_work_together() {
+        let r = compiled(
+            r#"
+id: x
+mode: taint
+languages: [python]
+severity: ERROR
+message: m
+pattern-sources:
+  - pattern-either:
+      - pattern: request.data
+      - pattern: request.form
+  - pattern: request
+pattern-sinks:
+  - pattern: pickle.loads($X)
+  - pattern-either:
+      - pattern: pickle.load($X)
+"#,
+        );
+        assert_eq!(r.spec.sources.len(), 3);
+        assert_eq!(r.spec.sinks.len(), 2);
+    }
+
+    #[test]
+    fn empty_pattern_either_warns_and_produces_no_matcher() {
+        // Empty pattern-either in sources → no source matchers, so whole
+        // rule is skipped (sources are required).
+        let yaml = r#"
+id: x
+mode: taint
+languages: [python]
+severity: ERROR
+message: m
+pattern-sources:
+  - pattern-either: []
+pattern-sinks:
+  - pattern: pickle.loads($X)
+"#;
+        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        match parse_taint_rule(&v) {
+            TaintRuleParse::Skip(msg) => assert!(msg.contains("pattern-sources")),
+            other => panic!(
+                "expected Skip because empty pattern-either produced no sources, got {:?}",
+                match other {
+                    TaintRuleParse::Compiled(_) => "Compiled",
+                    TaintRuleParse::NotTaint => "NotTaint",
+                    TaintRuleParse::Skip(_) => unreachable!(),
+                }
+            ),
+        }
+
+        // Empty pattern-either in sanitizers → rule still compiles (sanitizers
+        // are optional), but has zero sanitizer matchers.
+        let r = compiled(
+            r#"
+id: x
+mode: taint
+languages: [python]
+severity: ERROR
+message: m
+pattern-sources:
+  - pattern: request.data
+pattern-sinks:
+  - pattern: pickle.loads($X)
+pattern-sanitizers:
+  - pattern-either: []
+"#,
+        );
+        assert!(r.spec.sanitizers.is_empty());
+    }
+
+    #[test]
+    fn unknown_composite_still_rejected() {
+        // `patterns:` inside a source block → entry is skipped with a
+        // warning. With no other source entries the whole rule is skipped.
+        let yaml = r#"
+id: x
+mode: taint
+languages: [python]
+severity: ERROR
+message: m
+pattern-sources:
+  - patterns:
+      - pattern: request.data
 pattern-sinks:
   - pattern: pickle.loads($X)
 "#;
         let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
         assert!(matches!(parse_taint_rule(&v), TaintRuleParse::Skip(_)));
+
+        // `pattern-inside:` likewise rejected per-entry.
+        let yaml2 = r#"
+id: x
+mode: taint
+languages: [python]
+severity: ERROR
+message: m
+pattern-sources:
+  - pattern-inside: |
+      def $F(...):
+        ...
+pattern-sinks:
+  - pattern: pickle.loads($X)
+"#;
+        let v2: YamlValue = serde_yaml::from_str(yaml2).unwrap();
+        assert!(matches!(parse_taint_rule(&v2), TaintRuleParse::Skip(_)));
+
+        // But a mix where one entry is `patterns:` and another is a plain
+        // `pattern:` still compiles — the bad entry is dropped, the good
+        // one survives.
+        let r = compiled(
+            r#"
+id: x
+mode: taint
+languages: [python]
+severity: ERROR
+message: m
+pattern-sources:
+  - patterns:
+      - pattern: request.data
+  - pattern: request.form
+pattern-sinks:
+  - pattern: pickle.loads($X)
+"#,
+        );
+        assert_eq!(r.spec.sources.len(), 1);
     }
 }

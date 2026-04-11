@@ -1810,3 +1810,69 @@ fn test_semgrep_taint_yaml_bridge_safe() {
         n
     );
 }
+
+/// The Semgrep taint bridge must accept `pattern-either:` blocks inside
+/// `pattern-sources` / `pattern-sinks` (issue #33). The
+/// `pickle_taint_either.yml` fixture expresses the same sources and sinks
+/// as `pickle_taint.yml`, just using `pattern-either:` to group them, and
+/// must produce the same 16 findings on `vulnerable_py_taint.py`.
+#[test]
+fn test_semgrep_taint_yaml_bridge_pattern_either_vulnerable() {
+    let output = foxguard_cmd()
+        .args([
+            "tests/fixtures/vulnerable_py_taint.py",
+            "-f",
+            "json",
+            "--no-builtins",
+            "--rules",
+            "tests/fixtures/semgrep_taint/pickle_taint_either.yml",
+        ])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let lines: Vec<u64> = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("semgrep/semgrep-pickle-taint-either"))
+        .filter_map(|f| f["line"].as_u64())
+        .collect();
+
+    assert_eq!(
+        lines.len(),
+        16,
+        "semgrep pattern-either taint rule should fire on all 16 pickle flows, got {} (lines: {:?})",
+        lines.len(),
+        lines
+    );
+}
+
+#[test]
+fn test_semgrep_taint_yaml_bridge_pattern_either_safe() {
+    let output = foxguard_cmd()
+        .args([
+            "tests/fixtures/safe_py_taint.py",
+            "-f",
+            "json",
+            "--no-builtins",
+            "--rules",
+            "tests/fixtures/semgrep_taint/pickle_taint_either.yml",
+        ])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let n = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("semgrep/semgrep-pickle-taint-either"))
+        .count();
+
+    assert_eq!(
+        n, 0,
+        "semgrep pattern-either taint rule should not fire on safe_py_taint.py, got {} findings",
+        n
+    );
+}

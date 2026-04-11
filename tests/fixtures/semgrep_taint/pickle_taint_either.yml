@@ -1,0 +1,21 @@
+rules:
+  - id: semgrep-pickle-taint-either
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: "Untrusted Flask input reaches pickle.loads"
+    metadata:
+      cwe: "CWE-502"
+    pattern-sources:
+      - pattern-either:
+          - pattern: request.data
+          - pattern: request.form
+          - pattern: request.args
+          - pattern: request.json
+          - pattern: request.get_json($X)
+          - pattern: request.get_data($X)
+      - pattern: request
+    pattern-sinks:
+      - pattern-either:
+          - pattern: pickle.loads($X)
+          - pattern: pickle.load($X)
