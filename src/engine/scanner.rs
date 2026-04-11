@@ -1,3 +1,4 @@
+use crate::rules::javascript_taint::JsImportAliases;
 use crate::rules::python_aliases::ImportAliases;
 use crate::rules::{FileContext, RuleRegistry};
 use crate::{Finding, Language};
@@ -315,8 +316,14 @@ fn scan_files(
         } else {
             None
         };
+        let javascript_aliases = if matches!(language, Language::JavaScript) {
+            Some(JsImportAliases::from_tree(&source, &tree))
+        } else {
+            None
+        };
         let ctx = FileContext {
             python_aliases: python_aliases.as_ref(),
+            javascript_aliases: javascript_aliases.as_ref(),
         };
 
         for rule in rules {

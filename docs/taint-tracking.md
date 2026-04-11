@@ -12,7 +12,7 @@ The taint engine answers the second, on a narrower footprint. It lets us ship ru
 
 In scope:
 
-- **One language**: Python.
+- **Two languages**: Python and JavaScript/TypeScript, each with its own engine (`src/rules/python_taint.rs` and `src/rules/javascript_taint.rs`) sharing an identical surface (`TaintSpec`, `NodeMatcher`, `TaintFinding`, `analyze_tree`). `.ts` files are parsed through tree-sitter-javascript, so the JS engine also covers TypeScript source.
 - **Intraprocedural**: each function body is analyzed independently.
 - **Flow-insensitive**: statements are processed in source order. Reassigning a tainted variable to a clean value drops the taint. Branches are not modeled — taint observed in one branch of an `if` persists through the fall-through.
 - **One level of attribute propagation**: `x.y` is tainted when `x` is tainted.
@@ -30,7 +30,7 @@ Out of scope for this PR, tracked under #10 as follow-ups:
 - **Field sensitivity**: `d["key"]` is tainted because `d` is. Different keys are not distinguished.
 - **Object attribute propagation beyond one level**: `x.y.z` is tainted when `x` is tainted, but the engine does not persist taint on `x.y` as a distinct name.
 - **Dynamic import forms**: `importlib.import_module(...)` does not interact with the alias table, so sinks reached through it are not recognized.
-- **Other languages**: JS/TS, Go, Java, etc. have no taint engine yet. Adding one per language is expected — the shape of the current Python engine is intended to serve as a template.
+- **Other languages**: Go, Java, Ruby, PHP, C#, Swift, Rust etc. have no taint engine yet. Adding one per language is expected — the shape of the Python and JavaScript engines is intended to serve as a template. JavaScript/TypeScript uses the same scope as Python (intraprocedural, flow-insensitive, one-level subscript propagation, template-literal and wrapping-call propagation, collapse-to-clean sanitizers) with a `JsImportAliases` table for `import`/`require` forms.
 
 ## API
 

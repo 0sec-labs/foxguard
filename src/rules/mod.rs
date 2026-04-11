@@ -2,6 +2,7 @@ pub mod csharp;
 pub mod go;
 pub mod java;
 pub mod javascript;
+pub mod javascript_taint;
 pub mod php;
 pub mod python;
 pub mod python_aliases;
@@ -23,6 +24,8 @@ use std::path::Path;
 pub struct FileContext<'a> {
     /// Python import alias table. `None` for non-Python files.
     pub python_aliases: Option<&'a python_aliases::ImportAliases>,
+    /// JavaScript/TypeScript import alias table. `None` for non-JS files.
+    pub javascript_aliases: Option<&'a javascript_taint::JsImportAliases>,
 }
 
 /// A security rule that checks parsed source code for vulnerabilities.
@@ -96,6 +99,7 @@ impl RuleRegistry {
         registry.register(Box::new(javascript::JwtDecodeWithoutVerify));
         registry.register(Box::new(javascript::JwtVerifyMissingAlgorithms));
         registry.register(Box::new(javascript::NoUnsafeFormatString));
+        registry.register(Box::new(javascript::TaintXssInnerHtml));
 
         // Register Python rules
         registry.register(Box::new(python::NoEval));

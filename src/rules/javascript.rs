@@ -1,4 +1,4 @@
-use crate::rules::Rule;
+use crate::rules::{FileContext, Rule};
 use crate::{Finding, Language, Severity};
 #[allow(unused_imports)]
 use regex::Regex;
@@ -1822,5 +1822,96 @@ impl Rule for NoUnsafeFormatString {
             }
         });
         findings
+    }
+}
+
+// ─── js/taint-xss-innerhtml ───────────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted Express-style input
+// (`req.body`, `req.query`, ...) reaches an `innerHTML`/`outerHTML`
+// assignment or a `document.write` call. Uses the engine in
+// `javascript_taint` the same way `python::TaintPickleDeserialization`
+// uses `python_taint`.
+
+use crate::rules::javascript_taint::{
+    self, javascript_taint_sources, NodeMatcher as JsNodeMatcher, TaintSpec as JsTaintSpec,
+};
+
+pub struct TaintXssInnerHtml;
+
+impl TaintXssInnerHtml {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::MemberAssign {
+                    field: "innerHTML".into(),
+                    description: "innerHTML assignment".into(),
+                },
+                JsNodeMatcher::MemberAssign {
+                    field: "outerHTML".into(),
+                    description: "outerHTML assignment".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "document.write".into(),
+                    description: "document.write".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "document.writeln".into(),
+                    description: "document.writeln".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintXssInnerHtml {
+    fn id(&self) -> &str {
+        "js/taint-xss-innerhtml"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-79")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches innerHTML or document.write sink"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let spec = Self::spec();
+        let raw =
+            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
+        raw.into_iter()
+            .map(|t| Finding {
+                rule_id: self.id().to_string(),
+                severity: self.severity(),
+                cwe: self.cwe().map(|s| s.to_string()),
+                description: format!(
+                    "{} reaches {} — untrusted input can lead to XSS",
+                    t.source_description, t.sink_description
+                ),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+            })
+            .collect()
     }
 }

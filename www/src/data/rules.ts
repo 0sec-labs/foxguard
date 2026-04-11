@@ -38,6 +38,7 @@ const jsRules: Rule[] = [
   { id: 'js/jwt-decode-without-verify', cwe: 'CWE-347', desc: 'JWT decoded without signature verification', severity: 'high' },
   { id: 'js/jwt-verify-missing-algorithms', cwe: 'CWE-347', desc: 'JWT verification without an explicit algorithms allowlist', severity: 'high' },
   { id: 'js/no-unsafe-format-string', cwe: 'CWE-134', desc: 'Template literal with variables in logging function may enable log injection', severity: 'medium' },
+  { id: 'js/taint-xss-innerhtml', cwe: 'CWE-79', desc: 'Untrusted input reaches innerHTML or document.write sink', severity: 'high' },
 ];
 
 const pyRules: Rule[] = [

@@ -366,6 +366,77 @@ fn test_safe_py_taint_has_no_taint_findings() {
     }
 }
 
+/// POC for issue #18 intraprocedural JS/TS taint tracking. Every handler
+/// in `vulnerable_js_taint.js` shows a different shape of untrusted
+/// Express input reaching an innerHTML/document.write sink. The taint
+/// rule must catch each flow, and the existing conservative
+/// `js/no-xss-innerhtml` / `js/no-document-write` rules must keep firing
+/// alongside it (the two rule classes coexist by design).
+#[test]
+fn test_vulnerable_js_taint_catches_every_flow() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/vulnerable_js_taint.js", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    assert!(!output.status.success());
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for f in &findings {
+        if let Some(rule) = f["rule_id"].as_str() {
+            *counts.entry(rule).or_insert(0) += 1;
+        }
+    }
+
+    // Six handlers, each with exactly one source→sink flow.
+    assert_eq!(
+        counts.get("js/taint-xss-innerhtml").copied(),
+        Some(6),
+        "js/taint-xss-innerhtml should fire exactly six times. counts={:?}",
+        counts
+    );
+    // The conservative rules must still coexist on the same fixture.
+    assert!(
+        counts.get("js/no-xss-innerhtml").copied().unwrap_or(0) >= 1,
+        "js/no-xss-innerhtml must coexist with the taint rule. counts={:?}",
+        counts
+    );
+    assert!(
+        counts.get("js/no-document-write").copied().unwrap_or(0) >= 1,
+        "js/no-document-write must coexist with the taint rule. counts={:?}",
+        counts
+    );
+}
+
+/// Negative counterpart for the JS/TS taint POC. Every innerHTML/
+/// document.write sink call here receives a non-tainted argument (static
+/// literal, reassignment kills taint, local variable named `request`,
+/// cross-function taint the engine intentionally does not track). The
+/// taint rule must not fire at all.
+#[test]
+fn test_safe_js_taint_has_no_taint_findings() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/safe_js_taint.js", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let n = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("js/taint-xss-innerhtml"))
+        .count();
+    assert_eq!(
+        n, 0,
+        "js/taint-xss-innerhtml should not fire on safe_js_taint.js, got {} findings",
+        n
+    );
+}
+
 /// Negative regression for issue #7: aliased imports of the *same* sensitive
 /// modules, but called in safe shapes (static literals, SafeLoader, sha256,
 /// write-only pickle methods). Alias resolution must not silently widen the
