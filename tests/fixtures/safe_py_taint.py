@@ -42,6 +42,16 @@ def consumer_of_different_function():
     return pickle.loads(data)
 
 
+# Same-file interprocedural v1: the helper returns a constant literal,
+# so its return summary is clean and the caller must not fire.
+def clean_literal_helper():
+    return b"static-helper-payload"
+
+
+def interprocedural_clean_helper():
+    return pickle.loads(clean_literal_helper())
+
+
 # A call that happens to be named `loads` but isn't the pickle sink.
 class NotPickle:
     def loads(self, x):

@@ -31,3 +31,13 @@ function consumer() {
     const x = "trusted";
     document.write(x);
 }
+
+// Same-file interprocedural v1: helper returns a literal, caller passes
+// its result to a sink. Summary is clean, taint rule must not fire.
+function cleanLiteralHelper() {
+    return "static-helper";
+}
+
+function interproceduralCleanHelper() {
+    document.write(cleanLiteralHelper());
+}

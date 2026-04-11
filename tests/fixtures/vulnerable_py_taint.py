@@ -92,6 +92,32 @@ def tuple_unpack_conservative():
 def list_unpack_elementwise():
     [x, y] = [b"static", request.form["payload"]]
     return pickle.loads(y)
+
+
+# ─── Same-file helper return propagation (issue #19, v1) ───────────────
+# The helper reads an untrusted source and returns it; the caller
+# assigns the result to a local and passes it to pickle.loads. Pass 1
+# summarizes `get_user_input` as tainted; pass 2 taints `data` in the
+# caller via the summary.
+def get_user_input():
+    return request.data
+
+
+def interprocedural_direct_return():
+    data = get_user_input()
+    return pickle.loads(data)
+
+
+# Caller defined *above* its helper — the two-pass design visits every
+# function before analyzing any of them, so definition order does not
+# matter within the file.
+def interprocedural_late_definition():
+    data = late_helper()
+    return pickle.loads(data)
+
+
+def late_helper():
+    return request.form["payload"]
 # ═══ py/taint-eval ══════════════════════════════════════════════════════
 import os  # noqa: E402
 import subprocess  # noqa: E402

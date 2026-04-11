@@ -21,11 +21,14 @@ In scope:
 - **Tuple/list destructuring with flow-insensitive conservative semantics**: `a, b = expr1, expr2` and `[a, b] = [expr1, expr2]` pair targets with RHS elements when the arities match, so only the matching slot carries taint. When the RHS is a single opaque expression (e.g. `a, b = helper()`), the engine conservatively taints *every* LHS target — we lack the type info to pick the right slot.
 - **Alias-aware sinks and sources**: the engine resolves callees and source roots through the per-file import alias table already introduced for issue #7.
 - **Sanitizer support (collapsed to "clean")**: calls whose callee matches a `TaintSpec.sanitizers` entry produce a clean value even when their arguments were tainted. See the section below for the exact semantics.
+- **Same-file interprocedural return propagation (v1)**: a helper whose body returns a tainted expression marks its return as tainted, and bare calls to that helper elsewhere in the same file propagate the taint into the caller. See the dedicated section below for the exact scope.
 
 Out of scope for this PR, tracked under #10 as follow-ups:
 
-- **Interprocedural**: no cross-function analysis. A helper `def get_data(): return request.data` will not taint callers.
+- **Multi-hop interprocedural chains**: only one level of helper-call propagation is supported. A helper that itself calls another helper is not tracked through the deeper hop.
 - **Cross-file**: no module boundary crossing.
+- **Instance and class methods in interprocedural summaries**: only top-level `function_declaration`s and `const/let/var foo = ...` arrow/function-expression helpers are summarized. `obj.method()` and `self.helper()` calls are not looked up in the summary map.
+- **Argument taint propagation**: helper summaries are computed with only their parameters' taint sources seeded (via `ParamName`). Passing an already-tainted local into a helper does not influence the helper's return summary — pass 1 analyzes helpers with a conservative view of their parameters.
 - **Per-finding sanitization**: Semgrep's `mode: taint` distinguishes "this specific flow was sanitized" from "the value is now clean"; it can still fire on secondary flows that bypassed the sanitizer along a different path. foxguard's v1 collapses both cases into "clean" and does not track per-finding sanitization state.
 - **Field sensitivity**: `d["key"]` is tainted because `d` is. Different keys are not distinguished.
 - **Object attribute propagation beyond one level**: `x.y.z` is tainted when `x` is tainted, but the engine does not persist taint on `x.y` as a distinct name.
@@ -66,6 +69,35 @@ Nothing about Flask, pickle, or any other library is baked into the engine. A ru
 - **`Attribute { root, field, description }`** — matches `root.field` and `root.intermediate.field` chains where the leftmost identifier equals `root`. The engine also tries the alias-resolved form of the leftmost, so one spec entry with `root: "request"` covers both `from flask import request` and `def handler(request)`.
 - **`Call { canonical, description }`** — matches a call whose callee resolves (raw *or* alias-resolved) to `canonical`. Use for method-call sources like `request.get_json()` and for sinks like `pickle.loads`.
 - **`ParamName { names, description }`** — matches function parameters whose name is in `names`. Used to mark implicit sources (e.g. a Flask handler signature `def handler(request):` should treat `request` as untrusted without any assignment).
+
+## Interprocedural (v1)
+
+Issue #19 extends the engine with one level of same-file interprocedural return propagation. The implementation runs two passes over each file:
+
+1. **Pass 1 — return summaries.** Every eligible function in the file is walked with the same expression-taint machinery used in pass 2, but with an empty summary map. For each function, the first tainted `return` expression discovered becomes the function's summary value (`Some(description)`); otherwise the summary is `None`.
+
+2. **Pass 2 — analysis with summaries.** The usual per-function walk runs again, but now `expression_taint` resolves a bare-identifier call whose name is in the summary map by returning the summarized description, decorated with ` (via <callee>)` so findings show the helper chain.
+
+The worked example:
+
+```python
+def get_user_input():
+    return request.data          # summary: Some("flask.request.data")
+
+def handler():
+    data = get_user_input()      # pass 2: data ← "flask.request.data (via get_user_input)"
+    return pickle.loads(data)    # fires with that description
+```
+
+produces a finding whose message reads `flask.request.data (via get_user_input) reaches pickle.loads`.
+
+Scope and limitations:
+
+- **Eligible helpers.** Python: all `function_definition`s are summarized by their simple name. JavaScript/TypeScript: top-level `function_declaration`s and `const/let/var name = arrow_function | function_expression` declarators. Methods on classes/objects (`class Foo { bar() {} }`, `{ helper: function() {} }`) are not summarized.
+- **Single hop only.** Pass 1 runs each helper with an empty summary map, so a helper that itself calls another helper sees the inner call as untyped and cannot recognize its return. A two-hop chain like `handler → middle → source` is *not* caught. This limitation is pinned by a `multi_hop_chain_is_out_of_scope_v1` unit test in each engine.
+- **Bare identifier callees.** `handler()` looks up `handler` in the summary map. `obj.handler()`, `self.helper()`, and aliased forms of method calls do not. Rationale: method calls need receiver/type information the engine does not model.
+- **Name collisions are last-write-wins.** If two functions in the same file share a simple name (e.g. an outer `def helper` and a nested `def helper` inside another function), one summary will overwrite the other during pass 1. This is a known v1 limitation — fix by making summaries scope-aware when it stops being hypothetical.
+- **Argument-based taint is not threaded through helpers.** A helper's summary is computed using only its own parameter sources (`ParamName` matchers); passing an already-tainted local in as an argument does not retroactively taint the helper's return.
 
 ## Sanitizers
 
@@ -148,7 +180,7 @@ Load it with `foxguard --no-builtins --rules path/to/rule.yml target/` and each 
 
 ## Open questions for the full #10
 
-- **Cross-function propagation.** The first step beyond intraprocedural is probably "trust the return type of helpers whose body we can see in the same file", then cross-file via module symbol tables. Each step adds real complexity and should be its own issue.
+- **Cross-function propagation.** The first step — "trust the return of helpers whose body we can see in the same file" — landed in issue #19 as a single-hop, name-keyed summary pass. Next steps: multi-hop propagation via fixed-point iteration over the summary map, scope-aware keys that distinguish nested definitions, argument-based taint threading so callers' tainted arguments influence helper summaries, then cross-file via module symbol tables. Each is its own issue.
 - **Broader pattern surface in the YAML bridge.** `pattern-either` inside source/sink blocks, `pattern-inside` / `metavariable-pattern` constraints, and per-finding sanitization semantics are still unsupported. The bridge skips such rules with a warning rather than partially loading them.
 
 Contributions and concrete counter-examples welcome on #10.

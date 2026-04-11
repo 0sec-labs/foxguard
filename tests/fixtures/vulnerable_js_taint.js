@@ -38,3 +38,22 @@ function aliased(req) {
 function subscripted(req) {
     document.write(req.body["payload"]);
 }
+
+// ─── Same-file helper return propagation (issue #19, v1) ─────────────
+// Function-declaration helper: pass 1 summarizes its return as tainted,
+// pass 2 lets the caller's local pick up that taint.
+function getUserInputFromGlobal() {
+    return req.body.payload;
+}
+
+function interproceduralDirect() {
+    const data = getUserInputFromGlobal();
+    document.write(data);
+}
+
+// ─── Arrow-function helper assigned to a const ───────────────────────
+const getInputArrow = () => req.body.arrow;
+
+function interproceduralArrow() {
+    document.write(getInputArrow());
+}

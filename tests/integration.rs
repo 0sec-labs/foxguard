@@ -285,20 +285,21 @@ fn test_vulnerable_py_taint_catches_every_flow() {
         }
     }
 
-    // Fourteen pickle handlers (10 original + 4 added by #15 for nested
-    // subscripts and tuple/list destructuring). Each has one flow: one
-    // py/taint-pickle-deserialization finding per handler. The conservative
-    // py/no-pickle rule coexists on the same fourteen calls.
+    // Sixteen pickle handlers (10 original + 4 added by #15 for nested
+    // subscripts and tuple/list destructuring + 2 added by #19 for
+    // same-file interprocedural return propagation). Each has one flow:
+    // one py/taint-pickle-deserialization finding per handler. The
+    // conservative py/no-pickle rule coexists on the same sixteen calls.
     assert_eq!(
         counts.get("py/taint-pickle-deserialization").copied(),
-        Some(14),
-        "pickle taint rule should fire fourteen times. counts={:?}",
+        Some(16),
+        "pickle taint rule should fire sixteen times. counts={:?}",
         counts
     );
     assert_eq!(
         counts.get("py/no-pickle").copied(),
-        Some(14),
-        "NoPickle should still fire fourteen times alongside the taint rule. counts={:?}",
+        Some(16),
+        "NoPickle should still fire sixteen times alongside the taint rule. counts={:?}",
         counts
     );
 
@@ -391,11 +392,15 @@ fn test_vulnerable_js_taint_catches_every_flow() {
         }
     }
 
-    // Six handlers, each with exactly one source→sink flow.
+    // Eight handlers, each with exactly one source→sink flow (six
+    // original + two added by #19 for same-file interprocedural return
+    // propagation: `interproceduralDirect` via a function_declaration
+    // helper and `interproceduralArrow` via an arrow-function helper
+    // assigned to a const).
     assert_eq!(
         counts.get("js/taint-xss-innerhtml").copied(),
-        Some(6),
-        "js/taint-xss-innerhtml should fire exactly six times. counts={:?}",
+        Some(8),
+        "js/taint-xss-innerhtml should fire exactly eight times. counts={:?}",
         counts
     );
     // The conservative rules must still coexist on the same fixture.
@@ -1764,14 +1769,14 @@ fn test_semgrep_taint_yaml_bridge_vulnerable() {
         findings
     );
 
-    // Every pickle handler in the fixture (14 flows, matching the native
+    // Every pickle handler in the fixture (16 flows, matching the native
     // py/taint-pickle-deserialization rule) should be caught by the YAML
     // bridge. Asserting the exact count keeps the bridge honest: regressions
     // in pattern translation or the taint engine will flip this number.
     assert_eq!(
         lines.len(),
-        14,
-        "semgrep taint rule should fire on all 14 pickle flows, got {} (lines: {:?})",
+        16,
+        "semgrep taint rule should fire on all 16 pickle flows, got {} (lines: {:?})",
         lines.len(),
         lines
     );

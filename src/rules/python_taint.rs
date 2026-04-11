@@ -130,23 +130,154 @@ pub struct TaintFinding {
     pub sink_description: String,
 }
 
+/// Return-taint summary for a single function. Keyed by the function's
+/// simple name (class/nesting are ignored for v1). The value is `Some`
+/// description if any `return` statement in the function returns a
+/// tainted expression, `None` otherwise.
+///
+/// Function-name collisions (e.g. a nested `def helper` inside an outer
+/// function when another top-level `def helper` exists) are resolved
+/// last-write-wins, which is a known v1 limitation.
+pub type ReturnSummary = HashMap<String, Option<String>>;
+
 /// Run the taint engine over every function definition inside `root` and
 /// return one [`TaintFinding`] per source→sink flow discovered.
 ///
 /// The root can be a whole file tree. The engine finds every
 /// `function_definition` inside it (including nested ones) and analyzes
 /// each independently.
+///
+/// Internally this runs in two passes:
+///
+/// 1. **Pass 1 — return summaries.** Every function in the file is walked
+///    and its `return` expressions are classified as tainted / clean
+///    using the same `expression_taint` logic that pass 2 uses. The
+///    difference is that pass 1 has an *empty* return summary, so calls
+///    to local helpers fall through to default behavior. This gives one
+///    level of interprocedural propagation: a direct helper whose body
+///    reads a source will be summarized as tainted, but a helper that
+///    itself calls another helper will not (the deeper chain is missed).
+///    Documented limitation for v1.
+///
+/// 2. **Pass 2 — analysis with summaries.** Re-analyze each function with
+///    the pass-1 summary available. A call to a bare local helper whose
+///    summary says "tainted" now makes the call result tainted, so the
+///    caller's local bindings and sink arguments propagate correctly.
 pub fn analyze_tree(
     root: Node<'_>,
     source: &str,
     spec: &TaintSpec,
     aliases: Option<&ImportAliases>,
 ) -> Vec<TaintFinding> {
+    // Pass 1: build return summaries using an empty summary map so that
+    // calls to local helpers inside helper bodies fall through to the
+    // default behavior. This is the one-level interprocedural limit.
+    let empty_summary = ReturnSummary::new();
+    let mut summaries = ReturnSummary::new();
+    collect_function_defs(root, &mut |func_node| {
+        let (name, ret_taint) =
+            summarize_function(func_node, source, spec, aliases, &empty_summary);
+        if let Some(name) = name {
+            // Last-write-wins on name collisions (v1 limitation).
+            summaries.insert(name, ret_taint);
+        }
+    });
+
+    // Pass 2: full analysis with the summary map available.
     let mut findings = Vec::new();
     collect_function_defs(root, &mut |func_node| {
-        analyze_function(func_node, source, spec, aliases, &mut findings);
+        analyze_function(func_node, source, spec, aliases, &summaries, &mut findings);
     });
     findings
+}
+
+/// Pass-1 walker: compute a function's return-taint summary by scanning
+/// its body with the same state machinery used in pass 2, then inspecting
+/// every `return_statement` that appears inside it (excluding nested
+/// function bodies, which have their own summary).
+fn summarize_function(
+    func_node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&ImportAliases>,
+    summaries: &ReturnSummary,
+) -> (Option<String>, Option<String>) {
+    let name = func_node
+        .child_by_field_name("name")
+        .map(|n| node_text(n, source).to_string());
+
+    let mut state = TaintState::default();
+    if let Some(params) = func_node.child_by_field_name("parameters") {
+        seed_param_sources(params, source, spec, &mut state);
+    }
+    let Some(body) = func_node.child_by_field_name("body") else {
+        return (name, None);
+    };
+
+    let mut return_taint: Option<String> = None;
+    // Reuse the normal walker but throw away sink findings — we only want
+    // to update the taint state and inspect return statements.
+    let mut scratch: Vec<TaintFinding> = Vec::new();
+    walk_body_for_summary(
+        body,
+        source,
+        spec,
+        aliases,
+        &mut state,
+        &mut scratch,
+        summaries,
+        &mut return_taint,
+    );
+    (name, return_taint)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_body_for_summary(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&ImportAliases>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+    summaries: &ReturnSummary,
+    return_taint: &mut Option<String>,
+) {
+    // Don't descend into nested function definitions — their own returns
+    // belong to their own summary.
+    if node.kind() == "function_definition" {
+        return;
+    }
+
+    if node.kind() == "assignment" {
+        handle_assignment(node, source, spec, aliases, state, summaries);
+    }
+    if node.kind() == "call" {
+        handle_call(node, source, spec, aliases, state, findings, summaries);
+    }
+    if node.kind() == "return_statement" && return_taint.is_none() {
+        // The return's argument is the first named child, if any.
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            if let Some(desc) = expression_taint(child, source, spec, aliases, state, summaries) {
+                *return_taint = Some(desc);
+                break;
+            }
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_body_for_summary(
+            child,
+            source,
+            spec,
+            aliases,
+            state,
+            findings,
+            summaries,
+            return_taint,
+        );
+    }
 }
 
 // ─── Internals ────────────────────────────────────────────────────────────
@@ -190,6 +321,7 @@ fn analyze_function(
     source: &str,
     spec: &TaintSpec,
     aliases: Option<&ImportAliases>,
+    summaries: &ReturnSummary,
     findings: &mut Vec<TaintFinding>,
 ) {
     let mut state = TaintState::default();
@@ -204,7 +336,7 @@ fn analyze_function(
     let Some(body) = func_node.child_by_field_name("body") else {
         return;
     };
-    walk_body(body, source, spec, aliases, &mut state, findings);
+    walk_body(body, source, spec, aliases, &mut state, findings, summaries);
 }
 
 fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &mut TaintState) {
@@ -248,6 +380,7 @@ fn walk_body(
     aliases: Option<&ImportAliases>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
+    summaries: &ReturnSummary,
 ) {
     // Nested function definitions have their own scope. Skip them — they'll
     // be picked up independently by analyze_tree.
@@ -256,11 +389,11 @@ fn walk_body(
     }
 
     if node.kind() == "assignment" {
-        handle_assignment(node, source, spec, aliases, state);
+        handle_assignment(node, source, spec, aliases, state, summaries);
     }
 
     if node.kind() == "call" {
-        handle_call(node, source, spec, aliases, state, findings);
+        handle_call(node, source, spec, aliases, state, findings, summaries);
     }
 
     // Tree-sitter's cursor walks in document order, which is exactly the
@@ -268,7 +401,7 @@ fn walk_body(
     // semantics the POC wants.
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk_body(child, source, spec, aliases, state, findings);
+        walk_body(child, source, spec, aliases, state, findings, summaries);
     }
 }
 
@@ -278,6 +411,7 @@ fn handle_assignment(
     spec: &TaintSpec,
     aliases: Option<&ImportAliases>,
     state: &mut TaintState,
+    summaries: &ReturnSummary,
 ) {
     let (Some(left), Some(right)) = (
         node.child_by_field_name("left"),
@@ -289,7 +423,7 @@ fn handle_assignment(
     // Simple identifier LHS: the common case.
     if left.kind() == "identifier" {
         let lhs_name = node_text(left, source).to_string();
-        if let Some(desc) = expression_taint(right, source, spec, aliases, state) {
+        if let Some(desc) = expression_taint(right, source, spec, aliases, state, summaries) {
             state.taint(lhs_name, desc);
         } else {
             // Reassignment with a clean RHS kills any previous taint on LHS.
@@ -314,7 +448,9 @@ fn handle_assignment(
         if let Some(rhs_elems) = tuple_like_elements(right) {
             if rhs_elems.len() == lhs_targets.len() {
                 for (target, rhs) in lhs_targets.iter().zip(rhs_elems.iter()) {
-                    if let Some(desc) = expression_taint(*rhs, source, spec, aliases, state) {
+                    if let Some(desc) =
+                        expression_taint(*rhs, source, spec, aliases, state, summaries)
+                    {
                         state.taint(target.clone(), desc);
                     } else {
                         state.clear(target);
@@ -325,7 +461,7 @@ fn handle_assignment(
         }
 
         // Arity mismatch or opaque RHS: apply conservative semantics.
-        if let Some(desc) = expression_taint(right, source, spec, aliases, state) {
+        if let Some(desc) = expression_taint(right, source, spec, aliases, state, summaries) {
             for target in &lhs_targets {
                 state.taint(target.clone(), desc.clone());
             }
@@ -393,6 +529,7 @@ fn handle_call(
     aliases: Option<&ImportAliases>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
+    summaries: &ReturnSummary,
 ) {
     let Some(func) = node.child_by_field_name("function") else {
         return;
@@ -430,7 +567,7 @@ fn handle_call(
     };
     let mut cursor = args.walk();
     for arg in args.named_children(&mut cursor) {
-        if let Some(source_desc) = expression_taint(arg, source, spec, aliases, state) {
+        if let Some(source_desc) = expression_taint(arg, source, spec, aliases, state, summaries) {
             let start = node.start_position();
             let end = node.end_position();
             findings.push(TaintFinding {
@@ -458,6 +595,7 @@ fn expression_taint(
     spec: &TaintSpec,
     aliases: Option<&ImportAliases>,
     state: &TaintState,
+    summaries: &ReturnSummary,
 ) -> Option<String> {
     // Direct source match on this expression.
     if let Some(desc) = match_source(expr, source, spec, aliases) {
@@ -492,7 +630,7 @@ fn expression_taint(
     // identifier roots via the recursive call.
     if expr.kind() == "subscript" {
         if let Some(value) = expr.child_by_field_name("value") {
-            if let Some(desc) = expression_taint(value, source, spec, aliases, state) {
+            if let Some(desc) = expression_taint(value, source, spec, aliases, state, summaries) {
                 return Some(desc);
             }
         }
@@ -512,8 +650,24 @@ fn expression_taint(
         if let Some(args) = expr.child_by_field_name("arguments") {
             let mut cursor = args.walk();
             for arg in args.named_children(&mut cursor) {
-                if let Some(desc) = expression_taint(arg, source, spec, aliases, state) {
+                if let Some(desc) = expression_taint(arg, source, spec, aliases, state, summaries) {
                     return Some(desc);
+                }
+            }
+        }
+
+        // Same-file interprocedural v1: a bare identifier callee whose
+        // name matches a function in the return-summary map propagates
+        // the summary's taint description as the call's result. The
+        // description is decorated with "(via <callee>)" so findings
+        // show the helper chain. Only bare identifiers are considered —
+        // attribute calls like `self.helper()` or `obj.method()` need
+        // different semantics and are out of scope for v1.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "identifier" {
+                let callee = node_text(func, source);
+                if let Some(Some(desc)) = summaries.get(callee) {
+                    return Some(format!("{desc} (via {callee})"));
                 }
             }
         }
@@ -1133,6 +1287,96 @@ from flask import request
 def handler():
     [a, b] = [request.args["a"], b"static"]
     return pickle.loads(a)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn interprocedural_tainted_return_propagates_to_caller() {
+        let src = r#"
+import pickle
+from flask import request
+
+def get_user_input():
+    return request.data
+
+def handler():
+    data = get_user_input()
+    return pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("get_user_input"));
+        assert!(f[0].source_description.contains("request.data"));
+    }
+
+    #[test]
+    fn interprocedural_clean_return_does_not_fire() {
+        let src = r#"
+import pickle
+
+def literal_helper():
+    return b"static"
+
+def handler():
+    return pickle.loads(literal_helper())
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_late_definition_still_found() {
+        // Helper defined *below* the caller: pass 1 collects summaries
+        // for every function in the file before pass 2 runs, so the
+        // order of definitions does not matter.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = helper()
+    return pickle.loads(data)
+
+def helper():
+    return request.data
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn multi_hop_chain_is_out_of_scope_v1() {
+        // Two-hop chain: `middle()` calls `source()`. Pass 1 evaluates
+        // each helper with an empty summary, so `middle`'s return (which
+        // calls `source`) is seen as clean. Documented v1 limitation —
+        // the test pins the behavior so a future upgrade breaking it is
+        // a deliberate decision.
+        let src = r#"
+import pickle
+from flask import request
+
+def source():
+    return request.data
+
+def middle():
+    return source()
+
+def handler():
+    return pickle.loads(middle())
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_direct_call_as_sink_argument() {
+        let src = r#"
+import pickle
+from flask import request
+
+def get_user_input():
+    return request.data
+
+def handler():
+    return pickle.loads(get_user_input())
 "#;
         assert_eq!(run(src).len(), 1);
     }

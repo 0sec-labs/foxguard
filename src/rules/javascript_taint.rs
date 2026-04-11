@@ -105,19 +105,196 @@ pub struct TaintFinding {
     pub sink_description: String,
 }
 
+/// Return-taint summary map keyed by a function's simple name. Mirrors
+/// `python_taint::ReturnSummary`. Only top-level `function_declaration`s
+/// and arrow/function-expression helpers assigned to a `const`/`let`/
+/// `var` identifier are collected — instance methods and object-literal
+/// methods are out of scope for v1 because they live on objects with
+/// different call semantics. Function-name collisions are resolved
+/// last-write-wins (known v1 limitation).
+pub type ReturnSummary = HashMap<String, Option<String>>;
+
 /// Run the taint engine over every function/method body inside `root` and
 /// return one `TaintFinding` per source→sink flow.
+///
+/// Runs two passes per file. Pass 1 builds the return-taint summary for
+/// every eligible function in the file. Pass 2 re-analyzes each scope
+/// with that summary available so bare helper calls propagate their
+/// return taint into the caller. See `python_taint::analyze_tree` for
+/// the full design; the JS engine mirrors it.
 pub fn analyze_tree(
     root: Node<'_>,
     source: &str,
     spec: &TaintSpec,
     aliases: Option<&JsImportAliases>,
 ) -> Vec<TaintFinding> {
+    let empty_summary = ReturnSummary::new();
+    let mut summaries = ReturnSummary::new();
+    collect_summary_targets(root, source, &mut |name, func_node| {
+        let ret = summarize_function(func_node, source, spec, aliases, &empty_summary);
+        summaries.insert(name, ret);
+    });
+
     let mut findings = Vec::new();
     collect_function_scopes(root, &mut |func_node| {
-        analyze_function(func_node, source, spec, aliases, &mut findings);
+        analyze_function(func_node, source, spec, aliases, &summaries, &mut findings);
     });
     findings
+}
+
+/// Walk `root` and invoke `visit(name, body_node)` for every function
+/// whose simple name we can recover: top-level `function_declaration`s
+/// and `const foo = (...) => {...}` / `const foo = function(...) {...}`
+/// variable declarators with an arrow-function or function-expression
+/// initializer. Nested definitions inside other function scopes are NOT
+/// descended into for v1 — their summaries would rarely be useful and
+/// instance-method / class-method handling is explicitly out of scope.
+fn collect_summary_targets<'tree, F>(node: Node<'tree>, source: &str, visit: &mut F)
+where
+    F: FnMut(String, Node<'tree>),
+{
+    // Function declarations: record by name, don't descend into their
+    // body (nested helpers are out of scope for v1 summaries).
+    if matches!(
+        node.kind(),
+        "function_declaration" | "generator_function_declaration"
+    ) {
+        if let Some(name) = node.child_by_field_name("name") {
+            visit(node_text(name, source).to_string(), node);
+        }
+        return;
+    }
+    // `const foo = (...) => ...` / `const foo = function(...) {...}`
+    if node.kind() == "variable_declarator" {
+        if let (Some(name), Some(value)) = (
+            node.child_by_field_name("name"),
+            node.child_by_field_name("value"),
+        ) {
+            if name.kind() == "identifier"
+                && matches!(value.kind(), "arrow_function" | "function_expression")
+            {
+                visit(node_text(name, source).to_string(), value);
+                return;
+            }
+        }
+    }
+    // Otherwise recurse, but don't descend into *other* function scopes:
+    // nested-scope helpers are out of scope for v1.
+    if is_function_scope(node.kind()) {
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_summary_targets(child, source, visit);
+    }
+}
+
+/// Pass-1 walker: compute the return-taint summary for a single function
+/// scope. Walks the body with the normal state machinery but throws away
+/// sink findings and records the first tainted return expression it sees.
+fn summarize_function(
+    func_node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&JsImportAliases>,
+    summaries: &ReturnSummary,
+) -> Option<String> {
+    let mut state = TaintState::default();
+    if let Some(params) = func_node.child_by_field_name("parameters") {
+        seed_param_sources(params, source, spec, &mut state);
+    }
+    if let Some(single) = func_node.child_by_field_name("parameter") {
+        if single.kind() == "identifier" {
+            let name = node_text(single, source);
+            for matcher in &spec.sources {
+                if let NodeMatcher::ParamName { names, description } = matcher {
+                    if names.iter().any(|n| n == name) {
+                        state.taint(name.to_string(), description.clone());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    let body = func_node.child_by_field_name("body")?;
+
+    // Arrow-function concise body (`() => expr`): the body field holds
+    // the expression directly rather than a `statement_block`, and there
+    // is no `return_statement` node to visit. Evaluate taint on it up
+    // front so the summary still reflects the implicit return.
+    if func_node.kind() == "arrow_function" && body.kind() != "statement_block" {
+        return expression_taint(body, source, spec, aliases, &state, summaries);
+    }
+
+    let mut scratch: Vec<TaintFinding> = Vec::new();
+    let mut return_taint: Option<String> = None;
+    walk_body_for_summary(
+        body,
+        source,
+        spec,
+        aliases,
+        &mut state,
+        &mut scratch,
+        summaries,
+        &mut return_taint,
+    );
+    return_taint
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_body_for_summary(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&JsImportAliases>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+    summaries: &ReturnSummary,
+    return_taint: &mut Option<String>,
+) {
+    if is_function_scope(node.kind()) {
+        return;
+    }
+
+    match node.kind() {
+        "variable_declarator" => {
+            handle_variable_declarator(node, source, spec, aliases, state, summaries);
+        }
+        "assignment_expression" => {
+            handle_assignment(node, source, spec, aliases, state, findings, summaries);
+        }
+        "call_expression" => {
+            handle_call(node, source, spec, aliases, state, findings, summaries);
+        }
+        "return_statement" => {
+            if return_taint.is_none() {
+                let mut cursor = node.walk();
+                for child in node.named_children(&mut cursor) {
+                    if let Some(desc) =
+                        expression_taint(child, source, spec, aliases, state, summaries)
+                    {
+                        *return_taint = Some(desc);
+                        break;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_body_for_summary(
+            child,
+            source,
+            spec,
+            aliases,
+            state,
+            findings,
+            summaries,
+            return_taint,
+        );
+    }
 }
 
 // ─── Per-file import alias table ──────────────────────────────────────────
@@ -393,6 +570,7 @@ fn analyze_function(
     source: &str,
     spec: &TaintSpec,
     aliases: Option<&JsImportAliases>,
+    summaries: &ReturnSummary,
     findings: &mut Vec<TaintFinding>,
 ) {
     let mut state = TaintState::default();
@@ -421,7 +599,7 @@ fn analyze_function(
     let Some(body) = func_node.child_by_field_name("body") else {
         return;
     };
-    walk_body(body, source, spec, aliases, &mut state, findings);
+    walk_body(body, source, spec, aliases, &mut state, findings, summaries);
 }
 
 fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &mut TaintState) {
@@ -476,6 +654,7 @@ fn walk_body(
     aliases: Option<&JsImportAliases>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
+    summaries: &ReturnSummary,
 ) {
     // Nested function scopes have their own taint state — skip them; they'll
     // be picked up independently by analyze_tree.
@@ -484,15 +663,19 @@ fn walk_body(
     }
 
     match node.kind() {
-        "variable_declarator" => handle_variable_declarator(node, source, spec, aliases, state),
-        "assignment_expression" => handle_assignment(node, source, spec, aliases, state, findings),
-        "call_expression" => handle_call(node, source, spec, aliases, state, findings),
+        "variable_declarator" => {
+            handle_variable_declarator(node, source, spec, aliases, state, summaries)
+        }
+        "assignment_expression" => {
+            handle_assignment(node, source, spec, aliases, state, findings, summaries)
+        }
+        "call_expression" => handle_call(node, source, spec, aliases, state, findings, summaries),
         _ => {}
     }
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk_body(child, source, spec, aliases, state, findings);
+        walk_body(child, source, spec, aliases, state, findings, summaries);
     }
 }
 
@@ -502,6 +685,7 @@ fn handle_variable_declarator(
     spec: &TaintSpec,
     aliases: Option<&JsImportAliases>,
     state: &mut TaintState,
+    summaries: &ReturnSummary,
 ) {
     let Some(name) = node.child_by_field_name("name") else {
         return;
@@ -513,7 +697,7 @@ fn handle_variable_declarator(
 
     if name.kind() == "identifier" {
         let lhs = node_text(name, source).to_string();
-        if let Some(desc) = expression_taint(value, source, spec, aliases, state) {
+        if let Some(desc) = expression_taint(value, source, spec, aliases, state, summaries) {
             state.taint(lhs, desc);
         } else {
             state.clear(&lhs);
@@ -527,7 +711,7 @@ fn handle_variable_declarator(
     // destructuring shapes are more varied than Python's tuple unpack.
     if matches!(name.kind(), "object_pattern" | "array_pattern") {
         let targets = collect_destructuring_targets(name, source);
-        if let Some(desc) = expression_taint(value, source, spec, aliases, state) {
+        if let Some(desc) = expression_taint(value, source, spec, aliases, state, summaries) {
             for t in &targets {
                 state.taint(t.clone(), desc.clone());
             }
@@ -580,6 +764,7 @@ fn handle_assignment(
     aliases: Option<&JsImportAliases>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
+    summaries: &ReturnSummary,
 ) {
     let (Some(left), Some(right)) = (
         node.child_by_field_name("left"),
@@ -598,7 +783,9 @@ fn handle_assignment(
                 }
                 _ => None,
             }) {
-                if let Some(src_desc) = expression_taint(right, source, spec, aliases, state) {
+                if let Some(src_desc) =
+                    expression_taint(right, source, spec, aliases, state, summaries)
+                {
                     let start = node.start_position();
                     let end = node.end_position();
                     findings.push(TaintFinding {
@@ -620,7 +807,7 @@ fn handle_assignment(
 
     if left.kind() == "identifier" {
         let lhs = node_text(left, source).to_string();
-        if let Some(desc) = expression_taint(right, source, spec, aliases, state) {
+        if let Some(desc) = expression_taint(right, source, spec, aliases, state, summaries) {
             state.taint(lhs, desc);
         } else {
             state.clear(&lhs);
@@ -631,7 +818,7 @@ fn handle_assignment(
     // Destructuring LHS: `({ a } = req.body)` or `[a, b] = arr`.
     if matches!(left.kind(), "object_pattern" | "array_pattern") {
         let targets = collect_destructuring_targets(left, source);
-        if let Some(desc) = expression_taint(right, source, spec, aliases, state) {
+        if let Some(desc) = expression_taint(right, source, spec, aliases, state, summaries) {
             for t in &targets {
                 state.taint(t.clone(), desc.clone());
             }
@@ -650,6 +837,7 @@ fn handle_call(
     aliases: Option<&JsImportAliases>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
+    summaries: &ReturnSummary,
 ) {
     let Some(func) = node.child_by_field_name("function") else {
         return;
@@ -681,7 +869,7 @@ fn handle_call(
     };
     let mut cursor = args.walk();
     for arg in args.named_children(&mut cursor) {
-        if let Some(source_desc) = expression_taint(arg, source, spec, aliases, state) {
+        if let Some(source_desc) = expression_taint(arg, source, spec, aliases, state, summaries) {
             let start = node.start_position();
             let end = node.end_position();
             findings.push(TaintFinding {
@@ -705,6 +893,7 @@ fn expression_taint(
     spec: &TaintSpec,
     aliases: Option<&JsImportAliases>,
     state: &TaintState,
+    summaries: &ReturnSummary,
 ) -> Option<String> {
     // Direct source match on this expression.
     if let Some(desc) = match_source(expr, source, spec, aliases) {
@@ -722,7 +911,7 @@ fn expression_taint(
     // Tainted member-expression root: `x.y` where `x` is tainted.
     if expr.kind() == "member_expression" {
         if let Some(object) = expr.child_by_field_name("object") {
-            if let Some(desc) = expression_taint(object, source, spec, aliases, state) {
+            if let Some(desc) = expression_taint(object, source, spec, aliases, state, summaries) {
                 return Some(desc);
             }
         }
@@ -731,7 +920,7 @@ fn expression_taint(
     // Tainted subscript: `x[k]` where `x` is tainted (no key sensitivity).
     if expr.kind() == "subscript_expression" {
         if let Some(object) = expr.child_by_field_name("object") {
-            if let Some(desc) = expression_taint(object, source, spec, aliases, state) {
+            if let Some(desc) = expression_taint(object, source, spec, aliases, state, summaries) {
                 return Some(desc);
             }
         }
@@ -745,7 +934,8 @@ fn expression_taint(
             if child.kind() == "template_substitution" {
                 let mut inner = child.walk();
                 for inner_child in child.named_children(&mut inner) {
-                    if let Some(desc) = expression_taint(inner_child, source, spec, aliases, state)
+                    if let Some(desc) =
+                        expression_taint(inner_child, source, spec, aliases, state, summaries)
                     {
                         return Some(desc);
                     }
@@ -758,7 +948,7 @@ fn expression_taint(
     if expr.kind() == "binary_expression" {
         let mut cursor = expr.walk();
         for child in expr.named_children(&mut cursor) {
-            if let Some(desc) = expression_taint(child, source, spec, aliases, state) {
+            if let Some(desc) = expression_taint(child, source, spec, aliases, state, summaries) {
                 return Some(desc);
             }
         }
@@ -771,7 +961,7 @@ fn expression_taint(
     ) {
         let mut cursor = expr.walk();
         for child in expr.named_children(&mut cursor) {
-            if let Some(desc) = expression_taint(child, source, spec, aliases, state) {
+            if let Some(desc) = expression_taint(child, source, spec, aliases, state, summaries) {
                 return Some(desc);
             }
         }
@@ -786,8 +976,21 @@ fn expression_taint(
         if let Some(args) = expr.child_by_field_name("arguments") {
             let mut cursor = args.walk();
             for arg in args.named_children(&mut cursor) {
-                if let Some(desc) = expression_taint(arg, source, spec, aliases, state) {
+                if let Some(desc) = expression_taint(arg, source, spec, aliases, state, summaries) {
                     return Some(desc);
+                }
+            }
+        }
+
+        // Same-file interprocedural v1: a bare identifier callee whose
+        // name is in the return-summary map propagates the summary's
+        // taint description through the call result. Method calls
+        // (`obj.helper()`) are out of scope for v1.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "identifier" {
+                let callee = node_text(func, source);
+                if let Some(Some(desc)) = summaries.get(callee) {
+                    return Some(format!("{desc} (via {callee})"));
                 }
             }
         }
@@ -1224,6 +1427,110 @@ function handler(req) {
 }
 "#;
         assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn interprocedural_tainted_return_propagates_to_caller() {
+        // Use a module-scoped `req` so the caller's argument list is clean
+        // and the only path to taint in the caller is via the helper's
+        // return summary.
+        let src = r#"
+function getUserInput() {
+    return req.body;
+}
+
+function handler() {
+    const data = getUserInput();
+    document.write(data);
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("getUserInput"));
+    }
+
+    #[test]
+    fn interprocedural_clean_return_does_not_fire() {
+        let src = r#"
+function cleanHelper() {
+    return "static";
+}
+
+function handler() {
+    document.write(cleanHelper());
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_late_definition_still_found() {
+        let src = r#"
+function handler() {
+    const data = helper();
+    document.write(data);
+}
+
+function helper() {
+    return req.body;
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("helper"));
+    }
+
+    #[test]
+    fn multi_hop_chain_is_out_of_scope_v1() {
+        // Two-hop chain: `middle` calls `sourceFn`. Pass 1 uses an empty
+        // summary, so `middle`'s return is seen as clean. Documented
+        // v1 limitation — the test pins the behavior. The handler has
+        // no tainted argument (no `req` param or access), so the only
+        // path to taint would be a working multi-hop summary.
+        let src = r#"
+function sourceFn() {
+    return req.body;
+}
+
+function middle() {
+    return sourceFn();
+}
+
+function handler() {
+    document.write(middle());
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_arrow_function_helper_propagates() {
+        // Arrow-function helper with concise body assigned to a const.
+        let src = r#"
+const getInput = () => req.body;
+
+function handler() {
+    document.write(getInput());
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("getInput"));
+    }
+
+    #[test]
+    fn interprocedural_arrow_function_block_body_propagates() {
+        let src = r#"
+const getInput = () => { return req.body; };
+
+function handler() {
+    const data = getInput();
+    document.write(data);
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("getInput"));
     }
 
     #[test]
