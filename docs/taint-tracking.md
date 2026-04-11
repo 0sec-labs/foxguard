@@ -146,6 +146,21 @@ Per-finding sanitization (Semgrep's `mode: taint` style, where a sanitizer clean
 
 The `py/taint-pickle-deserialization` rule is ~120 lines and is the canonical example.
 
+## What real-world usage looks like
+
+For a hand-crafted but more realistic picture of what the engine fires on,
+see the fixtures under `tests/fixtures/realistic/`. Each file there is a
+small-but-complete vulnerable application for one supported framework —
+`flask_app.py`, `django_views.py`, `fastapi_app.py`, `cli_tool.py`,
+`express_app.js`, `nextjs_handlers.ts`, `hono_app.ts` — with idiomatic
+routing, helper functions that exercise interprocedural return
+propagation, and 2–3 `NEAR MISS` functions per file whose patterns the
+engine must not flag (literal arguments, reassignment to literals,
+tainted values that never reach a sink). The integration test
+`tests/realistic_fixtures.rs` pins the exact total finding count and the
+exact count per taint rule for every file, which is the bar we hold the
+engine to when adding new sources or sinks.
+
 ## Coexistence with conservative rules
 
 Taint rules do not replace direct-sink rules. In the POC, `py/no-pickle` fires on every `pickle.loads` call; `py/taint-pickle-deserialization` fires only on the subset where a flow is provable. A user may see both findings on the same line, with different messages. That is intended — the two rules encode different questions and should be silenced independently if the user wants to suppress one but not the other.

@@ -37,6 +37,20 @@ foxguard measures rule quality with three artifacts that all live in the repo:
    these produce **zero findings**. This is our **precision floor** for the
    patterns we already know about.
 
+   Sitting between the one-function-per-case positive fixtures and the real-
+   world corpus scans is a **realistic test corpus** under
+   `tests/fixtures/realistic/`. Each file there is a small-but-complete
+   vulnerable application for one supported framework (Flask, Django,
+   FastAPI, a CLI tool, Express, Next.js, Hono) with idiomatic routing,
+   helper functions that exercise interprocedural propagation, and 2–3
+   explicitly-labelled `NEAR MISS` functions per file whose patterns the
+   engine might be tempted to flag but should not. The integration test
+   `tests/realistic_fixtures.rs` pins the exact total finding count and the
+   exact count per taint rule for every file. Any rule addition or engine
+   change that shifts these counts forces explicit acknowledgement — which
+   is how we catch end-to-end precision regressions that neither the
+   single-function fixtures nor the public corpus scan would notice.
+
 3. **Real-world corpus scans.** We have run foxguard against the latest HEAD of
    Express, Flask, Gin, Laravel, Rails (actionpack), Spring Petclinic, and a
    Next.js starter — 799 files, 369 findings, 0.86 seconds total. Numbers and
