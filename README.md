@@ -191,6 +191,25 @@ repos:
 
 Or run `foxguard init` to install a git hook directly.
 
+### Claude Code
+
+Add foxguard as a pre-commit hook in your Claude Code configuration to automatically scan agent-written code before each commit:
+
+```json
+{
+  "hooks": {
+    "PreCommit": [
+      {
+        "command": "npx foxguard --changed --severity high .",
+        "description": "foxguard security scan"
+      }
+    ]
+  }
+}
+```
+
+Add this to `.claude/settings.json` in your project root. Claude Code will run foxguard before every commit and block if high-severity findings are detected, giving the agent a chance to fix issues before they land. See [docs/claude-code-integration.md](docs/claude-code-integration.md) for the full setup guide.
+
 ## Configuration
 
 foxguard auto-discovers `.foxguard.yml` from the scan path upward.
