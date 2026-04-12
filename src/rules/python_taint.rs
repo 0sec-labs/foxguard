@@ -567,6 +567,24 @@ fn walk_body(
         handle_assignment(node, ctx, state);
     }
 
+    // Walrus operator: `name := value` (named_expression). The `:=` both
+    // assigns and returns a value, so we need to track the binding.
+    if node.kind() == "named_expression" {
+        if let (Some(name), Some(value)) = (
+            node.child_by_field_name("name"),
+            node.child_by_field_name("value"),
+        ) {
+            if name.kind() == "identifier" {
+                let lhs = node_text(name, ctx.source).to_string();
+                if let Some((desc, src_line)) = expression_taint(value, ctx, state) {
+                    state.taint(lhs, desc, src_line);
+                } else {
+                    state.clear(&lhs);
+                }
+            }
+        }
+    }
+
     if node.kind() == "call" {
         handle_call(node, ctx, state, findings);
     }
@@ -2331,5 +2349,20 @@ def handler():
 "#;
         let f = run(src);
         assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn walrus_operator_propagates_taint() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    if data := request.get_json():
+        pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].sink_description, "pickle.loads");
     }
 }

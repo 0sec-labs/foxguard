@@ -1001,6 +1001,15 @@ fn expression_taint(
         }
     }
 
+    // Type assertion: `val.(string)` — propagate taint from operand.
+    if expr.kind() == "type_assertion_expression" {
+        if let Some(operand) = expr.child_by_field_name("operand") {
+            if let Some(result) = expression_taint(operand, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
     // Parenthesized / unary wrappers: recurse into children.
     if matches!(expr.kind(), "parenthesized_expression" | "unary_expression") {
         let mut cursor = expr.walk();
@@ -1732,5 +1741,23 @@ func handler(c *gin.Context) {
         let f = run(src);
         assert_eq!(f.len(), 1);
         assert!(f[0].source_description.contains("Fetch"));
+    }
+
+    #[test]
+    fn type_assertion_propagates_taint() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(c *gin.Context) {
+    var val interface{} = c.Query("cmd")
+    cmd := val.(string)
+    exec.Command(cmd)
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].sink_description, "exec.Command");
     }
 }

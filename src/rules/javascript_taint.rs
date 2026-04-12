@@ -1600,6 +1600,17 @@ fn expression_taint(
         }
     }
 
+    // Await expression: `await <inner>` — unwrap and recurse so that
+    // `await req.json()` propagates the taint of the inner call.
+    if expr.kind() == "await_expression" {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
     // Parenthesized / unary / sequence wrappers: recurse into children.
     if matches!(
         expr.kind(),
@@ -2702,5 +2713,18 @@ function handler(headers) {
 }
 "#;
         assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn await_expression_propagates_taint() {
+        let src = r#"
+async function handler(req) {
+    const data = await req.json();
+    document.getElementById("x").innerHTML = data;
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].sink_description, "innerHTML assignment");
     }
 }
