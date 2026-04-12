@@ -624,6 +624,19 @@ fn expression_taint(
         }
     }
 
+    // Tuple / list literals: if any element is tainted, the container is
+    // tainted. This is needed for `"... %s %s" % (clean, tainted)` where
+    // the RHS is a tuple — the `%` operator handler recurses into the
+    // right operand, which is the tuple itself.
+    if expr.kind() == "tuple" || expr.kind() == "list" {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
     // F-string / formatted-string interpolation. In tree-sitter-python both
     // plain and f-strings are `string` nodes; f-strings are distinguished by
     // carrying one or more `interpolation` children. Each `interpolation`
@@ -644,15 +657,17 @@ fn expression_taint(
         }
     }
 
-    // Binary `+` propagation: `"prefix " + tainted` or `tainted + "suffix"`
-    // is tainted. This mirrors the JS engine's string-concat rule and
-    // covers the most common SQL/command injection pattern in Python.
+    // Binary `+` / `%` propagation: `"prefix " + tainted`, `tainted + "suffix"`,
+    // and `"SELECT %s" % tainted` are all tainted. The `%` operator covers
+    // Python's old-style string formatting (`"... %s ..." % val`), which is
+    // a common SQL/command injection vector.
     // Conservative: if EITHER operand is tainted, the result is tainted.
     // Integer arithmetic on clean values short-circuits naturally because
     // both recursive calls return None.
     if expr.kind() == "binary_operator" {
         if let Some(op) = expr.child_by_field_name("operator") {
-            if node_text(op, ctx.source) == "+" {
+            let op_text = node_text(op, ctx.source);
+            if op_text == "+" || op_text == "%" {
                 if let Some(left) = expr.child_by_field_name("left") {
                     if let Some(result) = expression_taint(left, ctx, state) {
                         return Some(result);
@@ -683,6 +698,26 @@ fn expression_taint(
             for arg in args.named_children(&mut cursor) {
                 if let Some(result) = expression_taint(arg, ctx, state) {
                     return Some(result);
+                }
+            }
+        }
+
+        // `.format()` propagation: `"SELECT {} FROM t".format(tainted)` is
+        // tainted even though the receiver (a string literal) is not. This
+        // covers Python's new-style string formatting injection pattern.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "attribute" {
+                if let Some(attr) = func.child_by_field_name("attribute") {
+                    if node_text(attr, ctx.source) == "format" {
+                        if let Some(args) = expr.child_by_field_name("arguments") {
+                            let mut cursor = args.walk();
+                            for arg in args.named_children(&mut cursor) {
+                                if let Some(result) = expression_taint(arg, ctx, state) {
+                                    return Some(result);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1744,5 +1779,74 @@ def handler():
     return pickle.loads(data)
 "#;
         assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn percent_format_with_tainted_operand_is_tainted() {
+        // "... %s" % tainted → tainted (old-style string formatting).
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    name = request.args.get("name")
+    data = "prefix_%s" % name
+    pickle.loads(data)
+"#;
+        assert!(!run(src).is_empty());
+    }
+
+    #[test]
+    fn percent_format_with_clean_operand_is_clean() {
+        let src = r#"
+import pickle
+
+def handler():
+    data = "prefix_%s" % "literal"
+    pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn dot_format_with_tainted_argument_is_tainted() {
+        // "...{}".format(tainted) → tainted (new-style string formatting).
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    name = request.args.get("name")
+    data = "prefix_{}".format(name)
+    pickle.loads(data)
+"#;
+        assert!(!run(src).is_empty());
+    }
+
+    #[test]
+    fn dot_format_with_clean_arguments_is_clean() {
+        let src = r#"
+import pickle
+
+def handler():
+    data = "prefix_{}".format("literal")
+    pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn percent_format_tuple_with_tainted_is_tainted() {
+        // "... %s ... %s" % (clean, tainted) → tainted
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    user_input = request.args.get("q")
+    data = "%s_%s" % ("safe", user_input)
+    pickle.loads(data)
+"#;
+        assert!(!run(src).is_empty());
     }
 }
