@@ -932,6 +932,30 @@ fn expression_taint(
         }
     }
 
+    // List / set / dict comprehensions and generator expressions:
+    // `[expr for x in iterable]`, `{expr for x in iterable}`,
+    // `{k: v for x in iterable}`, `(expr for x in iterable)`.
+    // Conservative: if the iterable in any `for_in_clause` is tainted,
+    // the entire comprehension result is tainted.
+    if matches!(
+        expr.kind(),
+        "list_comprehension"
+            | "set_comprehension"
+            | "dictionary_comprehension"
+            | "generator_expression"
+    ) {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if child.kind() == "for_in_clause" {
+                if let Some(iterable) = child.child_by_field_name("right") {
+                    if let Some(result) = expression_taint(iterable, ctx, state) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+    }
+
     // F-string / formatted-string interpolation. In tree-sitter-python both
     // plain and f-strings are `string` nodes; f-strings are distinguished by
     // carrying one or more `interpolation` children. Each `interpolation`
@@ -1007,6 +1031,16 @@ fn expression_taint(
             return None;
         }
         if let Some(args) = expr.child_by_field_name("arguments") {
+            // When a generator expression is the sole argument,
+            // tree-sitter-python places a `generator_expression` node
+            // (including the parentheses) where `argument_list` would
+            // normally be. Treat the whole node as an expression so the
+            // comprehension handler can inspect the iterable.
+            if args.kind() == "generator_expression" {
+                if let Some(result) = expression_taint(args, ctx, state) {
+                    return Some(result);
+                }
+            }
             let mut cursor = args.walk();
             for arg in args.named_children(&mut cursor) {
                 if let Some(result) = expression_taint(arg, ctx, state) {
@@ -2208,5 +2242,94 @@ def handler():
     pickle.loads(data)
 "#;
         assert!(run(src).is_empty());
+    }
+
+    // ---- Comprehension taint propagation (refs #96) ----
+
+    #[test]
+    fn list_comprehension_tainted_iterable_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    user_input = request.args.get("q")
+    data = [x for x in user_input]
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn list_comprehension_method_call_on_tainted_elements() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    items = request.args.getlist("items")
+    data = [x.strip() for x in items]
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn list_comprehension_clean_iterable_is_clean() {
+        let src = r#"
+import pickle
+
+def handler():
+    data = [x for x in ["safe", "literal"]]
+    pickle.loads(data)
+"#;
+        assert!(run(src).is_empty());
+    }
+
+    #[test]
+    fn dict_comprehension_tainted_values_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    user_input = request.args.get("q")
+    data = {k: v for k, v in user_input.items()}
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn set_comprehension_tainted_iterable_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    user_input = request.args.get("q")
+    data = {x for x in user_input}
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn generator_expression_tainted_iterable_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    user_input = request.args.get("q")
+    data = list(x for x in user_input)
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
     }
 }
