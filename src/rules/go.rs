@@ -835,7 +835,9 @@ impl Rule for TaintSsrf {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
-            fix_suggestion: Some("Validate URLs against an allowlist of permitted hosts before making requests"),
+            fix_suggestion: Some(
+                "Validate URLs against an allowlist of permitted hosts before making requests",
+            ),
         };
         map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(

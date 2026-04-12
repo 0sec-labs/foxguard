@@ -2609,7 +2609,10 @@ fn test_taint_findings_include_fix_suggestion_in_json() {
         .output()
         .expect("failed to execute foxguard");
 
-    assert!(!output.status.success(), "should exit non-zero with findings");
+    assert!(
+        !output.status.success(),
+        "should exit non-zero with findings"
+    );
 
     let findings: Vec<serde_json::Value> =
         serde_json::from_slice(&output.stdout).expect("invalid JSON output");
@@ -2666,7 +2669,9 @@ fn test_fix_suggestion_appears_in_sarif_output() {
     let sarif: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("invalid SARIF output");
 
-    let results = sarif["runs"][0]["results"].as_array().expect("results array");
+    let results = sarif["runs"][0]["results"]
+        .as_array()
+        .expect("results array");
 
     let taint_results: Vec<&serde_json::Value> = results
         .iter()

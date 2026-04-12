@@ -1877,7 +1877,9 @@ impl Rule for TaintPickleDeserialization {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
-            fix_suggestion: Some("Use `json` or `msgpack` instead of pickle for untrusted data: `json.loads(data)`"),
+            fix_suggestion: Some(
+                "Use `json` or `msgpack` instead of pickle for untrusted data: `json.loads(data)`",
+            ),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(
@@ -1932,7 +1934,9 @@ impl Rule for TaintEvalFromRequest {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
-            fix_suggestion: Some("Use `ast.literal_eval()` for safe evaluation, or remove eval/exec entirely"),
+            fix_suggestion: Some(
+                "Use `ast.literal_eval()` for safe evaluation, or remove eval/exec entirely",
+            ),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(
@@ -2059,7 +2063,9 @@ impl Rule for TaintSsrfFromRequest {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
-            fix_suggestion: Some("Validate URLs against an allowlist of permitted hosts before making requests"),
+            fix_suggestion: Some(
+                "Validate URLs against an allowlist of permitted hosts before making requests",
+            ),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(
@@ -2118,7 +2124,9 @@ impl Rule for TaintYamlLoadFromRequest {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
-            fix_suggestion: Some("Use `yaml.safe_load()` instead of `yaml.load()` for untrusted input"),
+            fix_suggestion: Some(
+                "Use `yaml.safe_load()` instead of `yaml.load()` for untrusted input",
+            ),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(

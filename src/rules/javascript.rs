@@ -2251,7 +2251,10 @@ impl Rule for TaintSsrf {
                 source_description: Some(t.source_description),
                 sink_line: Some(t.sink_line),
                 sink_description: Some(t.sink_description),
-                fix_suggestion: Some("Validate URLs against an allowlist of permitted hosts before making requests".to_string()),
+                fix_suggestion: Some(
+                    "Validate URLs against an allowlist of permitted hosts before making requests"
+                        .to_string(),
+                ),
             })
             .collect()
     }
