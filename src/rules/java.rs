@@ -1,6 +1,6 @@
+use crate::impl_rule;
 use crate::rules::common::{make_finding, make_finding_from_offsets, walk_tree};
-use crate::rules::Rule;
-use crate::{Finding, Language, Severity};
+use crate::{Language, Severity};
 use regex::Regex;
 
 /// Check whether any descendant of `node` is a `binary_expression` with a `+`
@@ -66,24 +66,15 @@ fn is_literal(node: tree_sitter::Node) -> bool {
 
 pub struct NoSqlInjection;
 
-impl Rule for NoSqlInjection {
-    fn id(&self) -> &str {
-        "java/no-sql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-89")
-    }
-    fn description(&self) -> &str {
-        "Potential SQL injection via string concatenation in query method"
-    }
-    fn language(&self) -> Language {
-        Language::Java
-    }
+impl_rule! {
+    NoSqlInjection,
+    id = "java/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via string concatenation in query method",
+    language = Language::Java,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let sql_methods =
             Regex::new(r"^(executeQuery|execute|createQuery|createNativeQuery)$").unwrap();
@@ -96,9 +87,9 @@ impl Rule for NoSqlInjection {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if has_string_concat(args, src) {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     "SQL query built with string concatenation — use parameterized queries or prepared statements",
                                     node,
                                     src,
@@ -110,6 +101,7 @@ impl Rule for NoSqlInjection {
             }
         });
         findings
+
     }
 }
 
@@ -117,24 +109,15 @@ impl Rule for NoSqlInjection {
 
 pub struct NoCommandInjection;
 
-impl Rule for NoCommandInjection {
-    fn id(&self) -> &str {
-        "java/no-command-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-78")
-    }
-    fn description(&self) -> &str {
-        "Potential command injection via Runtime.exec or ProcessBuilder with dynamic input"
-    }
-    fn language(&self) -> Language {
-        Language::Java
-    }
+impl_rule! {
+    NoCommandInjection,
+    id = "java/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via Runtime.exec or ProcessBuilder with dynamic input",
+    language = Language::Java,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -150,9 +133,9 @@ impl Rule for NoCommandInjection {
                                     if let Some(first_arg) = args.named_child(0) {
                                         if !is_literal(first_arg) {
                                             findings.push(make_finding(
-                                                self.id(),
-                                                self.severity(),
-                                                self.cwe(),
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
                                                 "Runtime.exec() called with dynamic argument — risk of command injection",
                                                 node,
                                                 src,
@@ -175,9 +158,9 @@ impl Rule for NoCommandInjection {
                             if let Some(first_arg) = args.named_child(0) {
                                 if !is_literal(first_arg) {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         "ProcessBuilder created with dynamic argument — risk of command injection",
                                         node,
                                         src,
@@ -190,6 +173,7 @@ impl Rule for NoCommandInjection {
             }
         });
         findings
+
     }
 }
 
@@ -197,24 +181,15 @@ impl Rule for NoCommandInjection {
 
 pub struct NoUnsafeDeserialization;
 
-impl Rule for NoUnsafeDeserialization {
-    fn id(&self) -> &str {
-        "java/no-unsafe-deserialization"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-502")
-    }
-    fn description(&self) -> &str {
-        "Unsafe deserialization can lead to remote code execution"
-    }
-    fn language(&self) -> Language {
-        Language::Java
-    }
+impl_rule! {
+    NoUnsafeDeserialization,
+    id = "java/no-unsafe-deserialization",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Unsafe deserialization can lead to remote code execution",
+    language = Language::Java,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -232,9 +207,9 @@ impl Rule for NoUnsafeDeserialization {
                                 || !obj_text.contains('.')
                             {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     "readObject() on untrusted data can lead to remote code execution — use allowlist-based deserialization",
                                     node,
                                     src,
@@ -249,9 +224,9 @@ impl Rule for NoUnsafeDeserialization {
                             let obj_text = &src[obj.byte_range()];
                             if obj_text.contains("Yaml") || obj_text.contains("yaml") {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     "Yaml.load() deserializes arbitrary objects — use Yaml.safeLoad() or a safe constructor",
                                     node,
                                     src,
@@ -263,6 +238,7 @@ impl Rule for NoUnsafeDeserialization {
             }
         });
         findings
+
     }
 }
 
@@ -270,24 +246,15 @@ impl Rule for NoUnsafeDeserialization {
 
 pub struct NoSsrf;
 
-impl Rule for NoSsrf {
-    fn id(&self) -> &str {
-        "java/no-ssrf"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-918")
-    }
-    fn description(&self) -> &str {
-        "Potential SSRF via URL or RestTemplate with dynamic input"
-    }
-    fn language(&self) -> Language {
-        Language::Java
-    }
+impl_rule! {
+    NoSsrf,
+    id = "java/no-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Potential SSRF via URL or RestTemplate with dynamic input",
+    language = Language::Java,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -300,9 +267,9 @@ impl Rule for NoSsrf {
                             if let Some(first_arg) = args.named_child(0) {
                                 if !is_literal(first_arg) {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         "new URL() with dynamic argument — validate and allowlist target hosts to prevent SSRF",
                                         node,
                                         src,
@@ -334,9 +301,9 @@ impl Rule for NoSsrf {
                                     if let Some(first_arg) = args.named_child(0) {
                                         if !is_literal(first_arg) {
                                             findings.push(make_finding(
-                                                self.id(),
-                                                self.severity(),
-                                                self.cwe(),
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
                                                 "RestTemplate called with dynamic URL — validate and allowlist target hosts to prevent SSRF",
                                                 node,
                                                 src,
@@ -351,6 +318,7 @@ impl Rule for NoSsrf {
             }
         });
         findings
+
     }
 }
 
@@ -358,24 +326,15 @@ impl Rule for NoSsrf {
 
 pub struct NoPathTraversal;
 
-impl Rule for NoPathTraversal {
-    fn id(&self) -> &str {
-        "java/no-path-traversal"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-22")
-    }
-    fn description(&self) -> &str {
-        "Potential path traversal via dynamic file path"
-    }
-    fn language(&self) -> Language {
-        Language::Java
-    }
+impl_rule! {
+    NoPathTraversal,
+    id = "java/no-path-traversal",
+    severity = Severity::High,
+    cwe = Some("CWE-22"),
+    description = "Potential path traversal via dynamic file path",
+    language = Language::Java,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -388,9 +347,9 @@ impl Rule for NoPathTraversal {
                             if let Some(first_arg) = args.named_child(0) {
                                 if !is_literal(first_arg) {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "new {}() with dynamic path — sanitize input to prevent path traversal",
                                             type_text
@@ -417,9 +376,9 @@ impl Rule for NoPathTraversal {
                                     if let Some(first_arg) = args.named_child(0) {
                                         if !is_literal(first_arg) {
                                             findings.push(make_finding(
-                                                self.id(),
-                                                self.severity(),
-                                                self.cwe(),
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
                                                 "Paths.get() with dynamic path — sanitize input to prevent path traversal",
                                                 node,
                                                 src,
@@ -434,6 +393,7 @@ impl Rule for NoPathTraversal {
             }
         });
         findings
+
     }
 }
 
@@ -441,24 +401,15 @@ impl Rule for NoPathTraversal {
 
 pub struct NoWeakCrypto;
 
-impl Rule for NoWeakCrypto {
-    fn id(&self) -> &str {
-        "java/no-weak-crypto"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-327")
-    }
-    fn description(&self) -> &str {
-        "Use of weak cryptographic algorithm"
-    }
-    fn language(&self) -> Language {
-        Language::Java
-    }
+impl_rule! {
+    NoWeakCrypto,
+    id = "java/no-weak-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of weak cryptographic algorithm",
+    language = Language::Java,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let weak_algo =
             Regex::new(r#"(?i)"(DES|DESede|RC2|RC4|Blowfish|MD5|SHA-?1|.*ECB.*)"#).unwrap();
@@ -480,9 +431,9 @@ impl Rule for NoWeakCrypto {
                                         let arg_text = &src[first_arg.byte_range()];
                                         if weak_algo.is_match(arg_text) {
                                             findings.push(make_finding(
-                                                self.id(),
-                                                self.severity(),
-                                                self.cwe(),
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
                                                 &format!(
                                                     "{}.getInstance({}) uses a weak algorithm — use AES-GCM, SHA-256, or stronger",
                                                     obj_text, arg_text
@@ -500,6 +451,7 @@ impl Rule for NoWeakCrypto {
             }
         });
         findings
+
     }
 }
 
@@ -507,24 +459,15 @@ impl Rule for NoWeakCrypto {
 
 pub struct NoHardcodedSecret;
 
-impl Rule for NoHardcodedSecret {
-    fn id(&self) -> &str {
-        "java/no-hardcoded-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "Hardcoded secret or credential detected"
-    }
-    fn language(&self) -> Language {
-        Language::Java
-    }
+impl_rule! {
+    NoHardcodedSecret,
+    id = "java/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::Java,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(r"(?i)(password|secret|api_?key|apiKey|token|auth|credential|private_?key)")
@@ -542,9 +485,9 @@ impl Rule for NoHardcodedSecret {
                                 let inner = val.trim_matches('"');
                                 if inner.len() >= 4 {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "Hardcoded secret in '{}' — use environment variables or a secret manager",
                                             name
@@ -570,9 +513,9 @@ impl Rule for NoHardcodedSecret {
                                 let inner = val.trim_matches('"');
                                 if inner.len() >= 4 {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "Hardcoded secret in '{}' — use environment variables or a secret manager",
                                             left_text.trim()
@@ -588,6 +531,7 @@ impl Rule for NoHardcodedSecret {
             }
         });
         findings
+
     }
 }
 
@@ -595,24 +539,15 @@ impl Rule for NoHardcodedSecret {
 
 pub struct NoXxe;
 
-impl Rule for NoXxe {
-    fn id(&self) -> &str {
-        "java/no-xxe"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-611")
-    }
-    fn description(&self) -> &str {
-        "XML parser created without disabling external entities (XXE)"
-    }
-    fn language(&self) -> Language {
-        Language::Java
-    }
+impl_rule! {
+    NoXxe,
+    id = "java/no-xxe",
+    severity = Severity::High,
+    cwe = Some("CWE-611"),
+    description = "XML parser created without disabling external entities (XXE)",
+    language = Language::Java,
+    fn check(_self, source, _tree) {
 
-    fn check(&self, source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let factory_pattern = Regex::new(
             r"(DocumentBuilderFactory|SAXParserFactory|XMLInputFactory)\.newInstance\(\)",
@@ -626,9 +561,9 @@ impl Rule for NoXxe {
         if factory_pattern.is_match(source) && !secure_pattern.is_match(source) {
             for matched in factory_pattern.find_iter(source) {
                 findings.push(make_finding_from_offsets(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "XML parser factory created without disabling external entities — set feature to prevent XXE attacks",
                     source,
                     matched.start(),
@@ -637,6 +572,7 @@ impl Rule for NoXxe {
             }
         }
         findings
+
     }
 }
 
@@ -644,24 +580,15 @@ impl Rule for NoXxe {
 
 pub struct SpringCsrfDisabled;
 
-impl Rule for SpringCsrfDisabled {
-    fn id(&self) -> &str {
-        "java/spring-csrf-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-352")
-    }
-    fn description(&self) -> &str {
-        "Spring Security CSRF protection is disabled"
-    }
-    fn language(&self) -> Language {
-        Language::Java
-    }
+impl_rule! {
+    SpringCsrfDisabled,
+    id = "java/spring-csrf-disabled",
+    severity = Severity::High,
+    cwe = Some("CWE-352"),
+    description = "Spring Security CSRF protection is disabled",
+    language = Language::Java,
+    fn check(_self, source, _tree) {
 
-    fn check(&self, source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         // .csrf().disable() or csrf(csrf -> csrf.disable()) or csrf(c -> c.disable())
         let csrf_pattern = Regex::new(
@@ -671,9 +598,9 @@ impl Rule for SpringCsrfDisabled {
 
         for matched in csrf_pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 "CSRF protection is disabled — enable CSRF unless this is a stateless API with token auth",
                 source,
                 matched.start(),
@@ -681,6 +608,7 @@ impl Rule for SpringCsrfDisabled {
             ));
         }
         findings
+
     }
 }
 
@@ -688,24 +616,15 @@ impl Rule for SpringCsrfDisabled {
 
 pub struct NoXss;
 
-impl Rule for NoXss {
-    fn id(&self) -> &str {
-        "java/no-xss"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-79")
-    }
-    fn description(&self) -> &str {
-        "Potential XSS via direct write of user input to HTTP response"
-    }
-    fn language(&self) -> Language {
-        Language::Java
-    }
+impl_rule! {
+    NoXss,
+    id = "java/no-xss",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "Potential XSS via direct write of user input to HTTP response",
+    language = Language::Java,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -731,9 +650,9 @@ impl Rule for NoXss {
                                             && first_arg.kind() != "string_literal"
                                         {
                                             let mut f = make_finding(
-                                                self.id(),
-                                                self.severity(),
-                                                self.cwe(),
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
                                                 "User input written directly to HTTP response — risk of XSS",
                                                 node,
                                                 src,
@@ -750,6 +669,7 @@ impl Rule for NoXss {
             }
         });
         findings
+
     }
 }
 
@@ -757,33 +677,24 @@ impl Rule for NoXss {
 
 pub struct SpringCorsPermissive;
 
-impl Rule for SpringCorsPermissive {
-    fn id(&self) -> &str {
-        "java/spring-cors-permissive"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-942")
-    }
-    fn description(&self) -> &str {
-        "Permissive CORS configuration allows any origin"
-    }
-    fn language(&self) -> Language {
-        Language::Java
-    }
+impl_rule! {
+    SpringCorsPermissive,
+    id = "java/spring-cors-permissive",
+    severity = Severity::Medium,
+    cwe = Some("CWE-942"),
+    description = "Permissive CORS configuration allows any origin",
+    language = Language::Java,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         // allowedOrigins("*")
         let wildcard_pattern = Regex::new(r#"allowedOrigins\s*\(\s*"\*"\s*\)"#).unwrap();
         for matched in wildcard_pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 "allowedOrigins(\"*\") permits any origin — restrict to trusted domains",
                 source,
                 matched.start(),
@@ -802,9 +713,9 @@ impl Rule for SpringCorsPermissive {
                         || text.contains("origins = \"*\"")
                     {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "@CrossOrigin with wildcard origin — restrict to trusted domains",
                             node,
                             src,
@@ -814,5 +725,6 @@ impl Rule for SpringCorsPermissive {
             }
         });
         findings
+
     }
 }

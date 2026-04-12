@@ -1,38 +1,29 @@
+use crate::impl_rule;
 use crate::rules::common::{make_finding, walk_tree};
-use crate::rules::Rule;
-use crate::{Finding, Language, Severity};
+use crate::{Language, Severity};
 use regex::Regex;
 
 // ─── Rule 1: unsafe-block ─────────────────────────────────────────────────────
 
 pub struct UnsafeBlock;
 
-impl Rule for UnsafeBlock {
-    fn id(&self) -> &str {
-        "rs/unsafe-block"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-676")
-    }
-    fn description(&self) -> &str {
-        "Use of unsafe block bypasses Rust memory safety guarantees"
-    }
-    fn language(&self) -> Language {
-        Language::Rust
-    }
+impl_rule! {
+    UnsafeBlock,
+    id = "rs/unsafe-block",
+    severity = Severity::Medium,
+    cwe = Some("CWE-676"),
+    description = "Use of unsafe block bypasses Rust memory safety guarantees",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "unsafe_block" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "unsafe block bypasses Rust memory safety — ensure correctness is manually verified",
                     node,
                     src,
@@ -40,6 +31,7 @@ impl Rule for UnsafeBlock {
             }
         });
         findings
+
     }
 }
 
@@ -47,24 +39,15 @@ impl Rule for UnsafeBlock {
 
 pub struct TransmuteUsage;
 
-impl Rule for TransmuteUsage {
-    fn id(&self) -> &str {
-        "rs/transmute-usage"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-843")
-    }
-    fn description(&self) -> &str {
-        "Use of std::mem::transmute can cause type confusion and undefined behavior"
-    }
-    fn language(&self) -> Language {
-        Language::Rust
-    }
+impl_rule! {
+    TransmuteUsage,
+    id = "rs/transmute-usage",
+    severity = Severity::High,
+    cwe = Some("CWE-843"),
+    description = "Use of std::mem::transmute can cause type confusion and undefined behavior",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -73,9 +56,9 @@ impl Rule for TransmuteUsage {
                     let func_text = &src[func.byte_range()];
                     if func_text.contains("transmute") {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "std::mem::transmute can cause type confusion and undefined behavior — prefer safe casts",
                             node,
                             src,
@@ -85,6 +68,7 @@ impl Rule for TransmuteUsage {
             }
         });
         findings
+
     }
 }
 
@@ -92,24 +76,15 @@ impl Rule for TransmuteUsage {
 
 pub struct NoCommandInjection;
 
-impl Rule for NoCommandInjection {
-    fn id(&self) -> &str {
-        "rs/no-command-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-78")
-    }
-    fn description(&self) -> &str {
-        "Potential command injection via Command::new with dynamic input"
-    }
-    fn language(&self) -> Language {
-        Language::Rust
-    }
+impl_rule! {
+    NoCommandInjection,
+    id = "rs/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via Command::new with dynamic input",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -128,9 +103,9 @@ impl Rule for NoCommandInjection {
                             }
                             if !has_literal {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     "Command::new called with dynamic argument — risk of command injection",
                                     node,
                                     src,
@@ -142,6 +117,7 @@ impl Rule for NoCommandInjection {
             }
         });
         findings
+
     }
 }
 
@@ -149,24 +125,15 @@ impl Rule for NoCommandInjection {
 
 pub struct NoSqlInjection;
 
-impl Rule for NoSqlInjection {
-    fn id(&self) -> &str {
-        "rs/no-sql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-89")
-    }
-    fn description(&self) -> &str {
-        "Potential SQL injection via format! macro in query argument"
-    }
-    fn language(&self) -> Language {
-        Language::Rust
-    }
+impl_rule! {
+    NoSqlInjection,
+    id = "rs/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via format! macro in query argument",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let sql_methods = Regex::new(r"(?i)\b(query|sql_query|execute|raw_sql)\b").unwrap();
 
@@ -183,9 +150,9 @@ impl Rule for NoSqlInjection {
                                     let macro_text = &src[arg.byte_range()];
                                     if macro_text.starts_with("format!") {
                                         findings.push(make_finding(
-                                            self.id(),
-                                            self.severity(),
-                                            self.cwe(),
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
                                             "SQL query built with format! macro — use parameterized queries",
                                             node,
                                             src,
@@ -199,6 +166,7 @@ impl Rule for NoSqlInjection {
             }
         });
         findings
+
     }
 }
 
@@ -206,24 +174,15 @@ impl Rule for NoSqlInjection {
 
 pub struct NoWeakHash;
 
-impl Rule for NoWeakHash {
-    fn id(&self) -> &str {
-        "rs/no-weak-hash"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-328")
-    }
-    fn description(&self) -> &str {
-        "Use of weak cryptographic hash (MD5/SHA1)"
-    }
-    fn language(&self) -> Language {
-        Language::Rust
-    }
+impl_rule! {
+    NoWeakHash,
+    id = "rs/no-weak-hash",
+    severity = Severity::Medium,
+    cwe = Some("CWE-328"),
+    description = "Use of weak cryptographic hash (MD5/SHA1)",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let weak_hash = Regex::new(r"\b(md5|sha1|Md5|Sha1|MD5|SHA1)\b").unwrap();
 
@@ -239,9 +198,9 @@ impl Rule for NoWeakHash {
                             "SHA1"
                         };
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         &format!(
                             "Import of weak hash algorithm {} — use SHA-256 or stronger",
                             algo
@@ -266,9 +225,9 @@ impl Rule for NoWeakHash {
                             "SHA1"
                         };
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "{} is cryptographically weak — use SHA-256 or stronger",
                                 algo
@@ -281,6 +240,7 @@ impl Rule for NoWeakHash {
             }
         });
         findings
+
     }
 }
 
@@ -288,24 +248,15 @@ impl Rule for NoWeakHash {
 
 pub struct NoHardcodedSecret;
 
-impl Rule for NoHardcodedSecret {
-    fn id(&self) -> &str {
-        "rs/no-hardcoded-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "Hardcoded secret or credential detected"
-    }
-    fn language(&self) -> Language {
-        Language::Rust
-    }
+impl_rule! {
+    NoHardcodedSecret,
+    id = "rs/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(r"(?i)(password|secret|api_?key|token|auth|credential|private_?key)")
@@ -323,9 +274,9 @@ impl Rule for NoHardcodedSecret {
                                 let inner = val.trim_matches('"');
                                 if inner.len() >= 4 {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "Hardcoded secret in '{}' — use environment variables",
                                             name.trim()
@@ -341,6 +292,7 @@ impl Rule for NoHardcodedSecret {
             }
         });
         findings
+
     }
 }
 
@@ -348,24 +300,15 @@ impl Rule for NoHardcodedSecret {
 
 pub struct TlsVerifyDisabled;
 
-impl Rule for TlsVerifyDisabled {
-    fn id(&self) -> &str {
-        "rs/tls-verify-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-295")
-    }
-    fn description(&self) -> &str {
-        "TLS certificate verification disabled with danger_accept_invalid_certs"
-    }
-    fn language(&self) -> Language {
-        Language::Rust
-    }
+impl_rule! {
+    TlsVerifyDisabled,
+    id = "rs/tls-verify-disabled",
+    severity = Severity::High,
+    cwe = Some("CWE-295"),
+    description = "TLS certificate verification disabled with danger_accept_invalid_certs",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -378,9 +321,9 @@ impl Rule for TlsVerifyDisabled {
                                 let arg_text = &src[first_arg.byte_range()];
                                 if arg_text == "true" {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         "danger_accept_invalid_certs(true) disables TLS verification — prefer proper CA validation",
                                         node,
                                         src,
@@ -393,6 +336,7 @@ impl Rule for TlsVerifyDisabled {
             }
         });
         findings
+
     }
 }
 
@@ -400,24 +344,15 @@ impl Rule for TlsVerifyDisabled {
 
 pub struct NoSsrf;
 
-impl Rule for NoSsrf {
-    fn id(&self) -> &str {
-        "rs/no-ssrf"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-918")
-    }
-    fn description(&self) -> &str {
-        "Potential SSRF via reqwest with dynamic URL"
-    }
-    fn language(&self) -> Language {
-        Language::Rust
-    }
+impl_rule! {
+    NoSsrf,
+    id = "rs/no-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Potential SSRF via reqwest with dynamic URL",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -435,9 +370,9 @@ impl Rule for NoSsrf {
                                 if let Some(first_arg) = args.named_child(0) {
                                     if first_arg.kind() != "string_literal" {
                                         findings.push(make_finding(
-                                            self.id(),
-                                            self.severity(),
-                                            self.cwe(),
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
                                             &format!(
                                                 "{} called with dynamic URL — validate and allowlist target hosts to prevent SSRF",
                                                 func_text
@@ -454,6 +389,7 @@ impl Rule for NoSsrf {
             }
         });
         findings
+
     }
 }
 
@@ -461,24 +397,15 @@ impl Rule for NoSsrf {
 
 pub struct NoPathTraversal;
 
-impl Rule for NoPathTraversal {
-    fn id(&self) -> &str {
-        "rs/no-path-traversal"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-22")
-    }
-    fn description(&self) -> &str {
-        "Potential path traversal via Path::new or PathBuf::from with dynamic input"
-    }
-    fn language(&self) -> Language {
-        Language::Rust
-    }
+impl_rule! {
+    NoPathTraversal,
+    id = "rs/no-path-traversal",
+    severity = Severity::Medium,
+    cwe = Some("CWE-22"),
+    description = "Potential path traversal via Path::new or PathBuf::from with dynamic input",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -490,9 +417,9 @@ impl Rule for NoPathTraversal {
                             if let Some(first_arg) = args.named_child(0) {
                                 if first_arg.kind() != "string_literal" {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "{} called with dynamic path — validate input to prevent path traversal",
                                             func_text
@@ -508,6 +435,7 @@ impl Rule for NoPathTraversal {
             }
         });
         findings
+
     }
 }
 
@@ -515,24 +443,15 @@ impl Rule for NoPathTraversal {
 
 pub struct NoUnwrapInLib;
 
-impl Rule for NoUnwrapInLib {
-    fn id(&self) -> &str {
-        "rs/no-unwrap-in-lib"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-248")
-    }
-    fn description(&self) -> &str {
-        "Use of .unwrap() or .expect() can cause panics in production"
-    }
-    fn language(&self) -> Language {
-        Language::Rust
-    }
+impl_rule! {
+    NoUnwrapInLib,
+    id = "rs/no-unwrap-in-lib",
+    severity = Severity::Medium,
+    cwe = Some("CWE-248"),
+    description = "Use of .unwrap() or .expect() can cause panics in production",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -546,9 +465,9 @@ impl Rule for NoUnwrapInLib {
                             ".expect()"
                         };
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "{} can panic at runtime — use proper error handling with ? or match",
                                 method
@@ -561,5 +480,6 @@ impl Rule for NoUnwrapInLib {
             }
         });
         findings
+
     }
 }

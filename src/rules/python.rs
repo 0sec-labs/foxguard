@@ -1,5 +1,6 @@
+use crate::impl_rule;
 use crate::rules::common::{get_source_line, make_finding, walk_tree};
-use crate::rules::{FileContext, Rule};
+use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
 use regex::Regex;
 use std::borrow::Cow;
@@ -22,33 +23,15 @@ fn resolve_callee<'a>(func_text: &'a str, ctx: &'a FileContext<'_>) -> Cow<'a, s
 
 pub struct NoEval;
 
-impl Rule for NoEval {
-    fn id(&self) -> &str {
-        "py/no-eval"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-95")
-    }
-    fn description(&self) -> &str {
-        "Use of eval()/exec() allows arbitrary code execution"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoEval,
+    id = "py/no-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "Use of eval()/exec() allows arbitrary code execution",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -58,9 +41,9 @@ impl Rule for NoEval {
                     let resolved = resolve_callee(func_text, ctx);
                     if resolved.as_ref() == "eval" || resolved.as_ref() == "exec" {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "{}() allows arbitrary code execution — avoid using it with untrusted input",
                                 resolved
@@ -73,6 +56,7 @@ impl Rule for NoEval {
             }
         });
         findings
+
     }
 }
 
@@ -80,24 +64,15 @@ impl Rule for NoEval {
 
 pub struct NoHardcodedSecret;
 
-impl Rule for NoHardcodedSecret {
-    fn id(&self) -> &str {
-        "py/no-hardcoded-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "Hardcoded secret or credential detected"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoHardcodedSecret,
+    id = "py/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(r"(?i)(password|secret|api_?key|token|auth|credential|private_?key)")
@@ -120,9 +95,9 @@ impl Rule for NoHardcodedSecret {
                             .trim_matches(|c| c == '"' || c == '\'');
                         if inner.len() >= 4 {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 &format!(
                                     "Hardcoded secret in '{}' — use environment variables or a secrets manager",
                                     left_text
@@ -136,6 +111,7 @@ impl Rule for NoHardcodedSecret {
             }
         });
         findings
+
     }
 }
 
@@ -143,24 +119,15 @@ impl Rule for NoHardcodedSecret {
 
 pub struct NoSqlInjection;
 
-impl Rule for NoSqlInjection {
-    fn id(&self) -> &str {
-        "py/no-sql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-89")
-    }
-    fn description(&self) -> &str {
-        "Potential SQL injection via string formatting"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoSqlInjection,
+    id = "py/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via string formatting",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let sql_pattern =
             Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)").unwrap();
@@ -175,9 +142,9 @@ impl Rule for NoSqlInjection {
                     && sql_pattern.is_match(text)
                 {
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         "SQL query built with f-string — use parameterized queries",
                         node,
                         src,
@@ -194,9 +161,9 @@ impl Rule for NoSqlInjection {
                                 let text = &src[left.byte_range()];
                                 if sql_pattern.is_match(text) {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         "SQL query built with % formatting — use parameterized queries",
                                         node,
                                         src,
@@ -219,9 +186,9 @@ impl Rule for NoSqlInjection {
                                         let text = &src[obj.byte_range()];
                                         if sql_pattern.is_match(text) {
                                             findings.push(make_finding(
-                                                self.id(),
-                                                self.severity(),
-                                                self.cwe(),
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
                                                 "SQL query built with .format() — use parameterized queries",
                                                 node,
                                                 src,
@@ -244,9 +211,9 @@ impl Rule for NoSqlInjection {
                                 let text = &src[left.byte_range()];
                                 if sql_pattern.is_match(text) {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         "SQL query built with string concatenation — use parameterized queries",
                                         node,
                                         src,
@@ -259,6 +226,7 @@ impl Rule for NoSqlInjection {
             }
         });
         findings
+
     }
 }
 
@@ -266,33 +234,15 @@ impl Rule for NoSqlInjection {
 
 pub struct NoCommandInjection;
 
-impl Rule for NoCommandInjection {
-    fn id(&self) -> &str {
-        "py/no-command-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-78")
-    }
-    fn description(&self) -> &str {
-        "Potential command injection via os.system/subprocess with user input"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoCommandInjection,
+    id = "py/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via os.system/subprocess with user input",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let mut findings = Vec::new();
         let dangerous_fns = [
             "os.system",
@@ -326,9 +276,9 @@ impl Rule for NoCommandInjection {
                                 };
                                 if is_dynamic {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "{}() called with dynamic argument — risk of command injection",
                                             resolved
@@ -344,6 +294,7 @@ impl Rule for NoCommandInjection {
             }
         });
         findings
+
     }
 }
 
@@ -351,33 +302,15 @@ impl Rule for NoCommandInjection {
 
 pub struct NoPathTraversal;
 
-impl Rule for NoPathTraversal {
-    fn id(&self) -> &str {
-        "py/no-path-traversal"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-22")
-    }
-    fn description(&self) -> &str {
-        "Potential path traversal via open() with user input"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoPathTraversal,
+    id = "py/no-path-traversal",
+    severity = Severity::High,
+    cwe = Some("CWE-22"),
+    description = "Potential path traversal via open() with user input",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -402,9 +335,9 @@ impl Rule for NoPathTraversal {
                                 };
                                 if is_dynamic {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "{}() called with dynamic path — validate and sanitize to prevent path traversal",
                                             resolved
@@ -420,6 +353,7 @@ impl Rule for NoPathTraversal {
             }
         });
         findings
+
     }
 }
 
@@ -427,33 +361,15 @@ impl Rule for NoPathTraversal {
 
 pub struct NoSsrf;
 
-impl Rule for NoSsrf {
-    fn id(&self) -> &str {
-        "py/no-ssrf"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-918")
-    }
-    fn description(&self) -> &str {
-        "Potential SSRF via dynamic outbound request URL"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoSsrf,
+    id = "py/no-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Potential SSRF via dynamic outbound request URL",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let mut findings = Vec::new();
         let request_fns = [
             "requests.get",
@@ -511,9 +427,9 @@ impl Rule for NoSsrf {
 
             if is_dynamic {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     &format!(
                         "{} called with dynamic URL — validate and allowlist outbound destinations to prevent SSRF",
                         resolved
@@ -525,6 +441,7 @@ impl Rule for NoSsrf {
         });
 
         findings
+
     }
 }
 
@@ -532,33 +449,15 @@ impl Rule for NoSsrf {
 
 pub struct NoWeakCrypto;
 
-impl Rule for NoWeakCrypto {
-    fn id(&self) -> &str {
-        "py/no-weak-crypto"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-327")
-    }
-    fn description(&self) -> &str {
-        "Use of weak cryptographic hash (MD5/SHA1)"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoWeakCrypto,
+    id = "py/no-weak-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of weak cryptographic hash (MD5/SHA1)",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -573,9 +472,9 @@ impl Rule for NoWeakCrypto {
                             "SHA1"
                         };
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "hashlib.{}() is cryptographically weak — use sha256 or stronger",
                                 algo.to_lowercase()
@@ -594,9 +493,9 @@ impl Rule for NoWeakCrypto {
                                     let inner = val.trim_matches(|c| c == '"' || c == '\'');
                                     if inner == "md5" || inner == "sha1" {
                                         findings.push(make_finding(
-                                            self.id(),
-                                            self.severity(),
-                                            self.cwe(),
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
                                             &format!(
                                                 "hashlib.new('{}') is cryptographically weak — use sha256 or stronger",
                                                 inner
@@ -613,6 +512,7 @@ impl Rule for NoWeakCrypto {
             }
         });
         findings
+
     }
 }
 
@@ -620,33 +520,15 @@ impl Rule for NoWeakCrypto {
 
 pub struct NoPickle;
 
-impl Rule for NoPickle {
-    fn id(&self) -> &str {
-        "py/no-pickle"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-502")
-    }
-    fn description(&self) -> &str {
-        "Deserialization of untrusted data via pickle"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoPickle,
+    id = "py/no-pickle",
+    severity = Severity::High,
+    cwe = Some("CWE-502"),
+    description = "Deserialization of untrusted data via pickle",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let mut findings = Vec::new();
         let dangerous_fns = [
             "pickle.loads",
@@ -662,9 +544,9 @@ impl Rule for NoPickle {
                     let resolved = resolve_callee(func_text, ctx);
                     if dangerous_fns.contains(&resolved.as_ref()) {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "{}() deserializes untrusted data — can execute arbitrary code",
                                 resolved
@@ -677,6 +559,7 @@ impl Rule for NoPickle {
             }
         });
         findings
+
     }
 }
 
@@ -684,33 +567,15 @@ impl Rule for NoPickle {
 
 pub struct NoYamlLoad;
 
-impl Rule for NoYamlLoad {
-    fn id(&self) -> &str {
-        "py/no-yaml-load"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-502")
-    }
-    fn description(&self) -> &str {
-        "yaml.load() without SafeLoader can execute arbitrary code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoYamlLoad,
+    id = "py/no-yaml-load",
+    severity = Severity::High,
+    cwe = Some("CWE-502"),
+    description = "yaml.load() without SafeLoader can execute arbitrary code",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -727,9 +592,9 @@ impl Rule for NoYamlLoad {
                                 && !args_text.contains("BaseLoader")
                             {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     "yaml.load() without SafeLoader — use yaml.safe_load() or pass Loader=SafeLoader",
                                     node,
                                     src,
@@ -741,6 +606,7 @@ impl Rule for NoYamlLoad {
             }
         });
         findings
+
     }
 }
 
@@ -748,24 +614,15 @@ impl Rule for NoYamlLoad {
 
 pub struct NoDebugTrue;
 
-impl Rule for NoDebugTrue {
-    fn id(&self) -> &str {
-        "py/no-debug-true"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-489")
-    }
-    fn description(&self) -> &str {
-        "DEBUG = True left enabled — disable in production"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoDebugTrue,
+    id = "py/no-debug-true",
+    severity = Severity::Medium,
+    cwe = Some("CWE-489"),
+    description = "DEBUG = True left enabled — disable in production",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -779,9 +636,9 @@ impl Rule for NoDebugTrue {
                     let right_text = &src[right.byte_range()];
                     if left_text == "DEBUG" && right_text == "True" {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "DEBUG = True — ensure debug mode is disabled in production (Django CWE-489)",
                             node,
                             src,
@@ -791,6 +648,7 @@ impl Rule for NoDebugTrue {
             }
         });
         findings
+
     }
 }
 
@@ -798,24 +656,15 @@ impl Rule for NoDebugTrue {
 
 pub struct FlaskDebugMode;
 
-impl Rule for FlaskDebugMode {
-    fn id(&self) -> &str {
-        "py/flask-debug-mode"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-489")
-    }
-    fn description(&self) -> &str {
-        "Flask app.run(debug=True) exposes debugger and reloader in production"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    FlaskDebugMode,
+    id = "py/flask-debug-mode",
+    severity = Severity::High,
+    cwe = Some("CWE-489"),
+    description = "Flask app.run(debug=True) exposes debugger and reloader in production",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -831,9 +680,9 @@ impl Rule for FlaskDebugMode {
                                         || args_text.contains("debug = True")
                                     {
                                         findings.push(make_finding(
-                                            self.id(),
-                                            self.severity(),
-                                            self.cwe(),
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
                                             "Flask app.run(debug=True) — exposes Werkzeug debugger, disable in production",
                                             node,
                                             src,
@@ -856,9 +705,9 @@ impl Rule for FlaskDebugMode {
                     let right_text = &src[right.byte_range()];
                     if left_text.ends_with(".debug") && right_text == "True" {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "app.debug = True — exposes debugger, disable in production",
                             node,
                             src,
@@ -868,6 +717,7 @@ impl Rule for FlaskDebugMode {
             }
         });
         findings
+
     }
 }
 
@@ -875,24 +725,15 @@ impl Rule for FlaskDebugMode {
 
 pub struct DjangoSecretKeyHardcoded;
 
-impl Rule for DjangoSecretKeyHardcoded {
-    fn id(&self) -> &str {
-        "py/django-secret-key-hardcoded"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "Django SECRET_KEY hardcoded in source code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    DjangoSecretKeyHardcoded,
+    id = "py/django-secret-key-hardcoded",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Django SECRET_KEY hardcoded in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -908,9 +749,9 @@ impl Rule for DjangoSecretKeyHardcoded {
                         let inner = val.trim_matches(|c| c == '"' || c == '\'');
                         if inner.len() >= 4 {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 "Django SECRET_KEY is hardcoded — use an environment variable or secrets manager",
                                 node,
                                 src,
@@ -921,6 +762,7 @@ impl Rule for DjangoSecretKeyHardcoded {
             }
         });
         findings
+
     }
 }
 
@@ -928,24 +770,15 @@ impl Rule for DjangoSecretKeyHardcoded {
 
 pub struct NoOpenRedirect;
 
-impl Rule for NoOpenRedirect {
-    fn id(&self) -> &str {
-        "py/no-open-redirect"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-601")
-    }
-    fn description(&self) -> &str {
-        "Open redirect via redirect() with user-controlled input"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoOpenRedirect,
+    id = "py/no-open-redirect",
+    severity = Severity::Medium,
+    cwe = Some("CWE-601"),
+    description = "Open redirect via redirect() with user-controlled input",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let redirect_fns = ["redirect", "HttpResponseRedirect"];
 
@@ -969,9 +802,9 @@ impl Rule for NoOpenRedirect {
                                 };
                                 if is_dynamic {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "{}() with dynamic URL — validate target to prevent open redirect",
                                             func_name
@@ -987,6 +820,7 @@ impl Rule for NoOpenRedirect {
             }
         });
         findings
+
     }
 }
 
@@ -994,24 +828,15 @@ impl Rule for NoOpenRedirect {
 
 pub struct NoCorsStar;
 
-impl Rule for NoCorsStar {
-    fn id(&self) -> &str {
-        "py/no-cors-star"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-942")
-    }
-    fn description(&self) -> &str {
-        "CORS misconfiguration allowing all origins"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    NoCorsStar,
+    id = "py/no-cors-star",
+    severity = Severity::Medium,
+    cwe = Some("CWE-942"),
+    description = "CORS misconfiguration allowing all origins",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1028,9 +853,9 @@ impl Rule for NoCorsStar {
                         && right_text == "True"
                     {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!("{} = True — restrict CORS to specific origins", left_text),
                             node,
                             src,
@@ -1049,9 +874,9 @@ impl Rule for NoCorsStar {
                             && node_text.contains("*")
                         {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 "Access-Control-Allow-Origin set to '*' — restrict to specific origins",
                                 node,
                                 src,
@@ -1072,9 +897,9 @@ impl Rule for NoCorsStar {
                         let value_text = &src[value.byte_range()];
                         if value_text.contains("\"*\"") || value_text.contains("'*'") {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 "CORS allow_origins includes '*' — restrict to specific origins",
                                 node,
                                 src,
@@ -1085,6 +910,7 @@ impl Rule for NoCorsStar {
             }
         });
         findings
+
     }
 }
 
@@ -1092,24 +918,15 @@ impl Rule for NoCorsStar {
 
 pub struct FlaskSecretKeyHardcoded;
 
-impl Rule for FlaskSecretKeyHardcoded {
-    fn id(&self) -> &str {
-        "py/flask-secret-key-hardcoded"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "Flask SECRET_KEY hardcoded in source code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    FlaskSecretKeyHardcoded,
+    id = "py/flask-secret-key-hardcoded",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Flask SECRET_KEY hardcoded in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1142,9 +959,9 @@ impl Rule for FlaskSecretKeyHardcoded {
             }
 
             findings.push(make_finding(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 "Flask SECRET_KEY is hardcoded — use an environment variable or secrets manager",
                 node,
                 src,
@@ -1152,6 +969,7 @@ impl Rule for FlaskSecretKeyHardcoded {
         });
 
         findings
+
     }
 }
 
@@ -1159,24 +977,15 @@ impl Rule for FlaskSecretKeyHardcoded {
 
 pub struct SessionCookieSecureDisabled;
 
-impl Rule for SessionCookieSecureDisabled {
-    fn id(&self) -> &str {
-        "py/session-cookie-secure-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-614")
-    }
-    fn description(&self) -> &str {
-        "SESSION_COOKIE_SECURE disabled in source code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    SessionCookieSecureDisabled,
+    id = "py/session-cookie-secure-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-614"),
+    description = "SESSION_COOKIE_SECURE disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1197,9 +1006,9 @@ impl Rule for SessionCookieSecureDisabled {
                 left_text == "SESSION_COOKIE_SECURE" || left_text.contains("SESSION_COOKIE_SECURE");
             if is_session_cookie_secure && right_text == "False" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "SESSION_COOKIE_SECURE = False — session cookies may be sent over HTTP",
                     node,
                     src,
@@ -1208,6 +1017,7 @@ impl Rule for SessionCookieSecureDisabled {
         });
 
         findings
+
     }
 }
 
@@ -1215,24 +1025,15 @@ impl Rule for SessionCookieSecureDisabled {
 
 pub struct SessionCookieHttpOnlyDisabled;
 
-impl Rule for SessionCookieHttpOnlyDisabled {
-    fn id(&self) -> &str {
-        "py/session-cookie-httponly-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-1004")
-    }
-    fn description(&self) -> &str {
-        "SESSION_COOKIE_HTTPONLY disabled in source code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    SessionCookieHttpOnlyDisabled,
+    id = "py/session-cookie-httponly-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-1004"),
+    description = "SESSION_COOKIE_HTTPONLY disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1253,9 +1054,9 @@ impl Rule for SessionCookieHttpOnlyDisabled {
                 || left_text.contains("SESSION_COOKIE_HTTPONLY");
             if is_session_cookie_httponly && right_text == "False" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "SESSION_COOKIE_HTTPONLY = False — session cookies may be exposed to client-side scripts",
                     node,
                     src,
@@ -1264,6 +1065,7 @@ impl Rule for SessionCookieHttpOnlyDisabled {
         });
 
         findings
+
     }
 }
 
@@ -1271,24 +1073,15 @@ impl Rule for SessionCookieHttpOnlyDisabled {
 
 pub struct SessionCookieSameSiteDisabled;
 
-impl Rule for SessionCookieSameSiteDisabled {
-    fn id(&self) -> &str {
-        "py/session-cookie-samesite-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-352")
-    }
-    fn description(&self) -> &str {
-        "SESSION_COOKIE_SAMESITE disabled in source code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    SessionCookieSameSiteDisabled,
+    id = "py/session-cookie-samesite-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-352"),
+    description = "SESSION_COOKIE_SAMESITE disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1315,9 +1108,9 @@ impl Rule for SessionCookieSameSiteDisabled {
                 || right_text == "False";
             if is_session_cookie_samesite && disabled {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "SESSION_COOKIE_SAMESITE disabled — set it to 'Lax' or 'Strict' to reduce CSRF risk",
                     node,
                     src,
@@ -1326,6 +1119,7 @@ impl Rule for SessionCookieSameSiteDisabled {
         });
 
         findings
+
     }
 }
 
@@ -1333,24 +1127,15 @@ impl Rule for SessionCookieSameSiteDisabled {
 
 pub struct CsrfCookieSecureDisabled;
 
-impl Rule for CsrfCookieSecureDisabled {
-    fn id(&self) -> &str {
-        "py/csrf-cookie-secure-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-614")
-    }
-    fn description(&self) -> &str {
-        "CSRF_COOKIE_SECURE disabled in source code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    CsrfCookieSecureDisabled,
+    id = "py/csrf-cookie-secure-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-614"),
+    description = "CSRF_COOKIE_SECURE disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1371,9 +1156,9 @@ impl Rule for CsrfCookieSecureDisabled {
                 left_text == "CSRF_COOKIE_SECURE" || left_text.contains("CSRF_COOKIE_SECURE");
             if is_csrf_cookie_secure && right_text == "False" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "CSRF_COOKIE_SECURE = False — CSRF cookies may be sent over HTTP",
                     node,
                     src,
@@ -1382,6 +1167,7 @@ impl Rule for CsrfCookieSecureDisabled {
         });
 
         findings
+
     }
 }
 
@@ -1389,24 +1175,15 @@ impl Rule for CsrfCookieSecureDisabled {
 
 pub struct CsrfCookieHttpOnlyDisabled;
 
-impl Rule for CsrfCookieHttpOnlyDisabled {
-    fn id(&self) -> &str {
-        "py/csrf-cookie-httponly-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-1004")
-    }
-    fn description(&self) -> &str {
-        "CSRF_COOKIE_HTTPONLY disabled in source code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    CsrfCookieHttpOnlyDisabled,
+    id = "py/csrf-cookie-httponly-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-1004"),
+    description = "CSRF_COOKIE_HTTPONLY disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1427,9 +1204,9 @@ impl Rule for CsrfCookieHttpOnlyDisabled {
                 left_text == "CSRF_COOKIE_HTTPONLY" || left_text.contains("CSRF_COOKIE_HTTPONLY");
             if is_csrf_cookie_httponly && right_text == "False" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "CSRF_COOKIE_HTTPONLY = False — CSRF cookies may be exposed to client-side scripts",
                     node,
                     src,
@@ -1438,6 +1215,7 @@ impl Rule for CsrfCookieHttpOnlyDisabled {
         });
 
         findings
+
     }
 }
 
@@ -1445,24 +1223,15 @@ impl Rule for CsrfCookieHttpOnlyDisabled {
 
 pub struct CsrfCookieSameSiteDisabled;
 
-impl Rule for CsrfCookieSameSiteDisabled {
-    fn id(&self) -> &str {
-        "py/csrf-cookie-samesite-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-352")
-    }
-    fn description(&self) -> &str {
-        "CSRF_COOKIE_SAMESITE disabled in source code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    CsrfCookieSameSiteDisabled,
+    id = "py/csrf-cookie-samesite-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-352"),
+    description = "CSRF_COOKIE_SAMESITE disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1489,9 +1258,9 @@ impl Rule for CsrfCookieSameSiteDisabled {
                 || right_text == "False";
             if is_csrf_cookie_samesite && disabled {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "CSRF_COOKIE_SAMESITE disabled — set it to 'Lax' or 'Strict' to reduce CSRF risk",
                     node,
                     src,
@@ -1500,6 +1269,7 @@ impl Rule for CsrfCookieSameSiteDisabled {
         });
 
         findings
+
     }
 }
 
@@ -1507,33 +1277,24 @@ impl Rule for CsrfCookieSameSiteDisabled {
 
 pub struct CsrfExempt;
 
-impl Rule for CsrfExempt {
-    fn id(&self) -> &str {
-        "py/csrf-exempt"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-352")
-    }
-    fn description(&self) -> &str {
-        "View marked csrf_exempt"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    CsrfExempt,
+    id = "py/csrf-exempt",
+    severity = Severity::High,
+    cwe = Some("CWE-352"),
+    description = "View marked csrf_exempt",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             let text = &src[node.byte_range()];
             if node.kind() == "decorator" && text.contains("csrf_exempt") {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "@csrf_exempt disables CSRF protection — prefer scoped exemptions or validated alternative controls",
                     node,
                     src,
@@ -1542,6 +1303,7 @@ impl Rule for CsrfExempt {
         });
 
         findings
+
     }
 }
 
@@ -1549,24 +1311,15 @@ impl Rule for CsrfExempt {
 
 pub struct WtfCsrfDisabled;
 
-impl Rule for WtfCsrfDisabled {
-    fn id(&self) -> &str {
-        "py/wtf-csrf-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-352")
-    }
-    fn description(&self) -> &str {
-        "Flask-WTF CSRF protection disabled in source code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    WtfCsrfDisabled,
+    id = "py/wtf-csrf-disabled",
+    severity = Severity::High,
+    cwe = Some("CWE-352"),
+    description = "Flask-WTF CSRF protection disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1585,9 +1338,9 @@ impl Rule for WtfCsrfDisabled {
             let right_text = &src[right.byte_range()];
             if left_text.contains("WTF_CSRF_ENABLED") && right_text == "False" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "Flask-WTF CSRF protection disabled — keep WTF_CSRF_ENABLED enabled",
                     node,
                     src,
@@ -1596,6 +1349,7 @@ impl Rule for WtfCsrfDisabled {
         });
 
         findings
+
     }
 }
 
@@ -1603,24 +1357,15 @@ impl Rule for WtfCsrfDisabled {
 
 pub struct WtfCsrfCheckDefaultDisabled;
 
-impl Rule for WtfCsrfCheckDefaultDisabled {
-    fn id(&self) -> &str {
-        "py/wtf-csrf-check-default-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-352")
-    }
-    fn description(&self) -> &str {
-        "Flask-WTF default CSRF checks disabled in source code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    WtfCsrfCheckDefaultDisabled,
+    id = "py/wtf-csrf-check-default-disabled",
+    severity = Severity::High,
+    cwe = Some("CWE-352"),
+    description = "Flask-WTF default CSRF checks disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1639,9 +1384,9 @@ impl Rule for WtfCsrfCheckDefaultDisabled {
             let right_text = &src[right.byte_range()];
             if left_text.contains("WTF_CSRF_CHECK_DEFAULT") && right_text == "False" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "Flask-WTF default CSRF checks disabled — keep WTF_CSRF_CHECK_DEFAULT enabled",
                     node,
                     src,
@@ -1650,6 +1395,7 @@ impl Rule for WtfCsrfCheckDefaultDisabled {
         });
 
         findings
+
     }
 }
 
@@ -1657,24 +1403,15 @@ impl Rule for WtfCsrfCheckDefaultDisabled {
 
 pub struct DjangoAllowedHostsWildcard;
 
-impl Rule for DjangoAllowedHostsWildcard {
-    fn id(&self) -> &str {
-        "py/django-allowed-hosts-wildcard"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-346")
-    }
-    fn description(&self) -> &str {
-        "Django ALLOWED_HOSTS allows all hosts"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    DjangoAllowedHostsWildcard,
+    id = "py/django-allowed-hosts-wildcard",
+    severity = Severity::Medium,
+    cwe = Some("CWE-346"),
+    description = "Django ALLOWED_HOSTS allows all hosts",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1693,9 +1430,9 @@ impl Rule for DjangoAllowedHostsWildcard {
             let right_text = &src[right.byte_range()];
             if left_text.contains("ALLOWED_HOSTS") && right_text.contains("\"*\"") {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "Django ALLOWED_HOSTS contains '*' — restrict hostnames explicitly to reduce host header abuse risk",
                     node,
                     src,
@@ -1704,6 +1441,7 @@ impl Rule for DjangoAllowedHostsWildcard {
         });
 
         findings
+
     }
 }
 
@@ -1711,24 +1449,15 @@ impl Rule for DjangoAllowedHostsWildcard {
 
 pub struct SecureSslRedirectDisabled;
 
-impl Rule for SecureSslRedirectDisabled {
-    fn id(&self) -> &str {
-        "py/secure-ssl-redirect-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-319")
-    }
-    fn description(&self) -> &str {
-        "Django SECURE_SSL_REDIRECT disabled in source code"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    SecureSslRedirectDisabled,
+    id = "py/secure-ssl-redirect-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-319"),
+    description = "Django SECURE_SSL_REDIRECT disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1747,9 +1476,9 @@ impl Rule for SecureSslRedirectDisabled {
             let right_text = &src[right.byte_range()];
             if left_text.contains("SECURE_SSL_REDIRECT") && right_text == "False" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "SECURE_SSL_REDIRECT = False — enable HTTPS redirect in production-facing Django deployments",
                     node,
                     src,
@@ -1758,6 +1487,7 @@ impl Rule for SecureSslRedirectDisabled {
         });
 
         findings
+
     }
 }
 
@@ -1765,33 +1495,15 @@ impl Rule for SecureSslRedirectDisabled {
 
 pub struct JwtNoVerify;
 
-impl Rule for JwtNoVerify {
-    fn id(&self) -> &str {
-        "py/jwt-no-verify"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-347")
-    }
-    fn description(&self) -> &str {
-        "JWT decoded without signature verification"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    JwtNoVerify,
+    id = "py/jwt-no-verify",
+    severity = Severity::Critical,
+    cwe = Some("CWE-347"),
+    description = "JWT decoded without signature verification",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1827,9 +1539,9 @@ impl Rule for JwtNoVerify {
 
             if no_verify || none_algo {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "JWT decoded without signature verification — always verify tokens with a trusted key",
                     node,
                     src,
@@ -1838,6 +1550,7 @@ impl Rule for JwtNoVerify {
         });
 
         findings
+
     }
 }
 
@@ -1845,33 +1558,15 @@ impl Rule for JwtNoVerify {
 
 pub struct JwtHardcodedSecret;
 
-impl Rule for JwtHardcodedSecret {
-    fn id(&self) -> &str {
-        "py/jwt-hardcoded-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "JWT signing or verification with a hardcoded secret"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    JwtHardcodedSecret,
+    id = "py/jwt-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "JWT signing or verification with a hardcoded secret",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1904,9 +1599,9 @@ impl Rule for JwtHardcodedSecret {
                 let inner = secret_text.trim_matches(|c| c == '"' || c == '\'');
                 if inner.len() >= 4 {
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         "JWT secret is hardcoded — load signing keys from environment or a secrets manager",
                         node,
                         src,
@@ -1916,6 +1611,7 @@ impl Rule for JwtHardcodedSecret {
         });
 
         findings
+
     }
 }
 
@@ -2019,37 +1715,19 @@ impl TaintPickleDeserialization {
     }
 }
 
-impl Rule for TaintPickleDeserialization {
-    fn id(&self) -> &str {
-        "py/taint-pickle-deserialization"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-502")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches pickle deserialization sink"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintPickleDeserialization,
+    id = "py/taint-pickle-deserialization",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Untrusted input reaches pickle deserialization sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Use `json` or `msgpack` instead of pickle for untrusted data: `json.loads(data)`",
             ),
@@ -2060,6 +1738,7 @@ impl Rule for TaintPickleDeserialization {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2076,37 +1755,19 @@ impl TaintEvalFromRequest {
     }
 }
 
-impl Rule for TaintEvalFromRequest {
-    fn id(&self) -> &str {
-        "py/taint-eval"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-95")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches eval/exec sink"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintEvalFromRequest,
+    id = "py/taint-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "Untrusted input reaches eval/exec sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Use `ast.literal_eval()` for safe evaluation, or remove eval/exec entirely",
             ),
@@ -2117,6 +1778,7 @@ impl Rule for TaintEvalFromRequest {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2145,37 +1807,19 @@ impl TaintCommandInjectionFromRequest {
     }
 }
 
-impl Rule for TaintCommandInjectionFromRequest {
-    fn id(&self) -> &str {
-        "py/taint-command-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-78")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches OS command execution sink"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintCommandInjectionFromRequest,
+    id = "py/taint-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Untrusted input reaches OS command execution sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Use `shlex.quote()` to escape arguments, or pass a list to `subprocess.run([...])` instead of a shell string"),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
@@ -2184,6 +1828,7 @@ impl Rule for TaintCommandInjectionFromRequest {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2209,37 +1854,19 @@ impl TaintSsrfFromRequest {
     }
 }
 
-impl Rule for TaintSsrfFromRequest {
-    fn id(&self) -> &str {
-        "py/taint-ssrf"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-918")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches outbound HTTP sink (potential SSRF)"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintSsrfFromRequest,
+    id = "py/taint-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Untrusted input reaches outbound HTTP sink (potential SSRF)",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Validate URLs against an allowlist of permitted hosts before making requests",
             ),
@@ -2250,6 +1877,7 @@ impl Rule for TaintSsrfFromRequest {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2270,37 +1898,19 @@ impl TaintYamlLoadFromRequest {
     }
 }
 
-impl Rule for TaintYamlLoadFromRequest {
-    fn id(&self) -> &str {
-        "py/taint-yaml-load"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-502")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches unsafe YAML loader"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintYamlLoadFromRequest,
+    id = "py/taint-yaml-load",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Untrusted input reaches unsafe YAML loader",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Use `yaml.safe_load()` instead of `yaml.load()` for untrusted input",
             ),
@@ -2311,6 +1921,7 @@ impl Rule for TaintYamlLoadFromRequest {
                     src, sink
                 )
         })
+
     }
 }
 
@@ -2345,42 +1956,25 @@ impl TaintSqlInjectionFromRequest {
     }
 }
 
-impl Rule for TaintSqlInjectionFromRequest {
-    fn id(&self) -> &str {
-        "py/taint-sql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-89")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches DB execute sink"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintSqlInjectionFromRequest,
+    id = "py/taint-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Untrusted input reaches DB execute sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Use parameterized queries: `cur.execute(\"SELECT * FROM users WHERE name = ?\", (name,))`"),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!("{} reaches {} — untrusted input can inject SQL", src, sink)
         })
+
     }
 }
 
@@ -2412,37 +2006,19 @@ impl TaintSsti {
     }
 }
 
-impl Rule for TaintSsti {
-    fn id(&self) -> &str {
-        "py/taint-ssti"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-1336")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches template rendering sink (potential SSTI)"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintSsti,
+    id = "py/taint-ssti",
+    severity = Severity::Critical,
+    cwe = Some("CWE-1336"),
+    description = "Untrusted input reaches template rendering sink (potential SSTI)",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Use render_template() with separate template files instead of render_template_string() with user input",
             ),
@@ -2453,6 +2029,7 @@ impl Rule for TaintSsti {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2477,37 +2054,19 @@ impl TaintXpathInjection {
     }
 }
 
-impl Rule for TaintXpathInjection {
-    fn id(&self) -> &str {
-        "py/taint-xpath-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-643")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches XPath query sink"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintXpathInjection,
+    id = "py/taint-xpath-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-643"),
+    description = "Untrusted input reaches XPath query sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Use parameterized XPath queries or validate/sanitize input before building XPath expressions",
             ),
@@ -2518,6 +2077,7 @@ impl Rule for TaintXpathInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2548,37 +2108,19 @@ impl TaintLdapInjection {
     }
 }
 
-impl Rule for TaintLdapInjection {
-    fn id(&self) -> &str {
-        "py/taint-ldap-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-90")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches LDAP search sink"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintLdapInjection,
+    id = "py/taint-ldap-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-90"),
+    description = "Untrusted input reaches LDAP search sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Use ldap.filter.escape_filter_chars() to sanitize user input before building LDAP filters",
             ),
@@ -2589,6 +2131,7 @@ impl Rule for TaintLdapInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2634,37 +2177,19 @@ impl TaintLogInjection {
     }
 }
 
-impl Rule for TaintLogInjection {
-    fn id(&self) -> &str {
-        "py/taint-log-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-117")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches a logging sink — possible log injection"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintLogInjection,
+    id = "py/taint-log-injection",
+    severity = Severity::Medium,
+    cwe = Some("CWE-117"),
+    description = "Untrusted input reaches a logging sink — possible log injection",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Sanitize user input before logging — strip newlines and control characters (no standard sanitizer; use str.replace() or a regex to remove \\n, \\r, and ANSI escape sequences)",
             ),
@@ -2675,6 +2200,7 @@ impl Rule for TaintLogInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2709,37 +2235,19 @@ impl TaintXxe {
     }
 }
 
-impl Rule for TaintXxe {
-    fn id(&self) -> &str {
-        "py/taint-xxe"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-611")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches an XML parser — possible XML External Entity (XXE) injection"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintXxe,
+    id = "py/taint-xxe",
+    severity = Severity::High,
+    cwe = Some("CWE-611"),
+    description = "Untrusted input reaches an XML parser — possible XML External Entity (XXE) injection",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Use defusedxml instead of xml.etree.ElementTree for untrusted XML input",
             ),
@@ -2750,6 +2258,7 @@ impl Rule for TaintXxe {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2805,37 +2314,19 @@ impl TaintNosqlInjection {
     }
 }
 
-impl Rule for TaintNosqlInjection {
-    fn id(&self) -> &str {
-        "py/taint-nosql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-943")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches a MongoDB query sink — possible NoSQL injection"
-    }
-    fn language(&self) -> Language {
-        Language::Python
-    }
+impl_rule! {
+    TaintNosqlInjection,
+    id = "py/taint-nosql-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-943"),
+    description = "Untrusted input reaches a MongoDB query sink — possible NoSQL injection",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = TaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Validate and sanitize user input before using in MongoDB queries. Avoid passing raw user input as query filters."),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
@@ -2844,6 +2335,7 @@ impl Rule for TaintNosqlInjection {
                 src, sink
             )
         })
+
     }
 }
 

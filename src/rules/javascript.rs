@@ -1,5 +1,6 @@
+use crate::impl_rule;
 use crate::rules::common::{get_source_line, make_finding, walk_tree};
-use crate::rules::{FileContext, Rule};
+use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
 use regex::Regex;
 
@@ -7,24 +8,15 @@ use regex::Regex;
 
 pub struct NoEval;
 
-impl Rule for NoEval {
-    fn id(&self) -> &str {
-        "js/no-eval"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-95")
-    }
-    fn description(&self) -> &str {
-        "Use of eval() allows arbitrary code execution"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoEval,
+    id = "js/no-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "Use of eval() allows arbitrary code execution",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Look for call_expression where the function is `eval`
@@ -33,10 +25,10 @@ impl Rule for NoEval {
                     let func_text = &src[func.byte_range()];
                     if func_text == "eval" {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
-                            self.description(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            _self.description(),
                             node,
                             src,
                         ));
@@ -45,6 +37,7 @@ impl Rule for NoEval {
             }
         });
         findings
+
     }
 }
 
@@ -52,24 +45,15 @@ impl Rule for NoEval {
 
 pub struct NoHardcodedSecret;
 
-impl Rule for NoHardcodedSecret {
-    fn id(&self) -> &str {
-        "js/no-hardcoded-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "Hardcoded secret or credential detected"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoHardcodedSecret,
+    id = "js/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(r"(?i)(password|secret|api_?key|token|auth|credential|private_?key)")
@@ -92,9 +76,9 @@ impl Rule for NoHardcodedSecret {
                         let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
                         if inner.len() >= 4 {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 &format!(
                                     "Hardcoded secret in variable '{}' — avoid committing credentials",
                                     name
@@ -122,9 +106,9 @@ impl Rule for NoHardcodedSecret {
                         let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
                         if inner.len() >= 4 {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 &format!(
                                     "Hardcoded secret assigned to '{}' — use environment variables instead",
                                     left_text
@@ -138,6 +122,7 @@ impl Rule for NoHardcodedSecret {
             }
         });
         findings
+
     }
 }
 
@@ -145,24 +130,15 @@ impl Rule for NoHardcodedSecret {
 
 pub struct NoSqlInjection;
 
-impl Rule for NoSqlInjection {
-    fn id(&self) -> &str {
-        "js/no-sql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-89")
-    }
-    fn description(&self) -> &str {
-        "Potential SQL injection via string concatenation or template literal"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoSqlInjection,
+    id = "js/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via string concatenation or template literal",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         // Require SQL keyword followed by SQL structure (FROM, INTO, SET, WHERE, TABLE, VALUES)
         // This avoids matching plain English like res.send('delete ' + name)
@@ -181,9 +157,9 @@ impl Rule for NoSqlInjection {
                                 && sql_pattern.is_match(left_text)
                             {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     "SQL query built with string concatenation — use parameterized queries",
                                     node,
                                     src,
@@ -205,9 +181,9 @@ impl Rule for NoSqlInjection {
                         .any(|c| c.kind() == "template_substitution");
                     if has_substitution {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "SQL query built with template literal interpolation — use parameterized queries",
                             node,
                             src,
@@ -217,6 +193,7 @@ impl Rule for NoSqlInjection {
             }
         });
         findings
+
     }
 }
 
@@ -224,24 +201,15 @@ impl Rule for NoSqlInjection {
 
 pub struct NoXssInnerHtml;
 
-impl Rule for NoXssInnerHtml {
-    fn id(&self) -> &str {
-        "js/no-xss-innerhtml"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-79")
-    }
-    fn description(&self) -> &str {
-        "Assignment to innerHTML may lead to XSS"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoXssInnerHtml,
+    id = "js/no-xss-innerhtml",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "Assignment to innerHTML may lead to XSS",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // assignment_expression where left side ends with .innerHTML
@@ -255,9 +223,9 @@ impl Rule for NoXssInnerHtml {
                                 if let Some(right) = node.child_by_field_name("right") {
                                     if right.kind() != "string" {
                                         findings.push(make_finding(
-                                            self.id(),
-                                            self.severity(),
-                                            self.cwe(),
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
                                             &format!(
                                                 "Assignment to {} with dynamic content — use textContent or sanitize HTML",
                                                 prop_text
@@ -274,6 +242,7 @@ impl Rule for NoXssInnerHtml {
             }
         });
         findings
+
     }
 }
 
@@ -281,24 +250,15 @@ impl Rule for NoXssInnerHtml {
 
 pub struct NoCommandInjection;
 
-impl Rule for NoCommandInjection {
-    fn id(&self) -> &str {
-        "js/no-command-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-78")
-    }
-    fn description(&self) -> &str {
-        "Potential command injection via exec/spawn with dynamic input"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoCommandInjection,
+    id = "js/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via exec/spawn with dynamic input",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let dangerous_fns = [
             "exec",
@@ -337,9 +297,9 @@ impl Rule for NoCommandInjection {
 
                                 if is_dynamic {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "{}() called with dynamic argument — risk of command injection",
                                             func_name
@@ -355,6 +315,7 @@ impl Rule for NoCommandInjection {
             }
         });
         findings
+
     }
 }
 
@@ -362,24 +323,15 @@ impl Rule for NoCommandInjection {
 
 pub struct NoDocumentWrite;
 
-impl Rule for NoDocumentWrite {
-    fn id(&self) -> &str {
-        "js/no-document-write"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-79")
-    }
-    fn description(&self) -> &str {
-        "document.write() can lead to XSS vulnerabilities"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoDocumentWrite,
+    id = "js/no-document-write",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "document.write() can lead to XSS vulnerabilities",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
@@ -387,9 +339,9 @@ impl Rule for NoDocumentWrite {
                     let func_text = &src[func.byte_range()];
                     if func_text == "document.write" || func_text == "document.writeln" {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "document.write() can inject arbitrary HTML — use DOM APIs instead",
                             node,
                             src,
@@ -399,6 +351,7 @@ impl Rule for NoDocumentWrite {
             }
         });
         findings
+
     }
 }
 
@@ -406,24 +359,15 @@ impl Rule for NoDocumentWrite {
 
 pub struct NoOpenRedirect;
 
-impl Rule for NoOpenRedirect {
-    fn id(&self) -> &str {
-        "js/no-open-redirect"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-601")
-    }
-    fn description(&self) -> &str {
-        "Open redirect via assignment to window.location with user input"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoOpenRedirect,
+    id = "js/no-open-redirect",
+    severity = Severity::Medium,
+    cwe = Some("CWE-601"),
+    description = "Open redirect via assignment to window.location with user input",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "assignment_expression" {
@@ -439,9 +383,9 @@ impl Rule for NoOpenRedirect {
                             // Flag if right side is not a string literal
                             if right.kind() != "string" {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     "Assignment to window.location with dynamic value — risk of open redirect",
                                     node,
                                     src,
@@ -453,6 +397,7 @@ impl Rule for NoOpenRedirect {
             }
         });
         findings
+
     }
 }
 
@@ -460,24 +405,15 @@ impl Rule for NoOpenRedirect {
 
 pub struct NoWeakCrypto;
 
-impl Rule for NoWeakCrypto {
-    fn id(&self) -> &str {
-        "js/no-weak-crypto"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-327")
-    }
-    fn description(&self) -> &str {
-        "Use of weak cryptographic hash (MD5/SHA1)"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoWeakCrypto,
+    id = "js/no-weak-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of weak cryptographic hash (MD5/SHA1)",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: createHash('md5') or createHash('sha1')
@@ -493,9 +429,9 @@ impl Rule for NoWeakCrypto {
                                     let inner = val.trim_matches(|c| c == '"' || c == '\'');
                                     if inner == "md5" || inner == "sha1" {
                                         findings.push(make_finding(
-                                            self.id(),
-                                            self.severity(),
-                                            self.cwe(),
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
                                             &format!(
                                                 "createHash('{}') uses a weak hash — use sha256 or stronger",
                                                 inner
@@ -512,6 +448,7 @@ impl Rule for NoWeakCrypto {
             }
         });
         findings
+
     }
 }
 
@@ -519,24 +456,15 @@ impl Rule for NoWeakCrypto {
 
 pub struct NoPathTraversal;
 
-impl Rule for NoPathTraversal {
-    fn id(&self) -> &str {
-        "js/no-path-traversal"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-22")
-    }
-    fn description(&self) -> &str {
-        "Potential path traversal via fs operations with user input"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoPathTraversal,
+    id = "js/no-path-traversal",
+    severity = Severity::High,
+    cwe = Some("CWE-22"),
+    description = "Potential path traversal via fs operations with user input",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let fs_fns = [
             "readFile",
@@ -569,9 +497,9 @@ impl Rule for NoPathTraversal {
                                 let kind = first_arg.kind();
                                 if kind == "binary_expression" || kind == "template_string" {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "{}() called with dynamic path — validate and sanitize to prevent path traversal",
                                             func_name
@@ -598,9 +526,9 @@ impl Rule for NoPathTraversal {
                                 );
                                 if is_dynamic {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "{}() called with dynamic path — validate and sanitize to prevent path traversal",
                                             func_name
@@ -616,6 +544,7 @@ impl Rule for NoPathTraversal {
             }
         });
         findings
+
     }
 }
 
@@ -623,24 +552,15 @@ impl Rule for NoPathTraversal {
 
 pub struct NoSsrf;
 
-impl Rule for NoSsrf {
-    fn id(&self) -> &str {
-        "js/no-ssrf"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-918")
-    }
-    fn description(&self) -> &str {
-        "Potential SSRF via dynamic outbound request URL"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoSsrf,
+    id = "js/no-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Potential SSRF via dynamic outbound request URL",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let request_fns = [
             "fetch",
@@ -702,9 +622,9 @@ impl Rule for NoSsrf {
 
             if is_dynamic {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     &format!(
                         "{} called with dynamic URL — validate and allowlist outbound destinations to prevent SSRF",
                         func_text
@@ -716,6 +636,7 @@ impl Rule for NoSsrf {
         });
 
         findings
+
     }
 }
 
@@ -723,24 +644,15 @@ impl Rule for NoSsrf {
 
 pub struct NoPrototypePollution;
 
-impl Rule for NoPrototypePollution {
-    fn id(&self) -> &str {
-        "js/no-prototype-pollution"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-1321")
-    }
-    fn description(&self) -> &str {
-        "Potential prototype pollution via dynamic property assignment"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoPrototypePollution,
+    id = "js/no-prototype-pollution",
+    severity = Severity::High,
+    cwe = Some("CWE-1321"),
+    description = "Potential prototype pollution via dynamic property assignment",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: obj[key][subkey] = value where keys are identifiers (not literals)
@@ -754,9 +666,9 @@ impl Rule for NoPrototypePollution {
                                 if let Some(object) = left.child_by_field_name("object") {
                                     if object.kind() == "subscript_expression" {
                                         findings.push(make_finding(
-                                            self.id(),
-                                            self.severity(),
-                                            self.cwe(),
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
                                             "Nested dynamic property assignment — risk of prototype pollution",
                                             node,
                                             src,
@@ -770,6 +682,7 @@ impl Rule for NoPrototypePollution {
             }
         });
         findings
+
     }
 }
 
@@ -777,24 +690,15 @@ impl Rule for NoPrototypePollution {
 
 pub struct NoUnsafeRegex;
 
-impl Rule for NoUnsafeRegex {
-    fn id(&self) -> &str {
-        "js/no-unsafe-regex"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-1333")
-    }
-    fn description(&self) -> &str {
-        "Potentially catastrophic backtracking regex pattern"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoUnsafeRegex,
+    id = "js/no-unsafe-regex",
+    severity = Severity::Medium,
+    cwe = Some("CWE-1333"),
+    description = "Potentially catastrophic backtracking regex pattern",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         // Patterns known to cause catastrophic backtracking: nested quantifiers
         let dangerous_pattern =
@@ -806,9 +710,9 @@ impl Rule for NoUnsafeRegex {
                 let regex_text = &src[node.byte_range()];
                 if dangerous_pattern.is_match(regex_text) {
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         "Regex with nested quantifiers may cause catastrophic backtracking (ReDoS)",
                         node,
                         src,
@@ -827,9 +731,9 @@ impl Rule for NoUnsafeRegex {
                                     let pattern_text = &src[first_arg.byte_range()];
                                     if dangerous_pattern.is_match(pattern_text) {
                                         findings.push(make_finding(
-                                            self.id(),
-                                            self.severity(),
-                                            self.cwe(),
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
                                             "RegExp with nested quantifiers may cause catastrophic backtracking (ReDoS)",
                                             node,
                                             src,
@@ -843,6 +747,7 @@ impl Rule for NoUnsafeRegex {
             }
         });
         findings
+
     }
 }
 
@@ -850,24 +755,15 @@ impl Rule for NoUnsafeRegex {
 
 pub struct ExpressNoHardcodedSessionSecret;
 
-impl Rule for ExpressNoHardcodedSessionSecret {
-    fn id(&self) -> &str {
-        "js/express-no-hardcoded-session-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "Hardcoded session secret in express-session configuration"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    ExpressNoHardcodedSessionSecret,
+    id = "js/express-no-hardcoded-session-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded session secret in express-session configuration",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: session({ secret: "literal" }) — look for a pair with key "secret"
@@ -886,9 +782,9 @@ impl Rule for ExpressNoHardcodedSessionSecret {
                         let inner = val.trim_matches(|c| c == '"' || c == '\'');
                         if inner.len() >= 4 {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 "Hardcoded session secret — use an environment variable instead",
                                 node,
                                 src,
@@ -899,6 +795,7 @@ impl Rule for ExpressNoHardcodedSessionSecret {
             }
         });
         findings
+
     }
 }
 
@@ -906,24 +803,15 @@ impl Rule for ExpressNoHardcodedSessionSecret {
 
 pub struct ExpressCookieNoSecure;
 
-impl Rule for ExpressCookieNoSecure {
-    fn id(&self) -> &str {
-        "js/express-cookie-no-secure"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-614")
-    }
-    fn description(&self) -> &str {
-        "Cookie configuration missing secure flag"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    ExpressCookieNoSecure,
+    id = "js/express-cookie-no-secure",
+    severity = Severity::Medium,
+    cwe = Some("CWE-614"),
+    description = "Cookie configuration missing secure flag",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Look for object literals with a "cookie" key whose value is an object
@@ -942,9 +830,9 @@ impl Rule for ExpressCookieNoSecure {
                             || obj_text.contains("secure:false")
                         {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 "Cookie configuration missing 'secure: true' — cookies may be sent over HTTP",
                                 node,
                                 src,
@@ -955,6 +843,7 @@ impl Rule for ExpressCookieNoSecure {
             }
         });
         findings
+
     }
 }
 
@@ -962,24 +851,15 @@ impl Rule for ExpressCookieNoSecure {
 
 pub struct ExpressCookieNoHttpOnly;
 
-impl Rule for ExpressCookieNoHttpOnly {
-    fn id(&self) -> &str {
-        "js/express-cookie-no-httponly"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-1004")
-    }
-    fn description(&self) -> &str {
-        "Cookie configuration missing httpOnly flag"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    ExpressCookieNoHttpOnly,
+    id = "js/express-cookie-no-httponly",
+    severity = Severity::Medium,
+    cwe = Some("CWE-1004"),
+    description = "Cookie configuration missing httpOnly flag",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "pair" {
@@ -996,9 +876,9 @@ impl Rule for ExpressCookieNoHttpOnly {
                             || obj_text.contains("httpOnly:false")
                         {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 "Cookie configuration missing 'httpOnly: true' — cookies accessible to JavaScript",
                                 node,
                                 src,
@@ -1009,6 +889,7 @@ impl Rule for ExpressCookieNoHttpOnly {
             }
         });
         findings
+
     }
 }
 
@@ -1016,24 +897,15 @@ impl Rule for ExpressCookieNoHttpOnly {
 
 pub struct ExpressCookieNoSameSite;
 
-impl Rule for ExpressCookieNoSameSite {
-    fn id(&self) -> &str {
-        "js/express-cookie-no-samesite"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-352")
-    }
-    fn description(&self) -> &str {
-        "Cookie configuration missing sameSite protection"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    ExpressCookieNoSameSite,
+    id = "js/express-cookie-no-samesite",
+    severity = Severity::Medium,
+    cwe = Some("CWE-352"),
+    description = "Cookie configuration missing sameSite protection",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "pair" {
@@ -1054,9 +926,9 @@ impl Rule for ExpressCookieNoSameSite {
                             || obj_text.contains("sameSite:false");
                         if !has_same_site || none_mode {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 "Cookie configuration missing a safe sameSite setting — set sameSite to 'lax' or 'strict'",
                                 node,
                                 src,
@@ -1067,6 +939,7 @@ impl Rule for ExpressCookieNoSameSite {
             }
         });
         findings
+
     }
 }
 
@@ -1074,24 +947,15 @@ impl Rule for ExpressCookieNoSameSite {
 
 pub struct ExpressSessionSaveUninitializedTrue;
 
-impl Rule for ExpressSessionSaveUninitializedTrue {
-    fn id(&self) -> &str {
-        "js/express-session-saveuninitialized-true"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-359")
-    }
-    fn description(&self) -> &str {
-        "express-session configured with saveUninitialized: true"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    ExpressSessionSaveUninitializedTrue,
+    id = "js/express-session-saveuninitialized-true",
+    severity = Severity::Medium,
+    cwe = Some("CWE-359"),
+    description = "express-session configured with saveUninitialized: true",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() != "pair" {
@@ -1110,9 +974,9 @@ impl Rule for ExpressSessionSaveUninitializedTrue {
             let value_text = &src[value.byte_range()];
             if key_inner == "saveUninitialized" && value_text == "true" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "express-session saveUninitialized: true stores sessions before consent or login state is established",
                     node,
                     src,
@@ -1120,6 +984,7 @@ impl Rule for ExpressSessionSaveUninitializedTrue {
             }
         });
         findings
+
     }
 }
 
@@ -1127,24 +992,15 @@ impl Rule for ExpressSessionSaveUninitializedTrue {
 
 pub struct ExpressSessionResaveTrue;
 
-impl Rule for ExpressSessionResaveTrue {
-    fn id(&self) -> &str {
-        "js/express-session-resave-true"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-384")
-    }
-    fn description(&self) -> &str {
-        "express-session configured with resave: true"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    ExpressSessionResaveTrue,
+    id = "js/express-session-resave-true",
+    severity = Severity::Medium,
+    cwe = Some("CWE-384"),
+    description = "express-session configured with resave: true",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() != "pair" {
@@ -1163,9 +1019,9 @@ impl Rule for ExpressSessionResaveTrue {
             let value_text = &src[value.byte_range()];
             if key_inner == "resave" && value_text == "true" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "express-session resave: true can overwrite sessions unnecessarily — prefer resave: false unless your store requires it",
                     node,
                     src,
@@ -1173,6 +1029,7 @@ impl Rule for ExpressSessionResaveTrue {
             }
         });
         findings
+
     }
 }
 
@@ -1180,24 +1037,15 @@ impl Rule for ExpressSessionResaveTrue {
 
 pub struct ExpressDirectResponseWrite;
 
-impl Rule for ExpressDirectResponseWrite {
-    fn id(&self) -> &str {
-        "js/express-direct-response-write"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-79")
-    }
-    fn description(&self) -> &str {
-        "XSS via direct response write with user input"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    ExpressDirectResponseWrite,
+    id = "js/express-direct-response-write",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "XSS via direct response write with user input",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         // Match user-controlled input objects
         let user_input_re = Regex::new(r"^req\.(params|query|body|headers)(\b|\[|\.)").unwrap();
@@ -1249,9 +1097,9 @@ impl Rule for ExpressDirectResponseWrite {
                                         let arg_text = &src[arg.byte_range()];
                                         if user_input_re.is_match(arg_text.trim()) {
                                             findings.push(make_finding(
-                                                self.id(),
-                                                self.severity(),
-                                                self.cwe(),
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
                                                 &format!(
                                                     "res.{}() called with user input — risk of reflected XSS, sanitize before sending",
                                                     prop_text
@@ -1270,6 +1118,7 @@ impl Rule for ExpressDirectResponseWrite {
             }
         });
         findings
+
     }
 }
 
@@ -1277,24 +1126,15 @@ impl Rule for ExpressDirectResponseWrite {
 
 pub struct JwtHardcodedSecret;
 
-impl Rule for JwtHardcodedSecret {
-    fn id(&self) -> &str {
-        "js/jwt-hardcoded-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "JWT signing or verification with a hardcoded secret"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    JwtHardcodedSecret,
+    id = "js/jwt-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "JWT signing or verification with a hardcoded secret",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1331,9 +1171,9 @@ impl Rule for JwtHardcodedSecret {
             }
 
             findings.push(make_finding(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 "JWT secret is hardcoded — load signing keys from environment or a secrets manager",
                 node,
                 src,
@@ -1341,6 +1181,7 @@ impl Rule for JwtHardcodedSecret {
         });
 
         findings
+
     }
 }
 
@@ -1348,24 +1189,15 @@ impl Rule for JwtHardcodedSecret {
 
 pub struct JwtNoneAlgorithm;
 
-impl Rule for JwtNoneAlgorithm {
-    fn id(&self) -> &str {
-        "js/jwt-none-algorithm"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-347")
-    }
-    fn description(&self) -> &str {
-        "JWT configured to use the 'none' algorithm"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    JwtNoneAlgorithm,
+    id = "js/jwt-none-algorithm",
+    severity = Severity::High,
+    cwe = Some("CWE-347"),
+    description = "JWT configured to use the 'none' algorithm",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1409,9 +1241,9 @@ impl Rule for JwtNoneAlgorithm {
             }
 
             findings.push(make_finding(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 "JWT configured with algorithm 'none' — require a signed algorithm such as HS256 or RS256",
                 node,
                 src,
@@ -1419,6 +1251,7 @@ impl Rule for JwtNoneAlgorithm {
         });
 
         findings
+
     }
 }
 
@@ -1426,24 +1259,15 @@ impl Rule for JwtNoneAlgorithm {
 
 pub struct JwtIgnoreExpiration;
 
-impl Rule for JwtIgnoreExpiration {
-    fn id(&self) -> &str {
-        "js/jwt-ignore-expiration"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-613")
-    }
-    fn description(&self) -> &str {
-        "JWT verification configured to ignore token expiration"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    JwtIgnoreExpiration,
+    id = "js/jwt-ignore-expiration",
+    severity = Severity::High,
+    cwe = Some("CWE-613"),
+    description = "JWT verification configured to ignore token expiration",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1477,9 +1301,9 @@ impl Rule for JwtIgnoreExpiration {
             }
 
             findings.push(make_finding(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 "JWT verification ignores expiration — reject expired tokens instead of setting ignoreExpiration: true",
                 node,
                 src,
@@ -1487,6 +1311,7 @@ impl Rule for JwtIgnoreExpiration {
         });
 
         findings
+
     }
 }
 
@@ -1494,24 +1319,15 @@ impl Rule for JwtIgnoreExpiration {
 
 pub struct JwtDecodeWithoutVerify;
 
-impl Rule for JwtDecodeWithoutVerify {
-    fn id(&self) -> &str {
-        "js/jwt-decode-without-verify"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-347")
-    }
-    fn description(&self) -> &str {
-        "JWT decoded without signature verification"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    JwtDecodeWithoutVerify,
+    id = "js/jwt-decode-without-verify",
+    severity = Severity::High,
+    cwe = Some("CWE-347"),
+    description = "JWT decoded without signature verification",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1528,9 +1344,9 @@ impl Rule for JwtDecodeWithoutVerify {
             }
 
             findings.push(make_finding(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 "JWT decoded without verification — use jwt.verify() when authenticity matters",
                 node,
                 src,
@@ -1538,6 +1354,7 @@ impl Rule for JwtDecodeWithoutVerify {
         });
 
         findings
+
     }
 }
 
@@ -1545,24 +1362,15 @@ impl Rule for JwtDecodeWithoutVerify {
 
 pub struct JwtVerifyMissingAlgorithms;
 
-impl Rule for JwtVerifyMissingAlgorithms {
-    fn id(&self) -> &str {
-        "js/jwt-verify-missing-algorithms"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-347")
-    }
-    fn description(&self) -> &str {
-        "JWT verification without an explicit algorithms allowlist"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    JwtVerifyMissingAlgorithms,
+    id = "js/jwt-verify-missing-algorithms",
+    severity = Severity::High,
+    cwe = Some("CWE-347"),
+    description = "JWT verification without an explicit algorithms allowlist",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1584,9 +1392,9 @@ impl Rule for JwtVerifyMissingAlgorithms {
 
             let Some(options_arg) = args.named_child(2) else {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "JWT verification does not restrict allowed algorithms — pass an explicit algorithms allowlist",
                     node,
                     src,
@@ -1601,9 +1409,9 @@ impl Rule for JwtVerifyMissingAlgorithms {
             let options_text = &src[options_arg.byte_range()];
             if !options_text.contains("algorithms") {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "JWT verification does not restrict allowed algorithms — pass an explicit algorithms allowlist",
                     node,
                     src,
@@ -1612,6 +1420,7 @@ impl Rule for JwtVerifyMissingAlgorithms {
         });
 
         findings
+
     }
 }
 
@@ -1619,24 +1428,15 @@ impl Rule for JwtVerifyMissingAlgorithms {
 
 pub struct NoCorsStar;
 
-impl Rule for NoCorsStar {
-    fn id(&self) -> &str {
-        "js/no-cors-star"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-942")
-    }
-    fn description(&self) -> &str {
-        "CORS misconfiguration allowing all origins"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoCorsStar,
+    id = "js/no-cors-star",
+    severity = Severity::Medium,
+    cwe = Some("CWE-942"),
+    description = "CORS misconfiguration allowing all origins",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: setHeader("Access-Control-Allow-Origin", "*")
@@ -1663,9 +1463,9 @@ impl Rule for NoCorsStar {
                                             && val_inner == "*"
                                         {
                                             findings.push(make_finding(
-                                                self.id(),
-                                                self.severity(),
-                                                self.cwe(),
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
                                                 "Access-Control-Allow-Origin set to '*' — restrict to specific origins",
                                                 node,
                                                 src,
@@ -1692,9 +1492,9 @@ impl Rule for NoCorsStar {
                         let val_inner = val_text.trim_matches(|c| c == '"' || c == '\'');
                         if val_inner == "*" {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 "CORS origin set to '*' — restrict to specific origins",
                                 node,
                                 src,
@@ -1705,6 +1505,7 @@ impl Rule for NoCorsStar {
             }
         });
         findings
+
     }
 }
 
@@ -1712,24 +1513,15 @@ impl Rule for NoCorsStar {
 
 pub struct NoUnsafeFormatString;
 
-impl Rule for NoUnsafeFormatString {
-    fn id(&self) -> &str {
-        "js/no-unsafe-format-string"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-134")
-    }
-    fn description(&self) -> &str {
-        "Template literal with variables in console/logging function may enable log injection"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoUnsafeFormatString,
+    id = "js/no-unsafe-format-string",
+    severity = Severity::Medium,
+    cwe = Some("CWE-134"),
+    description = "Template literal with variables in console/logging function may enable log injection",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1760,9 +1552,9 @@ impl Rule for NoUnsafeFormatString {
                                     }
                                     if has_interpolation {
                                         findings.push(make_finding(
-                                            self.id(),
-                                            self.severity(),
-                                            self.cwe(),
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
                                             "Template literal with variables in logging function — user-controlled values may forge log entries",
                                             node,
                                             src,
@@ -1776,6 +1568,7 @@ impl Rule for NoUnsafeFormatString {
             }
         });
         findings
+
     }
 }
 
@@ -1783,24 +1576,15 @@ impl Rule for NoUnsafeFormatString {
 
 pub struct NoUnsafeDeserialization;
 
-impl Rule for NoUnsafeDeserialization {
-    fn id(&self) -> &str {
-        "js/no-unsafe-deserialization"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-502")
-    }
-    fn description(&self) -> &str {
-        "Unsafe deserialization of untrusted data"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    NoUnsafeDeserialization,
+    id = "js/no-unsafe-deserialization",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Unsafe deserialization of untrusted data",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -1820,9 +1604,9 @@ impl Rule for NoUnsafeDeserialization {
                 || func_text == "funcster.deepDeserialize"
             {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "Avoid deserializing untrusted data with node-serialize. Use JSON.parse() for structured data.",
                     node,
                     src,
@@ -1845,9 +1629,9 @@ impl Rule for NoUnsafeDeserialization {
                     }
                 }
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "Avoid deserializing untrusted data with node-serialize. Use JSON.parse() for structured data.",
                     node,
                     src,
@@ -1856,6 +1640,7 @@ impl Rule for NoUnsafeDeserialization {
         });
 
         findings
+
     }
 }
 
@@ -1973,42 +1758,25 @@ impl TaintXssInnerHtml {
     }
 }
 
-impl Rule for TaintXssInnerHtml {
-    fn id(&self) -> &str {
-        "js/taint-xss-innerhtml"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-79")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches innerHTML or document.write sink"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    TaintXssInnerHtml,
+    id = "js/taint-xss-innerhtml",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "Untrusted input reaches innerHTML or document.write sink",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = JsTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Use `DOMPurify.sanitize()` or `textContent` instead of `innerHTML`/`document.write`"),
         };
         map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!("{} reaches {} — untrusted input can lead to XSS", src, sink)
         })
+
     }
 }
 
@@ -2056,42 +1824,25 @@ impl TaintSqlInjection {
     }
 }
 
-impl Rule for TaintSqlInjection {
-    fn id(&self) -> &str {
-        "js/taint-sql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-89")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches a SQL execute sink — possible SQL injection"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    TaintSqlInjection,
+    id = "js/taint-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Untrusted input reaches a SQL execute sink — possible SQL injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = JsTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Use parameterized queries: `db.query(\"SELECT * FROM users WHERE name = $1\", [name])`"),
         };
         map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!("{} reaches {} — untrusted input can inject SQL", src, sink)
         })
+
     }
 }
 
@@ -2122,37 +1873,19 @@ impl TaintEval {
     }
 }
 
-impl Rule for TaintEval {
-    fn id(&self) -> &str {
-        "js/taint-eval"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-95")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches eval or Function — arbitrary code execution"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    TaintEval,
+    id = "js/taint-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "Untrusted input reaches eval or Function — arbitrary code execution",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = JsTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Remove `eval()`/`new Function()` and use safe alternatives like `JSON.parse()`",
             ),
@@ -2163,6 +1896,7 @@ impl Rule for TaintEval {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2217,37 +1951,19 @@ impl TaintCommandInjection {
     }
 }
 
-impl Rule for TaintCommandInjection {
-    fn id(&self) -> &str {
-        "js/taint-command-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-78")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches a command execution sink — OS command injection"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    TaintCommandInjection,
+    id = "js/taint-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Untrusted input reaches a command execution sink — OS command injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = JsTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Pass arguments as an array to `child_process.execFile()` instead of building a shell string"),
         };
         map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
@@ -2256,6 +1972,7 @@ impl Rule for TaintCommandInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2321,37 +2038,19 @@ impl TaintSsrf {
     }
 }
 
-impl Rule for TaintSsrf {
-    fn id(&self) -> &str {
-        "js/taint-ssrf"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-918")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches an HTTP request sink — possible SSRF"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    TaintSsrf,
+    id = "js/taint-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Untrusted input reaches an HTTP request sink — possible SSRF",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = JsTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Validate URLs against an allowlist of permitted hosts before making requests",
             ),
@@ -2362,6 +2061,7 @@ impl Rule for TaintSsrf {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2415,37 +2115,19 @@ impl TaintSsti {
     }
 }
 
-impl Rule for TaintSsti {
-    fn id(&self) -> &str {
-        "js/taint-ssti"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-1336")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches a template rendering sink — possible server-side template injection"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    TaintSsti,
+    id = "js/taint-ssti",
+    severity = Severity::Critical,
+    cwe = Some("CWE-1336"),
+    description = "Untrusted input reaches a template rendering sink — possible server-side template injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = JsTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Use pre-compiled templates with auto-escaping instead of rendering user input as template strings"),
         };
         map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
@@ -2454,6 +2136,7 @@ impl Rule for TaintSsti {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2491,37 +2174,19 @@ impl TaintXpathInjection {
     }
 }
 
-impl Rule for TaintXpathInjection {
-    fn id(&self) -> &str {
-        "js/taint-xpath-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-643")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches an XPath evaluation sink — possible XPath injection"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    TaintXpathInjection,
+    id = "js/taint-xpath-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-643"),
+    description = "Untrusted input reaches an XPath evaluation sink — possible XPath injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = JsTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Validate and sanitize user input before building XPath expressions",
             ),
@@ -2532,6 +2197,7 @@ impl Rule for TaintXpathInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2577,37 +2243,19 @@ impl TaintLdapInjection {
     }
 }
 
-impl Rule for TaintLdapInjection {
-    fn id(&self) -> &str {
-        "js/taint-ldap-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-90")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches an LDAP operation sink — possible LDAP injection"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    TaintLdapInjection,
+    id = "js/taint-ldap-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-90"),
+    description = "Untrusted input reaches an LDAP operation sink — possible LDAP injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = JsTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Use ldap-escape or sanitize special LDAP characters before building filter strings"),
         };
         map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
@@ -2616,6 +2264,7 @@ impl Rule for TaintLdapInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2654,37 +2303,19 @@ impl TaintLogInjection {
     }
 }
 
-impl Rule for TaintLogInjection {
-    fn id(&self) -> &str {
-        "js/taint-log-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-117")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches a logging sink — possible log injection"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    TaintLogInjection,
+    id = "js/taint-log-injection",
+    severity = Severity::Medium,
+    cwe = Some("CWE-117"),
+    description = "Untrusted input reaches a logging sink — possible log injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = JsTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Sanitize user input before logging — strip newlines and control characters",
             ),
@@ -2695,6 +2326,7 @@ impl Rule for TaintLogInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2724,37 +2356,19 @@ impl TaintXxe {
     }
 }
 
-impl Rule for TaintXxe {
-    fn id(&self) -> &str {
-        "js/taint-xxe"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-611")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches an XML parser — possible XML External Entity (XXE) injection"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    TaintXxe,
+    id = "js/taint-xxe",
+    severity = Severity::High,
+    cwe = Some("CWE-611"),
+    description = "Untrusted input reaches an XML parser — possible XML External Entity (XXE) injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = JsTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Disable external entity resolution in XML parser configuration"),
         };
         map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
@@ -2763,6 +2377,7 @@ impl Rule for TaintXxe {
                 src, sink
             )
         })
+
     }
 }
 
@@ -2830,37 +2445,19 @@ impl TaintNosqlInjection {
     }
 }
 
-impl Rule for TaintNosqlInjection {
-    fn id(&self) -> &str {
-        "js/taint-nosql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-943")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches a MongoDB query sink — possible NoSQL injection"
-    }
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
+impl_rule! {
+    TaintNosqlInjection,
+    id = "js/taint-nosql-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-943"),
+    description = "Untrusted input reaches a MongoDB query sink — possible NoSQL injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = JsTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Validate and sanitize user input before using in MongoDB queries. Use mongo-sanitize to strip $ operators."),
         };
         map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
@@ -2869,6 +2466,7 @@ impl Rule for TaintNosqlInjection {
                 src, sink
             )
         })
+
     }
 }
 

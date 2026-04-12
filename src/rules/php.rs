@@ -1,30 +1,21 @@
+use crate::impl_rule;
 use crate::rules::common::{make_finding, walk_tree};
-use crate::rules::Rule;
-use crate::{Finding, Language, Severity};
+use crate::{Language, Severity};
 use regex::Regex;
 
 // ─── Rule 1: no-eval ──────────────────────────────────────────────────────────
 
 pub struct NoEval;
 
-impl Rule for NoEval {
-    fn id(&self) -> &str {
-        "php/no-eval"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-95")
-    }
-    fn description(&self) -> &str {
-        "Use of eval() allows arbitrary code execution"
-    }
-    fn language(&self) -> Language {
-        Language::Php
-    }
+impl_rule! {
+    NoEval,
+    id = "php/no-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "Use of eval() allows arbitrary code execution",
+    language = Language::Php,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -33,9 +24,9 @@ impl Rule for NoEval {
                     let func_text = &src[func.byte_range()];
                     if func_text == "eval" {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "eval() allows arbitrary code execution — avoid dynamic code evaluation",
                             node,
                             src,
@@ -45,6 +36,7 @@ impl Rule for NoEval {
             }
         });
         findings
+
     }
 }
 
@@ -52,24 +44,15 @@ impl Rule for NoEval {
 
 pub struct NoCommandInjection;
 
-impl Rule for NoCommandInjection {
-    fn id(&self) -> &str {
-        "php/no-command-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-78")
-    }
-    fn description(&self) -> &str {
-        "Potential command injection via shell execution function"
-    }
-    fn language(&self) -> Language {
-        Language::Php
-    }
+impl_rule! {
+    NoCommandInjection,
+    id = "php/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via shell execution function",
+    language = Language::Php,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -82,9 +65,9 @@ impl Rule for NoCommandInjection {
                         "exec" | "system" | "passthru" | "shell_exec" | "popen" | "proc_open"
                     ) {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "{}() executes shell commands — risk of command injection",
                                 func_text
@@ -99,9 +82,9 @@ impl Rule for NoCommandInjection {
             // Detect backtick execution
             if node.kind() == "shell_command_expression" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "Backtick operator executes shell commands — risk of command injection",
                     node,
                     src,
@@ -109,6 +92,7 @@ impl Rule for NoCommandInjection {
             }
         });
         findings
+
     }
 }
 
@@ -116,24 +100,15 @@ impl Rule for NoCommandInjection {
 
 pub struct NoSqlInjection;
 
-impl Rule for NoSqlInjection {
-    fn id(&self) -> &str {
-        "php/no-sql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-89")
-    }
-    fn description(&self) -> &str {
-        "Potential SQL injection via string interpolation or concatenation"
-    }
-    fn language(&self) -> Language {
-        Language::Php
-    }
+impl_rule! {
+    NoSqlInjection,
+    id = "php/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via string interpolation or concatenation",
+    language = Language::Php,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let sql_funcs = ["mysqli_query", "pg_query", "mysql_query"];
 
@@ -147,9 +122,9 @@ impl Rule for NoSqlInjection {
                             let arg_text = &src[args.byte_range()];
                             if Self::has_interpolation_or_concat(args) {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     &format!(
                                         "{}() with dynamic query — use parameterized queries",
                                         func_text
@@ -160,9 +135,9 @@ impl Rule for NoSqlInjection {
                             } else if arg_text.contains('$') || arg_text.contains('.') {
                                 // Rough heuristic for interpolated or concatenated strings
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     &format!(
                                         "{}() with dynamic query — use parameterized queries",
                                         func_text
@@ -184,9 +159,9 @@ impl Rule for NoSqlInjection {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if Self::has_interpolation_or_concat(args) {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     "->query() with dynamic query — use parameterized queries",
                                     node,
                                     src,
@@ -198,6 +173,7 @@ impl Rule for NoSqlInjection {
             }
         });
         findings
+
     }
 }
 
@@ -230,24 +206,15 @@ impl NoSqlInjection {
 
 pub struct NoUnserialize;
 
-impl Rule for NoUnserialize {
-    fn id(&self) -> &str {
-        "php/no-unserialize"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-502")
-    }
-    fn description(&self) -> &str {
-        "Use of unserialize() on untrusted data can lead to object injection"
-    }
-    fn language(&self) -> Language {
-        Language::Php
-    }
+impl_rule! {
+    NoUnserialize,
+    id = "php/no-unserialize",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Use of unserialize() on untrusted data can lead to object injection",
+    language = Language::Php,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -256,9 +223,9 @@ impl Rule for NoUnserialize {
                     let func_text = &src[func.byte_range()];
                     if func_text == "unserialize" {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "unserialize() on untrusted data can lead to object injection — use json_decode instead",
                             node,
                             src,
@@ -268,6 +235,7 @@ impl Rule for NoUnserialize {
             }
         });
         findings
+
     }
 }
 
@@ -275,24 +243,15 @@ impl Rule for NoUnserialize {
 
 pub struct NoFileInclusion;
 
-impl Rule for NoFileInclusion {
-    fn id(&self) -> &str {
-        "php/no-file-inclusion"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-98")
-    }
-    fn description(&self) -> &str {
-        "Dynamic file inclusion with variable argument enables remote/local file inclusion"
-    }
-    fn language(&self) -> Language {
-        Language::Php
-    }
+impl_rule! {
+    NoFileInclusion,
+    id = "php/no-file-inclusion",
+    severity = Severity::Critical,
+    cwe = Some("CWE-98"),
+    description = "Dynamic file inclusion with variable argument enables remote/local file inclusion",
+    language = Language::Php,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -309,9 +268,9 @@ impl Rule for NoFileInclusion {
                 if has_variable || text.contains('$') {
                     let keyword = node.kind().replace("_expression", "").replace('_', " ");
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         &format!(
                             "{} with variable argument — risk of file inclusion attack",
                             keyword
@@ -323,6 +282,7 @@ impl Rule for NoFileInclusion {
             }
         });
         findings
+
     }
 }
 
@@ -348,24 +308,15 @@ impl NoFileInclusion {
 
 pub struct NoWeakCrypto;
 
-impl Rule for NoWeakCrypto {
-    fn id(&self) -> &str {
-        "php/no-weak-crypto"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-327")
-    }
-    fn description(&self) -> &str {
-        "Use of weak cryptographic hash (MD5/SHA1)"
-    }
-    fn language(&self) -> Language {
-        Language::Php
-    }
+impl_rule! {
+    NoWeakCrypto,
+    id = "php/no-weak-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of weak cryptographic hash (MD5/SHA1)",
+    language = Language::Php,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -375,9 +326,9 @@ impl Rule for NoWeakCrypto {
                     if func_text == "md5" || func_text == "sha1" {
                         let algo = if func_text == "md5" { "MD5" } else { "SHA1" };
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "{}() is cryptographically weak — use hash('sha256', ...) or stronger",
                                 algo
@@ -390,6 +341,7 @@ impl Rule for NoWeakCrypto {
             }
         });
         findings
+
     }
 }
 
@@ -397,24 +349,15 @@ impl Rule for NoWeakCrypto {
 
 pub struct NoHardcodedSecret;
 
-impl Rule for NoHardcodedSecret {
-    fn id(&self) -> &str {
-        "php/no-hardcoded-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "Hardcoded secret or credential detected"
-    }
-    fn language(&self) -> Language {
-        Language::Php
-    }
+impl_rule! {
+    NoHardcodedSecret,
+    id = "php/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::Php,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let secret_pattern = Regex::new(r"(?i)(password|secret|api_?key|token)").unwrap();
 
@@ -433,9 +376,9 @@ impl Rule for NoHardcodedSecret {
                                 let inner = val.trim_matches(|c| c == '"' || c == '\'');
                                 if inner.len() >= 4 {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "Hardcoded secret in '{}' — use environment variables",
                                             left_text
@@ -451,6 +394,7 @@ impl Rule for NoHardcodedSecret {
             }
         });
         findings
+
     }
 }
 
@@ -458,24 +402,15 @@ impl Rule for NoHardcodedSecret {
 
 pub struct NoSsrf;
 
-impl Rule for NoSsrf {
-    fn id(&self) -> &str {
-        "php/no-ssrf"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-918")
-    }
-    fn description(&self) -> &str {
-        "Potential SSRF via file_get_contents or curl_init with variable URL"
-    }
-    fn language(&self) -> Language {
-        Language::Php
-    }
+impl_rule! {
+    NoSsrf,
+    id = "php/no-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Potential SSRF via file_get_contents or curl_init with variable URL",
+    language = Language::Php,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -488,9 +423,9 @@ impl Rule for NoSsrf {
                                 // Flag if the argument is not a string literal
                                 if first_arg.kind() != "string" {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "{}() called with dynamic URL — validate and allowlist target hosts to prevent SSRF",
                                             func_text
@@ -506,6 +441,7 @@ impl Rule for NoSsrf {
             }
         });
         findings
+
     }
 }
 
@@ -513,24 +449,15 @@ impl Rule for NoSsrf {
 
 pub struct NoExtract;
 
-impl Rule for NoExtract {
-    fn id(&self) -> &str {
-        "php/no-extract"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-621")
-    }
-    fn description(&self) -> &str {
-        "Use of extract() can overwrite existing variables"
-    }
-    fn language(&self) -> Language {
-        Language::Php
-    }
+impl_rule! {
+    NoExtract,
+    id = "php/no-extract",
+    severity = Severity::High,
+    cwe = Some("CWE-621"),
+    description = "Use of extract() can overwrite existing variables",
+    language = Language::Php,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -539,9 +466,9 @@ impl Rule for NoExtract {
                     let func_text = &src[func.byte_range()];
                     if func_text == "extract" {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "extract() imports variables into the current scope — risk of variable overwrite",
                             node,
                             src,
@@ -551,6 +478,7 @@ impl Rule for NoExtract {
             }
         });
         findings
+
     }
 }
 
@@ -558,24 +486,15 @@ impl Rule for NoExtract {
 
 pub struct NoPregEval;
 
-impl Rule for NoPregEval {
-    fn id(&self) -> &str {
-        "php/no-preg-eval"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-95")
-    }
-    fn description(&self) -> &str {
-        "preg_replace with /e modifier allows arbitrary code execution"
-    }
-    fn language(&self) -> Language {
-        Language::Php
-    }
+impl_rule! {
+    NoPregEval,
+    id = "php/no-preg-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "preg_replace with /e modifier allows arbitrary code execution",
+    language = Language::Php,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let e_modifier = Regex::new(r#"['"][^'"]*/.*/[a-z]*e[a-z]*['"]"#).unwrap();
 
@@ -589,9 +508,9 @@ impl Rule for NoPregEval {
                                 let arg_text = &src[first_arg.byte_range()];
                                 if e_modifier.is_match(arg_text) {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         "preg_replace() with /e modifier executes code — use preg_replace_callback instead",
                                         node,
                                         src,
@@ -604,5 +523,6 @@ impl Rule for NoPregEval {
             }
         });
         findings
+
     }
 }

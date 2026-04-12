@@ -20,6 +20,97 @@ pub mod swift;
 use crate::{Finding, Language, Severity};
 use std::path::Path;
 
+/// Macro to reduce boilerplate in `impl Rule for …` blocks.
+///
+/// # Variant 1 — rules that only implement `check`:
+///
+/// ```ignore
+/// impl_rule! {
+///     SomeRule,
+///     id = "py/some-rule",
+///     severity = Severity::High,
+///     cwe = Some("CWE-123"),
+///     description = "Some description",
+///     language = Language::Python,
+///     fn check(&self, source, tree) {
+///         // …body using `self`, `source`, `tree`…
+///     }
+/// }
+/// ```
+///
+/// # Variant 2 — rules that implement `check_with_context` (auto-generates
+///   a delegating `check`):
+///
+/// ```ignore
+/// impl_rule! {
+///     SomeRule,
+///     id = "py/some-rule",
+///     severity = Severity::High,
+///     cwe = Some("CWE-123"),
+///     description = "Some description",
+///     language = Language::Python,
+///     fn check_with_context(&self, source, tree, ctx) {
+///         // …body using `self`, `source`, `tree`, `ctx`…
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! impl_rule {
+    // ── Variant 1: check only ──────────────────────────────────────────────
+    (
+        $struct:ty,
+        id = $id:expr,
+        severity = $sev:expr,
+        cwe = $cwe:expr,
+        description = $desc:expr,
+        language = $lang:expr,
+        fn check($self_:ident, $src:ident, $tree:ident) { $($check_body:tt)* }
+    ) => {
+        impl $crate::rules::Rule for $struct {
+            fn id(&self) -> &str { $id }
+            fn severity(&self) -> $crate::Severity { $sev }
+            fn cwe(&self) -> Option<&str> { $cwe }
+            fn description(&self) -> &str { $desc }
+            fn language(&self) -> $crate::Language { $lang }
+            fn check(&self, $src: &str, $tree: &tree_sitter::Tree) -> Vec<$crate::Finding> {
+                let $self_ = self;
+                $($check_body)*
+            }
+        }
+    };
+
+    // ── Variant 2: check_with_context (auto-generates delegating check) ──
+    (
+        $struct:ty,
+        id = $id:expr,
+        severity = $sev:expr,
+        cwe = $cwe:expr,
+        description = $desc:expr,
+        language = $lang:expr,
+        fn check_with_context($self_:ident, $src:ident, $tree:ident, $ctx:ident) { $($check_body:tt)* }
+    ) => {
+        impl $crate::rules::Rule for $struct {
+            fn id(&self) -> &str { $id }
+            fn severity(&self) -> $crate::Severity { $sev }
+            fn cwe(&self) -> Option<&str> { $cwe }
+            fn description(&self) -> &str { $desc }
+            fn language(&self) -> $crate::Language { $lang }
+            fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<$crate::Finding> {
+                self.check_with_context(source, tree, &$crate::rules::FileContext::default())
+            }
+            fn check_with_context(
+                &self,
+                $src: &str,
+                $tree: &tree_sitter::Tree,
+                $ctx: &$crate::rules::FileContext<'_>,
+            ) -> Vec<$crate::Finding> {
+                let $self_ = self;
+                $($check_body)*
+            }
+        }
+    };
+}
+
 /// Per-file analysis context shared across all rules running on a single file.
 ///
 /// Computed once after parsing in the scanner and handed to each rule via

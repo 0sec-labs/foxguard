@@ -1,30 +1,21 @@
+use crate::impl_rule;
 use crate::rules::common::{make_finding, make_finding_from_offsets, walk_tree};
-use crate::rules::Rule;
-use crate::{Finding, Language, Severity};
+use crate::{Language, Severity};
 use regex::Regex;
 
 // ─── Rule 1: no-hardcoded-secret ────────────────────────────────────────────
 
 pub struct NoHardcodedSecret;
 
-impl Rule for NoHardcodedSecret {
-    fn id(&self) -> &str {
-        "swift/no-hardcoded-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "Hardcoded secret or credential detected"
-    }
-    fn language(&self) -> Language {
-        Language::Swift
-    }
+impl_rule! {
+    NoHardcodedSecret,
+    id = "swift/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::Swift,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let mut reported_lines = std::collections::HashSet::new();
         let secret_pattern =
@@ -56,9 +47,9 @@ impl Rule for NoHardcodedSecret {
                             let line = node.start_position().row;
                             if inner.len() >= 4 && reported_lines.insert(line) {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     &format!(
                                         "Hardcoded secret in '{}' — use environment variables or Keychain",
                                         name
@@ -91,9 +82,9 @@ impl Rule for NoHardcodedSecret {
                                 let inner = val.trim_matches('"');
                                 if inner.len() >= 4 && reported_lines.insert(line) {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "Hardcoded secret in '{}' — use environment variables or Keychain",
                                             name
@@ -110,6 +101,7 @@ impl Rule for NoHardcodedSecret {
             }
         });
         findings
+
     }
 }
 
@@ -117,24 +109,15 @@ impl Rule for NoHardcodedSecret {
 
 pub struct NoCommandInjection;
 
-impl Rule for NoCommandInjection {
-    fn id(&self) -> &str {
-        "swift/no-command-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-78")
-    }
-    fn description(&self) -> &str {
-        "Potential command injection via Process or NSTask with dynamic arguments"
-    }
-    fn language(&self) -> Language {
-        Language::Swift
-    }
+impl_rule! {
+    NoCommandInjection,
+    id = "swift/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via Process or NSTask with dynamic arguments",
+    language = Language::Swift,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -142,9 +125,9 @@ impl Rule for NoCommandInjection {
                 let text = &src[node.byte_range()];
                 if text.starts_with("Process(") || text.starts_with("NSTask(") {
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         "Process/NSTask created — ensure arguments are not user-controlled to prevent command injection",
                         node,
                         src,
@@ -159,9 +142,9 @@ impl Rule for NoCommandInjection {
                     && !text.contains('"')
                 {
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         "Process arguments set with dynamic value — risk of command injection",
                         node,
                         src,
@@ -170,6 +153,7 @@ impl Rule for NoCommandInjection {
             }
         });
         findings
+
     }
 }
 
@@ -177,24 +161,15 @@ impl Rule for NoCommandInjection {
 
 pub struct NoWeakCrypto;
 
-impl Rule for NoWeakCrypto {
-    fn id(&self) -> &str {
-        "swift/no-weak-crypto"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-327")
-    }
-    fn description(&self) -> &str {
-        "Use of weak cryptographic hash (MD5/SHA1)"
-    }
-    fn language(&self) -> Language {
-        Language::Swift
-    }
+impl_rule! {
+    NoWeakCrypto,
+    id = "swift/no-weak-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of weak cryptographic hash (MD5/SHA1)",
+    language = Language::Swift,
+    fn check(_self, source, _tree) {
 
-    fn check(&self, source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let pattern =
             Regex::new(r"\b(CC_MD5|CC_SHA1|\.md5|\.sha1|Insecure\.MD5|Insecure\.SHA1)\b").unwrap();
@@ -206,9 +181,9 @@ impl Rule for NoWeakCrypto {
                 "SHA1"
             };
             findings.push(make_finding_from_offsets(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 &format!(
                     "{} is cryptographically weak — use SHA-256 or stronger",
                     algo
@@ -219,6 +194,7 @@ impl Rule for NoWeakCrypto {
             ));
         }
         findings
+
     }
 }
 
@@ -226,24 +202,15 @@ impl Rule for NoWeakCrypto {
 
 pub struct NoInsecureTransport;
 
-impl Rule for NoInsecureTransport {
-    fn id(&self) -> &str {
-        "swift/no-insecure-transport"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-319")
-    }
-    fn description(&self) -> &str {
-        "Insecure HTTP URL detected — use HTTPS instead"
-    }
-    fn language(&self) -> Language {
-        Language::Swift
-    }
+impl_rule! {
+    NoInsecureTransport,
+    id = "swift/no-insecure-transport",
+    severity = Severity::High,
+    cwe = Some("CWE-319"),
+    description = "Insecure HTTP URL detected — use HTTPS instead",
+    language = Language::Swift,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -254,9 +221,9 @@ impl Rule for NoInsecureTransport {
                     && !text.contains("http://127.0.0.1")
                 {
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         "Insecure HTTP URL — use HTTPS to protect data in transit",
                         node,
                         src,
@@ -265,6 +232,7 @@ impl Rule for NoInsecureTransport {
             }
         });
         findings
+
     }
 }
 
@@ -272,24 +240,15 @@ impl Rule for NoInsecureTransport {
 
 pub struct NoEvalJs;
 
-impl Rule for NoEvalJs {
-    fn id(&self) -> &str {
-        "swift/no-eval-js"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-95")
-    }
-    fn description(&self) -> &str {
-        "WKWebView evaluateJavaScript with dynamic input enables code injection"
-    }
-    fn language(&self) -> Language {
-        Language::Swift
-    }
+impl_rule! {
+    NoEvalJs,
+    id = "swift/no-eval-js",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "WKWebView evaluateJavaScript with dynamic input enables code injection",
+    language = Language::Swift,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -302,9 +261,9 @@ impl Rule for NoEvalJs {
                         !text.contains("evaluateJavaScript(\"") || has_interpolation;
                     if is_variable_arg {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "evaluateJavaScript called with dynamic input — risk of JavaScript injection in WKWebView",
                             node,
                             src,
@@ -314,6 +273,7 @@ impl Rule for NoEvalJs {
             }
         });
         findings
+
     }
 }
 
@@ -321,24 +281,15 @@ impl Rule for NoEvalJs {
 
 pub struct NoSqlInjection;
 
-impl Rule for NoSqlInjection {
-    fn id(&self) -> &str {
-        "swift/no-sql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-89")
-    }
-    fn description(&self) -> &str {
-        "Potential SQL injection via string interpolation in SQLite queries"
-    }
-    fn language(&self) -> Language {
-        Language::Swift
-    }
+impl_rule! {
+    NoSqlInjection,
+    id = "swift/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via string interpolation in SQLite queries",
+    language = Language::Swift,
+    fn check(_self, source, _tree) {
 
-    fn check(&self, source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let sql_keywords =
             Regex::new(r"(?i)(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\s").unwrap();
@@ -349,9 +300,9 @@ impl Rule for NoSqlInjection {
             let text = matched.as_str();
             if sql_keywords.is_match(text) {
                 findings.push(make_finding_from_offsets(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "SQL query with string interpolation — use parameterized queries to prevent SQL injection",
                     source,
                     matched.start(),
@@ -367,9 +318,9 @@ impl Rule for NoSqlInjection {
         .unwrap();
         for matched in sql_concat.find_iter(source) {
             findings.push(make_finding_from_offsets(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 "SQL query built with string concatenation — use parameterized queries",
                 source,
                 matched.start(),
@@ -378,6 +329,7 @@ impl Rule for NoSqlInjection {
         }
 
         findings
+
     }
 }
 
@@ -385,24 +337,15 @@ impl Rule for NoSqlInjection {
 
 pub struct NoInsecureKeychain;
 
-impl Rule for NoInsecureKeychain {
-    fn id(&self) -> &str {
-        "swift/no-insecure-keychain"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-311")
-    }
-    fn description(&self) -> &str {
-        "Insecure Keychain accessibility level allows access when device is locked"
-    }
-    fn language(&self) -> Language {
-        Language::Swift
-    }
+impl_rule! {
+    NoInsecureKeychain,
+    id = "swift/no-insecure-keychain",
+    severity = Severity::High,
+    cwe = Some("CWE-311"),
+    description = "Insecure Keychain accessibility level allows access when device is locked",
+    language = Language::Swift,
+    fn check(_self, source, _tree) {
 
-    fn check(&self, source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let pattern =
             Regex::new(r"\b(kSecAttrAccessibleAlways|kSecAttrAccessibleAlwaysThisDeviceOnly)\b")
@@ -410,9 +353,9 @@ impl Rule for NoInsecureKeychain {
 
         for matched in pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 &format!(
                     "{} allows Keychain access when device is locked — use kSecAttrAccessibleWhenUnlocked",
                     matched.as_str()
@@ -423,6 +366,7 @@ impl Rule for NoInsecureKeychain {
             ));
         }
         findings
+
     }
 }
 
@@ -430,24 +374,15 @@ impl Rule for NoInsecureKeychain {
 
 pub struct NoTlsDisabled;
 
-impl Rule for NoTlsDisabled {
-    fn id(&self) -> &str {
-        "swift/no-tls-disabled"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-295")
-    }
-    fn description(&self) -> &str {
-        "TLS certificate validation disabled or weakened"
-    }
-    fn language(&self) -> Language {
-        Language::Swift
-    }
+impl_rule! {
+    NoTlsDisabled,
+    id = "swift/no-tls-disabled",
+    severity = Severity::High,
+    cwe = Some("CWE-295"),
+    description = "TLS certificate validation disabled or weakened",
+    language = Language::Swift,
+    fn check(_self, source, _tree) {
 
-    fn check(&self, source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         let patterns = [
@@ -468,9 +403,9 @@ impl Rule for NoTlsDisabled {
         for (pattern, msg) in &patterns {
             for matched in pattern.find_iter(source) {
                 findings.push(make_finding_from_offsets(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     msg,
                     source,
                     matched.start(),
@@ -479,6 +414,7 @@ impl Rule for NoTlsDisabled {
             }
         }
         findings
+
     }
 }
 
@@ -486,24 +422,15 @@ impl Rule for NoTlsDisabled {
 
 pub struct NoPathTraversal;
 
-impl Rule for NoPathTraversal {
-    fn id(&self) -> &str {
-        "swift/no-path-traversal"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-22")
-    }
-    fn description(&self) -> &str {
-        "Potential path traversal via FileManager with dynamic path"
-    }
-    fn language(&self) -> Language {
-        Language::Swift
-    }
+impl_rule! {
+    NoPathTraversal,
+    id = "swift/no-path-traversal",
+    severity = Severity::High,
+    cwe = Some("CWE-22"),
+    description = "Potential path traversal via FileManager with dynamic path",
+    language = Language::Swift,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let mut reported_lines = std::collections::HashSet::new();
 
@@ -531,9 +458,9 @@ impl Rule for NoPathTraversal {
                         let line = node.start_position().row;
                         if reported_lines.insert(line) {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 "FileManager operation with dynamic path — validate and sanitize to prevent path traversal",
                                 node,
                                 src,
@@ -545,6 +472,7 @@ impl Rule for NoPathTraversal {
         });
 
         findings
+
     }
 }
 
@@ -552,24 +480,15 @@ impl Rule for NoPathTraversal {
 
 pub struct NoSsrf;
 
-impl Rule for NoSsrf {
-    fn id(&self) -> &str {
-        "swift/no-ssrf"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-918")
-    }
-    fn description(&self) -> &str {
-        "Potential SSRF via URLSession or URL with dynamic input"
-    }
-    fn language(&self) -> Language {
-        Language::Swift
-    }
+impl_rule! {
+    NoSsrf,
+    id = "swift/no-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Potential SSRF via URLSession or URL with dynamic input",
+    language = Language::Swift,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let mut reported_lines = std::collections::HashSet::new();
 
@@ -586,9 +505,9 @@ impl Rule for NoSsrf {
                         let line = node.start_position().row;
                         if reported_lines.insert(line) {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 "URL(string:) called with dynamic value — validate and allowlist target hosts to prevent SSRF",
                                 node,
                                 src,
@@ -603,9 +522,9 @@ impl Rule for NoSsrf {
                     let line = node.start_position().row;
                     if !text.contains("\"http") && reported_lines.insert(line) {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "URLSession.dataTask called with dynamic URL — validate and allowlist target hosts to prevent SSRF",
                             node,
                             src,
@@ -615,5 +534,6 @@ impl Rule for NoSsrf {
             }
         });
         findings
+
     }
 }

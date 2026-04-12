@@ -1,10 +1,11 @@
+use crate::impl_rule;
 use crate::rules::common::AliasTable;
 use crate::rules::common::{get_source_line, make_finding, make_finding_from_offsets, walk_tree};
 use crate::rules::go_taint::{
     self, go_aliases_from_tree, go_taint_sources, NodeMatcher as GoNodeMatcher,
     TaintSpec as GoTaintSpec,
 };
-use crate::rules::{FileContext, Rule};
+use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
 use regex::Regex;
 
@@ -12,24 +13,15 @@ use regex::Regex;
 
 pub struct NoSqlInjection;
 
-impl Rule for NoSqlInjection {
-    fn id(&self) -> &str {
-        "go/no-sql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-89")
-    }
-    fn description(&self) -> &str {
-        "Potential SQL injection via string concatenation or fmt.Sprintf"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    NoSqlInjection,
+    id = "go/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via string concatenation or fmt.Sprintf",
+    language = Language::Go,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let sql_pattern =
             Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)").unwrap();
@@ -47,9 +39,9 @@ impl Rule for NoSqlInjection {
                             let left_text = &src[left.byte_range()];
                             if sql_pattern.is_match(left_text) {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     "SQL query built with string concatenation — use parameterized queries",
                                     node,
                                     src,
@@ -73,9 +65,9 @@ impl Rule for NoSqlInjection {
                                     let arg_text = &src[first_arg.byte_range()];
                                     if sql_pattern.is_match(arg_text) {
                                         findings.push(make_finding(
-                                            self.id(),
-                                            self.severity(),
-                                            self.cwe(),
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
                                             "SQL query built with fmt.Sprintf — use parameterized queries",
                                             node,
                                             src,
@@ -89,6 +81,7 @@ impl Rule for NoSqlInjection {
             }
         });
         findings
+
     }
 }
 
@@ -96,24 +89,15 @@ impl Rule for NoSqlInjection {
 
 pub struct NoCommandInjection;
 
-impl Rule for NoCommandInjection {
-    fn id(&self) -> &str {
-        "go/no-command-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-78")
-    }
-    fn description(&self) -> &str {
-        "Potential command injection via exec.Command with dynamic input"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    NoCommandInjection,
+    id = "go/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via exec.Command with dynamic input",
+    language = Language::Go,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -128,9 +112,9 @@ impl Rule for NoCommandInjection {
                                     && first_arg.kind() != "raw_string_literal"
                                 {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         "exec.Command called with dynamic argument — risk of command injection",
                                         node,
                                         src,
@@ -143,6 +127,7 @@ impl Rule for NoCommandInjection {
             }
         });
         findings
+
     }
 }
 
@@ -150,24 +135,15 @@ impl Rule for NoCommandInjection {
 
 pub struct NoHardcodedSecret;
 
-impl Rule for NoHardcodedSecret {
-    fn id(&self) -> &str {
-        "go/no-hardcoded-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "Hardcoded secret or credential detected"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    NoHardcodedSecret,
+    id = "go/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::Go,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(r"(?i)(password|secret|api_?key|token|auth|credential|private_?key)")
@@ -192,9 +168,9 @@ impl Rule for NoHardcodedSecret {
                             let inner = val.trim_matches(|c| c == '"' || c == '`');
                             if inner.len() >= 4 {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     &format!(
                                         "Hardcoded secret in '{}' — use environment variables",
                                         left_text.trim()
@@ -222,9 +198,9 @@ impl Rule for NoHardcodedSecret {
                                 let inner = val.trim_matches(|c| c == '"' || c == '`');
                                 if inner.len() >= 4 {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "Hardcoded secret in '{}' — use environment variables",
                                             name
@@ -253,9 +229,9 @@ impl Rule for NoHardcodedSecret {
                                 let inner = val.trim_matches(|c| c == '"' || c == '`');
                                 if inner.len() >= 4 {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "Hardcoded secret in '{}' — use environment variables",
                                             name
@@ -271,6 +247,7 @@ impl Rule for NoHardcodedSecret {
             }
         });
         findings
+
     }
 }
 
@@ -278,24 +255,15 @@ impl Rule for NoHardcodedSecret {
 
 pub struct NoWeakCrypto;
 
-impl Rule for NoWeakCrypto {
-    fn id(&self) -> &str {
-        "go/no-weak-crypto"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-327")
-    }
-    fn description(&self) -> &str {
-        "Use of weak cryptographic hash (MD5/SHA1)"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    NoWeakCrypto,
+    id = "go/no-weak-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of weak cryptographic hash (MD5/SHA1)",
+    language = Language::Go,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -314,9 +282,9 @@ impl Rule for NoWeakCrypto {
                             "SHA1"
                         };
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "{} is cryptographically weak — use SHA-256 or stronger",
                                 algo
@@ -339,9 +307,9 @@ impl Rule for NoWeakCrypto {
                             "SHA1"
                         };
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "Import of weak crypto package {} — use crypto/sha256 or stronger",
                                 algo
@@ -354,6 +322,7 @@ impl Rule for NoWeakCrypto {
             }
         });
         findings
+
     }
 }
 
@@ -361,24 +330,15 @@ impl Rule for NoWeakCrypto {
 
 pub struct GinNoTrustedProxies;
 
-impl Rule for GinNoTrustedProxies {
-    fn id(&self) -> &str {
-        "go/gin-no-trusted-proxies"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-346")
-    }
-    fn description(&self) -> &str {
-        "Gin engine created without SetTrustedProxies configuration"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    GinNoTrustedProxies,
+    id = "go/gin-no-trusted-proxies",
+    severity = Severity::Medium,
+    cwe = Some("CWE-346"),
+    description = "Gin engine created without SetTrustedProxies configuration",
+    language = Language::Go,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         // Check if gin.Default() or gin.New() is called
         let has_gin_init = source.contains("gin.Default()") || source.contains("gin.New()");
@@ -391,9 +351,9 @@ impl Rule for GinNoTrustedProxies {
                         let func_text = &src[func.byte_range()];
                         if func_text == "gin.Default" || func_text == "gin.New" {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 &format!(
                                     "{}() called without SetTrustedProxies — configure trusted proxies to prevent IP spoofing",
                                     func_text
@@ -407,6 +367,7 @@ impl Rule for GinNoTrustedProxies {
             });
         }
         findings
+
     }
 }
 
@@ -414,24 +375,15 @@ impl Rule for GinNoTrustedProxies {
 
 pub struct NetHttpNoTimeout;
 
-impl Rule for NetHttpNoTimeout {
-    fn id(&self) -> &str {
-        "go/net-http-no-timeout"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-400")
-    }
-    fn description(&self) -> &str {
-        "http.ListenAndServe without timeout configuration enables slowloris attacks"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    NetHttpNoTimeout,
+    id = "go/net-http-no-timeout",
+    severity = Severity::Medium,
+    cwe = Some("CWE-400"),
+    description = "http.ListenAndServe without timeout configuration enables slowloris attacks",
+    language = Language::Go,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -440,9 +392,9 @@ impl Rule for NetHttpNoTimeout {
                     let func_text = &src[func.byte_range()];
                     if func_text == "http.ListenAndServe" || func_text == "http.ListenAndServeTLS" {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "{} used without timeout — use http.Server with ReadTimeout/WriteTimeout to prevent slowloris",
                                 func_text
@@ -455,6 +407,7 @@ impl Rule for NetHttpNoTimeout {
             }
         });
         findings
+
     }
 }
 
@@ -462,24 +415,15 @@ impl Rule for NetHttpNoTimeout {
 
 pub struct NoSsrf;
 
-impl Rule for NoSsrf {
-    fn id(&self) -> &str {
-        "go/no-ssrf"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-918")
-    }
-    fn description(&self) -> &str {
-        "Potential SSRF via http.Get/http.Post with variable URL"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    NoSsrf,
+    id = "go/no-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Potential SSRF via http.Get/http.Post with variable URL",
+    language = Language::Go,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -508,9 +452,9 @@ impl Rule for NoSsrf {
                                     && first_arg.kind() != "raw_string_literal"
                                 {
                                     findings.push(make_finding(
-                                        self.id(),
-                                        self.severity(),
-                                        self.cwe(),
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
                                         &format!(
                                             "{} called with dynamic URL — validate and allowlist target hosts to prevent SSRF",
                                             func_text
@@ -526,6 +470,7 @@ impl Rule for NoSsrf {
             }
         });
         findings
+
     }
 }
 
@@ -533,32 +478,23 @@ impl Rule for NoSsrf {
 
 pub struct InsecureTlsSkipVerify;
 
-impl Rule for InsecureTlsSkipVerify {
-    fn id(&self) -> &str {
-        "go/insecure-tls-skip-verify"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-295")
-    }
-    fn description(&self) -> &str {
-        "TLS certificate verification disabled with InsecureSkipVerify"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    InsecureTlsSkipVerify,
+    id = "go/insecure-tls-skip-verify",
+    severity = Severity::High,
+    cwe = Some("CWE-295"),
+    description = "TLS certificate verification disabled with InsecureSkipVerify",
+    language = Language::Go,
+    fn check(_self, source, _tree) {
 
-    fn check(&self, source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let pattern = Regex::new(r"InsecureSkipVerify\s*:\s*true").unwrap();
 
         for matched in pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 "InsecureSkipVerify: true disables TLS certificate verification — prefer proper CA validation",
                 source,
                 matched.start(),
@@ -567,6 +503,7 @@ impl Rule for InsecureTlsSkipVerify {
         }
 
         findings
+
     }
 }
 
@@ -574,24 +511,15 @@ impl Rule for InsecureTlsSkipVerify {
 
 pub struct NoUnsafeDeserialization;
 
-impl Rule for NoUnsafeDeserialization {
-    fn id(&self) -> &str {
-        "go/no-unsafe-deserialization"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-502")
-    }
-    fn description(&self) -> &str {
-        "Unsafe deserialization via gob or yaml.Unmarshal into interface{}/any"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    NoUnsafeDeserialization,
+    id = "go/no-unsafe-deserialization",
+    severity = Severity::High,
+    cwe = Some("CWE-502"),
+    description = "Unsafe deserialization via gob or yaml.Unmarshal into interface{}/any",
+    language = Language::Go,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -607,9 +535,9 @@ impl Rule for NoUnsafeDeserialization {
             // Flag gob.NewDecoder()
             if func_text == "gob.NewDecoder" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "Use JSON instead of gob for untrusted input. Unmarshal into concrete types, not interface{}.",
                     node,
                     src,
@@ -622,9 +550,9 @@ impl Rule for NoUnsafeDeserialization {
                 let call_text = &src[node.byte_range()];
                 if call_text.contains("interface{}") || call_text.contains("any") {
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         "Use JSON instead of gob for untrusted input. Unmarshal into concrete types, not interface{}.",
                         node,
                         src,
@@ -634,6 +562,7 @@ impl Rule for NoUnsafeDeserialization {
         });
 
         findings
+
     }
 }
 
@@ -641,24 +570,15 @@ impl Rule for NoUnsafeDeserialization {
 
 pub struct JwtNoVerify;
 
-impl Rule for JwtNoVerify {
-    fn id(&self) -> &str {
-        "go/jwt-no-verify"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-347")
-    }
-    fn description(&self) -> &str {
-        "JWT parsed without signature verification"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    JwtNoVerify,
+    id = "go/jwt-no-verify",
+    severity = Severity::Critical,
+    cwe = Some("CWE-347"),
+    description = "JWT parsed without signature verification",
+    language = Language::Go,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -674,9 +594,9 @@ impl Rule for JwtNoVerify {
             // Flag jwt.ParseUnverified
             if func_text == "jwt.ParseUnverified" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "JWT parsed without verification — use jwt.Parse with a proper key function",
                     node,
                     src,
@@ -698,9 +618,9 @@ impl Rule for JwtNoVerify {
                         let key_fn_text = &src[key_fn_arg.byte_range()];
                         if key_fn_text == "nil" {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 "JWT parsed with nil key function — provide a proper key validation function",
                                 node,
                                 src,
@@ -712,6 +632,7 @@ impl Rule for JwtNoVerify {
         });
 
         findings
+
     }
 }
 
@@ -719,24 +640,15 @@ impl Rule for JwtNoVerify {
 
 pub struct JwtHardcodedSecret;
 
-impl Rule for JwtHardcodedSecret {
-    fn id(&self) -> &str {
-        "go/jwt-hardcoded-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "JWT key function uses a hardcoded secret"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    JwtHardcodedSecret,
+    id = "go/jwt-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "JWT key function uses a hardcoded secret",
+    language = Language::Go,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let hardcoded_byte_re = Regex::new(r#"\[\]byte\(\s*"[^"]{4,}"\s*\)"#).unwrap();
 
@@ -760,9 +672,9 @@ impl Rule for JwtHardcodedSecret {
             let node_text = &src[node.byte_range()];
             if hardcoded_byte_re.is_match(node_text) {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "JWT secret is hardcoded — load signing keys from environment or a secrets manager",
                     node,
                     src,
@@ -771,6 +683,7 @@ impl Rule for JwtHardcodedSecret {
         });
 
         findings
+
     }
 }
 
@@ -874,37 +787,19 @@ impl TaintCommandInjection {
     }
 }
 
-impl Rule for TaintCommandInjection {
-    fn id(&self) -> &str {
-        "go/taint-command-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-78")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches os/exec command execution sink"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    TaintCommandInjection,
+    id = "go/taint-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Untrusted input reaches os/exec command execution sink",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = GoTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Go has no standard shell-escape function. Pass arguments as separate elements to `exec.Command(name, arg1, arg2)` instead of building a shell string — this avoids shell interpretation entirely"),
         };
         map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
@@ -913,6 +808,7 @@ impl Rule for TaintCommandInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -964,42 +860,25 @@ impl TaintSqlInjection {
     }
 }
 
-impl Rule for TaintSqlInjection {
-    fn id(&self) -> &str {
-        "go/taint-sql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-89")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches database Query/Exec sink"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    TaintSqlInjection,
+    id = "go/taint-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Untrusted input reaches database Query/Exec sink",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = GoTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Use parameterized queries: `db.Query(\"SELECT * FROM users WHERE name = $1\", name)`"),
         };
         map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!("{} reaches {} — untrusted input can inject SQL", src, sink)
         })
+
     }
 }
 
@@ -1024,37 +903,19 @@ impl TaintSsti {
     }
 }
 
-impl Rule for TaintSsti {
-    fn id(&self) -> &str {
-        "go/taint-ssti"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-1336")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches template parsing sink (potential SSTI)"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    TaintSsti,
+    id = "go/taint-ssti",
+    severity = Severity::Critical,
+    cwe = Some("CWE-1336"),
+    description = "Untrusted input reaches template parsing sink (potential SSTI)",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = GoTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Use pre-defined template files with template.ParseFiles() instead of parsing user-controlled template strings"),
         };
         map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
@@ -1063,6 +924,7 @@ impl Rule for TaintSsti {
                 src, sink
             )
         })
+
     }
 }
 
@@ -1086,37 +948,19 @@ impl TaintXpathInjection {
     }
 }
 
-impl Rule for TaintXpathInjection {
-    fn id(&self) -> &str {
-        "go/taint-xpath-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-643")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches XPath query sink (potential XPath injection)"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    TaintXpathInjection,
+    id = "go/taint-xpath-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-643"),
+    description = "Untrusted input reaches XPath query sink (potential XPath injection)",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = GoTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Validate and sanitize user input before building XPath expressions",
             ),
@@ -1127,6 +971,7 @@ impl Rule for TaintXpathInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -1150,37 +995,19 @@ impl TaintLdapInjection {
     }
 }
 
-impl Rule for TaintLdapInjection {
-    fn id(&self) -> &str {
-        "go/taint-ldap-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-90")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches LDAP search sink (potential LDAP injection)"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    TaintLdapInjection,
+    id = "go/taint-ldap-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-90"),
+    description = "Untrusted input reaches LDAP search sink (potential LDAP injection)",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = GoTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some("Use ldap.EscapeFilter() to sanitize user input before building LDAP filter strings"),
         };
         map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
@@ -1189,6 +1016,7 @@ impl Rule for TaintLdapInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -1213,37 +1041,19 @@ impl TaintSsrf {
     }
 }
 
-impl Rule for TaintSsrf {
-    fn id(&self) -> &str {
-        "go/taint-ssrf"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-918")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches outbound net/http sink (potential SSRF)"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    TaintSsrf,
+    id = "go/taint-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Untrusted input reaches outbound net/http sink (potential SSRF)",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = GoTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Validate URLs against an allowlist of permitted hosts before making requests",
             ),
@@ -1254,6 +1064,7 @@ impl Rule for TaintSsrf {
                 src, sink
             )
         })
+
     }
 }
 
@@ -1277,37 +1088,19 @@ impl TaintLogInjection {
     }
 }
 
-impl Rule for TaintLogInjection {
-    fn id(&self) -> &str {
-        "go/taint-log-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-117")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches a logging sink — possible log injection"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    TaintLogInjection,
+    id = "go/taint-log-injection",
+    severity = Severity::Medium,
+    cwe = Some("CWE-117"),
+    description = "Untrusted input reaches a logging sink — possible log injection",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = GoTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Sanitize user input before logging — strip newlines and control characters",
             ),
@@ -1318,6 +1111,7 @@ impl Rule for TaintLogInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -1374,37 +1168,19 @@ impl TaintNosqlInjection {
     }
 }
 
-impl Rule for TaintNosqlInjection {
-    fn id(&self) -> &str {
-        "go/taint-nosql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-943")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches a MongoDB query sink — possible NoSQL injection"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    TaintNosqlInjection,
+    id = "go/taint-nosql-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-943"),
+    description = "Untrusted input reaches a MongoDB query sink — possible NoSQL injection",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = GoTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Validate and sanitize user input before building MongoDB queries.",
             ),
@@ -1415,6 +1191,7 @@ impl Rule for TaintNosqlInjection {
                 src, sink
             )
         })
+
     }
 }
 
@@ -1459,37 +1236,19 @@ impl TaintPathTraversal {
     }
 }
 
-impl Rule for TaintPathTraversal {
-    fn id(&self) -> &str {
-        "go/taint-path-traversal"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-22")
-    }
-    fn description(&self) -> &str {
-        "Untrusted input reaches a filesystem path sink — possible path traversal"
-    }
-    fn language(&self) -> Language {
-        Language::Go
-    }
+impl_rule! {
+    TaintPathTraversal,
+    id = "go/taint-path-traversal",
+    severity = Severity::High,
+    cwe = Some("CWE-22"),
+    description = "Untrusted input reaches a filesystem path sink — possible path traversal",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
-        self.check_with_context(source, tree, &FileContext::default())
-    }
-
-    fn check_with_context(
-        &self,
-        source: &str,
-        tree: &tree_sitter::Tree,
-        ctx: &FileContext<'_>,
-    ) -> Vec<Finding> {
         let meta = GoTaintRuleMeta {
-            rule_id: self.id(),
-            severity: self.severity(),
-            cwe: self.cwe(),
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
             fix_suggestion: Some(
                 "Validate file paths with filepath.Clean() and ensure they don't escape the intended directory",
             ),
@@ -1500,6 +1259,7 @@ impl Rule for TaintPathTraversal {
                 src, sink
             )
         })
+
     }
 }
 

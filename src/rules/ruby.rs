@@ -1,6 +1,6 @@
+use crate::impl_rule;
 use crate::rules::common::{make_finding, walk_tree};
-use crate::rules::Rule;
-use crate::{Finding, Language, Severity};
+use crate::{Language, Severity};
 use regex::Regex;
 
 /// Returns `true` if a tree-sitter `string` node contains interpolation
@@ -21,24 +21,15 @@ fn has_interpolation(string_node: tree_sitter::Node) -> bool {
 
 pub struct NoEval;
 
-impl Rule for NoEval {
-    fn id(&self) -> &str {
-        "rb/no-eval"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-95")
-    }
-    fn description(&self) -> &str {
-        "Use of eval or similar dynamic code execution"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoEval,
+    id = "rb/no-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "Use of eval or similar dynamic code execution",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -57,9 +48,9 @@ impl Rule for NoEval {
                 // standard Ruby metaprogramming patterns used by every framework
                 if name == "eval" || name == "instance_eval" {
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         &format!(
                             "{} executes arbitrary code — avoid dynamic evaluation",
                             name
@@ -71,6 +62,7 @@ impl Rule for NoEval {
             }
         });
         findings
+
     }
 }
 
@@ -78,33 +70,24 @@ impl Rule for NoEval {
 
 pub struct NoCommandInjection;
 
-impl Rule for NoCommandInjection {
-    fn id(&self) -> &str {
-        "rb/no-command-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-78")
-    }
-    fn description(&self) -> &str {
-        "Potential command injection via system/exec/spawn or backtick execution"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoCommandInjection,
+    id = "rb/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via system/exec/spawn or backtick execution",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect backtick/subshell execution
             if node.kind() == "subshell" {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "Backtick/subshell command execution — risk of command injection",
                     node,
                     src,
@@ -149,9 +132,9 @@ impl Rule for NoCommandInjection {
 
                     if !is_safe_literal {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "{} called — risk of command injection with dynamic arguments",
                                 name
@@ -168,9 +151,9 @@ impl Rule for NoCommandInjection {
                 let text = &src[node.byte_range()];
                 if text.starts_with("%x") {
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         "%x command execution — risk of command injection",
                         node,
                         src,
@@ -179,6 +162,7 @@ impl Rule for NoCommandInjection {
             }
         });
         findings
+
     }
 }
 
@@ -186,24 +170,15 @@ impl Rule for NoCommandInjection {
 
 pub struct NoSqlInjection;
 
-impl Rule for NoSqlInjection {
-    fn id(&self) -> &str {
-        "rb/no-sql-injection"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-89")
-    }
-    fn description(&self) -> &str {
-        "Potential SQL injection via string interpolation in query methods"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoSqlInjection,
+    id = "rb/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via string interpolation in query methods",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -223,9 +198,9 @@ impl Rule for NoSqlInjection {
                     let node_text = &src[node.byte_range()];
                     if node_text.contains("#{") {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "String interpolation in {} — use parameterized queries to prevent SQL injection",
                                 name
@@ -238,6 +213,7 @@ impl Rule for NoSqlInjection {
             }
         });
         findings
+
     }
 }
 
@@ -245,24 +221,15 @@ impl Rule for NoSqlInjection {
 
 pub struct NoMassAssignment;
 
-impl Rule for NoMassAssignment {
-    fn id(&self) -> &str {
-        "rb/no-mass-assignment"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-915")
-    }
-    fn description(&self) -> &str {
-        "Mass assignment via permit! allows all parameters"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoMassAssignment,
+    id = "rb/no-mass-assignment",
+    severity = Severity::High,
+    cwe = Some("CWE-915"),
+    description = "Mass assignment via permit! allows all parameters",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -271,9 +238,9 @@ impl Rule for NoMassAssignment {
                     let name = &src[method.byte_range()];
                     if name == "permit!" {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "permit! allows all parameters — use permit(:field1, :field2) to whitelist",
                             node,
                             src,
@@ -283,6 +250,7 @@ impl Rule for NoMassAssignment {
             }
         });
         findings
+
     }
 }
 
@@ -290,24 +258,15 @@ impl Rule for NoMassAssignment {
 
 pub struct NoUnsafeDeserialization;
 
-impl Rule for NoUnsafeDeserialization {
-    fn id(&self) -> &str {
-        "rb/no-unsafe-deserialization"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Critical
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-502")
-    }
-    fn description(&self) -> &str {
-        "Unsafe deserialization via Marshal.load or YAML.load"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoUnsafeDeserialization,
+    id = "rb/no-unsafe-deserialization",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Unsafe deserialization via Marshal.load or YAML.load",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -323,9 +282,9 @@ impl Rule for NoUnsafeDeserialization {
                         || (recv == "YAML" && (meth == "load" || meth == "unsafe_load"))
                     {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             &format!(
                                 "{}.{} can execute arbitrary code — use YAML.safe_load or safer alternatives",
                                 recv, meth
@@ -338,6 +297,7 @@ impl Rule for NoUnsafeDeserialization {
             }
         });
         findings
+
     }
 }
 
@@ -345,24 +305,15 @@ impl Rule for NoUnsafeDeserialization {
 
 pub struct NoOpenRedirect;
 
-impl Rule for NoOpenRedirect {
-    fn id(&self) -> &str {
-        "rb/no-open-redirect"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-601")
-    }
-    fn description(&self) -> &str {
-        "Potential open redirect via redirect_to with dynamic argument"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoOpenRedirect,
+    id = "rb/no-open-redirect",
+    severity = Severity::High,
+    cwe = Some("CWE-601"),
+    description = "Potential open redirect via redirect_to with dynamic argument",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -389,9 +340,9 @@ impl Rule for NoOpenRedirect {
 
                 if !has_literal_only {
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         "redirect_to with dynamic argument — validate URL to prevent open redirect",
                         node,
                         src,
@@ -400,6 +351,7 @@ impl Rule for NoOpenRedirect {
             }
         });
         findings
+
     }
 }
 
@@ -407,24 +359,15 @@ impl Rule for NoOpenRedirect {
 
 pub struct NoCsrfSkip;
 
-impl Rule for NoCsrfSkip {
-    fn id(&self) -> &str {
-        "rb/no-csrf-skip"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-352")
-    }
-    fn description(&self) -> &str {
-        "CSRF protection disabled via skip_before_action"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoCsrfSkip,
+    id = "rb/no-csrf-skip",
+    severity = Severity::High,
+    cwe = Some("CWE-352"),
+    description = "CSRF protection disabled via skip_before_action",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -443,9 +386,9 @@ impl Rule for NoCsrfSkip {
                     let text = &src[node.byte_range()];
                     if text.contains("verify_authenticity_token") {
                         findings.push(make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "skip_before_action :verify_authenticity_token disables CSRF protection",
                             node,
                             src,
@@ -455,6 +398,7 @@ impl Rule for NoCsrfSkip {
             }
         });
         findings
+
     }
 }
 
@@ -462,24 +406,15 @@ impl Rule for NoCsrfSkip {
 
 pub struct NoHtmlSafe;
 
-impl Rule for NoHtmlSafe {
-    fn id(&self) -> &str {
-        "rb/no-html-safe"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-79")
-    }
-    fn description(&self) -> &str {
-        "Potential XSS via html_safe or raw()"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoHtmlSafe,
+    id = "rb/no-html-safe",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "Potential XSS via html_safe or raw()",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -492,9 +427,9 @@ impl Rule for NoHtmlSafe {
                             // Only flag non-string-literal receivers
                             if receiver.kind() != "string" {
                                 findings.push(make_finding(
-                                    self.id(),
-                                    self.severity(),
-                                    self.cwe(),
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
                                     ".html_safe on dynamic content — risk of XSS",
                                     node,
                                     src,
@@ -520,9 +455,9 @@ impl Rule for NoHtmlSafe {
 
             if is_raw {
                 findings.push(make_finding(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     "raw() bypasses HTML escaping — risk of XSS",
                     node,
                     src,
@@ -530,6 +465,7 @@ impl Rule for NoHtmlSafe {
             }
         });
         findings
+
     }
 }
 
@@ -537,24 +473,15 @@ impl Rule for NoHtmlSafe {
 
 pub struct NoHardcodedSecret;
 
-impl Rule for NoHardcodedSecret {
-    fn id(&self) -> &str {
-        "rb/no-hardcoded-secret"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-798")
-    }
-    fn description(&self) -> &str {
-        "Hardcoded secret or credential detected"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoHardcodedSecret,
+    id = "rb/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(r"(?i)(password|secret|api_?key|token|auth|credential|private_?key)")
@@ -576,9 +503,9 @@ impl Rule for NoHardcodedSecret {
                             .trim_end_matches(['"', '\'']);
                         if inner.len() >= 4 {
                             findings.push(make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 &format!(
                                     "Hardcoded secret in '{}' — use environment variables",
                                     left_text.trim()
@@ -592,6 +519,7 @@ impl Rule for NoHardcodedSecret {
             }
         });
         findings
+
     }
 }
 
@@ -599,24 +527,15 @@ impl Rule for NoHardcodedSecret {
 
 pub struct NoSsrf;
 
-impl Rule for NoSsrf {
-    fn id(&self) -> &str {
-        "rb/no-ssrf"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-918")
-    }
-    fn description(&self) -> &str {
-        "Potential SSRF via dynamic outbound HTTP request URL"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoSsrf,
+    id = "rb/no-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Potential SSRF via dynamic outbound HTTP request URL",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -672,9 +591,9 @@ impl Rule for NoSsrf {
                     if let Some(arg) = first_arg {
                         if arg.kind() != "string" {
                             let mut finding = make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 &format!(
                                     "{} called with dynamic URL — validate against an allowlist to prevent SSRF",
                                     label
@@ -712,9 +631,9 @@ impl Rule for NoSsrf {
 
                     if !is_literal {
                         let mut finding = make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "open called with dynamic URL — validate against an allowlist to prevent SSRF",
                             node,
                             src,
@@ -730,6 +649,7 @@ impl Rule for NoSsrf {
             }
         });
         findings
+
     }
 }
 
@@ -737,24 +657,15 @@ impl Rule for NoSsrf {
 
 pub struct NoPathTraversal;
 
-impl Rule for NoPathTraversal {
-    fn id(&self) -> &str {
-        "rb/no-path-traversal"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-22")
-    }
-    fn description(&self) -> &str {
-        "Potential path traversal via dynamic file path"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoPathTraversal,
+    id = "rb/no-path-traversal",
+    severity = Severity::High,
+    cwe = Some("CWE-22"),
+    description = "Potential path traversal via dynamic file path",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -814,9 +725,9 @@ impl Rule for NoPathTraversal {
                     if let Some(arg) = first_arg {
                         if arg.kind() != "string" {
                             let mut finding = make_finding(
-                                self.id(),
-                                self.severity(),
-                                self.cwe(),
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
                                 &format!(
                                     "{} called with dynamic path — validate to prevent path traversal",
                                     label
@@ -853,9 +764,9 @@ impl Rule for NoPathTraversal {
 
                     if !is_literal {
                         let mut finding = make_finding(
-                            self.id(),
-                            self.severity(),
-                            self.cwe(),
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
                             "send_file called with dynamic path — validate to prevent path traversal",
                             node,
                             src,
@@ -871,6 +782,7 @@ impl Rule for NoPathTraversal {
             }
         });
         findings
+
     }
 }
 
@@ -878,24 +790,15 @@ impl Rule for NoPathTraversal {
 
 pub struct NoWeakCrypto;
 
-impl Rule for NoWeakCrypto {
-    fn id(&self) -> &str {
-        "rb/no-weak-crypto"
-    }
-    fn severity(&self) -> Severity {
-        Severity::Medium
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some("CWE-327")
-    }
-    fn description(&self) -> &str {
-        "Use of weak cryptographic hash (MD5/SHA1)"
-    }
-    fn language(&self) -> Language {
-        Language::Ruby
-    }
+impl_rule! {
+    NoWeakCrypto,
+    id = "rb/no-weak-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of weak cryptographic hash (MD5/SHA1)",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
 
-    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -905,9 +808,9 @@ impl Rule for NoWeakCrypto {
                 if text == "Digest::MD5" || text == "Digest::SHA1" {
                     let algo = if text.contains("MD5") { "MD5" } else { "SHA1" };
                     findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
                         &format!(
                             "{} is cryptographically weak — use SHA-256 or stronger",
                             algo
@@ -919,12 +822,14 @@ impl Rule for NoWeakCrypto {
             }
         });
         findings
+
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rules::Rule;
     use tree_sitter::Parser;
 
     fn parse_ruby(source: &str) -> tree_sitter::Tree {
