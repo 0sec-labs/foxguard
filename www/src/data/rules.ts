@@ -130,7 +130,9 @@ const rubyRules: Rule[] = [
   { id: 'rb/no-html-safe', cwe: 'CWE-79', desc: 'Potential XSS via html_safe or raw()', severity: 'high' },
   { id: 'rb/no-mass-assignment', cwe: 'CWE-915', desc: 'Mass assignment via permit! allows all parameters', severity: 'high' },
   { id: 'rb/no-open-redirect', cwe: 'CWE-601', desc: 'Potential open redirect via redirect_to with dynamic argument', severity: 'high' },
+  { id: 'rb/no-path-traversal', cwe: 'CWE-22', desc: 'Potential path traversal via dynamic file path', severity: 'high' },
   { id: 'rb/no-sql-injection', cwe: 'CWE-89', desc: 'Potential SQL injection via string interpolation in query methods', severity: 'critical' },
+  { id: 'rb/no-ssrf', cwe: 'CWE-918', desc: 'Potential SSRF via dynamic outbound HTTP request URL', severity: 'high' },
   { id: 'rb/no-unsafe-deserialization', cwe: 'CWE-502', desc: 'Unsafe deserialization via Marshal.load or YAML.load', severity: 'critical' },
   { id: 'rb/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic hash (MD5/SHA1)', severity: 'medium' },
 ];

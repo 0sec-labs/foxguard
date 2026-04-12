@@ -556,7 +556,286 @@ impl Rule for NoHardcodedSecret {
     }
 }
 
-// ─── Rule 10: no-weak-crypto ──────────────────────────────────────────────────
+// ─── Rule 10: no-ssrf ────────────────────────────────────────────────────────
+
+pub struct NoSsrf;
+
+impl Rule for NoSsrf {
+    fn id(&self) -> &str {
+        "rb/no-ssrf"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-918")
+    }
+    fn description(&self) -> &str {
+        "Potential SSRF via dynamic outbound HTTP request URL"
+    }
+    fn language(&self) -> Language {
+        Language::Ruby
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            match node.kind() {
+                // Calls with a receiver: URI.open(...), Net::HTTP.get(...),
+                // HTTParty.get(...), Faraday.get(...), RestClient.get(...)
+                // Also bare calls: open(url), open url
+                "call" => {
+                    let method = node.child_by_field_name("method");
+                    let receiver = node.child_by_field_name("receiver");
+
+                    let http_methods = ["get", "post", "put", "patch", "delete", "head"];
+
+                    let (is_ssrf_call, label) = match (receiver, method) {
+                        (Some(recv_node), Some(meth_node)) => {
+                            let recv = &src[recv_node.byte_range()];
+                            let meth = &src[meth_node.byte_range()];
+                            let matched = (recv == "URI" && meth == "open")
+                                || (recv == "Net::HTTP" && http_methods.contains(&meth))
+                                || (recv == "HTTParty" && http_methods.contains(&meth))
+                                || (recv == "Faraday" && http_methods.contains(&meth))
+                                || (recv == "RestClient" && http_methods.contains(&meth));
+                            (matched, format!("{}.{}", recv, meth))
+                        }
+                        // Bare call: open url  (no receiver, method = "open")
+                        (None, Some(meth_node)) => {
+                            let meth = &src[meth_node.byte_range()];
+                            (meth == "open", "open".to_string())
+                        }
+                        _ => (false, String::new()),
+                    };
+
+                    if !is_ssrf_call {
+                        return;
+                    }
+
+                    // Check if the first argument is dynamic (not a string literal)
+                    // Arguments can be in an "arguments" field or as argument_list named child
+                    let first_arg = node
+                        .child_by_field_name("arguments")
+                        .and_then(|a| a.named_child(0))
+                        .or_else(|| {
+                            // For bare calls like `open url`, args are in an argument_list child
+                            node.named_child(1).and_then(|c| {
+                                if c.kind() == "argument_list" {
+                                    c.named_child(0)
+                                } else {
+                                    Some(c)
+                                }
+                            })
+                        });
+
+                    if let Some(arg) = first_arg {
+                        if arg.kind() != "string" {
+                            let mut finding = make_finding(
+                                self.id(),
+                                self.severity(),
+                                self.cwe(),
+                                &format!(
+                                    "{} called with dynamic URL — validate against an allowlist to prevent SSRF",
+                                    label
+                                ),
+                                node,
+                                src,
+                            );
+                            finding.fix_suggestion = Some(
+                                "Validate URLs against an allowlist before making HTTP requests"
+                                    .to_string(),
+                            );
+                            findings.push(finding);
+                        }
+                    }
+                }
+
+                // Command-style bare calls (e.g. open url without parens)
+                "command" => {
+                    let Some(name_node) = node.child_by_field_name("name") else {
+                        return;
+                    };
+                    let name = &src[name_node.byte_range()];
+                    if name != "open" {
+                        return;
+                    }
+
+                    // For command nodes, check if the argument is a string literal
+                    let is_literal = if let Some(arg) = node.named_child(1) {
+                        arg.kind() == "string"
+                            || (arg.kind() == "argument_list"
+                                && arg.named_child(0).is_some_and(|a| a.kind() == "string"))
+                    } else {
+                        false
+                    };
+
+                    if !is_literal {
+                        let mut finding = make_finding(
+                            self.id(),
+                            self.severity(),
+                            self.cwe(),
+                            "open called with dynamic URL — validate against an allowlist to prevent SSRF",
+                            node,
+                            src,
+                        );
+                        finding.fix_suggestion = Some(
+                            "Validate URLs against an allowlist before making HTTP requests"
+                                .to_string(),
+                        );
+                        findings.push(finding);
+                    }
+                }
+                _ => {}
+            }
+        });
+        findings
+    }
+}
+
+// ─── Rule 11: no-path-traversal ──────────────────────────────────────────────
+
+pub struct NoPathTraversal;
+
+impl Rule for NoPathTraversal {
+    fn id(&self) -> &str {
+        "rb/no-path-traversal"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-22")
+    }
+    fn description(&self) -> &str {
+        "Potential path traversal via dynamic file path"
+    }
+    fn language(&self) -> Language {
+        Language::Ruby
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            match node.kind() {
+                // Calls with a receiver: File.read(...), File.open(...),
+                // IO.read(...), File.write(...), FileUtils.cp(...)
+                // Also bare calls: send_file(path), send_file path
+                "call" => {
+                    let method = node.child_by_field_name("method");
+                    let receiver = node.child_by_field_name("receiver");
+
+                    let (is_path_sink, label) = match (receiver, method) {
+                        (Some(recv_node), Some(meth_node)) => {
+                            let recv = &src[recv_node.byte_range()];
+                            let meth = &src[meth_node.byte_range()];
+                            let matched = (recv == "File"
+                                && (meth == "read"
+                                    || meth == "open"
+                                    || meth == "write"
+                                    || meth == "delete"
+                                    || meth == "readlines"
+                                    || meth == "binread"))
+                                || (recv == "IO" && (meth == "read" || meth == "readlines"))
+                                || (recv == "FileUtils"
+                                    && (meth == "cp"
+                                        || meth == "mv"
+                                        || meth == "rm"
+                                        || meth == "mkdir_p"));
+                            (matched, format!("{}.{}", recv, meth))
+                        }
+                        // Bare call: send_file path  (no receiver)
+                        (None, Some(meth_node)) => {
+                            let meth = &src[meth_node.byte_range()];
+                            (meth == "send_file", "send_file".to_string())
+                        }
+                        _ => (false, String::new()),
+                    };
+
+                    if !is_path_sink {
+                        return;
+                    }
+
+                    // Check if the first argument is dynamic (not a string literal)
+                    let first_arg = node
+                        .child_by_field_name("arguments")
+                        .and_then(|a| a.named_child(0))
+                        .or_else(|| {
+                            node.named_child(1).and_then(|c| {
+                                if c.kind() == "argument_list" {
+                                    c.named_child(0)
+                                } else {
+                                    Some(c)
+                                }
+                            })
+                        });
+
+                    if let Some(arg) = first_arg {
+                        if arg.kind() != "string" {
+                            let mut finding = make_finding(
+                                self.id(),
+                                self.severity(),
+                                self.cwe(),
+                                &format!(
+                                    "{} called with dynamic path — validate to prevent path traversal",
+                                    label
+                                ),
+                                node,
+                                src,
+                            );
+                            finding.fix_suggestion = Some(
+                                "Validate file paths and ensure they don't escape the intended directory"
+                                    .to_string(),
+                            );
+                            findings.push(finding);
+                        }
+                    }
+                }
+
+                // Command-style bare calls (e.g. send_file path without parens)
+                "command" => {
+                    let Some(name_node) = node.child_by_field_name("name") else {
+                        return;
+                    };
+                    let name = &src[name_node.byte_range()];
+                    if name != "send_file" {
+                        return;
+                    }
+
+                    let is_literal = if let Some(arg) = node.named_child(1) {
+                        arg.kind() == "string"
+                            || (arg.kind() == "argument_list"
+                                && arg.named_child(0).is_some_and(|a| a.kind() == "string"))
+                    } else {
+                        false
+                    };
+
+                    if !is_literal {
+                        let mut finding = make_finding(
+                            self.id(),
+                            self.severity(),
+                            self.cwe(),
+                            "send_file called with dynamic path — validate to prevent path traversal",
+                            node,
+                            src,
+                        );
+                        finding.fix_suggestion = Some(
+                            "Validate file paths and ensure they don't escape the intended directory"
+                                .to_string(),
+                        );
+                        findings.push(finding);
+                    }
+                }
+                _ => {}
+            }
+        });
+        findings
+    }
+}
+
+// ─── Rule 12: no-weak-crypto ──────────────────────────────────────────────────
 
 pub struct NoWeakCrypto;
 
@@ -601,5 +880,73 @@ impl Rule for NoWeakCrypto {
             }
         });
         findings
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    fn parse_ruby(source: &str) -> tree_sitter::Tree {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_ruby::LANGUAGE.into())
+            .unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
+    #[allow(dead_code)]
+    fn dump_tree(node: tree_sitter::Node, src: &str, depth: usize) {
+        let indent = "  ".repeat(depth);
+        let text = &src[node.byte_range()];
+        let short = if text.len() > 60 { &text[..60] } else { text };
+        eprintln!(
+            "{}kind={:?} named_children={} text={:?}",
+            indent,
+            node.kind(),
+            node.named_child_count(),
+            short.replace('\n', "\\n")
+        );
+        for i in 0..node.named_child_count() {
+            if let Some(c) = node.named_child(i) {
+                dump_tree(c, src, depth + 1);
+            }
+        }
+    }
+
+    #[test]
+    fn debug_open_url_tree() {
+        let source = "open url\nsend_file path\n";
+        let tree = parse_ruby(source);
+        dump_tree(tree.root_node(), source, 0);
+    }
+
+    #[test]
+    fn test_ssrf_detects_all_patterns() {
+        let source = "URI.open(user_input)\nNet::HTTP.get(user_url)\nHTTParty.get(url)\nFaraday.get(url)\nRestClient.get(url)\nopen url\n";
+        let tree = parse_ruby(source);
+        let rule = NoSsrf;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            6,
+            "Expected 6 SSRF findings, got {}",
+            findings.len()
+        );
+    }
+
+    #[test]
+    fn test_path_traversal_detects_all_patterns() {
+        let source = "File.read(user_input)\nFile.open(user_input)\nIO.read(user_input)\nFile.write(path, data)\nFileUtils.cp(src, dst)\nsend_file path\n";
+        let tree = parse_ruby(source);
+        let rule = NoPathTraversal;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            6,
+            "Expected 6 path traversal findings, got {}",
+            findings.len()
+        );
     }
 }

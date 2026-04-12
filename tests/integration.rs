@@ -994,8 +994,8 @@ fn test_vulnerable_ruby_finds_all_rules() {
 
     assert_eq!(
         findings.len(),
-        18,
-        "vulnerable.rb should have 18 findings, got {}",
+        30,
+        "vulnerable.rb should have 30 findings, got {}",
         findings.len()
     );
 
@@ -1015,10 +1015,34 @@ fn test_vulnerable_ruby_finds_all_rules() {
         "rb/no-html-safe",
         "rb/no-hardcoded-secret",
         "rb/no-weak-crypto",
+        "rb/no-ssrf",
+        "rb/no-path-traversal",
     ];
 
     for rule in &expected_rules {
         assert!(rule_ids.contains(rule), "missing expected rule: {}", rule);
+    }
+}
+
+#[test]
+fn test_safe_ruby_no_findings() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/safe.rb", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !stdout.trim().is_empty() {
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_str(stdout.trim()).unwrap_or_default();
+        assert_eq!(
+            findings.len(),
+            0,
+            "safe.rb should have 0 findings, got {}",
+            findings.len()
+        );
     }
 }
 

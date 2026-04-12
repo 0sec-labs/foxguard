@@ -37,3 +37,19 @@ api_token = "sk-live-abcdef123456789"
 # rb/no-weak-crypto
 Digest::MD5.hexdigest("data")
 Digest::SHA1.hexdigest("data")
+
+# rb/no-ssrf
+URI.open(user_input)
+Net::HTTP.get(user_url)
+HTTParty.get(url)
+Faraday.get(url)
+RestClient.get(url)
+open url
+
+# rb/no-path-traversal
+File.read(user_input)
+File.open(user_input)
+IO.read(user_input)
+File.write(path, data)
+FileUtils.cp(src, dst)
+send_file path

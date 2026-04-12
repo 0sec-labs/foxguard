@@ -231,6 +231,8 @@ impl RuleRegistry {
         registry.register(Box::new(ruby::NoHtmlSafe));
         registry.register(Box::new(ruby::NoHardcodedSecret));
         registry.register(Box::new(ruby::NoWeakCrypto));
+        registry.register(Box::new(ruby::NoSsrf));
+        registry.register(Box::new(ruby::NoPathTraversal));
 
         // Register C# rules
         registry.register(Box::new(csharp::NoSqlInjection));
