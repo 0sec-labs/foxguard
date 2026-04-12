@@ -2259,3 +2259,287 @@ impl Rule for TaintSsrf {
             .collect()
     }
 }
+
+// ─── js/taint-ssti ─────────────────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches a
+// template rendering sink. CWE-1336 (Server-Side Template Injection).
+
+pub struct TaintSsti;
+
+impl TaintSsti {
+    pub(crate) fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::Call {
+                    canonical: "ejs.render".into(),
+                    description: "ejs.render() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "ejs.renderFile".into(),
+                    description: "ejs.renderFile() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "pug.render".into(),
+                    description: "pug.render() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "pug.renderFile".into(),
+                    description: "pug.renderFile() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "Handlebars.compile".into(),
+                    description: "Handlebars.compile() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "handlebars.compile".into(),
+                    description: "handlebars.compile() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "nunjucks.renderString".into(),
+                    description: "nunjucks.renderString() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "mustache.render".into(),
+                    description: "mustache.render() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintSsti {
+    fn id(&self) -> &str {
+        "js/taint-ssti"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-1336")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches a template rendering sink — possible server-side template injection"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let spec = Self::spec();
+        let raw =
+            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
+        raw.into_iter()
+            .map(|t| Finding {
+                rule_id: self.id().to_string(),
+                severity: self.severity(),
+                cwe: self.cwe().map(|s| s.to_string()),
+                description: format!(
+                    "{} reaches {} — untrusted input can inject server-side templates",
+                    t.source_description, t.sink_description
+                ),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
+                fix_suggestion: Some(
+                    "Use pre-compiled templates with auto-escaping instead of rendering user input as template strings"
+                        .to_string(),
+                ),
+            })
+            .collect()
+    }
+}
+
+// ─── js/taint-xpath-injection ──────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches an
+// XPath evaluation sink. CWE-643 (XPath Injection).
+
+pub struct TaintXpathInjection;
+
+impl TaintXpathInjection {
+    pub(crate) fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::Call {
+                    canonical: "xpath.select".into(),
+                    description: "xpath.select() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "xpath.evaluate".into(),
+                    description: "xpath.evaluate() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "document.evaluate".into(),
+                    description: "document.evaluate() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "dom.evaluate".into(),
+                    description: "dom.evaluate() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintXpathInjection {
+    fn id(&self) -> &str {
+        "js/taint-xpath-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-643")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches an XPath evaluation sink — possible XPath injection"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let spec = Self::spec();
+        let raw =
+            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
+        raw.into_iter()
+            .map(|t| Finding {
+                rule_id: self.id().to_string(),
+                severity: self.severity(),
+                cwe: self.cwe().map(|s| s.to_string()),
+                description: format!(
+                    "{} reaches {} — untrusted input can inject XPath expressions",
+                    t.source_description, t.sink_description
+                ),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
+                fix_suggestion: Some(
+                    "Validate and sanitize user input before building XPath expressions"
+                        .to_string(),
+                ),
+            })
+            .collect()
+    }
+}
+
+// ─── js/taint-ldap-injection ───────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches an
+// LDAP operation sink. CWE-90 (LDAP Injection).
+
+pub struct TaintLdapInjection;
+
+impl TaintLdapInjection {
+    pub(crate) fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::MethodName {
+                    method: "search".into(),
+                    description: "LDAP .search() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "bind".into(),
+                    description: "LDAP .bind() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintLdapInjection {
+    fn id(&self) -> &str {
+        "js/taint-ldap-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-90")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches an LDAP operation sink — possible LDAP injection"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let spec = Self::spec();
+        let raw =
+            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
+        raw.into_iter()
+            .map(|t| Finding {
+                rule_id: self.id().to_string(),
+                severity: self.severity(),
+                cwe: self.cwe().map(|s| s.to_string()),
+                description: format!(
+                    "{} reaches {} — untrusted input can inject LDAP filters",
+                    t.source_description, t.sink_description
+                ),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
+                fix_suggestion: Some(
+                    "Use ldap-escape or sanitize special LDAP characters before building filter strings"
+                        .to_string(),
+                ),
+            })
+            .collect()
+    }
+}

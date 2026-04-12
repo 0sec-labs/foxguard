@@ -1666,4 +1666,107 @@ function handler(req) {
             0
         );
     }
+
+    // ─── SSTI rule tests ────────────────────────────────────────────────
+
+    #[test]
+    fn ssti_ejs_render_from_req_body() {
+        let spec = super::super::javascript::TaintSsti::spec();
+        let src = r#"
+const ejs = require("ejs");
+function handler(req, res) {
+    const template = req.body.template;
+    ejs.render(template);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(!findings.is_empty(), "expected SSTI finding for ejs.render");
+        assert!(findings[0].sink_description.contains("ejs.render"));
+    }
+
+    #[test]
+    fn ssti_no_finding_when_static_template() {
+        let spec = super::super::javascript::TaintSsti::spec();
+        let src = r#"
+const ejs = require("ejs");
+function handler(req, res) {
+    ejs.render("<h1>Hello</h1>");
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(findings.is_empty(), "static template should not fire SSTI");
+    }
+
+    // ─── XPath injection rule tests ─────────────────────────────────────
+
+    #[test]
+    fn xpath_select_from_req_query() {
+        let spec = super::super::javascript::TaintXpathInjection::spec();
+        let src = r#"
+const xpath = require("xpath");
+function handler(req, res) {
+    const expr = req.query.path;
+    xpath.select(expr, doc);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(!findings.is_empty(), "expected XPath injection finding");
+        assert!(findings[0].sink_description.contains("xpath.select"));
+    }
+
+    #[test]
+    fn xpath_no_finding_when_static_expression() {
+        let spec = super::super::javascript::TaintXpathInjection::spec();
+        let src = r#"
+const xpath = require("xpath");
+function handler(req, res) {
+    xpath.select("//book/title", doc);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(findings.is_empty(), "static XPath should not fire");
+    }
+
+    // ─── LDAP injection rule tests ──────────────────────────────────────
+
+    #[test]
+    fn ldap_search_from_req_body() {
+        let spec = super::super::javascript::TaintLdapInjection::spec();
+        let src = r#"
+function handler(req, res) {
+    const filter = req.body.username;
+    client.search(filter);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(
+            !findings.is_empty(),
+            "expected LDAP injection finding for .search()"
+        );
+        assert!(findings[0].sink_description.contains("LDAP .search()"));
+    }
+
+    #[test]
+    fn ldap_no_finding_when_static_filter() {
+        let spec = super::super::javascript::TaintLdapInjection::spec();
+        let src = r#"
+function handler(req, res) {
+    client.search("dc=example", { filter: "(cn=admin)" });
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(findings.is_empty(), "static LDAP filter should not fire");
+    }
 }

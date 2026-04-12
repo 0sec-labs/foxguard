@@ -109,6 +109,9 @@ impl RuleRegistry {
         registry.register(Box::new(javascript::TaintEval));
         registry.register(Box::new(javascript::TaintCommandInjection));
         registry.register(Box::new(javascript::TaintSsrf));
+        registry.register(Box::new(javascript::TaintSsti));
+        registry.register(Box::new(javascript::TaintXpathInjection));
+        registry.register(Box::new(javascript::TaintLdapInjection));
 
         // Register Python rules
         registry.register(Box::new(python::NoEval));

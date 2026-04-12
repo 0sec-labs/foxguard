@@ -44,8 +44,11 @@ const jsRules: Rule[] = [
   { id: 'js/no-xss-innerhtml', cwe: 'CWE-79', desc: 'Assignment to innerHTML may lead to XSS', severity: 'high' },
   { id: 'js/taint-command-injection', cwe: 'CWE-78', desc: 'Untrusted input reaches a command execution sink — OS command injection', severity: 'critical' },
   { id: 'js/taint-eval', cwe: 'CWE-95', desc: 'Untrusted input reaches eval or Function — arbitrary code execution', severity: 'critical' },
+  { id: 'js/taint-ldap-injection', cwe: 'CWE-90', desc: 'Untrusted input reaches an LDAP operation sink — possible LDAP injection', severity: 'high' },
   { id: 'js/taint-sql-injection', cwe: 'CWE-89', desc: 'Untrusted input reaches a SQL execute sink — possible SQL injection', severity: 'critical' },
   { id: 'js/taint-ssrf', cwe: 'CWE-918', desc: 'Untrusted input reaches an HTTP request sink — possible SSRF', severity: 'high' },
+  { id: 'js/taint-ssti', cwe: 'CWE-1336', desc: 'Untrusted input reaches a template rendering sink — possible server-side template injection', severity: 'critical' },
+  { id: 'js/taint-xpath-injection', cwe: 'CWE-643', desc: 'Untrusted input reaches an XPath evaluation sink — possible XPath injection', severity: 'high' },
   { id: 'js/taint-xss-innerhtml', cwe: 'CWE-79', desc: 'Untrusted input reaches innerHTML or document.write sink', severity: 'high' },
 ];
 
