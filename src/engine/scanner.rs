@@ -9,7 +9,6 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -281,73 +280,74 @@ fn scan_files(
 ) -> ScanResult {
     let start = Instant::now();
     let file_count = files.len();
-    let findings = Mutex::new(Vec::new());
 
-    files.par_iter().for_each(|(path, language)| {
-        // Skip files in test/vendor/fixture directories
-        if is_noise_path(path) {
-            return;
-        }
-
-        let Ok(source) = std::fs::read_to_string(path) else {
-            return;
-        };
-
-        // Skip minified files (likely bundled/compiled assets)
-        if is_minified(&source) {
-            return;
-        }
-
-        let inline_ignores = inline_ignore_directives(&source, *language);
-
-        let Some(tree) = super::parser::parse_file(&source, *language) else {
-            return;
-        };
-
-        let file_str = path.display().to_string();
-        let relative_path = relative_scan_path(scan_root, path);
-        let rules = registry.rules_for_language(*language);
-
-        // Per-file analysis context. Python builds an import alias table so
-        // rules can resolve aliased callees (`import pickle as p; p.loads(x)`)
-        // back to their canonical dotted paths before sink matching.
-        let python_aliases = if matches!(language, Language::Python) {
-            Some(py_aliases_from_tree(&source, &tree))
-        } else {
-            None
-        };
-        let javascript_aliases = if matches!(language, Language::JavaScript) {
-            Some(js_aliases_from_tree(&source, &tree))
-        } else {
-            None
-        };
-        let go_aliases = if matches!(language, Language::Go) {
-            Some(go_aliases_from_tree(&source, &tree))
-        } else {
-            None
-        };
-        let ctx = FileContext {
-            python_aliases: python_aliases.as_ref(),
-            javascript_aliases: javascript_aliases.as_ref(),
-            go_aliases: go_aliases.as_ref(),
-        };
-
-        for rule in rules {
-            if !rule.applies_to_path(&relative_path) {
-                continue;
+    let mut results: Vec<Finding> = files
+        .par_iter()
+        .flat_map(|(path, language)| {
+            // Skip files in test/vendor/fixture directories
+            if is_noise_path(path) {
+                return Vec::new();
             }
-            let mut rule_findings = rule.check_with_context(&source, &tree, &ctx);
-            for f in &mut rule_findings {
-                f.file = file_str.clone();
-            }
-            let rule_findings = apply_inline_ignores(rule_findings, &inline_ignores);
-            if !rule_findings.is_empty() {
-                findings.lock().unwrap().extend(rule_findings);
-            }
-        }
-    });
 
-    let mut results = findings.into_inner().unwrap();
+            let Ok(source) = std::fs::read_to_string(path) else {
+                return Vec::new();
+            };
+
+            // Skip minified files (likely bundled/compiled assets)
+            if is_minified(&source) {
+                return Vec::new();
+            }
+
+            let inline_ignores = inline_ignore_directives(&source, *language);
+
+            let Some(tree) = super::parser::parse_file(&source, *language) else {
+                return Vec::new();
+            };
+
+            let file_str = path.display().to_string();
+            let relative_path = relative_scan_path(scan_root, path);
+            let rules = registry.rules_for_language(*language);
+
+            // Per-file analysis context. Python builds an import alias table so
+            // rules can resolve aliased callees (`import pickle as p; p.loads(x)`)
+            // back to their canonical dotted paths before sink matching.
+            let python_aliases = if matches!(language, Language::Python) {
+                Some(py_aliases_from_tree(&source, &tree))
+            } else {
+                None
+            };
+            let javascript_aliases = if matches!(language, Language::JavaScript) {
+                Some(js_aliases_from_tree(&source, &tree))
+            } else {
+                None
+            };
+            let go_aliases = if matches!(language, Language::Go) {
+                Some(go_aliases_from_tree(&source, &tree))
+            } else {
+                None
+            };
+            let ctx = FileContext {
+                python_aliases: python_aliases.as_ref(),
+                javascript_aliases: javascript_aliases.as_ref(),
+                go_aliases: go_aliases.as_ref(),
+            };
+
+            let mut file_findings = Vec::new();
+            for rule in rules {
+                if !rule.applies_to_path(&relative_path) {
+                    continue;
+                }
+                let mut rule_findings = rule.check_with_context(&source, &tree, &ctx);
+                for f in &mut rule_findings {
+                    f.file = file_str.clone();
+                }
+                let rule_findings = apply_inline_ignores(rule_findings, &inline_ignores);
+                file_findings.extend(rule_findings);
+            }
+            file_findings
+        })
+        .collect();
+
     results.sort_by(|a, b| {
         a.file
             .cmp(&b.file)
