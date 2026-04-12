@@ -39,6 +39,10 @@ pub struct FileContext<'a> {
     /// Python import-to-file-path resolution map for the current file.
     /// Maps local import names to resolved file paths on disk.
     pub python_import_paths: Option<&'a std::collections::HashMap<String, std::path::PathBuf>>,
+    /// JavaScript/TypeScript import-to-file-path resolution map for the current file.
+    /// Maps local import names (e.g. `"services"` from `require('./services')`) to
+    /// resolved file paths on disk.
+    pub javascript_import_paths: Option<&'a std::collections::HashMap<String, std::path::PathBuf>>,
 }
 
 /// A security rule that checks parsed source code for vulnerabilities.

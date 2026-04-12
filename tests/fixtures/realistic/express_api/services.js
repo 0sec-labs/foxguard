@@ -6,7 +6,7 @@
 // propagate through these functions.
 
 const db = {
-    exec(_q) {
+    query(_q) {
         return [];
     },
 };
@@ -14,7 +14,7 @@ const db = {
 function runQuery(name) {
     // Would become a taint SQL injection finding after #46 when
     // called from routes.search with a tainted name.
-    return db.exec("SELECT * FROM users WHERE name = '" + name + "'");
+    return db.query("SELECT * FROM users WHERE name = '" + name + "'");
 }
 
 function evalExpression(expr) {

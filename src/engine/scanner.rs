@@ -1,6 +1,6 @@
 use crate::rules::cross_file::CrossFileSummaryMap;
 use crate::rules::go_taint::go_aliases_from_tree;
-use crate::rules::javascript_taint::js_aliases_from_tree;
+use crate::rules::javascript_taint::{self, js_aliases_from_tree};
 use crate::rules::python_aliases::{from_tree as py_aliases_from_tree, resolve_imports_to_paths};
 use crate::rules::python_taint;
 use crate::rules::{FileContext, RuleRegistry};
@@ -291,15 +291,20 @@ fn scan_files(
     let start = Instant::now();
     let file_count = files.len();
 
-    // ── Pass 1: Extract cross-file taint summaries (Python only) ─────
-    // Only run pass 1 if there are multiple Python files — single-file
+    // ── Pass 1: Extract cross-file taint summaries (Python + JS) ──────
+    // Only run pass 1 if there are multiple files in a language — single-file
     // scans cannot benefit from cross-file analysis.
     let python_files: Vec<&(PathBuf, Language)> = files
         .iter()
         .filter(|(path, lang)| matches!(lang, Language::Python) && !is_noise_path(path))
         .collect();
 
-    let cross_file_summaries: CrossFileSummaryMap = if python_files.len() > 1 {
+    let js_files: Vec<&(PathBuf, Language)> = files
+        .iter()
+        .filter(|(path, lang)| matches!(lang, Language::JavaScript) && !is_noise_path(path))
+        .collect();
+
+    let py_summaries: CrossFileSummaryMap = if python_files.len() > 1 {
         let rule_specs = crate::rules::python::python_taint_rule_specs();
         python_files
             .par_iter()
@@ -319,7 +324,6 @@ fn scan_files(
                 if summaries.is_empty() {
                     None
                 } else {
-                    // Canonicalize the path for consistent lookups.
                     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
                     Some((canonical, summaries))
                 }
@@ -328,6 +332,39 @@ fn scan_files(
     } else {
         CrossFileSummaryMap::new()
     };
+
+    let js_summaries: CrossFileSummaryMap = if js_files.len() > 1 {
+        let rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        js_files
+            .par_iter()
+            .filter_map(|(path, _)| {
+                let source = std::fs::read_to_string(path).ok()?;
+                if is_minified(&source) {
+                    return None;
+                }
+                let tree = super::parser::parse_file(&source, Language::JavaScript)?;
+                let aliases = js_aliases_from_tree(&source, &tree);
+                let summaries = javascript_taint::extract_cross_file_summaries(
+                    tree.root_node(),
+                    &source,
+                    Some(&aliases),
+                    &rule_specs,
+                );
+                if summaries.is_empty() {
+                    None
+                } else {
+                    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                    Some((canonical, summaries))
+                }
+            })
+            .collect()
+    } else {
+        CrossFileSummaryMap::new()
+    };
+
+    // Merge Python and JS summaries into a single map.
+    let mut cross_file_summaries = py_summaries;
+    cross_file_summaries.extend(js_summaries);
 
     let has_cross_file = !cross_file_summaries.is_empty();
 
@@ -413,6 +450,23 @@ fn scan_files(
                 None
             };
 
+            // Build JavaScript import-to-path map for cross-file resolution.
+            let javascript_import_paths =
+                if has_cross_file && matches!(language, Language::JavaScript) {
+                    let mut imports =
+                        javascript_taint::resolve_js_imports_to_paths(&source, &tree, path);
+                    let canonical: HashMap<String, PathBuf> = imports
+                        .drain()
+                        .map(|(k, v)| {
+                            let canon = std::fs::canonicalize(&v).unwrap_or(v);
+                            (k, canon)
+                        })
+                        .collect();
+                    Some(canonical)
+                } else {
+                    None
+                };
+
             let ctx = FileContext {
                 python_aliases: python_aliases.as_ref(),
                 javascript_aliases: javascript_aliases.as_ref(),
@@ -423,6 +477,7 @@ fn scan_files(
                     None
                 },
                 python_import_paths: python_import_paths.as_ref(),
+                javascript_import_paths: javascript_import_paths.as_ref(),
             };
 
             let mut file_findings = Vec::new();

@@ -184,11 +184,11 @@ fn realistic_django_shop_multifile() {
 fn realistic_express_api_multifile() {
     assert_fixture(
         "express_api",
-        9,
+        10,
         &[
-            ("js/taint-sql-injection", 1),
+            ("js/taint-sql-injection", 2),
             ("js/taint-command-injection", 1),
-            ("js/taint-eval", 1),
+            ("js/taint-eval", 2),
         ],
     );
 }
