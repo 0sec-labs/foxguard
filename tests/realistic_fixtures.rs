@@ -204,17 +204,20 @@ fn realistic_next_app_multifile() {
 
 /// Multi-file Gin fixture (issue #48). `handlers.go` holds request
 /// sources, `store.go` holds a SQL execute helper tainted across the
-/// file boundary. In-file taint flows fire today (command injection
-/// in `runCmd`, SSRF in `proxyFetch`). Cross-file flow via
-/// `store.runQuery` does NOT fire yet — the non-taint
-/// `go/no-sql-injection` pins that behavior. After #46 lands, a new
-/// `go/taint-sql-injection` finding appears and the counts update.
+/// file boundary. In-file taint flows fire (command injection in the
+/// closure, SSRF in `proxyFetch`). Cross-file flow via
+/// `runQuery(name)` in `handlers.go` → `db.Query` in `store.go`
+/// fires as `go/taint-sql-injection` after issue #46.
 #[test]
 fn realistic_gin_service_multifile() {
     assert_fixture(
         "gin_service",
-        5,
-        &[("go/taint-command-injection", 1), ("go/taint-ssrf", 1)],
+        6,
+        &[
+            ("go/taint-command-injection", 1),
+            ("go/taint-sql-injection", 1),
+            ("go/taint-ssrf", 1),
+        ],
     );
 }
 

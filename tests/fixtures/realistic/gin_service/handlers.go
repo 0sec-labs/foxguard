@@ -1,12 +1,12 @@
 // Multi-file Gin fixture (issue #48). Companion to django_shop/ and
 // express_api/. handlers.go holds request sources; store.go holds the
-// dangerous sinks. The current Go taint engine is intraprocedural +
-// same-file interprocedural, so cross-file flows from handlers → store
-// do not fire yet. Issue #46 will fix that and this fixture's expected
-// counts will need to be updated.
+// dangerous sinks. Cross-file taint analysis (issue #46) resolves
+// same-package function calls, so runQuery(name) in search() flows
+// through to db.Query in store.go.
 //
-// Hand-counted expected findings under the current engine:
+// Hand-counted expected findings:
 //   go/taint-command-injection : 1   (in-file closure in Register)
+//   go/taint-sql-injection     : 1   (cross-file: search → runQuery)
 //   go/taint-ssrf              : 1   (in-file proxyFetch)
 
 package gin_service
@@ -26,7 +26,7 @@ func proxyFetch(c *gin.Context) {
 	c.String(http.StatusOK, "ok")
 }
 
-// Cross-file flow — should fire after #46 lands.
+// Cross-file flow — fires via same-package taint resolution (#46).
 func search(c *gin.Context) {
 	name := c.Query("name")
 	rows := runQuery(name)

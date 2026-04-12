@@ -1,5 +1,5 @@
 use crate::rules::cross_file::CrossFileSummaryMap;
-use crate::rules::go_taint::go_aliases_from_tree;
+use crate::rules::go_taint::{self, go_aliases_from_tree};
 use crate::rules::javascript_taint::js_aliases_from_tree;
 use crate::rules::python_aliases::{from_tree as py_aliases_from_tree, resolve_imports_to_paths};
 use crate::rules::python_taint;
@@ -291,15 +291,22 @@ fn scan_files(
     let start = Instant::now();
     let file_count = files.len();
 
-    // ── Pass 1: Extract cross-file taint summaries (Python only) ─────
-    // Only run pass 1 if there are multiple Python files — single-file
-    // scans cannot benefit from cross-file analysis.
+    // ── Pass 1: Extract cross-file taint summaries ────────────────────
+    // Run pass 1 for Python and Go files when there are multiple files
+    // of the same language — single-file scans cannot benefit from
+    // cross-file analysis.
+
     let python_files: Vec<&(PathBuf, Language)> = files
         .iter()
         .filter(|(path, lang)| matches!(lang, Language::Python) && !is_noise_path(path))
         .collect();
 
-    let cross_file_summaries: CrossFileSummaryMap = if python_files.len() > 1 {
+    let go_files: Vec<&(PathBuf, Language)> = files
+        .iter()
+        .filter(|(path, lang)| matches!(lang, Language::Go) && !is_noise_path(path))
+        .collect();
+
+    let mut cross_file_summaries: CrossFileSummaryMap = if python_files.len() > 1 {
         let rule_specs = crate::rules::python::python_taint_rule_specs();
         python_files
             .par_iter()
@@ -329,7 +336,53 @@ fn scan_files(
         CrossFileSummaryMap::new()
     };
 
+    // Go cross-file summaries: extract from all Go files.
+    if go_files.len() > 1 {
+        let go_rule_specs = crate::rules::go::go_taint_rule_specs();
+        let go_summaries: CrossFileSummaryMap = go_files
+            .par_iter()
+            .filter_map(|(path, _)| {
+                let source = std::fs::read_to_string(path).ok()?;
+                if is_minified(&source) {
+                    return None;
+                }
+                let tree = super::parser::parse_file(&source, Language::Go)?;
+                let aliases = go_aliases_from_tree(&source, &tree);
+                let summaries = go_taint::extract_cross_file_summaries(
+                    tree.root_node(),
+                    &source,
+                    Some(&aliases),
+                    &go_rule_specs,
+                );
+                if summaries.is_empty() {
+                    None
+                } else {
+                    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                    Some((canonical, summaries))
+                }
+            })
+            .collect();
+        cross_file_summaries.extend(go_summaries);
+    }
+
     let has_cross_file = !cross_file_summaries.is_empty();
+
+    // Build a directory→files index for Go same-package resolution.
+    // All .go files in the same directory share the same package.
+    let go_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_cross_file {
+        let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+        for (path, lang) in &files {
+            if matches!(lang, Language::Go) && !is_noise_path(path) {
+                if let Some(dir) = path.parent() {
+                    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                    index.entry(dir.to_path_buf()).or_default().push(canonical);
+                }
+            }
+        }
+        index
+    } else {
+        HashMap::new()
+    };
 
     // ── Pass 2: Full analysis with cross-file summaries available ─────
     let mut results: Vec<Finding> = files
@@ -413,6 +466,25 @@ fn scan_files(
                 None
             };
 
+            // Build Go same-package paths for cross-file resolution.
+            // All .go files in the same directory share a package, so
+            // we provide the paths of sibling files (excluding self).
+            let go_same_package_paths = if has_cross_file && matches!(language, Language::Go) {
+                path.parent().and_then(|dir| {
+                    let canonical_self =
+                        std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                    go_dir_index.get(dir).map(|siblings| {
+                        siblings
+                            .iter()
+                            .filter(|p| **p != canonical_self)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                })
+            } else {
+                None
+            };
+
             let ctx = FileContext {
                 python_aliases: python_aliases.as_ref(),
                 javascript_aliases: javascript_aliases.as_ref(),
@@ -423,6 +495,7 @@ fn scan_files(
                     None
                 },
                 python_import_paths: python_import_paths.as_ref(),
+                go_same_package_paths,
             };
 
             let mut file_findings = Vec::new();

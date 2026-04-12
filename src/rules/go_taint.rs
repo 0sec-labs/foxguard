@@ -35,8 +35,10 @@
 //! `TaintSpec`.
 
 use super::common::AliasTable;
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tree_sitter::{Node, Tree};
 
 // ─── Public API ───────────────────────────────────────────────────────────
@@ -99,6 +101,23 @@ pub struct TaintSpec {
     pub sanitizers: Vec<NodeMatcher>,
 }
 
+/// Cross-file taint info for Go same-package resolution.
+///
+/// In Go, all `.go` files in the same directory belong to the same package
+/// and can call each other's functions without imports. This struct maps
+/// file paths in the same package to their taint summaries.
+pub struct CrossFileInfo<'a> {
+    /// Map from file path to taint summaries for that file.
+    /// For same-package resolution, these are all `.go` files in the
+    /// same directory as the current file.
+    pub same_package_paths: &'a [PathBuf],
+    /// Cross-file summaries keyed by canonical file path.
+    pub summaries: &'a CrossFileSummaryMap,
+    /// The rule ID currently being analyzed. Cross-file findings are only
+    /// emitted when the summary's `sink_rule_id` matches this value.
+    pub current_rule_id: &'a str,
+}
+
 /// A single source→sink flow reported by the engine.
 #[derive(Debug, Clone)]
 pub struct TaintFinding {
@@ -130,6 +149,8 @@ struct AnalysisContext<'a> {
     spec: &'a TaintSpec,
     aliases: Option<&'a AliasTable>,
     summaries: &'a ReturnSummary,
+    /// Cross-file info for resolving same-package function calls.
+    cross_file: Option<&'a CrossFileInfo<'a>>,
 }
 
 /// Run the taint engine over every function/method body inside `root`
@@ -144,6 +165,22 @@ pub fn analyze_tree(
     spec: &TaintSpec,
     aliases: Option<&AliasTable>,
 ) -> Vec<TaintFinding> {
+    analyze_tree_with_cross_file(root, source, spec, aliases, None)
+}
+
+/// Like [`analyze_tree`] but with optional cross-file taint summaries.
+///
+/// When `cross_file` is `Some`, calls to functions defined in other files
+/// of the same Go package are resolved against the summary map. If a
+/// tainted argument reaches a sink in the callee (per its summary), a
+/// finding is emitted in the caller's file.
+pub fn analyze_tree_with_cross_file<'a>(
+    root: Node<'_>,
+    source: &'a str,
+    spec: &'a TaintSpec,
+    aliases: Option<&'a AliasTable>,
+    cross_file: Option<&'a CrossFileInfo<'a>>,
+) -> Vec<TaintFinding> {
     let empty_summary = ReturnSummary::new();
     let mut summaries = ReturnSummary::new();
     let pass1_ctx = AnalysisContext {
@@ -151,6 +188,7 @@ pub fn analyze_tree(
         spec,
         aliases,
         summaries: &empty_summary,
+        cross_file: None,
     };
     collect_function_defs(root, &mut |func_node| {
         let (name, ret_taint) = summarize_function(func_node, &pass1_ctx);
@@ -165,6 +203,7 @@ pub fn analyze_tree(
         spec,
         aliases,
         summaries: &summaries,
+        cross_file,
     };
     let mut findings = Vec::new();
     collect_function_defs(root, &mut |func_node| {
@@ -252,6 +291,137 @@ fn go_collect_import_spec(aliases: &mut AliasTable, node: Node<'_>, source: &str
             aliases.insert(canonical.clone(), canonical);
         }
     }
+}
+
+// ─── Cross-file summary extraction ───────────────────────────────────────
+
+/// Collect parameter names from a Go function / method declaration.
+///
+/// For a function like `func runQuery(name string) []any`, this returns
+/// `["name"]`. For a method like `func (s *Store) Run(q string)`, this
+/// returns `["q"]` (the receiver is excluded).
+fn collect_param_names(func_node: Node<'_>, source: &str) -> Vec<String> {
+    let Some(params) = func_node.child_by_field_name("parameters") else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        if !matches!(
+            child.kind(),
+            "parameter_declaration" | "variadic_parameter_declaration"
+        ) {
+            continue;
+        }
+        let mut name_cursor = child.walk();
+        for inner in child.children(&mut name_cursor) {
+            if inner.kind() == "identifier" {
+                names.push(node_text(inner, source).to_string());
+            }
+        }
+    }
+    names
+}
+
+/// Extract cross-file function taint summaries for all functions in a
+/// parsed Go file.
+///
+/// For each function, every parameter is treated as a synthetic taint
+/// source. Each rule spec's sinks are tested against the function body.
+/// If a parameter reaches a sink, a [`ParamSinkFlow`] is recorded. If a
+/// parameter flows to a return value, `params_to_return` records the index.
+///
+/// Unlike Python, we process *all* functions (not just exported ones)
+/// because Go same-package calls can reach unexported (lowercase) functions.
+pub fn extract_cross_file_summaries(
+    root: Node<'_>,
+    source: &str,
+    aliases: Option<&AliasTable>,
+    rule_specs: &[(&str, TaintSpec)],
+) -> Vec<FunctionTaintSummary> {
+    let mut summaries = Vec::new();
+
+    collect_function_defs(root, &mut |func_node| {
+        // Only process named functions / methods (skip closures).
+        let Some(name_node) = func_node.child_by_field_name("name") else {
+            return;
+        };
+        let func_name = node_text(name_node, source).to_string();
+
+        let param_names = collect_param_names(func_node, source);
+        if param_names.is_empty() {
+            return;
+        }
+
+        let mut params_to_sink: Vec<ParamSinkFlow> = Vec::new();
+        let mut params_to_return: Vec<usize> = Vec::new();
+
+        for (param_idx, param_name) in param_names.iter().enumerate() {
+            let synthetic_source = NodeMatcher::ParamName {
+                names: vec![param_name.clone()],
+                description: format!("parameter '{}'", param_name),
+            };
+
+            // Check return-taint: does this parameter flow to a return value?
+            let return_spec = TaintSpec {
+                sources: vec![synthetic_source.clone()],
+                sinks: vec![],
+                sanitizers: vec![],
+            };
+            let empty_summary = ReturnSummary::new();
+            let return_ctx = AnalysisContext {
+                source,
+                spec: &return_spec,
+                aliases,
+                summaries: &empty_summary,
+                cross_file: None,
+            };
+            let (_, ret_taint) = summarize_function(func_node, &return_ctx);
+            if ret_taint.is_some() && !params_to_return.contains(&param_idx) {
+                params_to_return.push(param_idx);
+            }
+
+            // Check sink-taint: does this parameter reach any sink?
+            for (rule_id, rule_spec) in rule_specs {
+                let synthetic_spec = TaintSpec {
+                    sources: vec![synthetic_source.clone()],
+                    sinks: rule_spec.sinks.clone(),
+                    sanitizers: rule_spec.sanitizers.clone(),
+                };
+                let sink_ctx = AnalysisContext {
+                    source,
+                    spec: &synthetic_spec,
+                    aliases,
+                    summaries: &empty_summary,
+                    cross_file: None,
+                };
+                let mut findings = Vec::new();
+                analyze_function(func_node, &sink_ctx, &mut findings);
+                if !findings.is_empty() {
+                    let already = params_to_sink
+                        .iter()
+                        .any(|f| f.param_index == param_idx && f.sink_rule_id == *rule_id);
+                    if !already {
+                        params_to_sink.push(ParamSinkFlow {
+                            param_index: param_idx,
+                            sink_rule_id: rule_id.to_string(),
+                            sink_description: findings[0].sink_description.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if !params_to_sink.is_empty() || !params_to_return.is_empty() {
+            summaries.push(FunctionTaintSummary {
+                name: func_name,
+                params_to_return,
+                params_to_sink,
+            });
+        }
+    });
+
+    summaries
 }
 
 // ─── Internals ────────────────────────────────────────────────────────────
@@ -666,15 +836,96 @@ fn handle_call(
         } if method == final_segment => Some(description.clone()),
         _ => None,
     });
-    let Some(sink_desc) = sink_desc else {
+
+    if let Some(sink_desc) = sink_desc {
+        let Some(args) = node.child_by_field_name("arguments") else {
+            return;
+        };
+        let mut cursor = args.walk();
+        for arg in args.named_children(&mut cursor) {
+            if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
+                let start = node.start_position();
+                let end = node.end_position();
+                findings.push(TaintFinding {
+                    sink_start_byte: node.start_byte(),
+                    sink_end_byte: node.end_byte(),
+                    sink_line: start.row + 1,
+                    sink_column: start.column + 1,
+                    sink_end_line: end.row + 1,
+                    sink_end_column: end.column + 1,
+                    source_description: source_desc,
+                    sink_description: sink_desc.clone(),
+                    source_line: src_line,
+                });
+                break;
+            }
+        }
+        return;
+    }
+
+    // ── Cross-file summary check ─────────────────────────────────────
+    // If the callee is a bare identifier (same-package function call)
+    // and we have cross-file summaries, check whether any tainted
+    // argument reaches a sink in the callee function (per its summary).
+    if let Some(cross_file) = ctx.cross_file {
+        handle_cross_file_call(node, callee_raw.as_ref(), ctx, state, findings, cross_file);
+    }
+}
+
+/// Check if a call targets a same-package function with cross-file summaries.
+///
+/// In Go, all files in the same directory share the same package namespace.
+/// A bare identifier call like `runQuery(name)` may refer to a function
+/// defined in another `.go` file in the same directory.
+fn handle_cross_file_call(
+    node: Node<'_>,
+    _callee_text: &str,
+    ctx: &AnalysisContext<'_>,
+    state: &TaintState,
+    findings: &mut Vec<TaintFinding>,
+    cross_file: &CrossFileInfo<'_>,
+) {
+    // Only handle bare identifier calls (same-package function calls).
+    // Selector expressions like `pkg.Func` are external package calls
+    // which we don't resolve yet.
+    let func = match node.child_by_field_name("function") {
+        Some(f) if f.kind() == "identifier" => f,
+        _ => return,
+    };
+    let func_name = node_text(func, ctx.source);
+
+    // Search all same-package files for a function with this name.
+    let mut resolved_summary: Option<&FunctionTaintSummary> = None;
+    for pkg_path in cross_file.same_package_paths {
+        if let Some(file_summaries) = cross_file.summaries.get(pkg_path) {
+            if let Some(summary) = file_summaries.iter().find(|s| s.name == func_name) {
+                resolved_summary = Some(summary);
+                break;
+            }
+        }
+    }
+
+    let Some(summary) = resolved_summary else {
         return;
     };
 
+    // Collect argument nodes.
     let Some(args) = node.child_by_field_name("arguments") else {
         return;
     };
     let mut cursor = args.walk();
-    for arg in args.named_children(&mut cursor) {
+    let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+
+    // For each tainted argument, check if the corresponding parameter
+    // has a ParamSinkFlow whose rule ID matches the current rule.
+    for flow in &summary.params_to_sink {
+        if flow.sink_rule_id != cross_file.current_rule_id {
+            continue;
+        }
+        if flow.param_index >= arg_nodes.len() {
+            continue;
+        }
+        let arg = arg_nodes[flow.param_index];
         if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
             let start = node.start_position();
             let end = node.end_position();
@@ -686,10 +937,14 @@ fn handle_call(
                 sink_end_line: end.row + 1,
                 sink_end_column: end.column + 1,
                 source_description: source_desc,
-                sink_description: sink_desc.clone(),
+                sink_description: format!(
+                    "{} (via cross-file call to {})",
+                    flow.sink_description, func_name
+                ),
                 source_line: src_line,
             });
-            break;
+            // One finding per cross-file call is enough.
+            return;
         }
     }
 }

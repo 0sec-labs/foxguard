@@ -1,6 +1,7 @@
 // Query helpers for the gin_service fixture. Takes a tainted argument
-// and passes it into a SQL execute sink via string concatenation. Will
-// become a cross-file taint finding after issue #46.
+// and passes it into a SQL execute sink via string concatenation.
+// Cross-file taint analysis (issue #46) detects the flow from
+// handlers.go search() → runQuery(name) → db.Query.
 
 package gin_service
 

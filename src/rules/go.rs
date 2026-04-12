@@ -615,7 +615,23 @@ fn map_go_taint_findings(
         None
     };
     let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
-    let raw = go_taint::analyze_tree(tree.root_node(), source, spec, aliases);
+
+    // Build cross-file info if both summaries and same-package paths are available.
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.go_same_package_paths.as_ref()) {
+        (Some(summaries), Some(paths)) => Some(go_taint::CrossFileInfo {
+            same_package_paths: paths,
+            summaries,
+            current_rule_id: meta.rule_id,
+        }),
+        _ => None,
+    };
+    let raw = go_taint::analyze_tree_with_cross_file(
+        tree.root_node(),
+        source,
+        spec,
+        aliases,
+        cross_file_info.as_ref(),
+    );
     raw.into_iter()
         .map(|t| Finding {
             rule_id: meta.rule_id.to_string(),
@@ -1036,4 +1052,20 @@ impl Rule for TaintSsrf {
             )
         })
     }
+}
+
+/// All Go taint rule IDs paired with their specs.
+///
+/// Used by the scanner's pass 1 to extract cross-file summaries: each
+/// rule's sinks are tested against function bodies with synthetic
+/// per-parameter sources.
+pub fn go_taint_rule_specs() -> Vec<(&'static str, GoTaintSpec)> {
+    vec![
+        ("go/taint-command-injection", TaintCommandInjection::spec()),
+        ("go/taint-sql-injection", TaintSqlInjection::spec()),
+        ("go/taint-ssti", TaintSsti::spec()),
+        ("go/taint-xpath-injection", TaintXpathInjection::spec()),
+        ("go/taint-ldap-injection", TaintLdapInjection::spec()),
+        ("go/taint-ssrf", TaintSsrf::spec()),
+    ]
 }

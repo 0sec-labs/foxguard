@@ -39,6 +39,10 @@ pub struct FileContext<'a> {
     /// Python import-to-file-path resolution map for the current file.
     /// Maps local import names to resolved file paths on disk.
     pub python_import_paths: Option<&'a std::collections::HashMap<String, std::path::PathBuf>>,
+    /// Go same-package file paths. All `.go` files in the same directory
+    /// share the same package and can call each other's functions.
+    /// Excludes the current file itself.
+    pub go_same_package_paths: Option<Vec<std::path::PathBuf>>,
 }
 
 /// A security rule that checks parsed source code for vulnerabilities.
