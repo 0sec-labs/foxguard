@@ -110,11 +110,17 @@ fn is_noise_path(path: &Path) -> bool {
         "/node_modules/",
         "/__fixtures__/",
         "/__mocks__/",
+        "/__tests__/",
+        "/__snapshots__/",
         "/dist/",
         "/build/",
         "/.next/",
         "/coverage/",
         "/.cache/",
+        "/spec/",
+        "/stubs/",
+        "/generated/",
+        "/gen/",
     ];
     for dir in &noise_dirs {
         if path_str.contains(dir) {

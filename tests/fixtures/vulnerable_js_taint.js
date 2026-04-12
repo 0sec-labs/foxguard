@@ -65,6 +65,12 @@ function methodCallOnTaintedRoot(req) {
     document.getElementById("x").innerHTML = req.body.toString();
 }
 
+// ─── Spread element: [...source] propagates taint (issue #119) ───────
+function spreadTaint(req) {
+    const arr = [...req.body];
+    document.getElementById("x").innerHTML = arr[0];
+}
+
 // ─── js/taint-log-injection ──────────────────────────────────────────
 function logInjection(req) {
     const userInput = req.body.username;

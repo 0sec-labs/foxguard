@@ -1663,6 +1663,28 @@ fn expression_taint(
         }
     }
 
+    // Array / object literals: propagate taint from any element.
+    // This lets `[...req.body]` and `[tainted, clean]` carry taint.
+    if matches!(expr.kind(), "array" | "object") {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Spread element: `...inner` — unwrap and recurse into the inner expression
+    // so that `[...req.body]` and `func(...tainted)` propagate taint.
+    if expr.kind() == "spread_element" {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
     // Parenthesized / unary / sequence wrappers: recurse into children.
     if matches!(
         expr.kind(),

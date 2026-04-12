@@ -637,14 +637,15 @@ fn test_vulnerable_js_taint_catches_every_flow() {
         }
     }
 
-    // Nine handlers, each with exactly one source→sink flow (six
+    // Ten handlers, each with exactly one source→sink flow (six
     // original + two added by #19 for same-file interprocedural return
     // propagation + one added by #27 for method-call propagation on a
-    // tainted root `req.body.toString()`).
+    // tainted root `req.body.toString()` + one added by #119 for spread
+    // element taint propagation `[...req.body]`).
     assert_eq!(
         counts.get("js/taint-xss-innerhtml").copied(),
-        Some(9),
-        "js/taint-xss-innerhtml should fire exactly nine times. counts={:?}",
+        Some(10),
+        "js/taint-xss-innerhtml should fire exactly ten times. counts={:?}",
         counts
     );
     // The conservative rules must still coexist on the same fixture.
