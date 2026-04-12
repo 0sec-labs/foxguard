@@ -60,6 +60,10 @@ pub struct ScanArgs {
     #[arg(long, default_value_t = false)]
     pub explain: bool,
 
+    /// Suppress terminal output (exit code still reflects findings)
+    #[arg(short, long)]
+    pub quiet: bool,
+
     /// Maximum file size in bytes to scan (default: 1 MB)
     #[arg(long, default_value_t = 1_048_576)]
     pub max_file_size: u64,

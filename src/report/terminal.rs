@@ -14,7 +14,7 @@ pub fn print_findings_with_options(
     if findings.is_empty() {
         if files_scanned > 0 {
             println!(
-                "{}  Scanned {} files in {:.2}s",
+                "{} Scanned {} files in {:.2}s.",
                 "No security issues found.".green().bold(),
                 files_scanned.to_string().bold(),
                 duration.as_secs_f64(),

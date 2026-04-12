@@ -161,14 +161,22 @@ fn run_scan(scan: &ScanArgs) -> i32 {
 
     findings = suppress_with_baseline(findings, baseline.as_ref());
 
+    if files_scanned == 0 {
+        eprintln!(
+            "Warning: no files with supported extensions found. Supported: .js, .ts, .py, .go, .rb, .java, .php, .rs, .cs, .swift, .kt"
+        );
+    }
+
     match scan.format {
         OutputFormat::Terminal => {
-            foxguard::report::terminal::print_findings_with_options(
-                &findings,
-                files_scanned,
-                duration,
-                scan.explain,
-            );
+            if !scan.quiet {
+                foxguard::report::terminal::print_findings_with_options(
+                    &findings,
+                    files_scanned,
+                    duration,
+                    scan.explain,
+                );
+            }
         }
         OutputFormat::Json => foxguard::report::json::print_json(&findings),
         OutputFormat::Sarif => foxguard::report::sarif::print_sarif(&findings),
@@ -372,6 +380,7 @@ fn run_init(args: &InitArgs) -> i32 {
                 baseline: None,
                 write_baseline: None,
                 explain: false,
+                quiet: false,
                 max_file_size: 1_048_576,
             },
             output: repo_root.join(&args.baseline).display().to_string(),
