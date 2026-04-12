@@ -595,6 +595,7 @@ struct GoTaintRuleMeta<'a> {
     rule_id: &'a str,
     severity: Severity,
     cwe: Option<&'a str>,
+    fix_suggestion: Option<&'a str>,
 }
 
 fn map_go_taint_findings(
@@ -631,6 +632,7 @@ fn map_go_taint_findings(
             source_description: Some(t.source_description),
             sink_line: Some(t.sink_line),
             sink_description: Some(t.sink_description),
+            fix_suggestion: meta.fix_suggestion.map(|s| s.to_string()),
         })
         .collect()
 }
@@ -683,6 +685,7 @@ impl Rule for TaintCommandInjection {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
+            fix_suggestion: Some("Pass arguments as separate elements to `exec.Command(name, arg1, arg2)` instead of a single shell string"),
         };
         map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(
@@ -772,6 +775,7 @@ impl Rule for TaintSqlInjection {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
+            fix_suggestion: Some("Use parameterized queries: `db.Query(\"SELECT * FROM users WHERE name = $1\", name)`"),
         };
         map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!("{} reaches {} — untrusted input can inject SQL", src, sink)
@@ -831,6 +835,7 @@ impl Rule for TaintSsrf {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
+            fix_suggestion: Some("Validate URLs against an allowlist of permitted hosts before making requests"),
         };
         map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(

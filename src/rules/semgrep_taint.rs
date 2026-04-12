@@ -319,6 +319,7 @@ impl Rule for SemgrepTaintRule {
                 source_description: Some(t.source_description),
                 sink_line: Some(t.sink_line),
                 sink_description: Some(t.sink_description),
+                fix_suggestion: None,
             })
             .collect()
     }

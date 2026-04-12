@@ -1796,6 +1796,7 @@ struct TaintRuleMeta<'a> {
     rule_id: &'a str,
     severity: Severity,
     cwe: Option<&'a str>,
+    fix_suggestion: Option<&'a str>,
 }
 
 fn map_taint_findings(
@@ -1823,6 +1824,7 @@ fn map_taint_findings(
             source_description: Some(t.source_description),
             sink_line: Some(t.sink_line),
             sink_description: Some(t.sink_description),
+            fix_suggestion: meta.fix_suggestion.map(|s| s.to_string()),
         })
         .collect()
 }
@@ -1875,6 +1877,7 @@ impl Rule for TaintPickleDeserialization {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
+            fix_suggestion: Some("Use `json` or `msgpack` instead of pickle for untrusted data: `json.loads(data)`"),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(
@@ -1929,6 +1932,7 @@ impl Rule for TaintEvalFromRequest {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
+            fix_suggestion: Some("Use `ast.literal_eval()` for safe evaluation, or remove eval/exec entirely"),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(
@@ -1991,6 +1995,7 @@ impl Rule for TaintCommandInjectionFromRequest {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
+            fix_suggestion: Some("Use `shlex.quote()` to escape arguments, or pass a list to `subprocess.run([...])` instead of a shell string"),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(
@@ -2054,6 +2059,7 @@ impl Rule for TaintSsrfFromRequest {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
+            fix_suggestion: Some("Validate URLs against an allowlist of permitted hosts before making requests"),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(
@@ -2112,6 +2118,7 @@ impl Rule for TaintYamlLoadFromRequest {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
+            fix_suggestion: Some("Use `yaml.safe_load()` instead of `yaml.load()` for untrusted input"),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(
@@ -2184,6 +2191,7 @@ impl Rule for TaintSqlInjectionFromRequest {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
+            fix_suggestion: Some("Use parameterized queries: `cur.execute(\"SELECT * FROM users WHERE name = ?\", (name,))`"),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!("{} reaches {} — untrusted input can inject SQL", src, sink)

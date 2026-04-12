@@ -1869,6 +1869,7 @@ impl Rule for TaintXssInnerHtml {
                 source_description: Some(t.source_description),
                 sink_line: Some(t.sink_line),
                 sink_description: Some(t.sink_description),
+                fix_suggestion: Some("Use `DOMPurify.sanitize()` or `textContent` instead of `innerHTML`/`document.write`".to_string()),
             })
             .collect()
     }
@@ -1958,6 +1959,7 @@ impl Rule for TaintSqlInjection {
                 source_description: Some(t.source_description),
                 sink_line: Some(t.sink_line),
                 sink_description: Some(t.sink_description),
+                fix_suggestion: Some("Use parameterized queries: `db.query(\"SELECT * FROM users WHERE name = $1\", [name])`".to_string()),
             })
             .collect()
     }
@@ -2039,6 +2041,7 @@ impl Rule for TaintEval {
                 source_description: Some(t.source_description),
                 sink_line: Some(t.sink_line),
                 sink_description: Some(t.sink_description),
+                fix_suggestion: Some("Remove `eval()`/`new Function()` and use safe alternatives like `JSON.parse()`".to_string()),
             })
             .collect()
     }
@@ -2131,6 +2134,7 @@ impl Rule for TaintCommandInjection {
                 source_description: Some(t.source_description),
                 sink_line: Some(t.sink_line),
                 sink_description: Some(t.sink_description),
+                fix_suggestion: Some("Pass arguments as an array to `child_process.execFile()` instead of building a shell string".to_string()),
             })
             .collect()
     }
@@ -2247,6 +2251,7 @@ impl Rule for TaintSsrf {
                 source_description: Some(t.source_description),
                 sink_line: Some(t.sink_line),
                 sink_description: Some(t.sink_description),
+                fix_suggestion: Some("Validate URLs against an allowlist of permitted hosts before making requests".to_string()),
             })
             .collect()
     }

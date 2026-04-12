@@ -85,6 +85,9 @@ pub fn print_findings_with_options(
                     snk_desc,
                 );
             }
+            if let Some(fix) = f.fix_suggestion.as_ref() {
+                println!("  {} {}", "Fix:".green().bold(), fix);
+            }
         }
     }
 

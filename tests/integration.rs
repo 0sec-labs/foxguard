@@ -2597,3 +2597,103 @@ fn test_explain_json_includes_trace_fields() {
         );
     }
 }
+
+// ─── Fix-suggestion tests ──────────────────────────────────────────────
+
+#[test]
+fn test_taint_findings_include_fix_suggestion_in_json() {
+    // Scan the Python taint fixture in JSON mode and verify that taint
+    // findings carry a non-empty fix_suggestion field.
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/vulnerable_py_taint.py", "-f", "json"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    assert!(!output.status.success(), "should exit non-zero with findings");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let taint_findings: Vec<&serde_json::Value> = findings
+        .iter()
+        .filter(|f| {
+            f["rule_id"]
+                .as_str()
+                .map_or(false, |id| id.contains("taint"))
+        })
+        .collect();
+
+    assert!(
+        !taint_findings.is_empty(),
+        "should have at least one taint finding"
+    );
+
+    for f in &taint_findings {
+        let fix = f.get("fix_suggestion");
+        assert!(
+            fix.is_some() && fix.unwrap().is_string() && !fix.unwrap().as_str().unwrap().is_empty(),
+            "taint finding {} should have a non-empty fix_suggestion",
+            f["rule_id"]
+        );
+    }
+
+    // Non-taint findings should NOT have fix_suggestion
+    let nontaint_findings: Vec<&serde_json::Value> = findings
+        .iter()
+        .filter(|f| {
+            f["rule_id"]
+                .as_str()
+                .map_or(false, |id| !id.contains("taint"))
+        })
+        .collect();
+
+    for f in &nontaint_findings {
+        assert!(
+            f.get("fix_suggestion").is_none() || f["fix_suggestion"].is_null(),
+            "non-taint finding {} should not have fix_suggestion",
+            f["rule_id"]
+        );
+    }
+}
+
+#[test]
+fn test_fix_suggestion_appears_in_sarif_output() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/vulnerable_py_taint.py", "-f", "sarif"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let sarif: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("invalid SARIF output");
+
+    let results = sarif["runs"][0]["results"].as_array().expect("results array");
+
+    let taint_results: Vec<&serde_json::Value> = results
+        .iter()
+        .filter(|r| {
+            r["ruleId"]
+                .as_str()
+                .map_or(false, |id| id.contains("taint"))
+        })
+        .collect();
+
+    assert!(
+        !taint_results.is_empty(),
+        "should have at least one taint result in SARIF"
+    );
+
+    for r in &taint_results {
+        let fixes = r.get("fixes");
+        assert!(
+            fixes.is_some() && fixes.unwrap().is_array(),
+            "taint SARIF result {} should have a fixes array",
+            r["ruleId"]
+        );
+        let fix_text = fixes.unwrap()[0]["description"]["text"].as_str();
+        assert!(
+            fix_text.is_some() && !fix_text.unwrap().is_empty(),
+            "SARIF fix description should be non-empty for {}",
+            r["ruleId"]
+        );
+    }
+}

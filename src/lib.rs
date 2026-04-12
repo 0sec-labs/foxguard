@@ -79,4 +79,6 @@ pub struct Finding {
     pub sink_line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sink_description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix_suggestion: Option<String>,
 }

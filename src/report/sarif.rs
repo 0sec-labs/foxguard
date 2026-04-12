@@ -10,7 +10,7 @@ pub fn print_sarif(findings: &[Finding]) {
                 props.insert("tags".to_string(), json!([cwe]));
             }
 
-            json!({
+            let mut result = json!({
                 "ruleId": f.rule_id,
                 "level": match f.severity {
                     crate::Severity::Critical | crate::Severity::High => "error",
@@ -34,7 +34,17 @@ pub fn print_sarif(findings: &[Finding]) {
                     }
                 }],
                 "properties": props
-            })
+            });
+
+            if let Some(fix) = &f.fix_suggestion {
+                result["fixes"] = json!([{
+                    "description": {
+                        "text": fix
+                    }
+                }]);
+            }
+
+            result
         })
         .collect();
 

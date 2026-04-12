@@ -113,6 +113,7 @@ pub fn make_finding(
         source_description: None,
         sink_line: None,
         sink_description: None,
+        fix_suggestion: None,
     }
 }
 
@@ -153,6 +154,7 @@ pub fn make_finding_from_offsets(
         source_description: None,
         sink_line: None,
         sink_description: None,
+        fix_suggestion: None,
     }
 }
 
