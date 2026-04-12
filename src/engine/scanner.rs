@@ -298,19 +298,22 @@ fn scan_files(
     let file_count = files.len();
 
     // ── Pass 1: Extract cross-file taint summaries ────────────────────
-    // Run pass 1 for Python and Go files when there are multiple files
-    // of the same language — single-file scans cannot benefit from
+    // Run pass 1 for Python, Go, and JS files when there are multiple
+    // files of the same language — single-file scans cannot benefit from
     // cross-file analysis.
 
-    let python_files: Vec<&(PathBuf, Language)> = files
-        .iter()
-        .filter(|(path, lang)| matches!(lang, Language::Python) && !is_noise_path(path))
-        .collect();
-
-    let go_files: Vec<&(PathBuf, Language)> = files
-        .iter()
-        .filter(|(path, lang)| matches!(lang, Language::Go) && !is_noise_path(path))
-        .collect();
+    // Build a per-language file index in a single pass over the file list.
+    let mut files_by_lang: HashMap<Language, Vec<&(PathBuf, Language)>> = HashMap::new();
+    for entry in &files {
+        if !is_noise_path(&entry.0) {
+            files_by_lang.entry(entry.1).or_default().push(entry);
+        }
+    }
+    let python_files: Vec<_> = files_by_lang.remove(&Language::Python).unwrap_or_default();
+    let go_files: Vec<_> = files_by_lang.remove(&Language::Go).unwrap_or_default();
+    let js_files: Vec<_> = files_by_lang
+        .remove(&Language::JavaScript)
+        .unwrap_or_default();
 
     let mut cross_file_summaries: CrossFileSummaryMap = if python_files.len() > 1 {
         let rule_specs = crate::rules::python::python_taint_rule_specs();
@@ -341,11 +344,6 @@ fn scan_files(
     } else {
         CrossFileSummaryMap::new()
     };
-
-    let js_files: Vec<&(PathBuf, Language)> = files
-        .iter()
-        .filter(|(path, lang)| matches!(lang, Language::JavaScript) && !is_noise_path(path))
-        .collect();
 
     // JavaScript cross-file summaries: extract from all JS/TS files.
     if js_files.len() > 1 {
