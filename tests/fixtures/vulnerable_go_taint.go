@@ -10,7 +10,9 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 // ─── go/taint-command-injection ───────────────────────────────────────────
@@ -126,4 +128,24 @@ func ginQueryToLogPrintf(c *gin.Context) {
 func ginQueryToMongoFind(c *gin.Context, collection *mongo.Collection) {
 	filter := c.Query("filter")
 	collection.Find(context.TODO(), filter)
+}
+
+// ─── go/taint-path-traversal ────────────────────────────────────────────
+
+// 17. net/http r.URL.Query().Get → os.Open
+func httpQueryToOsOpen(w http.ResponseWriter, r *http.Request) {
+	file := r.URL.Query().Get("file")
+	os.Open(file)
+}
+
+// 18. gin Context.Query → filepath.Join
+func ginQueryToFilepathJoin(c *gin.Context) {
+	name := c.Query("name")
+	filepath.Join("/uploads", name)
+}
+
+// 19. gin Context.Param → os.ReadFile
+func ginParamToOsReadFile(c *gin.Context) {
+	path := c.Param("path")
+	os.ReadFile(path)
 }

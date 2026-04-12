@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 // 1. Static literal argument — no taint source at all.
@@ -76,4 +78,16 @@ func sprintfStatic() {
 func unusedHandler(w http.ResponseWriter, r *http.Request) {
 	_ = r
 	exec.Command("/bin/true")
+}
+
+// 9. filepath.Clean sanitizes path traversal.
+func sanitizedPathClean(c *gin.Context) {
+	name := c.Query("file")
+	safe := filepath.Clean(name)
+	os.Open(safe)
+}
+
+// 10. Static literal path — no taint source.
+func staticFilePath() {
+	os.Open("/etc/hostname")
 }

@@ -194,6 +194,7 @@ impl RuleRegistry {
         registry.register(Box::new(go::JwtNoVerify));
         registry.register(Box::new(go::JwtHardcodedSecret));
         registry.register(Box::new(go::TaintNosqlInjection));
+        registry.register(Box::new(go::TaintPathTraversal));
 
         // Register Java rules
         registry.register(Box::new(java::NoSqlInjection));

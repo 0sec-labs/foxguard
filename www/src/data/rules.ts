@@ -115,6 +115,7 @@ const goRules: Rule[] = [
   { id: 'go/taint-ldap-injection', cwe: 'CWE-90', desc: 'Untrusted input reaches LDAP search sink (potential LDAP injection)', severity: 'high' },
   { id: 'go/taint-log-injection', cwe: 'CWE-117', desc: 'Untrusted input reaches a logging sink — possible log injection', severity: 'medium' },
   { id: 'go/taint-nosql-injection', cwe: 'CWE-943', desc: 'Untrusted input reaches a MongoDB query sink — possible NoSQL injection', severity: 'critical' },
+  { id: 'go/taint-path-traversal', cwe: 'CWE-22', desc: 'Untrusted input reaches a filesystem path sink — possible path traversal', severity: 'high' },
   { id: 'go/taint-sql-injection', cwe: 'CWE-89', desc: 'Untrusted input reaches database Query/Exec sink', severity: 'critical' },
   { id: 'go/taint-ssrf', cwe: 'CWE-918', desc: 'Untrusted input reaches outbound net/http sink (potential SSRF)', severity: 'high' },
   { id: 'go/taint-ssti', cwe: 'CWE-1336', desc: 'Untrusted input reaches template parsing sink (potential SSTI)', severity: 'critical' },

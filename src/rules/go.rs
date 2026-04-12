@@ -1414,6 +1414,91 @@ impl Rule for TaintNosqlInjection {
     }
 }
 
+// ─── Rule: taint-path-traversal ──────────────────────────────────────────
+
+pub struct TaintPathTraversal;
+
+impl TaintPathTraversal {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                go_call_sink("os.Open"),
+                go_call_sink("os.OpenFile"),
+                go_call_sink("os.ReadFile"),
+                go_call_sink("os.WriteFile"),
+                go_call_sink("os.Remove"),
+                go_call_sink("os.Stat"),
+                go_call_sink("os.MkdirAll"),
+                go_call_sink("filepath.Join"),
+                go_call_sink("ioutil.ReadFile"),
+                go_call_sink("ioutil.WriteFile"),
+                GoNodeMatcher::MethodName {
+                    method: "Open".into(),
+                    description: "http.Dir.Open".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "Create".into(),
+                    description: "os.Create".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "ReadFile".into(),
+                    description: "afero.ReadFile".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "WriteFile".into(),
+                    description: "afero.WriteFile".into(),
+                },
+            ],
+            sanitizers: vec![go_call_sink("filepath.Clean"), go_call_sink("filepath.Abs")],
+        }
+    }
+}
+
+impl Rule for TaintPathTraversal {
+    fn id(&self) -> &str {
+        "go/taint-path-traversal"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-22")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches a filesystem path sink — possible path traversal"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = GoTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Validate file paths with filepath.Clean() and ensure they don't escape the intended directory",
+            ),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can traverse the filesystem",
+                src, sink
+            )
+        })
+    }
+}
+
 /// All Go taint rule IDs paired with their specs.
 ///
 /// Used by the scanner's pass 1 to extract cross-file summaries: each
@@ -1429,5 +1514,6 @@ pub fn go_taint_rule_specs() -> Vec<(&'static str, GoTaintSpec)> {
         ("go/taint-ssrf", TaintSsrf::spec()),
         ("go/taint-log-injection", TaintLogInjection::spec()),
         ("go/taint-nosql-injection", TaintNosqlInjection::spec()),
+        ("go/taint-path-traversal", TaintPathTraversal::spec()),
     ]
 }

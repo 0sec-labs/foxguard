@@ -2458,6 +2458,7 @@ fn test_vulnerable_go_taint_catches_every_flow() {
         ("go/taint-ldap-injection", 1),
         ("go/taint-log-injection", 1),
         ("go/taint-nosql-injection", 1),
+        ("go/taint-path-traversal", 3),
     ] {
         assert_eq!(
             counts.get(taint_rule).copied(),
@@ -2493,6 +2494,7 @@ fn test_safe_go_taint_has_no_taint_findings() {
         "go/taint-ldap-injection",
         "go/taint-log-injection",
         "go/taint-nosql-injection",
+        "go/taint-path-traversal",
     ] {
         let n = findings
             .iter()
