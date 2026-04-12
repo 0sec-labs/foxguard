@@ -952,6 +952,24 @@ fn expression_taint(
         }
     }
 
+    // Conditional expression (ternary): `x = tainted if cond else safe`.
+    // Conservative: if EITHER branch is tainted, the result is tainted.
+    // tree-sitter-python lays out `conditional_expression` without field
+    // names: named_child(0) = body, named_child(1) = condition,
+    // named_child(2) = alternative. We check body and alternative only.
+    if expr.kind() == "conditional_expression" {
+        if let Some(body) = expr.named_child(0) {
+            if let Some(result) = expression_taint(body, ctx, state) {
+                return Some(result);
+            }
+        }
+        if let Some(alternative) = expr.named_child(2) {
+            if let Some(result) = expression_taint(alternative, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
     // Binary `+` / `%` propagation: `"prefix " + tainted`, `tainted + "suffix"`,
     // and `"SELECT %s" % tainted` are all tainted. The `%` operator covers
     // Python's old-style string formatting (`"... %s ..." % val`), which is
@@ -2147,5 +2165,48 @@ def handler():
     pickle.loads(data)
 "#;
         assert!(!run(src).is_empty());
+    }
+
+    #[test]
+    fn conditional_expression_tainted_body_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.data if True else "safe"
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.data"));
+    }
+
+    #[test]
+    fn conditional_expression_tainted_alternative_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = "safe" if True else request.data
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.data"));
+    }
+
+    #[test]
+    fn conditional_expression_clean_both_branches_is_clean() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = "a" if True else "b"
+    pickle.loads(data)
+"#;
+        assert!(run(src).is_empty());
     }
 }

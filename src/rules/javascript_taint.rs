@@ -1575,6 +1575,21 @@ fn expression_taint(
         }
     }
 
+    // Ternary expression: `cond ? tainted : safe`.
+    // Conservative: if EITHER branch is tainted, the result is tainted.
+    if expr.kind() == "ternary_expression" {
+        if let Some(consequence) = expr.child_by_field_name("consequence") {
+            if let Some(result) = expression_taint(consequence, ctx, state) {
+                return Some(result);
+            }
+        }
+        if let Some(alternative) = expr.child_by_field_name("alternative") {
+            if let Some(result) = expression_taint(alternative, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
     // Binary plus (string concat): `"x" + tainted` is tainted.
     if expr.kind() == "binary_expression" {
         let mut cursor = expr.walk();
@@ -2507,5 +2522,42 @@ module.exports = { runQuery, evalExpression };
             "expected evalExpression to have eval sink flow, got {:?}",
             ee.params_to_sink
         );
+    }
+
+    #[test]
+    fn ternary_tainted_consequence_propagates() {
+        let src = r#"
+function handler(req) {
+    const data = true ? req.body : "safe";
+    document.getElementById("x").innerHTML = data;
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("req.body"));
+    }
+
+    #[test]
+    fn ternary_tainted_alternative_propagates() {
+        let src = r#"
+function handler(req) {
+    const data = false ? "safe" : req.body;
+    document.getElementById("x").innerHTML = data;
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("req.body"));
+    }
+
+    #[test]
+    fn ternary_clean_both_branches_is_clean() {
+        let src = r#"
+function handler(req) {
+    const data = true ? "a" : "b";
+    document.getElementById("x").innerHTML = data;
+}
+"#;
+        assert!(run(src).is_empty());
     }
 }
