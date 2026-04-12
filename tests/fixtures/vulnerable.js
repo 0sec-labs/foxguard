@@ -89,3 +89,19 @@ const weakVerify = jwt.verify(token, publicKey);
 function handler(req, res) {
   res.send(req.query.name);
 }
+
+// 27. js/no-unsafe-deserialization (Critical) — node-serialize
+const serialize = require("node-serialize");
+serialize.unserialize(userInput);
+
+// 28. js/no-unsafe-deserialization (Critical) — js-yaml without safe schema
+const yaml = require("js-yaml");
+yaml.load(userInput);
+
+// 29. js/no-unsafe-deserialization (Critical) — cryo
+const cryo = require("cryo");
+cryo.parse(userInput);
+
+// 30. js/no-unsafe-deserialization (Critical) — funcster
+const funcster = require("funcster");
+funcster.deepDeserialize(userInput);

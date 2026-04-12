@@ -128,6 +128,7 @@ impl RuleRegistry {
         registry.register(Box::new(javascript::TaintXpathInjection));
         registry.register(Box::new(javascript::TaintLdapInjection));
         registry.register(Box::new(javascript::TaintLogInjection));
+        registry.register(Box::new(javascript::NoUnsafeDeserialization));
 
         // Register Python rules
         registry.register(Box::new(python::NoEval));
@@ -183,6 +184,7 @@ impl RuleRegistry {
         registry.register(Box::new(go::TaintXpathInjection));
         registry.register(Box::new(go::TaintLdapInjection));
         registry.register(Box::new(go::TaintLogInjection));
+        registry.register(Box::new(go::NoUnsafeDeserialization));
 
         // Register Java rules
         registry.register(Box::new(java::NoSqlInjection));

@@ -570,6 +570,125 @@ impl Rule for InsecureTlsSkipVerify {
     }
 }
 
+// ─── Rule 9: no-unsafe-deserialization ──────────────────────────────────────
+
+pub struct NoUnsafeDeserialization;
+
+impl Rule for NoUnsafeDeserialization {
+    fn id(&self) -> &str {
+        "go/no-unsafe-deserialization"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-502")
+    }
+    fn description(&self) -> &str {
+        "Unsafe deserialization can lead to remote code execution"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+
+                    // encoding/gob: gob.NewDecoder / gob.Decode
+                    if func_text == "gob.NewDecoder" || func_text == "gob.Decode" {
+                        let mut f = make_finding(
+                            self.id(),
+                            self.severity(),
+                            self.cwe(),
+                            "gob decoding of untrusted input can lead to arbitrary code execution",
+                            node,
+                            src,
+                        );
+                        f.fix_suggestion = Some(
+                            "Use JSON instead of gob for untrusted input. Unmarshal into concrete types, not interface{}.".to_string(),
+                        );
+                        findings.push(f);
+                        return;
+                    }
+
+                    // yaml.Unmarshal into interface{}
+                    if func_text == "yaml.Unmarshal" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            // Check second argument for interface{} / any type
+                            if let Some(second_arg) = args.named_child(1) {
+                                let arg_text = &src[second_arg.byte_range()];
+                                // Flag when unmarshalling into &interface{} or a variable
+                                // typed as interface{}/any. We look for common patterns:
+                                //   yaml.Unmarshal(data, &result)  where result is interface{}
+                                //   yaml.Unmarshal(data, &map[string]interface{}{})
+                                // Since static analysis of Go types is limited without
+                                // full type resolution, we flag when the arg text contains
+                                // "interface{}" or "any".
+                                if arg_text.contains("interface{}") || arg_text.contains("any") {
+                                    let mut f = make_finding(
+                                        self.id(),
+                                        self.severity(),
+                                        self.cwe(),
+                                        "yaml.Unmarshal into interface{} allows arbitrary types — unmarshal into a concrete struct",
+                                        node,
+                                        src,
+                                    );
+                                    f.fix_suggestion = Some(
+                                        "Use JSON instead of gob for untrusted input. Unmarshal into concrete types, not interface{}.".to_string(),
+                                    );
+                                    findings.push(f);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Also detect method calls like decoder.Decode(...)
+            // where decoder was created from gob.NewDecoder
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    if func.kind() == "selector_expression" {
+                        if let Some(field) = func.child_by_field_name("field") {
+                            let field_text = &src[field.byte_range()];
+                            if field_text == "Decode" {
+                                // Check if the receiver looks like a gob decoder
+                                // by scanning surrounding context for gob.NewDecoder
+                                if src.contains("gob.NewDecoder") {
+                                    // Avoid double-reporting the gob.NewDecoder call itself
+                                    if let Some(operand) = func.child_by_field_name("operand") {
+                                        let operand_text = &src[operand.byte_range()];
+                                        if operand_text != "gob" {
+                                            let mut f = make_finding(
+                                                self.id(),
+                                                self.severity(),
+                                                self.cwe(),
+                                                "gob Decode of untrusted input can lead to arbitrary code execution",
+                                                node,
+                                                src,
+                                            );
+                                            f.fix_suggestion = Some(
+                                                "Use JSON instead of gob for untrusted input. Unmarshal into concrete types, not interface{}.".to_string(),
+                                            );
+                                            findings.push(f);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+    }
+}
+
 // ─── Taint rules ───────────────────────────────────────────────────────────
 //
 // These rules consume the intraprocedural taint engine in

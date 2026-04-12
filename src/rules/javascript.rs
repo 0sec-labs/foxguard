@@ -1779,6 +1779,131 @@ impl Rule for NoUnsafeFormatString {
     }
 }
 
+// ─── Rule: no-unsafe-deserialization ─────────────────────────────────────────
+
+pub struct NoUnsafeDeserialization;
+
+impl Rule for NoUnsafeDeserialization {
+    fn id(&self) -> &str {
+        "js/no-unsafe-deserialization"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-502")
+    }
+    fn description(&self) -> &str {
+        "Unsafe deserialization can lead to remote code execution"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+
+                    // node-serialize: serialize.unserialize(...)
+                    if func_text == "serialize.unserialize" || func_text == "unserialize" {
+                        let mut f = make_finding(
+                            self.id(),
+                            self.severity(),
+                            self.cwe(),
+                            "serialize.unserialize() can execute arbitrary code — use JSON.parse() instead",
+                            node,
+                            src,
+                        );
+                        f.fix_suggestion = Some(
+                            "Avoid deserializing untrusted data with node-serialize. Use JSON.parse() for structured data.".to_string(),
+                        );
+                        findings.push(f);
+                        return;
+                    }
+
+                    // cryo.parse(...)
+                    if func_text == "cryo.parse" {
+                        let mut f = make_finding(
+                            self.id(),
+                            self.severity(),
+                            self.cwe(),
+                            "cryo.parse() can deserialize arbitrary objects — use JSON.parse() instead",
+                            node,
+                            src,
+                        );
+                        f.fix_suggestion = Some(
+                            "Avoid deserializing untrusted data with node-serialize. Use JSON.parse() for structured data.".to_string(),
+                        );
+                        findings.push(f);
+                        return;
+                    }
+
+                    // funcster.deepDeserialize(...)
+                    if func_text == "funcster.deepDeserialize" {
+                        let mut f = make_finding(
+                            self.id(),
+                            self.severity(),
+                            self.cwe(),
+                            "funcster.deepDeserialize() can execute arbitrary code — use JSON.parse() instead",
+                            node,
+                            src,
+                        );
+                        f.fix_suggestion = Some(
+                            "Avoid deserializing untrusted data with node-serialize. Use JSON.parse() for structured data.".to_string(),
+                        );
+                        findings.push(f);
+                        return;
+                    }
+
+                    // js-yaml: yaml.load(...) without safe schema
+                    if func_text == "yaml.load" || func_text == "jsyaml.load" {
+                        // Check if a safe schema option is passed
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            let arg_count = args.named_child_count();
+                            // yaml.load(str) with no options or yaml.load(str, opts)
+                            // Only flag if there's no second argument (schema option)
+                            // or if the second argument doesn't reference a safe schema
+                            let has_safe_schema = if arg_count >= 2 {
+                                if let Some(second_arg) = args.named_child(1) {
+                                    let arg_text = &src[second_arg.byte_range()];
+                                    arg_text.contains("SAFE_SCHEMA")
+                                        || arg_text.contains("JSON_SCHEMA")
+                                        || arg_text.contains("FAILSAFE_SCHEMA")
+                                        || arg_text.contains("safe")
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+
+                            if !has_safe_schema {
+                                let mut f = make_finding(
+                                    self.id(),
+                                    self.severity(),
+                                    self.cwe(),
+                                    "yaml.load() without a safe schema can execute arbitrary code — use yaml.load(input, { schema: SAFE_SCHEMA })",
+                                    node,
+                                    src,
+                                );
+                                f.fix_suggestion = Some(
+                                    "Avoid deserializing untrusted data with node-serialize. Use JSON.parse() for structured data.".to_string(),
+                                );
+                                findings.push(f);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+    }
+}
+
 // ─── js/taint-xss-innerhtml ───────────────────────────────────────────────
 //
 // Intraprocedural taint rule: fires when untrusted Express-style input

@@ -3,9 +3,13 @@ package main
 import (
 	"crypto/tls"
 	"crypto/md5"
+	"encoding/gob"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+
+	"gopkg.in/yaml.v3"
 )
 
 func vulnerable() {
@@ -40,10 +44,21 @@ func vulnerable() {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 
+	// 10. go/no-unsafe-deserialization (High) — gob.NewDecoder
+	decoder := gob.NewDecoder(os.Stdin)
+
+	// 11. go/no-unsafe-deserialization (High) — decoder.Decode
+	var result interface{}
+	decoder.Decode(&result)
+
+	// 12. go/no-unsafe-deserialization (High) — yaml.Unmarshal into interface{}
+	yaml.Unmarshal([]byte(userInput), new(interface{}))
+
 	_ = query1
 	_ = query2
 	_ = apiKey
 	_ = transport
+	_ = result
 }
 
 func getUserInput() string {

@@ -108,8 +108,8 @@ fn test_vulnerable_js_finds_all_rules() {
 
     assert_eq!(
         findings.len(),
-        30,
-        "vulnerable.js should have 30 findings, got {}",
+        34,
+        "vulnerable.js should have 34 findings, got {}",
         findings.len()
     );
 
@@ -144,6 +144,7 @@ fn test_vulnerable_js_finds_all_rules() {
         "js/jwt-ignore-expiration",
         "js/jwt-decode-without-verify",
         "js/jwt-verify-missing-algorithms",
+        "js/no-unsafe-deserialization",
     ];
 
     for rule in &expected_rules {
@@ -861,8 +862,8 @@ fn test_vulnerable_go_finds_all_rules() {
 
     assert_eq!(
         findings.len(),
-        10,
-        "vulnerable.go should have 10 findings, got {}",
+        13,
+        "vulnerable.go should have 13 findings, got {}",
         findings.len()
     );
 
@@ -879,6 +880,7 @@ fn test_vulnerable_go_finds_all_rules() {
         "go/no-ssrf",
         "go/insecure-tls-skip-verify",
         "go/net-http-no-timeout",
+        "go/no-unsafe-deserialization",
     ];
 
     for rule in &expected_rules {
@@ -1677,8 +1679,8 @@ fn test_severity_filter_high() {
     // High and Critical only
     assert_eq!(
         findings.len(),
-        19,
-        "high severity filter on vulnerable.js should yield 19 findings, got {}",
+        23,
+        "high severity filter on vulnerable.js should yield 23 findings, got {}",
         findings.len()
     );
 
