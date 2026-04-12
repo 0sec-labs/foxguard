@@ -176,19 +176,18 @@ fn realistic_django_shop_multifile() {
 }
 
 /// Multi-file Express fixture (issue #48). In-file SQL injection in
-/// `routes.js::/user` fires under `js/taint-sql-injection`. The
-/// cross-file flows via `services.runQuery` and `services.evalExpression`
-/// do not fire today and will light up after issue #46 (cross-file
-/// summaries).
+/// `routes.js::/user` fires under `js/taint-sql-injection`. Cross-file
+/// flows via `services.runQuery` and `services.evalExpression` fire after
+/// issue #46 (cross-file summaries).
 #[test]
 fn realistic_express_api_multifile() {
     assert_fixture(
         "express_api",
-        9,
+        10,
         &[
-            ("js/taint-sql-injection", 1),
+            ("js/taint-sql-injection", 2),
             ("js/taint-command-injection", 1),
-            ("js/taint-eval", 1),
+            ("js/taint-eval", 2),
         ],
     );
 }

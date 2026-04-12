@@ -1791,6 +1791,58 @@ use crate::rules::javascript_taint::{
     self, javascript_taint_sources, NodeMatcher as JsNodeMatcher, TaintSpec as JsTaintSpec,
 };
 
+struct JsTaintRuleMeta<'a> {
+    rule_id: &'a str,
+    severity: Severity,
+    cwe: Option<&'a str>,
+    fix_suggestion: Option<&'a str>,
+}
+
+fn map_js_taint_findings(
+    meta: &JsTaintRuleMeta<'_>,
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &FileContext<'_>,
+    spec: &JsTaintSpec,
+    format_description: impl Fn(&str, &str) -> String,
+) -> Vec<Finding> {
+    // Build cross-file info if both summaries and import paths are available.
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.javascript_import_paths) {
+        (Some(summaries), Some(import_paths)) => Some(javascript_taint::CrossFileInfo {
+            import_to_path: import_paths,
+            summaries,
+            current_rule_id: meta.rule_id,
+        }),
+        _ => None,
+    };
+    let raw = javascript_taint::analyze_tree_with_cross_file(
+        tree.root_node(),
+        source,
+        spec,
+        ctx.javascript_aliases,
+        cross_file_info.as_ref(),
+    );
+    raw.into_iter()
+        .map(|t| Finding {
+            rule_id: meta.rule_id.to_string(),
+            severity: meta.severity,
+            cwe: meta.cwe.map(|s| s.to_string()),
+            description: format_description(&t.source_description, &t.sink_description),
+            file: String::new(),
+            line: t.sink_line,
+            column: t.sink_column,
+            end_line: t.sink_end_line,
+            end_column: t.sink_end_column,
+            snippet: get_source_line(source, t.sink_start_byte),
+            source_line: Some(t.source_line),
+            source_description: Some(t.source_description),
+            sink_line: Some(t.sink_line),
+            sink_description: Some(t.sink_description),
+            fix_suggestion: meta.fix_suggestion.map(|s| s.to_string()),
+        })
+        .collect()
+}
+
 pub struct TaintXssInnerHtml;
 
 impl TaintXssInnerHtml {
@@ -1847,31 +1899,15 @@ impl Rule for TaintXssInnerHtml {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        let spec = Self::spec();
-        let raw =
-            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
-        raw.into_iter()
-            .map(|t| Finding {
-                rule_id: self.id().to_string(),
-                severity: self.severity(),
-                cwe: self.cwe().map(|s| s.to_string()),
-                description: format!(
-                    "{} reaches {} — untrusted input can lead to XSS",
-                    t.source_description, t.sink_description
-                ),
-                file: String::new(),
-                line: t.sink_line,
-                column: t.sink_column,
-                end_line: t.sink_end_line,
-                end_column: t.sink_end_column,
-                snippet: get_source_line(source, t.sink_start_byte),
-                source_line: Some(t.source_line),
-                source_description: Some(t.source_description),
-                sink_line: Some(t.sink_line),
-                sink_description: Some(t.sink_description),
-                fix_suggestion: Some("Use `DOMPurify.sanitize()` or `textContent` instead of `innerHTML`/`document.write`".to_string()),
-            })
-            .collect()
+        let meta = JsTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some("Use `DOMPurify.sanitize()` or `textContent` instead of `innerHTML`/`document.write`"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!("{} reaches {} — untrusted input can lead to XSS", src, sink)
+        })
     }
 }
 
@@ -1937,31 +1973,15 @@ impl Rule for TaintSqlInjection {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        let spec = Self::spec();
-        let raw =
-            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
-        raw.into_iter()
-            .map(|t| Finding {
-                rule_id: self.id().to_string(),
-                severity: self.severity(),
-                cwe: self.cwe().map(|s| s.to_string()),
-                description: format!(
-                    "{} reaches {} — untrusted input can inject SQL",
-                    t.source_description, t.sink_description
-                ),
-                file: String::new(),
-                line: t.sink_line,
-                column: t.sink_column,
-                end_line: t.sink_end_line,
-                end_column: t.sink_end_column,
-                snippet: get_source_line(source, t.sink_start_byte),
-                source_line: Some(t.source_line),
-                source_description: Some(t.source_description),
-                sink_line: Some(t.sink_line),
-                sink_description: Some(t.sink_description),
-                fix_suggestion: Some("Use parameterized queries: `db.query(\"SELECT * FROM users WHERE name = $1\", [name])`".to_string()),
-            })
-            .collect()
+        let meta = JsTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some("Use parameterized queries: `db.query(\"SELECT * FROM users WHERE name = $1\", [name])`"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!("{} reaches {} — untrusted input can inject SQL", src, sink)
+        })
     }
 }
 
@@ -2019,31 +2039,20 @@ impl Rule for TaintEval {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        let spec = Self::spec();
-        let raw =
-            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
-        raw.into_iter()
-            .map(|t| Finding {
-                rule_id: self.id().to_string(),
-                severity: self.severity(),
-                cwe: self.cwe().map(|s| s.to_string()),
-                description: format!(
-                    "{} reaches {} — untrusted input can execute arbitrary code",
-                    t.source_description, t.sink_description
-                ),
-                file: String::new(),
-                line: t.sink_line,
-                column: t.sink_column,
-                end_line: t.sink_end_line,
-                end_column: t.sink_end_column,
-                snippet: get_source_line(source, t.sink_start_byte),
-                source_line: Some(t.source_line),
-                source_description: Some(t.source_description),
-                sink_line: Some(t.sink_line),
-                sink_description: Some(t.sink_description),
-                fix_suggestion: Some("Remove `eval()`/`new Function()` and use safe alternatives like `JSON.parse()`".to_string()),
-            })
-            .collect()
+        let meta = JsTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Remove `eval()`/`new Function()` and use safe alternatives like `JSON.parse()`",
+            ),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can execute arbitrary code",
+                src, sink
+            )
+        })
     }
 }
 
@@ -2112,31 +2121,18 @@ impl Rule for TaintCommandInjection {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        let spec = Self::spec();
-        let raw =
-            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
-        raw.into_iter()
-            .map(|t| Finding {
-                rule_id: self.id().to_string(),
-                severity: self.severity(),
-                cwe: self.cwe().map(|s| s.to_string()),
-                description: format!(
-                    "{} reaches {} — untrusted input can inject OS commands",
-                    t.source_description, t.sink_description
-                ),
-                file: String::new(),
-                line: t.sink_line,
-                column: t.sink_column,
-                end_line: t.sink_end_line,
-                end_column: t.sink_end_column,
-                snippet: get_source_line(source, t.sink_start_byte),
-                source_line: Some(t.source_line),
-                source_description: Some(t.source_description),
-                sink_line: Some(t.sink_line),
-                sink_description: Some(t.sink_description),
-                fix_suggestion: Some("Pass arguments as an array to `child_process.execFile()` instead of building a shell string".to_string()),
-            })
-            .collect()
+        let meta = JsTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some("Pass arguments as an array to `child_process.execFile()` instead of building a shell string"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject OS commands",
+                src, sink
+            )
+        })
     }
 }
 
@@ -2229,34 +2225,20 @@ impl Rule for TaintSsrf {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        let spec = Self::spec();
-        let raw =
-            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
-        raw.into_iter()
-            .map(|t| Finding {
-                rule_id: self.id().to_string(),
-                severity: self.severity(),
-                cwe: self.cwe().map(|s| s.to_string()),
-                description: format!(
-                    "{} reaches {} — untrusted input can cause server-side request forgery",
-                    t.source_description, t.sink_description
-                ),
-                file: String::new(),
-                line: t.sink_line,
-                column: t.sink_column,
-                end_line: t.sink_end_line,
-                end_column: t.sink_end_column,
-                snippet: get_source_line(source, t.sink_start_byte),
-                source_line: Some(t.source_line),
-                source_description: Some(t.source_description),
-                sink_line: Some(t.sink_line),
-                sink_description: Some(t.sink_description),
-                fix_suggestion: Some(
-                    "Validate URLs against an allowlist of permitted hosts before making requests"
-                        .to_string(),
-                ),
-            })
-            .collect()
+        let meta = JsTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Validate URLs against an allowlist of permitted hosts before making requests",
+            ),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can cause server-side request forgery",
+                src, sink
+            )
+        })
     }
 }
 
@@ -2337,34 +2319,18 @@ impl Rule for TaintSsti {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        let spec = Self::spec();
-        let raw =
-            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
-        raw.into_iter()
-            .map(|t| Finding {
-                rule_id: self.id().to_string(),
-                severity: self.severity(),
-                cwe: self.cwe().map(|s| s.to_string()),
-                description: format!(
-                    "{} reaches {} — untrusted input can inject server-side templates",
-                    t.source_description, t.sink_description
-                ),
-                file: String::new(),
-                line: t.sink_line,
-                column: t.sink_column,
-                end_line: t.sink_end_line,
-                end_column: t.sink_end_column,
-                snippet: get_source_line(source, t.sink_start_byte),
-                source_line: Some(t.source_line),
-                source_description: Some(t.source_description),
-                sink_line: Some(t.sink_line),
-                sink_description: Some(t.sink_description),
-                fix_suggestion: Some(
-                    "Use pre-compiled templates with auto-escaping instead of rendering user input as template strings"
-                        .to_string(),
-                ),
-            })
-            .collect()
+        let meta = JsTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some("Use pre-compiled templates with auto-escaping instead of rendering user input as template strings"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject server-side templates",
+                src, sink
+            )
+        })
     }
 }
 
@@ -2429,34 +2395,20 @@ impl Rule for TaintXpathInjection {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        let spec = Self::spec();
-        let raw =
-            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
-        raw.into_iter()
-            .map(|t| Finding {
-                rule_id: self.id().to_string(),
-                severity: self.severity(),
-                cwe: self.cwe().map(|s| s.to_string()),
-                description: format!(
-                    "{} reaches {} — untrusted input can inject XPath expressions",
-                    t.source_description, t.sink_description
-                ),
-                file: String::new(),
-                line: t.sink_line,
-                column: t.sink_column,
-                end_line: t.sink_end_line,
-                end_column: t.sink_end_column,
-                snippet: get_source_line(source, t.sink_start_byte),
-                source_line: Some(t.source_line),
-                source_description: Some(t.source_description),
-                sink_line: Some(t.sink_line),
-                sink_description: Some(t.sink_description),
-                fix_suggestion: Some(
-                    "Validate and sanitize user input before building XPath expressions"
-                        .to_string(),
-                ),
-            })
-            .collect()
+        let meta = JsTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Validate and sanitize user input before building XPath expressions",
+            ),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject XPath expressions",
+                src, sink
+            )
+        })
     }
 }
 
@@ -2513,33 +2465,34 @@ impl Rule for TaintLdapInjection {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        let spec = Self::spec();
-        let raw =
-            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
-        raw.into_iter()
-            .map(|t| Finding {
-                rule_id: self.id().to_string(),
-                severity: self.severity(),
-                cwe: self.cwe().map(|s| s.to_string()),
-                description: format!(
-                    "{} reaches {} — untrusted input can inject LDAP filters",
-                    t.source_description, t.sink_description
-                ),
-                file: String::new(),
-                line: t.sink_line,
-                column: t.sink_column,
-                end_line: t.sink_end_line,
-                end_column: t.sink_end_column,
-                snippet: get_source_line(source, t.sink_start_byte),
-                source_line: Some(t.source_line),
-                source_description: Some(t.source_description),
-                sink_line: Some(t.sink_line),
-                sink_description: Some(t.sink_description),
-                fix_suggestion: Some(
-                    "Use ldap-escape or sanitize special LDAP characters before building filter strings"
-                        .to_string(),
-                ),
-            })
-            .collect()
+        let meta = JsTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some("Use ldap-escape or sanitize special LDAP characters before building filter strings"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject LDAP filters",
+                src, sink
+            )
+        })
     }
+}
+
+/// Returns the taint rule ID and spec pairs for all JavaScript taint rules.
+/// Used by the scanner's pass 1 to extract cross-file summaries: each
+/// rule's sinks are tested against function bodies with synthetic
+/// per-parameter sources.
+pub fn js_taint_rule_specs() -> Vec<(&'static str, JsTaintSpec)> {
+    vec![
+        ("js/taint-xss-innerhtml", TaintXssInnerHtml::spec()),
+        ("js/taint-sql-injection", TaintSqlInjection::spec()),
+        ("js/taint-eval", TaintEval::spec()),
+        ("js/taint-command-injection", TaintCommandInjection::spec()),
+        ("js/taint-ssrf", TaintSsrf::spec()),
+        ("js/taint-ssti", TaintSsti::spec()),
+        ("js/taint-xpath-injection", TaintXpathInjection::spec()),
+        ("js/taint-ldap-injection", TaintLdapInjection::spec()),
+    ]
 }

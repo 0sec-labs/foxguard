@@ -1,16 +1,14 @@
 // Multi-file Express fixture (issue #48). Companion to django_shop/.
 //
 // routes.js holds request sources; services.js holds dangerous sinks.
-// The current taint engine is intraprocedural + same-file interprocedural,
-// so cross-file flows from routes → services do NOT fire yet. This
-// fixture pins that limit so the day issue #46 (cross-file summaries)
-// lands, the expected counts in tests/realistic_fixtures.rs for this
-// fixture need to be updated to include the new cross-file findings.
+// Cross-file taint analysis (issue #46) resolves require("./services")
+// to services.js and fires when tainted arguments reach sinks defined
+// in the imported module.
 //
-// Hand-counted expected findings under the current engine:
-//   js/taint-sql-injection        : 1  (in-file /user handler)
+// Hand-counted expected taint findings:
+//   js/taint-sql-injection        : 2  (in-file /user + cross-file /search → runQuery)
 //   js/taint-command-injection    : 1  (in-file /exec handler)
-//   js/taint-eval                 : 1  (in-file /eval handler)
+//   js/taint-eval                 : 2  (in-file /eval + cross-file /import → evalExpression)
 
 const express = require("express");
 const child_process = require("child_process");
@@ -43,7 +41,7 @@ app.get("/eval", (req, res) => {
     res.send("ok");
 });
 
-// ─── Cross-file flows — should fire after #46 lands ──────────────────
+// ─── Cross-file flows — fire via cross-file taint summaries (#46) ────
 app.get("/search", (req, res) => {
     // Cross-file: source in routes.js, sink in services.js.
     const name = req.query.name;

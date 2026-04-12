@@ -25,8 +25,10 @@
 //! Everything specific to a library is expressed declaratively via `TaintSpec`.
 
 use super::common::AliasTable;
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tree_sitter::{Node, Tree};
 
 // ─── Public API ───────────────────────────────────────────────────────────
@@ -108,6 +110,22 @@ pub struct TaintFinding {
     pub source_line: usize,
 }
 
+/// Cross-file context passed to `analyze_tree_with_cross_file` to enable
+/// cross-file taint propagation. When `Some`, the engine resolves calls to
+/// imported functions via the summary map and emits findings when tainted
+/// arguments reach cross-file sinks.
+#[derive(Clone)]
+pub struct CrossFileInfo<'a> {
+    /// Map from local import name (e.g. `"./services"` module specifier or
+    /// local binding) to the resolved file path.
+    pub import_to_path: &'a HashMap<String, PathBuf>,
+    /// Cross-file summaries keyed by canonical file path.
+    pub summaries: &'a CrossFileSummaryMap,
+    /// The rule ID currently being analyzed. Cross-file findings are only
+    /// emitted when the summary's `sink_rule_id` matches this value.
+    pub current_rule_id: &'a str,
+}
+
 /// Return-taint summary map keyed by a function's simple name. Mirrors
 /// `python_taint::ReturnSummary`. Only top-level `function_declaration`s
 /// and arrow/function-expression helpers assigned to a `const`/`let`/
@@ -124,6 +142,8 @@ struct AnalysisContext<'a> {
     spec: &'a TaintSpec,
     aliases: Option<&'a AliasTable>,
     summaries: &'a ReturnSummary,
+    /// Cross-file info for resolving imported function calls.
+    cross_file: Option<&'a CrossFileInfo<'a>>,
 }
 
 /// Run the taint engine over every function/method body inside `root` and
@@ -140,6 +160,22 @@ pub fn analyze_tree(
     spec: &TaintSpec,
     aliases: Option<&AliasTable>,
 ) -> Vec<TaintFinding> {
+    analyze_tree_with_cross_file(root, source, spec, aliases, None)
+}
+
+/// Like [`analyze_tree`] but with optional cross-file taint summaries.
+///
+/// When `cross_file` is `Some`, calls to imported functions are resolved
+/// against the summary map. If a tainted argument reaches a sink in the
+/// imported function (per its summary), a finding is emitted in the
+/// caller's file.
+pub fn analyze_tree_with_cross_file<'a>(
+    root: Node<'_>,
+    source: &'a str,
+    spec: &'a TaintSpec,
+    aliases: Option<&'a AliasTable>,
+    cross_file: Option<&'a CrossFileInfo<'a>>,
+) -> Vec<TaintFinding> {
     let empty_summary = ReturnSummary::new();
     let mut summaries = ReturnSummary::new();
     let pass1_ctx = AnalysisContext {
@@ -147,6 +183,7 @@ pub fn analyze_tree(
         spec,
         aliases,
         summaries: &empty_summary,
+        cross_file: None,
     };
     collect_summary_targets(root, source, &mut |name, func_node| {
         let ret = summarize_function(func_node, &pass1_ctx);
@@ -158,6 +195,7 @@ pub fn analyze_tree(
         spec,
         aliases,
         summaries: &summaries,
+        cross_file,
     };
     let mut findings = Vec::new();
     collect_function_scopes(root, &mut |func_node| {
@@ -289,6 +327,525 @@ fn walk_body_for_summary(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         walk_body_for_summary(child, ctx, state, findings, return_taint);
+    }
+}
+
+// ─── Cross-file summary extraction ───────────────────────────────────────
+
+/// Extract cross-file taint summaries for every exported function in a JS/TS
+/// file. Each parameter is treated as a synthetic taint source and the engine
+/// checks which sinks it can reach. The resulting summaries are consumed in
+/// pass 2 by callers in other files.
+///
+/// The `rule_specs` argument should be the output of
+/// [`crate::rules::javascript::js_taint_rule_specs()`].
+pub fn extract_cross_file_summaries(
+    root: Node<'_>,
+    source: &str,
+    aliases: Option<&AliasTable>,
+    rule_specs: &[(&str, TaintSpec)],
+) -> Vec<FunctionTaintSummary> {
+    let mut summaries = Vec::new();
+
+    collect_exported_functions(root, source, &mut |func_name, func_node| {
+        let param_names = collect_param_names(func_node, source);
+        if param_names.is_empty() {
+            return;
+        }
+
+        let mut params_to_sink: Vec<ParamSinkFlow> = Vec::new();
+        let mut params_to_return: Vec<usize> = Vec::new();
+
+        for (param_idx, param_name) in param_names.iter().enumerate() {
+            let synthetic_source = NodeMatcher::ParamName {
+                names: vec![param_name.clone()],
+                description: format!("parameter '{}'", param_name),
+            };
+
+            // Check return-taint: does this parameter flow to a return value?
+            let return_spec = TaintSpec {
+                sources: vec![synthetic_source.clone()],
+                sinks: vec![],
+                sanitizers: vec![],
+            };
+            let empty_summary = ReturnSummary::new();
+            let return_ctx = AnalysisContext {
+                source,
+                spec: &return_spec,
+                aliases,
+                summaries: &empty_summary,
+                cross_file: None,
+            };
+            let ret_taint = summarize_function(func_node, &return_ctx);
+            if ret_taint.is_some() && !params_to_return.contains(&param_idx) {
+                params_to_return.push(param_idx);
+            }
+
+            // Check sink-taint: does this parameter reach any sink?
+            for (rule_id, rule_spec) in rule_specs {
+                let synthetic_spec = TaintSpec {
+                    sources: vec![synthetic_source.clone()],
+                    sinks: rule_spec.sinks.clone(),
+                    sanitizers: rule_spec.sanitizers.clone(),
+                };
+                let sink_ctx = AnalysisContext {
+                    source,
+                    spec: &synthetic_spec,
+                    aliases,
+                    summaries: &empty_summary,
+                    cross_file: None,
+                };
+                let mut findings = Vec::new();
+                analyze_function(func_node, &sink_ctx, &mut findings);
+                if !findings.is_empty() {
+                    let already = params_to_sink
+                        .iter()
+                        .any(|f| f.param_index == param_idx && f.sink_rule_id == *rule_id);
+                    if !already {
+                        params_to_sink.push(ParamSinkFlow {
+                            param_index: param_idx,
+                            sink_rule_id: rule_id.to_string(),
+                            sink_description: findings[0].sink_description.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if !params_to_sink.is_empty() || !params_to_return.is_empty() {
+            summaries.push(FunctionTaintSummary {
+                name: func_name,
+                params_to_return,
+                params_to_sink,
+            });
+        }
+    });
+
+    summaries
+}
+
+/// Collect parameter names from a function node in declaration order.
+fn collect_param_names(func_node: Node<'_>, source: &str) -> Vec<String> {
+    let Some(params) = func_node.child_by_field_name("parameters") else {
+        // Arrow with single bare parameter: `x => ...`
+        if let Some(single) = func_node.child_by_field_name("parameter") {
+            if single.kind() == "identifier" {
+                return vec![node_text(single, source).to_string()];
+            }
+        }
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        let param_name = match child.kind() {
+            "identifier" => Some(node_text(child, source)),
+            "assignment_pattern" => child
+                .child_by_field_name("left")
+                .filter(|n| n.kind() == "identifier")
+                .map(|n| node_text(n, source)),
+            "rest_pattern" => {
+                let mut inner = child.walk();
+                let mut found: Option<&str> = None;
+                for c in child.named_children(&mut inner) {
+                    if c.kind() == "identifier" {
+                        found = Some(node_text(c, source));
+                        break;
+                    }
+                }
+                found
+            }
+            _ => None,
+        };
+        if let Some(name) = param_name {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// Walk the AST to find exported function declarations and their names.
+/// Handles:
+/// - `module.exports = { runQuery, evalExpression }` (CommonJS shorthand)
+/// - `module.exports = { runQuery: runQuery }` (explicit value)
+/// - `module.exports.foo = function(...)` (direct assignment)
+/// - `export function foo(...)` / `export const foo = (...)` (ES modules)
+/// - `export { foo }` (ES named re-exports)
+///
+/// The callback receives (function_name, function_node).
+fn collect_exported_functions<'tree, F>(root: Node<'tree>, source: &str, visit: &mut F)
+where
+    F: FnMut(String, Node<'tree>),
+{
+    // First, find all top-level function declarations and const arrow/fn
+    // assignments so we can resolve names to nodes.
+    let mut func_defs: HashMap<String, Node<'tree>> = HashMap::new();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        match child.kind() {
+            "function_declaration" | "generator_function_declaration" => {
+                if let Some(name) = child.child_by_field_name("name") {
+                    func_defs.insert(node_text(name, source).to_string(), child);
+                }
+            }
+            "lexical_declaration" | "variable_declaration" => {
+                let mut inner = child.walk();
+                for decl in child.children(&mut inner) {
+                    if decl.kind() == "variable_declarator" {
+                        if let (Some(name), Some(value)) = (
+                            decl.child_by_field_name("name"),
+                            decl.child_by_field_name("value"),
+                        ) {
+                            if name.kind() == "identifier"
+                                && matches!(value.kind(), "arrow_function" | "function_expression")
+                            {
+                                func_defs.insert(node_text(name, source).to_string(), value);
+                            }
+                        }
+                    }
+                }
+            }
+            "export_statement" => {
+                // `export function foo(...)` or `export const foo = (...) => ...`
+                let mut inner = child.walk();
+                for c in child.children(&mut inner) {
+                    match c.kind() {
+                        "function_declaration" | "generator_function_declaration" => {
+                            if let Some(name) = c.child_by_field_name("name") {
+                                let n = node_text(name, source).to_string();
+                                func_defs.insert(n.clone(), c);
+                                visit(n, c);
+                            }
+                        }
+                        "lexical_declaration" | "variable_declaration" => {
+                            let mut d = c.walk();
+                            for decl in c.children(&mut d) {
+                                if decl.kind() == "variable_declarator" {
+                                    if let (Some(name), Some(value)) = (
+                                        decl.child_by_field_name("name"),
+                                        decl.child_by_field_name("value"),
+                                    ) {
+                                        if name.kind() == "identifier"
+                                            && matches!(
+                                                value.kind(),
+                                                "arrow_function" | "function_expression"
+                                            )
+                                        {
+                                            let n = node_text(name, source).to_string();
+                                            func_defs.insert(n.clone(), value);
+                                            visit(n, value);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Now scan for module.exports patterns.
+    scan_module_exports(root, source, &func_defs, visit);
+}
+
+/// Scan for `module.exports = { ... }` and `module.exports.x = ...` patterns.
+fn scan_module_exports<'tree, F>(
+    root: Node<'tree>,
+    source: &str,
+    func_defs: &HashMap<String, Node<'tree>>,
+    visit: &mut F,
+) where
+    F: FnMut(String, Node<'tree>),
+{
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() != "expression_statement" {
+            continue;
+        }
+        let Some(expr) = child.named_child(0) else {
+            continue;
+        };
+        if expr.kind() != "assignment_expression" {
+            continue;
+        }
+        let Some(left) = expr.child_by_field_name("left") else {
+            continue;
+        };
+        let Some(right) = expr.child_by_field_name("right") else {
+            continue;
+        };
+        let left_text = node_text(left, source);
+
+        // `module.exports = { runQuery, evalExpression }`
+        if left_text == "module.exports" && right.kind() == "object" {
+            let mut obj_cursor = right.walk();
+            for prop in right.named_children(&mut obj_cursor) {
+                match prop.kind() {
+                    // `{ runQuery }` — shorthand
+                    "shorthand_property_identifier" | "shorthand_property" => {
+                        let name = node_text(prop, source).to_string();
+                        if let Some(func_node) = func_defs.get(&name) {
+                            visit(name, *func_node);
+                        }
+                    }
+                    // `{ runQuery: runQuery }` or `{ runQuery: function(...) {} }`
+                    "pair" => {
+                        if let Some(key) = prop.child_by_field_name("key") {
+                            let export_name = node_text(key, source).to_string();
+                            if let Some(value) = prop.child_by_field_name("value") {
+                                if matches!(value.kind(), "arrow_function" | "function_expression")
+                                {
+                                    visit(export_name, value);
+                                } else if value.kind() == "identifier" {
+                                    let ref_name = node_text(value, source);
+                                    if let Some(func_node) = func_defs.get(ref_name) {
+                                        visit(export_name, *func_node);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // `module.exports.foo = function(...)` or `module.exports.foo = someFunc`
+        if left_text.starts_with("module.exports.") {
+            let export_name = left_text.strip_prefix("module.exports.").unwrap();
+            if matches!(right.kind(), "arrow_function" | "function_expression") {
+                visit(export_name.to_string(), right);
+            } else if right.kind() == "identifier" {
+                let ref_name = node_text(right, source);
+                if let Some(func_node) = func_defs.get(ref_name) {
+                    visit(export_name.to_string(), *func_node);
+                }
+            }
+        }
+    }
+}
+
+// ─── JS import resolution for cross-file analysis ────────────────────────
+
+/// Resolve JS import/require specifiers to file paths on disk.
+///
+/// Handles:
+/// - `const services = require("./services")` → resolve `./services` to
+///   `services.js` (or `.ts`, `.mjs`, etc.) in the same directory
+/// - `import { foo } from "./services"` → same resolution
+/// - `const { foo } = require("./services")` → maps both the module name
+///   and `__from__:./services:foo` for direct-name resolution
+///
+/// Returns a map from module specifier / synthetic keys to resolved file paths.
+pub fn resolve_js_imports_to_paths(
+    source: &str,
+    tree: &Tree,
+    current_file: &std::path::Path,
+) -> HashMap<String, PathBuf> {
+    let mut result = HashMap::new();
+    let Some(parent_dir) = current_file.parent() else {
+        return result;
+    };
+
+    resolve_js_imports_walk(&mut result, tree.root_node(), source, parent_dir);
+    result
+}
+
+/// File extensions to try when resolving a bare JS/TS module specifier.
+const JS_EXTENSIONS: &[&str] = &[".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx"];
+
+/// Try to resolve a relative module specifier to a file on disk.
+/// Tries the specifier as-is first, then with each extension, then as
+/// a directory with `index.*`.
+fn resolve_js_module_path(parent_dir: &std::path::Path, specifier: &str) -> Option<PathBuf> {
+    // Only resolve relative specifiers (starting with . or ..)
+    if !specifier.starts_with('.') {
+        return None;
+    }
+
+    let base = parent_dir.join(specifier);
+
+    // 1. Try the specifier as-is (e.g. `./services.js`)
+    if base.is_file() {
+        return Some(base);
+    }
+
+    // 2. Try appending each extension
+    for ext in JS_EXTENSIONS {
+        let candidate = parent_dir.join(format!("{}{}", specifier, ext));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    // 3. Try as directory with index.*
+    if base.is_dir() {
+        for ext in JS_EXTENSIONS {
+            let candidate = base.join(format!("index{}", ext));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+fn resolve_js_imports_walk(
+    result: &mut HashMap<String, PathBuf>,
+    node: Node<'_>,
+    source: &str,
+    parent_dir: &std::path::Path,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "import_statement" => {
+                resolve_js_import_statement(result, child, source, parent_dir);
+            }
+            "lexical_declaration" | "variable_declaration" => {
+                resolve_js_require_decl(result, child, source, parent_dir);
+            }
+            "export_statement" => {
+                // `export { foo } from "./mod"` — treat like an import
+                resolve_js_import_statement(result, child, source, parent_dir);
+            }
+            "program" | "statement_block" => {
+                resolve_js_imports_walk(result, child, source, parent_dir);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn resolve_js_import_statement(
+    result: &mut HashMap<String, PathBuf>,
+    node: Node<'_>,
+    source: &str,
+    parent_dir: &std::path::Path,
+) {
+    let Some(src_node) = node.child_by_field_name("source") else {
+        return;
+    };
+    let module = string_literal_text(src_node, source);
+    if module.is_empty() {
+        return;
+    }
+    let Some(resolved) = resolve_js_module_path(parent_dir, &module) else {
+        return;
+    };
+
+    // Map the module specifier to the resolved path.
+    result.insert(module.clone(), resolved.clone());
+
+    // For named imports `import { foo } from "./mod"`, also create
+    // `__from__:./mod:foo` entries so `handle_cross_file_call` can resolve
+    // direct calls to `foo(...)`.
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "import_clause" {
+            continue;
+        }
+        let mut inner = child.walk();
+        for spec in child.children(&mut inner) {
+            if spec.kind() == "named_imports" {
+                let mut n_cursor = spec.walk();
+                for isp in spec.children(&mut n_cursor) {
+                    if isp.kind() != "import_specifier" {
+                        continue;
+                    }
+                    let name = isp
+                        .child_by_field_name("name")
+                        .map(|n| node_text(n, source).to_string());
+                    let alias = isp
+                        .child_by_field_name("alias")
+                        .map(|n| node_text(n, source).to_string());
+                    if let Some(real) = name {
+                        let local = alias.unwrap_or_else(|| real.clone());
+                        let key = format!("__from__:{}:{}", module, real);
+                        result.insert(key, resolved.clone());
+                        // Also map the local name → module for attribute-style calls
+                        let local_key = format!("__from__:{}:{}", module, local);
+                        if local != real {
+                            result.insert(local_key, resolved.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn resolve_js_require_decl(
+    result: &mut HashMap<String, PathBuf>,
+    node: Node<'_>,
+    source: &str,
+    parent_dir: &std::path::Path,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "variable_declarator" {
+            continue;
+        }
+        let Some(value) = child.child_by_field_name("value") else {
+            continue;
+        };
+        let Some(module) = require_call_module(value, source) else {
+            continue;
+        };
+        let Some(resolved) = resolve_js_module_path(parent_dir, &module) else {
+            continue;
+        };
+        let Some(name_node) = child.child_by_field_name("name") else {
+            continue;
+        };
+
+        // Map the module specifier to the resolved path.
+        result.insert(module.clone(), resolved.clone());
+
+        match name_node.kind() {
+            "identifier" => {
+                // `const services = require("./services")`
+                // The local name (e.g. "services") maps to the module for
+                // attribute-style calls: `services.runQuery(...)`.
+                let local = node_text(name_node, source).to_string();
+                result.insert(local, resolved.clone());
+            }
+            "object_pattern" => {
+                // `const { runQuery } = require("./services")`
+                let mut p_cursor = name_node.walk();
+                for p in name_node.children(&mut p_cursor) {
+                    match p.kind() {
+                        "shorthand_property_identifier_pattern" => {
+                            let local = node_text(p, source).to_string();
+                            let key = format!("__from__:{}:{}", module, local);
+                            result.insert(key, resolved.clone());
+                        }
+                        "pair_pattern" => {
+                            let key_name = p
+                                .child_by_field_name("key")
+                                .map(|n| node_text(n, source).to_string());
+                            let value_name = p
+                                .child_by_field_name("value")
+                                .map(|n| node_text(n, source).to_string());
+                            if let (Some(real), Some(local)) = (key_name, value_name) {
+                                let key = format!("__from__:{}:{}", module, real);
+                                result.insert(key, resolved.clone());
+                                if local != real {
+                                    let lkey = format!("__from__:{}:{}", module, local);
+                                    result.insert(lkey, resolved.clone());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -811,15 +1368,85 @@ fn handle_call(
         } if method == final_segment => Some(description.clone()),
         _ => None,
     });
-    let Some(sink_desc) = sink_desc else {
+
+    if let Some(sink_desc) = sink_desc {
+        let Some(args) = node.child_by_field_name("arguments") else {
+            return;
+        };
+        let mut cursor = args.walk();
+        for arg in args.named_children(&mut cursor) {
+            if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
+                let start = node.start_position();
+                let end = node.end_position();
+                findings.push(TaintFinding {
+                    sink_start_byte: node.start_byte(),
+                    sink_end_byte: node.end_byte(),
+                    sink_line: start.row + 1,
+                    sink_column: start.column + 1,
+                    sink_end_line: end.row + 1,
+                    sink_end_column: end.column + 1,
+                    source_description: source_desc,
+                    sink_description: sink_desc.clone(),
+                    source_line: src_line,
+                });
+                break;
+            }
+        }
+        return;
+    }
+
+    // ── Cross-file summary check ─────────────────────────────────────
+    // If the callee is an imported function with cross-file summaries,
+    // check whether any tainted argument reaches a sink in the imported
+    // function (per its summary).
+    if let Some(cross_file) = ctx.cross_file {
+        handle_cross_file_call(node, func, callee_text, ctx, state, findings, cross_file);
+    }
+}
+
+/// Check if a call targets an imported function with cross-file summaries.
+///
+/// Handles two import patterns:
+/// - `const services = require("./services"); services.runQuery(x)` — attribute call
+/// - `const { runQuery } = require("./services"); runQuery(x)` — direct call
+/// - `import { runQuery } from "./services"; runQuery(x)` — ES import direct call
+fn handle_cross_file_call(
+    node: Node<'_>,
+    func: Node<'_>,
+    callee_text: &str,
+    ctx: &AnalysisContext<'_>,
+    state: &TaintState,
+    findings: &mut Vec<TaintFinding>,
+    cross_file: &CrossFileInfo<'_>,
+) {
+    let resolved = resolve_cross_file_callee(func, callee_text, ctx.source, cross_file);
+    let Some((file_path, func_name)) = resolved else {
         return;
     };
 
+    let Some(file_summaries) = cross_file.summaries.get(&file_path) else {
+        return;
+    };
+
+    let Some(summary) = file_summaries.iter().find(|s| s.name == func_name) else {
+        return;
+    };
+
+    // Collect argument nodes.
     let Some(args) = node.child_by_field_name("arguments") else {
         return;
     };
     let mut cursor = args.walk();
-    for arg in args.named_children(&mut cursor) {
+    let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+
+    for flow in &summary.params_to_sink {
+        if flow.sink_rule_id != cross_file.current_rule_id {
+            continue;
+        }
+        if flow.param_index >= arg_nodes.len() {
+            continue;
+        }
+        let arg = arg_nodes[flow.param_index];
         if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
             let start = node.start_position();
             let end = node.end_position();
@@ -831,12 +1458,67 @@ fn handle_call(
                 sink_end_line: end.row + 1,
                 sink_end_column: end.column + 1,
                 source_description: source_desc,
-                sink_description: sink_desc.clone(),
+                sink_description: format!(
+                    "{} (via cross-file call to {})",
+                    flow.sink_description, func_name
+                ),
                 source_line: src_line,
             });
-            break;
+            return;
         }
     }
+}
+
+/// Resolve a call-site callee to (file_path, function_name) using the
+/// cross-file import map.
+fn resolve_cross_file_callee(
+    func: Node<'_>,
+    callee_text: &str,
+    source: &str,
+    cross_file: &CrossFileInfo<'_>,
+) -> Option<(PathBuf, String)> {
+    // Pattern 1: attribute call `module.func(...)` where `module` is a
+    // require'd/imported module (e.g. `services.runQuery`).
+    if func.kind() == "member_expression" {
+        if let Some(object) = func.child_by_field_name("object") {
+            if object.kind() == "identifier" {
+                let module_name = node_text(object, source);
+                if let Some(file_path) = cross_file.import_to_path.get(module_name) {
+                    if let Some(prop) = func.child_by_field_name("property") {
+                        let func_name = node_text(prop, source).to_string();
+                        return Some((file_path.clone(), func_name));
+                    }
+                }
+            }
+        }
+    }
+
+    // Pattern 2: direct call `func(...)` where `func` was destructured
+    // from a require or imported with ES `import { func } from "..."`.
+    if func.kind() == "identifier" {
+        for (key, file_path) in cross_file.import_to_path.iter() {
+            if let Some(rest) = key.strip_prefix("__from__:") {
+                if let Some((_module, name)) = rest.split_once(':') {
+                    if name == callee_text {
+                        return Some((file_path.clone(), name.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    // Pattern 3: `callee_text` might be a dotted path like `services.runQuery`
+    // that wasn't parsed as a member_expression (e.g. from alias resolution).
+    if callee_text.contains('.') {
+        let parts: Vec<&str> = callee_text.splitn(2, '.').collect();
+        if parts.len() == 2 {
+            if let Some(file_path) = cross_file.import_to_path.get(parts[0]) {
+                return Some((file_path.clone(), parts[1].to_string()));
+            }
+        }
+    }
+
+    None
 }
 
 fn expression_taint(
@@ -1768,5 +2450,62 @@ function handler(req, res) {
         let aliases = js_aliases_from_tree(src, &tree);
         let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
         assert!(findings.is_empty(), "static LDAP filter should not fire");
+    }
+
+    #[test]
+    fn cross_file_summary_extraction_finds_exported_functions() {
+        // services.js-like fixture
+        let src = r#"
+const db = { query(_q) { return []; } };
+
+function runQuery(name) {
+    return db.query("SELECT * FROM users WHERE name = '" + name + "'");
+}
+
+function evalExpression(expr) {
+    return eval(expr);
+}
+
+module.exports = { runQuery, evalExpression };
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        let summaries =
+            extract_cross_file_summaries(tree.root_node(), src, Some(&aliases), &rule_specs);
+
+        eprintln!("summaries: {:#?}", summaries);
+        let names: Vec<&str> = summaries.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"runQuery"),
+            "expected runQuery in summaries, got {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"evalExpression"),
+            "expected evalExpression in summaries, got {:?}",
+            names
+        );
+
+        let rq = summaries.iter().find(|s| s.name == "runQuery").unwrap();
+        assert!(
+            rq.params_to_sink
+                .iter()
+                .any(|f| f.sink_rule_id == "js/taint-sql-injection"),
+            "expected runQuery to have sql-injection sink flow, got {:?}",
+            rq.params_to_sink
+        );
+
+        let ee = summaries
+            .iter()
+            .find(|s| s.name == "evalExpression")
+            .unwrap();
+        assert!(
+            ee.params_to_sink
+                .iter()
+                .any(|f| f.sink_rule_id == "js/taint-eval"),
+            "expected evalExpression to have eval sink flow, got {:?}",
+            ee.params_to_sink
+        );
     }
 }
