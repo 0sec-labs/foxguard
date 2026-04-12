@@ -31,8 +31,25 @@
 //! Semgrep-compatible `mode: taint` YAML) will plug into the same API.
 
 use crate::rules::common::AliasTable;
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tree_sitter::Node;
+
+/// Cross-file context passed to `analyze_tree` to enable cross-file taint
+/// propagation. When `Some`, the engine resolves calls to imported functions
+/// via the summary map and emits findings when tainted arguments reach
+/// cross-file sinks.
+#[derive(Clone)]
+pub struct CrossFileInfo<'a> {
+    /// Map from local import name (e.g. "queries") to the resolved file path.
+    pub import_to_path: &'a HashMap<String, PathBuf>,
+    /// Cross-file summaries keyed by canonical file path.
+    pub summaries: &'a CrossFileSummaryMap,
+    /// The rule ID currently being analyzed. Cross-file findings are only
+    /// emitted when the summary's `sink_rule_id` matches this value.
+    pub current_rule_id: &'a str,
+}
 
 // ─── Public API ───────────────────────────────────────────────────────────
 
@@ -149,6 +166,8 @@ struct AnalysisContext<'a> {
     spec: &'a TaintSpec,
     aliases: Option<&'a AliasTable>,
     summaries: &'a ReturnSummary,
+    /// Cross-file info for resolving imported function calls.
+    cross_file: Option<&'a CrossFileInfo<'a>>,
 }
 
 /// Run the taint engine over every function definition inside `root` and
@@ -180,6 +199,22 @@ pub fn analyze_tree(
     spec: &TaintSpec,
     aliases: Option<&AliasTable>,
 ) -> Vec<TaintFinding> {
+    analyze_tree_with_cross_file(root, source, spec, aliases, None)
+}
+
+/// Like [`analyze_tree`] but with optional cross-file taint summaries.
+///
+/// When `cross_file` is `Some`, calls to imported functions are resolved
+/// against the summary map. If a tainted argument reaches a sink in the
+/// imported function (per its summary), a finding is emitted in the
+/// caller's file.
+pub fn analyze_tree_with_cross_file<'a>(
+    root: Node<'_>,
+    source: &'a str,
+    spec: &'a TaintSpec,
+    aliases: Option<&'a AliasTable>,
+    cross_file: Option<&'a CrossFileInfo<'a>>,
+) -> Vec<TaintFinding> {
     // Pass 1: build return summaries using an empty summary map so that
     // calls to local helpers inside helper bodies fall through to the
     // default behavior. This is the one-level interprocedural limit.
@@ -190,6 +225,7 @@ pub fn analyze_tree(
         spec,
         aliases,
         summaries: &empty_summary,
+        cross_file: None,
     };
     collect_function_defs(root, &mut |func_node| {
         let (name, ret_taint) = summarize_function(func_node, &pass1_ctx);
@@ -205,12 +241,151 @@ pub fn analyze_tree(
         spec,
         aliases,
         summaries: &summaries,
+        cross_file,
     };
     let mut findings = Vec::new();
     collect_function_defs(root, &mut |func_node| {
         analyze_function(func_node, &ctx, &mut findings);
     });
     findings
+}
+
+/// Extract cross-file function taint summaries for all top-level functions
+/// in a parsed Python file.
+///
+/// For each function, every parameter is treated as a synthetic taint source.
+/// Each rule spec's sinks are tested against the function body. If a
+/// parameter reaches a sink, a [`ParamSinkFlow`] is recorded. If a
+/// parameter flows to a return value, `params_to_return` records the index.
+///
+/// The `rule_specs` argument should be the output of
+/// [`crate::rules::python::python_taint_rule_specs()`].
+pub fn extract_cross_file_summaries(
+    root: Node<'_>,
+    source: &str,
+    aliases: Option<&AliasTable>,
+    rule_specs: &[(&str, TaintSpec)],
+) -> Vec<FunctionTaintSummary> {
+    let mut summaries = Vec::new();
+
+    collect_function_defs(root, &mut |func_node| {
+        let Some(name_node) = func_node.child_by_field_name("name") else {
+            return;
+        };
+        let func_name = node_text(name_node, source).to_string();
+
+        // Collect parameter names in order.
+        let param_names = collect_param_names(func_node, source);
+        if param_names.is_empty() {
+            return;
+        }
+
+        let mut params_to_sink: Vec<ParamSinkFlow> = Vec::new();
+        let mut params_to_return: Vec<usize> = Vec::new();
+
+        // For each parameter, create a synthetic spec that treats ONLY
+        // that parameter as a taint source, then run each rule's sinks.
+        for (param_idx, param_name) in param_names.iter().enumerate() {
+            let synthetic_source = NodeMatcher::ParamName {
+                names: vec![param_name.clone()],
+                description: format!("parameter '{}'", param_name),
+            };
+
+            // Check return-taint: does this parameter flow to a return value?
+            // Use a minimal spec with no sinks just to check return flow.
+            let return_spec = TaintSpec {
+                sources: vec![synthetic_source.clone()],
+                sinks: vec![],
+                sanitizers: vec![],
+            };
+            let empty_summary = ReturnSummary::new();
+            let return_ctx = AnalysisContext {
+                source,
+                spec: &return_spec,
+                aliases,
+                summaries: &empty_summary,
+                cross_file: None,
+            };
+            let (_, ret_taint) = summarize_function(func_node, &return_ctx);
+            if ret_taint.is_some() && !params_to_return.contains(&param_idx) {
+                params_to_return.push(param_idx);
+            }
+
+            // Check sink-taint: does this parameter reach any sink?
+            for (rule_id, rule_spec) in rule_specs {
+                let synthetic_spec = TaintSpec {
+                    sources: vec![synthetic_source.clone()],
+                    sinks: rule_spec.sinks.clone(),
+                    sanitizers: rule_spec.sanitizers.clone(),
+                };
+                let sink_ctx = AnalysisContext {
+                    source,
+                    spec: &synthetic_spec,
+                    aliases,
+                    summaries: &empty_summary,
+                    cross_file: None,
+                };
+                let mut findings = Vec::new();
+                analyze_function(func_node, &sink_ctx, &mut findings);
+                if !findings.is_empty() {
+                    // Deduplicate: only record one flow per (param, rule) pair.
+                    let already = params_to_sink
+                        .iter()
+                        .any(|f| f.param_index == param_idx && f.sink_rule_id == *rule_id);
+                    if !already {
+                        params_to_sink.push(ParamSinkFlow {
+                            param_index: param_idx,
+                            sink_rule_id: rule_id.to_string(),
+                            sink_description: findings[0].sink_description.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if !params_to_sink.is_empty() || !params_to_return.is_empty() {
+            summaries.push(FunctionTaintSummary {
+                name: func_name,
+                params_to_return,
+                params_to_sink,
+            });
+        }
+    });
+
+    summaries
+}
+
+/// Collect parameter names from a function definition, in order.
+fn collect_param_names(func_node: Node<'_>, source: &str) -> Vec<String> {
+    let Some(params) = func_node.child_by_field_name("parameters") else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        let param_name = match child.kind() {
+            "identifier" => Some(node_text(child, source)),
+            "typed_parameter" | "default_parameter" | "typed_default_parameter" => {
+                let mut inner_cursor = child.walk();
+                let mut found: Option<&str> = None;
+                for inner in child.children(&mut inner_cursor) {
+                    if inner.kind() == "identifier" {
+                        found = Some(node_text(inner, source));
+                        break;
+                    }
+                }
+                found
+            }
+            _ => None,
+        };
+        if let Some(name) = param_name {
+            // Skip `self` and `cls` — they are not user-controlled.
+            if name != "self" && name != "cls" {
+                names.push(name.to_string());
+            }
+        }
+    }
+    names
 }
 
 /// Pass-1 walker: compute a function's return-taint summary by scanning
@@ -545,16 +720,92 @@ fn handle_call(
         } if method == final_segment => Some(description.clone()),
         _ => None,
     });
-    let Some(sink_desc) = sink_desc else {
+
+    if let Some(sink_desc) = sink_desc {
+        // Check each argument for taint.
+        let Some(args) = node.child_by_field_name("arguments") else {
+            return;
+        };
+        let mut cursor = args.walk();
+        for arg in args.named_children(&mut cursor) {
+            if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
+                let start = node.start_position();
+                let end = node.end_position();
+                findings.push(TaintFinding {
+                    sink_start_byte: node.start_byte(),
+                    sink_end_byte: node.end_byte(),
+                    sink_line: start.row + 1,
+                    sink_column: start.column + 1,
+                    sink_end_line: end.row + 1,
+                    sink_end_column: end.column + 1,
+                    source_description: source_desc,
+                    sink_description: sink_desc.clone(),
+                    source_line: src_line,
+                });
+                // One finding per sink call is enough — don't double-report
+                // when multiple args are tainted.
+                break;
+            }
+        }
+        return;
+    }
+
+    // ── Cross-file summary check ─────────────────────────────────────
+    // If the callee is an imported function with cross-file summaries,
+    // check whether any tainted argument reaches a sink in the imported
+    // function (per its summary).
+    if let Some(cross_file) = ctx.cross_file {
+        handle_cross_file_call(node, func, callee_text, ctx, state, findings, cross_file);
+    }
+}
+
+/// Check if a call targets an imported function with cross-file summaries.
+///
+/// Handles two import patterns:
+/// - `from . import queries; queries.run_query(x)` — attribute call on imported module
+/// - `from .queries import run_query; run_query(x)` — direct call to imported function
+fn handle_cross_file_call(
+    node: Node<'_>,
+    func: Node<'_>,
+    callee_text: &str,
+    ctx: &AnalysisContext<'_>,
+    state: &TaintState,
+    findings: &mut Vec<TaintFinding>,
+    cross_file: &CrossFileInfo<'_>,
+) {
+    // Try to resolve the callee to a (file_path, function_name) pair.
+    let resolved = resolve_cross_file_callee(func, callee_text, ctx.source, cross_file);
+    let Some((file_path, func_name)) = resolved else {
         return;
     };
 
-    // Check each argument for taint.
+    // Look up summaries for the resolved file.
+    let Some(file_summaries) = cross_file.summaries.get(&file_path) else {
+        return;
+    };
+
+    // Find the function summary.
+    let Some(summary) = file_summaries.iter().find(|s| s.name == func_name) else {
+        return;
+    };
+
+    // Collect argument nodes.
     let Some(args) = node.child_by_field_name("arguments") else {
         return;
     };
     let mut cursor = args.walk();
-    for arg in args.named_children(&mut cursor) {
+    let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+
+    // For each tainted argument, check if the corresponding parameter
+    // has a ParamSinkFlow whose rule ID matches the current rule.
+    for flow in &summary.params_to_sink {
+        if flow.sink_rule_id != cross_file.current_rule_id {
+            continue;
+        }
+        if flow.param_index >= arg_nodes.len() {
+            continue;
+        }
+        let arg = arg_nodes[flow.param_index];
         if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
             let start = node.start_position();
             let end = node.end_position();
@@ -566,14 +817,58 @@ fn handle_call(
                 sink_end_line: end.row + 1,
                 sink_end_column: end.column + 1,
                 source_description: source_desc,
-                sink_description: sink_desc.clone(),
+                sink_description: format!(
+                    "{} (via cross-file call to {})",
+                    flow.sink_description, func_name
+                ),
                 source_line: src_line,
             });
-            // One finding per sink call is enough — don't double-report
-            // when multiple args are tainted.
-            break;
+            // One finding per cross-file call is enough.
+            return;
         }
     }
+}
+
+/// Resolve a call-site callee to (file_path, function_name) using the
+/// cross-file import map.
+fn resolve_cross_file_callee(
+    func: Node<'_>,
+    callee_text: &str,
+    source: &str,
+    cross_file: &CrossFileInfo<'_>,
+) -> Option<(PathBuf, String)> {
+    // Pattern 1: attribute call `module.func(...)` where `module` is an
+    // imported module name (e.g. `queries.run_query`).
+    if func.kind() == "attribute" {
+        if let Some(object) = func.child_by_field_name("object") {
+            if object.kind() == "identifier" {
+                let module_name = node_text(object, source);
+                if let Some(file_path) = cross_file.import_to_path.get(module_name) {
+                    if let Some(attr) = func.child_by_field_name("attribute") {
+                        let func_name = node_text(attr, source).to_string();
+                        return Some((file_path.clone(), func_name));
+                    }
+                }
+            }
+        }
+    }
+
+    // Pattern 2: direct call `func(...)` where `func` was imported from
+    // another module (e.g. `from .queries import run_query; run_query(x)`).
+    if func.kind() == "identifier" {
+        // Check all __from__:<module>:<name> entries
+        for (key, file_path) in cross_file.import_to_path.iter() {
+            if let Some(rest) = key.strip_prefix("__from__:") {
+                if let Some((_module, name)) = rest.split_once(':') {
+                    if name == callee_text {
+                        return Some((file_path.clone(), name.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Returns the (source description, source line) if `expr` evaluates to (or

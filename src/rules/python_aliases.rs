@@ -112,6 +112,196 @@ fn collect_import_from(aliases: &mut AliasTable, node: Node, source: &str) {
     }
 }
 
+/// Resolve Python imports to file paths for cross-file taint analysis.
+///
+/// Given the source of a Python file and the path of that file, returns a
+/// mapping from local import names to the resolved file paths. Only resolves:
+/// - `from . import foo` (relative sibling import) -> `<dir>/foo.py`
+/// - `from .foo import bar` (relative import) -> `<dir>/foo.py`
+/// - `import foo` / `from foo import bar` -> `<dir>/foo.py` (sibling only)
+///
+/// Does not attempt full Python package resolution (sys.path, site-packages).
+pub fn resolve_imports_to_paths(
+    source: &str,
+    tree: &Tree,
+    current_file: &std::path::Path,
+) -> std::collections::HashMap<String, std::path::PathBuf> {
+    let mut result = std::collections::HashMap::new();
+    let Some(parent_dir) = current_file.parent() else {
+        return result;
+    };
+
+    resolve_imports_walk(&mut result, tree.root_node(), source, parent_dir);
+    result
+}
+
+fn resolve_imports_walk(
+    result: &mut std::collections::HashMap<String, std::path::PathBuf>,
+    node: Node,
+    source: &str,
+    parent_dir: &std::path::Path,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "import_from_statement" => {
+                resolve_import_from(result, child, source, parent_dir);
+            }
+            "import_statement" => {
+                resolve_plain_import(result, child, source, parent_dir);
+            }
+            "if_statement" | "try_statement" | "with_statement" | "block" | "module" => {
+                resolve_imports_walk(result, child, source, parent_dir);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn resolve_import_from(
+    result: &mut std::collections::HashMap<String, std::path::PathBuf>,
+    node: Node,
+    source: &str,
+    parent_dir: &std::path::Path,
+) {
+    let Some(module_node) = node.child_by_field_name("module_name") else {
+        return;
+    };
+    let module = node_text(module_node, source);
+
+    // `from . import queries` — module_name is ".", name is "queries"
+    if module == "." {
+        let mut cursor = node.walk();
+        for name in node.children_by_field_name("name", &mut cursor) {
+            let local = match name.kind() {
+                "dotted_name" | "identifier" => node_text(name, source),
+                "aliased_import" => {
+                    // `from . import queries as q` — use the alias as the local name
+                    // but resolve the real name to a file
+                    if let Some(real_name) = name.child_by_field_name("name") {
+                        let real = node_text(real_name, source);
+                        let local = name
+                            .child_by_field_name("alias")
+                            .map(|a| node_text(a, source))
+                            .unwrap_or(real);
+                        let candidate = parent_dir.join(format!("{}.py", real));
+                        if candidate.exists() {
+                            result.insert(local.to_string(), candidate);
+                        }
+                        continue;
+                    }
+                    continue;
+                }
+                _ => continue,
+            };
+            let candidate = parent_dir.join(format!("{}.py", local));
+            if candidate.exists() {
+                result.insert(local.to_string(), candidate);
+            }
+        }
+        return;
+    }
+
+    // `from .queries import run_query` — relative import with a module name
+    if let Some(stripped) = module.strip_prefix('.') {
+        if !stripped.is_empty() && !stripped.contains('.') {
+            let candidate = parent_dir.join(format!("{}.py", stripped));
+            if candidate.exists() {
+                // Map each imported name to the module file
+                let mut cursor = node.walk();
+                for name in node.children_by_field_name("name", &mut cursor) {
+                    let local = match name.kind() {
+                        "dotted_name" | "identifier" => node_text(name, source),
+                        "aliased_import" => name
+                            .child_by_field_name("alias")
+                            .or_else(|| name.child_by_field_name("name"))
+                            .map(|n| node_text(n, source))
+                            .unwrap_or(""),
+                        _ => continue,
+                    };
+                    if !local.is_empty() {
+                        // For `from .queries import run_query`, we want to be
+                        // able to look up `run_query` as a function in `queries.py`.
+                        // Store the module path keyed by the *module* name for
+                        // attribute access (`queries.run_query`), but this form
+                        // imports the function directly. We store it keyed by
+                        // a special format: `__from_module__:<local_name>` ->
+                        // file path, plus the module itself.
+                        result.insert(
+                            format!("__from__:{}:{}", stripped, local),
+                            candidate.clone(),
+                        );
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    // `from queries import run_query` — bare module name, try sibling
+    if !module.contains('.') {
+        let candidate = parent_dir.join(format!("{}.py", module));
+        if candidate.exists() {
+            let mut cursor = node.walk();
+            for name in node.children_by_field_name("name", &mut cursor) {
+                let local = match name.kind() {
+                    "dotted_name" | "identifier" => node_text(name, source),
+                    "aliased_import" => name
+                        .child_by_field_name("alias")
+                        .or_else(|| name.child_by_field_name("name"))
+                        .map(|n| node_text(n, source))
+                        .unwrap_or(""),
+                    _ => continue,
+                };
+                if !local.is_empty() {
+                    result.insert(format!("__from__:{}:{}", module, local), candidate.clone());
+                }
+            }
+        }
+    }
+}
+
+fn resolve_plain_import(
+    result: &mut std::collections::HashMap<String, std::path::PathBuf>,
+    node: Node,
+    source: &str,
+    parent_dir: &std::path::Path,
+) {
+    // `import queries` — try sibling file
+    let mut cursor = node.walk();
+    for name in node.children_by_field_name("name", &mut cursor) {
+        let (local, module_name) = match name.kind() {
+            "dotted_name" => {
+                let text = node_text(name, source);
+                // Only resolve simple (non-dotted) module names to siblings
+                if text.contains('.') {
+                    continue;
+                }
+                (text.to_string(), text)
+            }
+            "aliased_import" => {
+                let real = name
+                    .child_by_field_name("name")
+                    .map(|n| node_text(n, source))
+                    .unwrap_or("");
+                let alias = name
+                    .child_by_field_name("alias")
+                    .map(|n| node_text(n, source))
+                    .unwrap_or(real);
+                if real.contains('.') {
+                    continue;
+                }
+                (alias.to_string(), real)
+            }
+            _ => continue,
+        };
+        let candidate = parent_dir.join(format!("{}.py", module_name));
+        if candidate.exists() {
+            result.insert(local, candidate);
+        }
+    }
+}
+
 fn node_text<'a>(node: Node, source: &'a str) -> &'a str {
     &source[node.byte_range()]
 }

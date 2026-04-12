@@ -1,4 +1,5 @@
 pub mod common;
+pub mod cross_file;
 pub mod csharp;
 pub mod go;
 pub mod go_taint;
@@ -32,6 +33,12 @@ pub struct FileContext<'a> {
     pub javascript_aliases: Option<&'a common::AliasTable>,
     /// Go import alias table. `None` for non-Go files.
     pub go_aliases: Option<&'a common::AliasTable>,
+    /// Cross-file taint summaries from pass 1. Keyed by canonical file path.
+    /// `None` when cross-file analysis is not available (e.g. single-file scan).
+    pub cross_file_summaries: Option<&'a cross_file::CrossFileSummaryMap>,
+    /// Python import-to-file-path resolution map for the current file.
+    /// Maps local import names to resolved file paths on disk.
+    pub python_import_paths: Option<&'a std::collections::HashMap<String, std::path::PathBuf>>,
 }
 
 /// A security rule that checks parsed source code for vulnerabilities.

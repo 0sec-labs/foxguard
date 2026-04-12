@@ -1807,7 +1807,22 @@ fn map_taint_findings(
     spec: &TaintSpec,
     format_description: impl Fn(&str, &str) -> String,
 ) -> Vec<Finding> {
-    let raw = python_taint::analyze_tree(tree.root_node(), source, spec, ctx.python_aliases);
+    // Build cross-file info if both summaries and import paths are available.
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.python_import_paths) {
+        (Some(summaries), Some(import_paths)) => Some(python_taint::CrossFileInfo {
+            import_to_path: import_paths,
+            summaries,
+            current_rule_id: meta.rule_id,
+        }),
+        _ => None,
+    };
+    let raw = python_taint::analyze_tree_with_cross_file(
+        tree.root_node(),
+        source,
+        spec,
+        ctx.python_aliases,
+        cross_file_info.as_ref(),
+    );
     raw.into_iter()
         .map(|t| Finding {
             rule_id: meta.rule_id.to_string(),
@@ -2413,4 +2428,35 @@ impl Rule for TaintLdapInjection {
             )
         })
     }
+}
+
+// ─── Cross-file summary extraction ──────────────────────────────────────
+
+/// Returns all Python taint rule specs paired with their rule IDs.
+///
+/// Used by the cross-file summary extractor (pass 1) to determine which
+/// sinks a function's parameters can reach. Each spec's *sources* are
+/// replaced with synthetic `ParamName` entries by the caller — only the
+/// sinks and sanitizers are meaningful here.
+pub fn python_taint_rule_specs() -> Vec<(&'static str, TaintSpec)> {
+    vec![
+        (
+            "py/taint-pickle-deserialization",
+            TaintPickleDeserialization::spec(),
+        ),
+        ("py/taint-eval", TaintEvalFromRequest::spec()),
+        (
+            "py/taint-command-injection",
+            TaintCommandInjectionFromRequest::spec(),
+        ),
+        ("py/taint-ssrf", TaintSsrfFromRequest::spec()),
+        ("py/taint-yaml-load", TaintYamlLoadFromRequest::spec()),
+        (
+            "py/taint-sql-injection",
+            TaintSqlInjectionFromRequest::spec(),
+        ),
+        ("py/taint-ssti", TaintSsti::spec()),
+        ("py/taint-xpath-injection", TaintXpathInjection::spec()),
+        ("py/taint-ldap-injection", TaintLdapInjection::spec()),
+    ]
 }
