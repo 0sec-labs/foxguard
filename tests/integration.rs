@@ -2622,7 +2622,7 @@ fn test_taint_findings_include_fix_suggestion_in_json() {
         .filter(|f| {
             f["rule_id"]
                 .as_str()
-                .map_or(false, |id| id.contains("taint"))
+                .is_some_and(|id| id.contains("taint"))
         })
         .collect();
 
@@ -2646,7 +2646,7 @@ fn test_taint_findings_include_fix_suggestion_in_json() {
         .filter(|f| {
             f["rule_id"]
                 .as_str()
-                .map_or(false, |id| !id.contains("taint"))
+                .is_some_and(|id| !id.contains("taint"))
         })
         .collect();
 
@@ -2678,7 +2678,7 @@ fn test_fix_suggestion_appears_in_sarif_output() {
         .filter(|r| {
             r["ruleId"]
                 .as_str()
-                .map_or(false, |id| id.contains("taint"))
+                .is_some_and(|id| id.contains("taint"))
         })
         .collect();
 
