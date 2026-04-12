@@ -805,6 +805,7 @@ fn map_language(lang_str: &str) -> Option<Language> {
         "rust" | "rs" => Some(Language::Rust),
         "csharp" | "c#" | "cs" => Some(Language::CSharp),
         "swift" => Some(Language::Swift),
+        "kotlin" | "kt" => Some(Language::Kotlin),
         _ => None,
     }
 }

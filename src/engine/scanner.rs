@@ -48,6 +48,7 @@ fn detect_language(path: &Path) -> Option<Language> {
         "rs" => Some(Language::Rust),
         "cs" => Some(Language::CSharp),
         "swift" => Some(Language::Swift),
+        "kt" | "kts" => Some(Language::Kotlin),
         _ => None,
     }
 }
@@ -253,7 +254,8 @@ fn comment_markers(language: Language) -> &'static [&'static str] {
         | Language::Java
         | Language::Rust
         | Language::CSharp
-        | Language::Swift => &["//"],
+        | Language::Swift
+        | Language::Kotlin => &["//"],
     }
 }
 

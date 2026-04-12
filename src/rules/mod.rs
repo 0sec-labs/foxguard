@@ -5,6 +5,7 @@ pub mod go_taint;
 pub mod java;
 pub mod javascript;
 pub mod javascript_taint;
+pub mod kotlin;
 pub mod php;
 pub mod python;
 pub mod python_aliases;
@@ -216,6 +217,18 @@ impl RuleRegistry {
         registry.register(Box::new(swift::NoTlsDisabled));
         registry.register(Box::new(swift::NoPathTraversal));
         registry.register(Box::new(swift::NoSsrf));
+
+        // Register Kotlin rules
+        registry.register(Box::new(kotlin::NoSqlInjection));
+        registry.register(Box::new(kotlin::NoCommandInjection));
+        registry.register(Box::new(kotlin::NoUnsafeDeserialization));
+        registry.register(Box::new(kotlin::NoSsrf));
+        registry.register(Box::new(kotlin::NoPathTraversal));
+        registry.register(Box::new(kotlin::NoWeakCrypto));
+        registry.register(Box::new(kotlin::NoHardcodedSecret));
+        registry.register(Box::new(kotlin::NoXxe));
+        registry.register(Box::new(kotlin::NoCorsStar));
+        registry.register(Box::new(kotlin::NoEval));
 
         // Register Rust rules
         registry.register(Box::new(rust_lang::UnsafeBlock));

@@ -41,6 +41,7 @@ pub enum Language {
     Rust,
     CSharp,
     Swift,
+    Kotlin,
 }
 
 impl std::fmt::Display for Language {
@@ -55,6 +56,7 @@ impl std::fmt::Display for Language {
             Language::Rust => write!(f, "rust"),
             Language::CSharp => write!(f, "csharp"),
             Language::Swift => write!(f, "swift"),
+            Language::Kotlin => write!(f, "kotlin"),
         }
     }
 }

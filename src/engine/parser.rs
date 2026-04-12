@@ -14,6 +14,7 @@ pub fn parse_file(source: &str, language: Language) -> Option<tree_sitter::Tree>
         Language::Rust => tree_sitter_rust::LANGUAGE.into(),
         Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
         Language::Swift => tree_sitter_swift::LANGUAGE.into(),
+        Language::Kotlin => tree_sitter_kotlin_sg::LANGUAGE.into(),
     };
 
     parser.set_language(&ts_language).ok()?;

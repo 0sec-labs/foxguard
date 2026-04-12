@@ -176,6 +176,19 @@ const swiftRules: Rule[] = [
   { id: 'swift/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic hash (MD5/SHA1)', severity: 'medium' },
 ];
 
+const kotlinRules: Rule[] = [
+  { id: 'kt/no-command-injection', cwe: 'CWE-78', desc: 'Potential command injection via Runtime.exec or ProcessBuilder with dynamic input', severity: 'critical' },
+  { id: 'kt/no-cors-star', cwe: 'CWE-942', desc: 'Permissive CORS configuration allows any origin', severity: 'medium' },
+  { id: 'kt/no-eval', cwe: 'CWE-94', desc: 'ScriptEngine.eval can execute arbitrary code', severity: 'critical' },
+  { id: 'kt/no-hardcoded-secret', cwe: 'CWE-798', desc: 'Hardcoded secret or credential detected', severity: 'high' },
+  { id: 'kt/no-path-traversal', cwe: 'CWE-22', desc: 'Potential path traversal via dynamic file path', severity: 'high' },
+  { id: 'kt/no-sql-injection', cwe: 'CWE-89', desc: 'Potential SQL injection via string concatenation in query method', severity: 'critical' },
+  { id: 'kt/no-ssrf', cwe: 'CWE-918', desc: 'Potential SSRF via URL or HTTP client with dynamic input', severity: 'high' },
+  { id: 'kt/no-unsafe-deserialization', cwe: 'CWE-502', desc: 'Unsafe deserialization can lead to remote code execution', severity: 'critical' },
+  { id: 'kt/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic algorithm', severity: 'medium' },
+  { id: 'kt/no-xxe', cwe: 'CWE-611', desc: 'XML parser created without disabling external entities (XXE)', severity: 'high' },
+];
+
 export const ruleGroups: RuleGroup[] = [
   { name: 'JavaScript / TypeScript', slug: 'js', rules: jsRules },
   { name: 'Python', slug: 'py', rules: pyRules },
@@ -186,7 +199,8 @@ export const ruleGroups: RuleGroup[] = [
   { name: 'Rust', slug: 'rs', rules: rustRules },
   { name: 'C#', slug: 'cs', rules: csharpRules },
   { name: 'Swift', slug: 'swift', rules: swiftRules },
+  { name: 'Kotlin', slug: 'kt', rules: kotlinRules },
 ];
 
 export const totalRules = ruleGroups.reduce((sum, g) => sum + g.rules.length, 0);
-export const productLanguageCount = 9;
+export const productLanguageCount = 10;

@@ -24,6 +24,7 @@ const LANGUAGE_ORDER: &[Language] = &[
     Language::Rust,
     Language::CSharp,
     Language::Swift,
+    Language::Kotlin,
 ];
 
 fn language_slug(language: Language) -> &'static str {
@@ -37,6 +38,7 @@ fn language_slug(language: Language) -> &'static str {
         Language::Rust => "rs",
         Language::CSharp => "cs",
         Language::Swift => "swift",
+        Language::Kotlin => "kt",
     }
 }
 
@@ -51,6 +53,7 @@ fn language_display_name(language: Language) -> &'static str {
         Language::Rust => "Rust",
         Language::CSharp => "C#",
         Language::Swift => "Swift",
+        Language::Kotlin => "Kotlin",
     }
 }
 
@@ -65,6 +68,7 @@ fn language_array_name(language: Language) -> &'static str {
         Language::Rust => "rustRules",
         Language::CSharp => "csharpRules",
         Language::Swift => "swiftRules",
+        Language::Kotlin => "kotlinRules",
     }
 }
 
