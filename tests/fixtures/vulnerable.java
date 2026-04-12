@@ -62,4 +62,15 @@ public class Vulnerable {
     void cors() {
         registry.allowedOrigins("*");
     }
+
+    // java/no-xss
+    void xss(String userInput, HttpServletResponse response) throws Exception {
+        response.getWriter().write(userInput);
+        response.getWriter().println(userInput);
+        out.write(userInput);
+        out.println(userInput);
+        PrintWriter pw = response.getWriter();
+        pw.write("<h1>" + userInput);
+        pw.println("<div>" + userInput);
+    }
 }

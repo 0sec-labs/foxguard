@@ -143,6 +143,7 @@ const javaRules: Rule[] = [
   { id: 'java/no-ssrf', cwe: 'CWE-918', desc: 'Potential SSRF via URL or RestTemplate with dynamic input', severity: 'high' },
   { id: 'java/no-unsafe-deserialization', cwe: 'CWE-502', desc: 'Unsafe deserialization can lead to remote code execution', severity: 'critical' },
   { id: 'java/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic algorithm', severity: 'medium' },
+  { id: 'java/no-xss', cwe: 'CWE-79', desc: 'Potential XSS via direct write of user input to HTTP response', severity: 'high' },
   { id: 'java/no-xxe', cwe: 'CWE-611', desc: 'XML parser created without disabling external entities (XXE)', severity: 'high' },
   { id: 'java/spring-cors-permissive', cwe: 'CWE-942', desc: 'Permissive CORS configuration allows any origin', severity: 'medium' },
   { id: 'java/spring-csrf-disabled', cwe: 'CWE-352', desc: 'Spring Security CSRF protection is disabled', severity: 'high' },

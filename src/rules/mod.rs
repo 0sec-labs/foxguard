@@ -207,6 +207,7 @@ impl RuleRegistry {
         registry.register(Box::new(java::NoXxe));
         registry.register(Box::new(java::SpringCsrfDisabled));
         registry.register(Box::new(java::SpringCorsPermissive));
+        registry.register(Box::new(java::NoXss));
 
         // Register PHP rules
         registry.register(Box::new(php::NoEval));

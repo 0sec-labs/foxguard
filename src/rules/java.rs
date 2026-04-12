@@ -684,7 +684,76 @@ impl Rule for SpringCsrfDisabled {
     }
 }
 
-// ─── Rule 10: spring-cors-permissive ────────────────────────────────────────
+// ─── Rule 10: no-xss ──────────────────────────────────────────────────────
+
+pub struct NoXss;
+
+impl Rule for NoXss {
+    fn id(&self) -> &str {
+        "java/no-xss"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-79")
+    }
+    fn description(&self) -> &str {
+        "Potential XSS via direct write of user input to HTTP response"
+    }
+    fn language(&self) -> Language {
+        Language::Java
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "method_invocation" {
+                if let Some(name) = node.child_by_field_name("name") {
+                    let name_text = &src[name.byte_range()];
+                    if name_text == "write" || name_text == "println" || name_text == "print" {
+                        if let Some(obj) = node.child_by_field_name("object") {
+                            let obj_text = &src[obj.byte_range()];
+                            // Match response.getWriter().write/println, out.write/println,
+                            // or PrintWriter.write/println
+                            if obj_text.contains("getWriter()")
+                                || obj_text == "out"
+                                || obj_text.contains("PrintWriter")
+                                || obj_text == "writer"
+                                || obj_text == "pw"
+                            {
+                                if let Some(args) = node.child_by_field_name("arguments") {
+                                    if let Some(first_arg) = args.named_child(0) {
+                                        // Flag if the argument is not a pure literal
+                                        // (i.e. it's a variable, concatenation, method call, etc.)
+                                        if !is_literal(first_arg)
+                                            && first_arg.kind() != "string_literal"
+                                        {
+                                            let mut f = make_finding(
+                                                self.id(),
+                                                self.severity(),
+                                                self.cwe(),
+                                                "User input written directly to HTTP response — risk of XSS",
+                                                node,
+                                                src,
+                                            );
+                                            f.fix_suggestion = Some("HTML-encode user input before writing to response: use OWASP Java Encoder or StringEscapeUtils.escapeHtml4()".to_string());
+                                            findings.push(f);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+    }
+}
+
+// ─── Rule 11: spring-cors-permissive ────────────────────────────────────────
 
 pub struct SpringCorsPermissive;
 

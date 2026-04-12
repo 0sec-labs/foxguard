@@ -335,6 +335,7 @@ impl Rule for NoPathTraversal {
             "File.OpenRead",
             "File.WriteAllText",
             "File.Delete",
+            "File.Exists",
         ];
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -354,14 +355,16 @@ impl Rule for NoPathTraversal {
                                 if !is_string_literal(first_arg) {
                                     let arg_text = &src[first_arg.byte_range()];
                                     if !arg_text.starts_with('"') && !arg_text.starts_with("@\"") {
-                                        findings.push(make_finding(
+                                        let mut f = make_finding(
                                             self.id(),
                                             self.severity(),
                                             self.cwe(),
                                             "File operation with dynamic path — validate and sanitize to prevent path traversal",
                                             node,
                                             src,
-                                        ));
+                                        );
+                                        f.fix_suggestion = Some("Validate file paths with Path.GetFullPath() and ensure they don't escape the intended directory".to_string());
+                                        findings.push(f);
                                         return;
                                     }
                                 }
@@ -375,10 +378,12 @@ impl Rule for NoPathTraversal {
                 let _ = has_stream_reader;
             }
 
-            // new StreamReader(userInput)
+            // new StreamReader(userInput) / new FileStream(userInput, ...)
             if node.kind() == "object_creation_expression" {
                 let node_text = &src[node.byte_range()];
-                if node_text.contains("StreamReader") {
+                let is_stream_reader = node_text.contains("StreamReader");
+                let is_file_stream = node_text.contains("FileStream");
+                if is_stream_reader || is_file_stream {
                     let mut cursor = node.walk();
                     for child in node.children(&mut cursor) {
                         if child.kind() == "argument_list" {
@@ -386,14 +391,24 @@ impl Rule for NoPathTraversal {
                                 if !is_string_literal(first_arg) {
                                     let arg_text = &src[first_arg.byte_range()];
                                     if !arg_text.starts_with('"') && !arg_text.starts_with("@\"") {
-                                        findings.push(make_finding(
+                                        let type_name = if is_stream_reader {
+                                            "StreamReader"
+                                        } else {
+                                            "FileStream"
+                                        };
+                                        let mut f = make_finding(
                                             self.id(),
                                             self.severity(),
                                             self.cwe(),
-                                            "new StreamReader with dynamic path — validate and sanitize to prevent path traversal",
+                                            &format!(
+                                                "new {} with dynamic path — validate and sanitize to prevent path traversal",
+                                                type_name
+                                            ),
                                             node,
                                             src,
-                                        ));
+                                        );
+                                        f.fix_suggestion = Some("Validate file paths with Path.GetFullPath() and ensure they don't escape the intended directory".to_string());
+                                        findings.push(f);
                                         return;
                                     }
                                 }

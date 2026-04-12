@@ -46,6 +46,8 @@ namespace VulnerableApp
         {
             var content = File.ReadAllText(userPath);
             var reader = new StreamReader(userPath);
+            var exists = File.Exists(userPath);
+            var stream = new FileStream(userPath, FileMode.Open);
         }
 
         // Rule 6: Weak cryptography
