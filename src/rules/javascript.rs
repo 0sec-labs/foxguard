@@ -2045,29 +2045,25 @@ impl TaintCommandInjection {
         JsTaintSpec {
             sources: javascript_taint_sources(),
             sinks: vec![
-                JsNodeMatcher::MethodName {
-                    method: "exec".into(),
-                    description: "child_process .exec() call".into(),
-                },
-                JsNodeMatcher::MethodName {
-                    method: "execSync".into(),
-                    description: "child_process .execSync() call".into(),
-                },
-                JsNodeMatcher::MethodName {
-                    method: "spawn".into(),
-                    description: "child_process .spawn() call".into(),
-                },
-                JsNodeMatcher::MethodName {
-                    method: "spawnSync".into(),
-                    description: "child_process .spawnSync() call".into(),
-                },
                 JsNodeMatcher::Call {
                     canonical: "child_process.exec".into(),
-                    description: "child_process.exec() call".into(),
+                    description: "child_process.exec()".into(),
                 },
                 JsNodeMatcher::Call {
                     canonical: "child_process.execSync".into(),
-                    description: "child_process.execSync() call".into(),
+                    description: "child_process.execSync()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "child_process.spawn".into(),
+                    description: "child_process.spawn()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "child_process.spawnSync".into(),
+                    description: "child_process.spawnSync()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "child_process.execFile".into(),
+                    description: "child_process.execFile()".into(),
                 },
             ],
             sanitizers: vec![],
