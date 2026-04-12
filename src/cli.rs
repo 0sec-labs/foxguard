@@ -60,6 +60,10 @@ pub struct ScanArgs {
     #[arg(long, default_value_t = false)]
     pub explain: bool,
 
+    /// Post findings as inline review comments on a GitHub PR
+    #[arg(long)]
+    pub github_pr: Option<u64>,
+
     /// Suppress terminal output (exit code still reflects findings)
     #[arg(short, long)]
     pub quiet: bool,

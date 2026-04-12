@@ -188,6 +188,16 @@ fn run_scan(scan: &ScanArgs) -> i32 {
         OutputFormat::Sarif => foxguard::report::sarif::print_sarif(&findings),
     }
 
+    // Post inline PR review comments if --github-pr is set (best-effort)
+    if let Some(pr_number) = scan.github_pr {
+        let scan_root = Path::new(&scan.path);
+        if let Err(e) =
+            foxguard::report::github_pr::post_pr_review(&findings, pr_number, Some(scan_root))
+        {
+            eprintln!("Warning: failed to post PR review: {}", e);
+        }
+    }
+
     if !findings.is_empty() {
         return 1;
     }
@@ -386,6 +396,7 @@ fn run_init(args: &InitArgs) -> i32 {
                 baseline: None,
                 write_baseline: None,
                 explain: false,
+                github_pr: None,
                 quiet: false,
                 max_file_size: 1_048_576,
             },
