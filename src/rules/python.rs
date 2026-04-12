@@ -2749,6 +2749,94 @@ impl Rule for TaintXxe {
     }
 }
 
+// ─── py/taint-nosql-injection ─────────────────────────────────────────
+pub struct TaintNosqlInjection;
+
+impl TaintNosqlInjection {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                NodeMatcher::MethodName {
+                    method: "find".into(),
+                    description: "collection.find".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "find_one".into(),
+                    description: "collection.find_one".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "update_one".into(),
+                    description: "collection.update_one".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "update_many".into(),
+                    description: "collection.update_many".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "delete_one".into(),
+                    description: "collection.delete_one".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "delete_many".into(),
+                    description: "collection.delete_many".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "aggregate".into(),
+                    description: "collection.aggregate".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "count_documents".into(),
+                    description: "collection.count_documents".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintNosqlInjection {
+    fn id(&self) -> &str {
+        "py/taint-nosql-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-943")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches a MongoDB query sink — possible NoSQL injection"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some("Validate and sanitize user input before using in MongoDB queries. Avoid passing raw user input as query filters."),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject NoSQL operators",
+                src, sink
+            )
+        })
+    }
+}
+
 // ─── Cross-file summary extraction ──────────────────────────────────────
 
 /// Returns all Python taint rule specs paired with their rule IDs.
@@ -2779,5 +2867,6 @@ pub fn python_taint_rule_specs() -> Vec<(&'static str, TaintSpec)> {
         ("py/taint-ldap-injection", TaintLdapInjection::spec()),
         ("py/taint-log-injection", TaintLogInjection::spec()),
         ("py/taint-xxe", TaintXxe::spec()),
+        ("py/taint-nosql-injection", TaintNosqlInjection::spec()),
     ]
 }

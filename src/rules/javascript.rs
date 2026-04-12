@@ -2703,6 +2703,98 @@ impl Rule for TaintXxe {
     }
 }
 
+// ─── js/taint-nosql-injection ──────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted Express/Next/etc input
+// reaches a MongoDB query sink (mongoose/mongodb driver patterns).
+
+pub struct TaintNosqlInjection;
+
+impl TaintNosqlInjection {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::MethodName {
+                    method: "find".into(),
+                    description: "MongoDB .find() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "findOne".into(),
+                    description: "MongoDB .findOne() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "updateOne".into(),
+                    description: "MongoDB .updateOne() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "updateMany".into(),
+                    description: "MongoDB .updateMany() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "deleteOne".into(),
+                    description: "MongoDB .deleteOne() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "deleteMany".into(),
+                    description: "MongoDB .deleteMany() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "aggregate".into(),
+                    description: "MongoDB .aggregate() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "countDocuments".into(),
+                    description: "MongoDB .countDocuments() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintNosqlInjection {
+    fn id(&self) -> &str {
+        "js/taint-nosql-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-943")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches a MongoDB query sink — possible NoSQL injection"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = JsTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some("Validate and sanitize user input before using in MongoDB queries. Use mongo-sanitize to strip $ operators."),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject NoSQL operators",
+                src, sink
+            )
+        })
+    }
+}
+
 /// Returns the taint rule ID and spec pairs for all JavaScript taint rules.
 /// Used by the scanner's pass 1 to extract cross-file summaries: each
 /// rule's sinks are tested against function bodies with synthetic
@@ -2719,5 +2811,6 @@ pub fn js_taint_rule_specs() -> Vec<(&'static str, JsTaintSpec)> {
         ("js/taint-ldap-injection", TaintLdapInjection::spec()),
         ("js/taint-log-injection", TaintLogInjection::spec()),
         ("js/taint-xxe", TaintXxe::spec()),
+        ("js/taint-nosql-injection", TaintNosqlInjection::spec()),
     ]
 }

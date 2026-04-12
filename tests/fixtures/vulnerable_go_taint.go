@@ -119,3 +119,11 @@ func ginQueryToLogPrintf(c *gin.Context) {
 	name := c.Query("name")
 	log.Printf("user: %s", name)
 }
+
+// ─── go/taint-nosql-injection ────────────────────────────────────────────
+
+// 16. gin Context.Query → collection.Find
+func ginQueryToMongoFind(c *gin.Context, collection *mongo.Collection) {
+	filter := c.Query("filter")
+	collection.Find(context.TODO(), filter)
+}

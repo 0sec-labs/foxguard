@@ -1323,6 +1323,97 @@ impl Rule for TaintLogInjection {
     }
 }
 
+// ─── Rule: taint-nosql-injection ────────────────────────────────────────
+
+pub struct TaintNosqlInjection;
+
+impl TaintNosqlInjection {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                GoNodeMatcher::MethodName {
+                    method: "Find".into(),
+                    description: "collection.Find".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "FindOne".into(),
+                    description: "collection.FindOne".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "UpdateOne".into(),
+                    description: "collection.UpdateOne".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "UpdateMany".into(),
+                    description: "collection.UpdateMany".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "DeleteOne".into(),
+                    description: "collection.DeleteOne".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "DeleteMany".into(),
+                    description: "collection.DeleteMany".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "Aggregate".into(),
+                    description: "collection.Aggregate".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "CountDocuments".into(),
+                    description: "collection.CountDocuments".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintNosqlInjection {
+    fn id(&self) -> &str {
+        "go/taint-nosql-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-943")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches a MongoDB query sink — possible NoSQL injection"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = GoTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Validate and sanitize user input before building MongoDB queries.",
+            ),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject NoSQL operators",
+                src, sink
+            )
+        })
+    }
+}
+
 /// All Go taint rule IDs paired with their specs.
 ///
 /// Used by the scanner's pass 1 to extract cross-file summaries: each
@@ -1337,5 +1428,6 @@ pub fn go_taint_rule_specs() -> Vec<(&'static str, GoTaintSpec)> {
         ("go/taint-ldap-injection", TaintLdapInjection::spec()),
         ("go/taint-ssrf", TaintSsrf::spec()),
         ("go/taint-log-injection", TaintLogInjection::spec()),
+        ("go/taint-nosql-injection", TaintNosqlInjection::spec()),
     ]
 }

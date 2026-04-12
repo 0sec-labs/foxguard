@@ -235,3 +235,13 @@ from xml.etree import ElementTree  # noqa: E402
 def xxe_from_request():
     xml_data = request.data
     return ElementTree.fromstring(xml_data)
+
+
+# ═══ py/taint-nosql-injection ═════════════════════════════════════════
+from pymongo import MongoClient  # noqa: E402
+
+def nosql_injection_from_request():
+    user_filter = request.args["filter"]
+    client = MongoClient()
+    db = client.mydb
+    db.users.find(user_filter)

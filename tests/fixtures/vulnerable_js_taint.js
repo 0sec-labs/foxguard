@@ -77,3 +77,9 @@ function xxeInjection(req) {
     const parser = new DOMParser();
     parser.parseFromString(xmlData, "text/xml");
 }
+
+// ─── js/taint-nosql-injection ───────────────────────────────────────
+function nosqlInjection(req) {
+    const filter = req.body.filter;
+    db.collection("users").find(filter);
+}
