@@ -2735,9 +2735,23 @@ impl TaintNosqlInjection {
         JsTaintSpec {
             sources: javascript_taint_sources(),
             sinks: vec![
-                JsNodeMatcher::MethodName {
-                    method: "find".into(),
-                    description: "MongoDB .find() call".into(),
+                // Use specific Call matchers for .find() to avoid matching
+                // Array.prototype.find() (issue #141).
+                JsNodeMatcher::Call {
+                    canonical: "collection.find".into(),
+                    description: "MongoDB collection.find()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "db.find".into(),
+                    description: "MongoDB db.find()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "model.find".into(),
+                    description: "Mongoose model.find()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "Model.find".into(),
+                    description: "Mongoose Model.find()".into(),
                 },
                 JsNodeMatcher::MethodName {
                     method: "findOne".into(),

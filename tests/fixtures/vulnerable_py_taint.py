@@ -243,5 +243,5 @@ from pymongo import MongoClient  # noqa: E402
 def nosql_injection_from_request():
     user_filter = request.args["filter"]
     client = MongoClient()
-    db = client.mydb
-    db.users.find(user_filter)
+    collection = client.mydb.users
+    collection.find(user_filter)

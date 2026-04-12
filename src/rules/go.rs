@@ -1330,9 +1330,15 @@ impl TaintNosqlInjection {
         GoTaintSpec {
             sources: go_taint_sources(),
             sinks: vec![
-                GoNodeMatcher::MethodName {
-                    method: "Find".into(),
-                    description: "collection.Find".into(),
+                // Use specific Call matchers for .Find() to avoid matching
+                // regexp.Find() and other non-MongoDB uses (issue #141).
+                GoNodeMatcher::Call {
+                    canonical: "collection.Find".into(),
+                    description: "MongoDB collection.Find()".into(),
+                },
+                GoNodeMatcher::Call {
+                    canonical: "db.Find".into(),
+                    description: "MongoDB db.Find()".into(),
                 },
                 GoNodeMatcher::MethodName {
                     method: "FindOne".into(),

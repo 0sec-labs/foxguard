@@ -2751,9 +2751,15 @@ impl TaintNosqlInjection {
         TaintSpec {
             sources: python_taint_sources(),
             sinks: vec![
-                NodeMatcher::MethodName {
-                    method: "find".into(),
-                    description: "collection.find".into(),
+                // Use specific Call matchers for .find() to avoid matching
+                // str.find() and other non-MongoDB uses (issue #141).
+                NodeMatcher::Call {
+                    canonical: "collection.find".into(),
+                    description: "MongoDB collection.find()".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "db.find".into(),
+                    description: "MongoDB db.find()".into(),
                 },
                 NodeMatcher::MethodName {
                     method: "find_one".into(),

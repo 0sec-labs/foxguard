@@ -3,6 +3,20 @@ use crate::rules::Rule;
 use crate::{Finding, Language, Severity};
 use regex::Regex;
 
+/// Returns `true` if a tree-sitter `string` node contains interpolation
+/// children (i.e., `#{}` segments). Plain string literals like `"ls -la"`
+/// return `false`; strings like `"#{cmd}"` return `true`.
+fn has_interpolation(string_node: tree_sitter::Node) -> bool {
+    let mut cursor = string_node.walk();
+    for child in string_node.children(&mut cursor) {
+        // tree-sitter-ruby uses "interpolation" for `#{}` segments
+        if child.kind() == "interpolation" {
+            return true;
+        }
+    }
+    false
+}
+
 // ─── Rule 1: no-eval ──────────────────────────────────────────────────────────
 
 pub struct NoEval;
@@ -110,17 +124,42 @@ impl Rule for NoCommandInjection {
 
             if let Some(name) = method_name {
                 if name == "system" || name == "exec" || name == "spawn" {
-                    findings.push(make_finding(
-                        self.id(),
-                        self.severity(),
-                        self.cwe(),
-                        &format!(
-                            "{} called — risk of command injection with dynamic arguments",
-                            name
-                        ),
-                        node,
-                        src,
-                    ));
+                    // Check if the first argument is a plain string literal
+                    // (no interpolation). If so, skip — it's safe.
+                    let first_arg = node
+                        .child_by_field_name("arguments")
+                        .and_then(|a| a.named_child(0))
+                        .or_else(|| {
+                            // For command-style calls like `system "ls"`,
+                            // args are in an argument_list child.
+                            node.named_child(1).and_then(|c| {
+                                if c.kind() == "argument_list" {
+                                    c.named_child(0)
+                                } else {
+                                    Some(c)
+                                }
+                            })
+                        });
+
+                    let is_safe_literal = first_arg.is_some_and(|arg| {
+                        // A `string` node without any `string_content` siblings
+                        // that are interpolation is a plain literal.
+                        arg.kind() == "string" && !has_interpolation(arg)
+                    });
+
+                    if !is_safe_literal {
+                        findings.push(make_finding(
+                            self.id(),
+                            self.severity(),
+                            self.cwe(),
+                            &format!(
+                                "{} called — risk of command injection with dynamic arguments",
+                                name
+                            ),
+                            node,
+                            src,
+                        ));
+                    }
                 }
             }
 
@@ -947,6 +986,58 @@ mod tests {
             6,
             "Expected 6 path traversal findings, got {}",
             findings.len()
+        );
+    }
+
+    #[test]
+    fn test_command_injection_skips_plain_string_literal() {
+        let source = r#"system("ls -la")"#;
+        let tree = parse_ruby(source);
+        let rule = NoCommandInjection;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            0,
+            "system() with a plain string literal should NOT fire"
+        );
+    }
+
+    #[test]
+    fn test_command_injection_fires_on_variable() {
+        let source = "system(user_input)";
+        let tree = parse_ruby(source);
+        let rule = NoCommandInjection;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            1,
+            "system() with a variable argument should fire"
+        );
+    }
+
+    #[test]
+    fn test_command_injection_fires_on_interpolated_string() {
+        let source = r##"system("#{cmd}")"##;
+        let tree = parse_ruby(source);
+        let rule = NoCommandInjection;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            1,
+            "system() with an interpolated string should fire"
+        );
+    }
+
+    #[test]
+    fn test_command_injection_skips_exec_with_literal() {
+        let source = r#"exec("echo hello")"#;
+        let tree = parse_ruby(source);
+        let rule = NoCommandInjection;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            0,
+            "exec() with a plain string literal should NOT fire"
         );
     }
 }

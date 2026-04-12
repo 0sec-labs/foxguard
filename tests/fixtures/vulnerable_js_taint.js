@@ -87,7 +87,8 @@ function xxeInjection(req) {
 // ─── js/taint-nosql-injection ───────────────────────────────────────
 function nosqlInjection(req) {
     const filter = req.body.filter;
-    db.collection("users").find(filter);
+    const collection = db.collection("users");
+    collection.find(filter);
 }
 
 // ─── js/taint-ldap-injection ───────────────────────────────────────
