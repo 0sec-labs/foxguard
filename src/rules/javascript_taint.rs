@@ -1908,6 +1908,49 @@ pub fn javascript_taint_sources() -> Vec<NodeMatcher> {
             canonical: "Deno.env.get".into(),
             description: "Deno.env.get()".into(),
         },
+        // ─── 8. Koa ──────────────────────────────────────────────────
+        // Koa handlers receive a context object `ctx`. `ctx.request.body`
+        // is the parsed body; `ctx.query`, `ctx.params`, and `ctx.headers`
+        // are delegated getters. `ctx.request.query` is covered by taint
+        // propagation from the `ctx` root.
+        NodeMatcher::ParamName {
+            names: vec!["ctx".into()],
+            description: "Koa context parameter".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "ctx".into(),
+            field: "body".into(),
+            description: "Koa ctx.request.body".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "ctx".into(),
+            field: "query".into(),
+            description: "Koa ctx.query".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "ctx".into(),
+            field: "params".into(),
+            description: "Koa ctx.params".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "ctx".into(),
+            field: "headers".into(),
+            description: "Koa ctx.headers".into(),
+        },
+        // ─── 9. NestJS ───────────────────────────────────────────────
+        // NestJS uses decorators (@Body(), @Query(), @Param(), @Headers())
+        // to inject request data into handler parameters. In compiled JS
+        // the decorated parameters retain their names, so we match common
+        // NestJS parameter names as a conservative approximation.
+        NodeMatcher::ParamName {
+            names: vec![
+                "body".into(),
+                "query".into(),
+                "params".into(),
+                "headers".into(),
+            ],
+            description: "NestJS decorated parameter".into(),
+        },
     ]
 }
 
@@ -2507,5 +2550,105 @@ module.exports = { runQuery, evalExpression };
             "expected evalExpression to have eval sink flow, got {:?}",
             ee.params_to_sink
         );
+    }
+
+    // ─── Koa ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn koa_ctx_request_body_is_tainted() {
+        let src = r#"
+router.post("/", async (ctx) => {
+    document.write(ctx.request.body);
+});
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(
+            f[0].source_description.contains("ctx"),
+            "expected Koa ctx source, got: {}",
+            f[0].source_description
+        );
+    }
+
+    #[test]
+    fn koa_ctx_query_is_tainted() {
+        let src = r#"
+router.get("/search", async (ctx) => {
+    document.getElementById("x").innerHTML = ctx.query.q;
+});
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn koa_ctx_params_is_tainted() {
+        let src = r#"
+router.get("/user/:id", async (ctx) => {
+    document.write(ctx.params.id);
+});
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn koa_ctx_headers_is_tainted() {
+        let src = r#"
+router.get("/", async (ctx) => {
+    document.write(ctx.headers["x-forwarded-for"]);
+});
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn koa_ctx_param_name_taints_bare_ctx() {
+        let src = r#"
+router.get("/", async (ctx) => {
+    document.write(ctx);
+});
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    // ─── NestJS ──────────────────────────────────────────────────────
+
+    #[test]
+    fn nestjs_body_param_is_tainted() {
+        let src = r#"
+function createUser(body) {
+    document.write(body.username);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn nestjs_query_param_is_tainted() {
+        let src = r#"
+function searchUsers(query) {
+    document.getElementById("x").innerHTML = query.term;
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn nestjs_params_param_is_tainted() {
+        let src = r#"
+function getUser(params) {
+    document.write(params.id);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn nestjs_headers_param_is_tainted() {
+        let src = r#"
+function handler(headers) {
+    document.write(headers["authorization"]);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
     }
 }
