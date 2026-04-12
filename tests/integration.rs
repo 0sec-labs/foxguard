@@ -2619,11 +2619,7 @@ fn test_taint_findings_include_fix_suggestion_in_json() {
 
     let taint_findings: Vec<&serde_json::Value> = findings
         .iter()
-        .filter(|f| {
-            f["rule_id"]
-                .as_str()
-                .is_some_and(|id| id.contains("taint"))
-        })
+        .filter(|f| f["rule_id"].as_str().is_some_and(|id| id.contains("taint")))
         .collect();
 
     assert!(
@@ -2675,11 +2671,7 @@ fn test_fix_suggestion_appears_in_sarif_output() {
 
     let taint_results: Vec<&serde_json::Value> = results
         .iter()
-        .filter(|r| {
-            r["ruleId"]
-                .as_str()
-                .is_some_and(|id| id.contains("taint"))
-        })
+        .filter(|r| r["ruleId"].as_str().is_some_and(|id| id.contains("taint")))
         .collect();
 
     assert!(
