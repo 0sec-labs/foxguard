@@ -1272,7 +1272,6 @@ impl TaintLogInjection {
                 go_call_sink("log.Print"),
                 go_call_sink("log.Fatalf"),
                 go_call_sink("fmt.Printf"),
-                go_call_sink("fmt.Println"),
             ],
             sanitizers: vec![],
         }
@@ -1375,7 +1374,7 @@ impl Rule for TaintNosqlInjection {
         "go/taint-nosql-injection"
     }
     fn severity(&self) -> Severity {
-        Severity::Critical
+        Severity::High
     }
     fn cwe(&self) -> Option<&str> {
         Some("CWE-943")

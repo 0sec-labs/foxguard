@@ -2800,7 +2800,7 @@ impl Rule for TaintNosqlInjection {
         "py/taint-nosql-injection"
     }
     fn severity(&self) -> Severity {
-        Severity::Critical
+        Severity::High
     }
     fn cwe(&self) -> Option<&str> {
         Some("CWE-943")

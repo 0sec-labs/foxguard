@@ -2569,21 +2569,25 @@ impl TaintLogInjection {
         JsTaintSpec {
             sources: javascript_taint_sources(),
             sinks: vec![
-                JsNodeMatcher::MethodName {
-                    method: "log".into(),
+                JsNodeMatcher::Call {
+                    canonical: "console.log".into(),
                     description: "console.log".into(),
                 },
-                JsNodeMatcher::MethodName {
-                    method: "warn".into(),
-                    description: "console.warn".into(),
-                },
-                JsNodeMatcher::MethodName {
-                    method: "error".into(),
+                JsNodeMatcher::Call {
+                    canonical: "console.error".into(),
                     description: "console.error".into(),
                 },
                 JsNodeMatcher::MethodName {
+                    method: "warn".into(),
+                    description: "warn() (matches console.warn, logger.warn, etc.)".into(),
+                },
+                JsNodeMatcher::MethodName {
                     method: "info".into(),
-                    description: "console.info / logger.info".into(),
+                    description: "info() (matches console.info, logger.info, etc.)".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "debug".into(),
+                    description: "debug() (matches console.debug, logger.debug, etc.)".into(),
                 },
             ],
             sanitizers: vec![],
@@ -2758,7 +2762,7 @@ impl Rule for TaintNosqlInjection {
         "js/taint-nosql-injection"
     }
     fn severity(&self) -> Severity {
-        Severity::Critical
+        Severity::High
     }
     fn cwe(&self) -> Option<&str> {
         Some("CWE-943")
