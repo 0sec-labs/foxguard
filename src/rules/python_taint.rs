@@ -1029,6 +1029,10 @@ pub fn python_taint_sources() -> Vec<NodeMatcher> {
             canonical: "os.getenv".into(),
             description: "os.getenv(...)".into(),
         },
+        NodeMatcher::Call {
+            canonical: "os.environ.get".into(),
+            description: "os.environ.get(...)".into(),
+        },
         // ─── Handler-parameter sources ────────────────────────────
         // Covers `def view(request): ...` across Flask/Django and
         // `async def handler(request: Request): ...` in

@@ -143,6 +143,9 @@ impl RuleRegistry {
         registry.register(Box::new(python::TaintSsrfFromRequest));
         registry.register(Box::new(python::TaintYamlLoadFromRequest));
         registry.register(Box::new(python::TaintSqlInjectionFromRequest));
+        registry.register(Box::new(python::TaintSsti));
+        registry.register(Box::new(python::TaintXpathInjection));
+        registry.register(Box::new(python::TaintLdapInjection));
 
         // Register Go rules
         registry.register(Box::new(go::NoSqlInjection));

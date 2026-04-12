@@ -315,7 +315,8 @@ fn test_vulnerable_py_taint_catches_every_flow() {
     // f-string handler.
     for (taint_rule, conservative_rule, expected) in [
         ("py/taint-eval", "py/no-eval", 2usize),
-        ("py/taint-command-injection", "py/no-command-injection", 2),
+        // command-injection: 2 original + 1 os.environ.get() source handler
+        ("py/taint-command-injection", "py/no-command-injection", 3),
         ("py/taint-ssrf", "py/no-ssrf", 1),
         ("py/taint-yaml-load", "py/no-yaml-load", 1),
         ("py/taint-sql-injection", "py/no-sql-injection", 2),
@@ -333,6 +334,22 @@ fn test_vulnerable_py_taint_catches_every_flow() {
             "conservative {} must coexist with {}. counts={:?}",
             conservative_rule,
             taint_rule,
+            counts
+        );
+    }
+
+    // New taint-only rules (no conservative counterpart).
+    for (taint_rule, expected) in [
+        ("py/taint-ssti", 1usize),
+        ("py/taint-xpath-injection", 1),
+        ("py/taint-ldap-injection", 1),
+    ] {
+        assert_eq!(
+            counts.get(taint_rule).copied(),
+            Some(expected),
+            "{} should fire exactly {} time(s) on vulnerable_py_taint.py. counts={:?}",
+            taint_rule,
+            expected,
             counts
         );
     }
@@ -362,6 +379,9 @@ fn test_safe_py_taint_has_no_taint_findings() {
         "py/taint-ssrf",
         "py/taint-yaml-load",
         "py/taint-sql-injection",
+        "py/taint-ssti",
+        "py/taint-xpath-injection",
+        "py/taint-ldap-injection",
     ] {
         let n = findings
             .iter()

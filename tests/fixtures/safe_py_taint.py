@@ -121,3 +121,29 @@ def clean_fstring_no_interpolation():
     q = f"hello world"  # noqa: F541
     cur = sqlite3.connect(":memory:").cursor()
     cur.execute(q)
+
+
+# ─── Clean SSTI: template from a literal string ──────────────────────
+from flask import render_template_string  # noqa: E402
+
+
+def clean_ssti():
+    return render_template_string("<h1>Hello</h1>")
+
+
+# ─── Clean XPath: query from a literal string ────────────────────────
+from lxml import etree  # noqa: E402
+
+
+def clean_xpath():
+    tree = etree.parse("data.xml")
+    return tree.xpath("//item[@id='1']")
+
+
+# ─── Clean LDAP: filter from a literal string ────────────────────────
+import ldap  # noqa: E402
+
+
+def clean_ldap():
+    conn = ldap.initialize("ldap://localhost")
+    return conn.search_s("dc=example,dc=com", ldap.SCOPE_SUBTREE, "(cn=admin)")

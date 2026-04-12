@@ -183,3 +183,39 @@ def sql_injection_from_fstring():
     conn = sqlite3.connect(":memory:")
     cur = conn.cursor()
     cur.execute(f"SELECT * FROM users WHERE id = {request.args.get('id')}")
+
+
+# ═══ py/taint-ssti ═════════════════════════════════════════════════════
+from flask import render_template_string  # noqa: E402
+import jinja2  # noqa: E402
+
+
+def ssti_from_request():
+    tpl = request.args["template"]
+    return render_template_string(tpl)
+
+
+# ═══ py/taint-xpath-injection ══════════════════════════════════════════
+from lxml import etree  # noqa: E402
+
+
+def xpath_injection_from_request():
+    expr = request.args["xpath"]
+    tree = etree.parse("data.xml")
+    return tree.xpath(expr)
+
+
+# ═══ py/taint-ldap-injection ══════════════════════════════════════════
+import ldap  # noqa: E402
+
+
+def ldap_injection_from_request():
+    user_input = request.args["filter"]
+    conn = ldap.initialize("ldap://localhost")
+    return conn.search_s("dc=example,dc=com", ldap.SCOPE_SUBTREE, user_input)
+
+
+# ═══ os.environ.get() source ══════════════════════════════════════════
+def command_injection_from_environ_get():
+    cmd = os.environ.get("USER_CMD")
+    os.system(cmd)

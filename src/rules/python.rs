@@ -2206,3 +2206,211 @@ impl Rule for TaintSqlInjectionFromRequest {
         })
     }
 }
+
+// ─── py/taint-ssti ──────────────────────────────────────────────────────
+pub struct TaintSsti;
+
+impl TaintSsti {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("jinja2.Template"),
+                call_sink("Template"),
+                call_sink("flask.render_template_string"),
+                call_sink("render_template_string"),
+                call_sink("Template.render"),
+                call_sink("Environment.from_string"),
+                call_sink("jinja2.Environment.from_string"),
+                call_sink("mako.template.Template"),
+            ],
+            sanitizers: vec![call_sink("markupsafe.escape"), call_sink("jinja2.escape")],
+        }
+    }
+}
+
+impl Rule for TaintSsti {
+    fn id(&self) -> &str {
+        "py/taint-ssti"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-1336")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches template rendering sink (potential SSTI)"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Use render_template() with separate template files instead of render_template_string() with user input",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject server-side templates",
+                src, sink
+            )
+        })
+    }
+}
+
+// ─── py/taint-xpath-injection ───────────────────────────────────────────
+pub struct TaintXpathInjection;
+
+impl TaintXpathInjection {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("etree.XPath"),
+                call_sink("etree.xpath"),
+                call_sink("lxml.etree.XPath"),
+                NodeMatcher::MethodName {
+                    method: "xpath".into(),
+                    description: "lxml.etree.xpath".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintXpathInjection {
+    fn id(&self) -> &str {
+        "py/taint-xpath-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-643")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches XPath query sink"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Use parameterized XPath queries or validate/sanitize input before building XPath expressions",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject XPath expressions",
+                src, sink
+            )
+        })
+    }
+}
+
+// ─── py/taint-ldap-injection ────────────────────────────────────────────
+pub struct TaintLdapInjection;
+
+impl TaintLdapInjection {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("ldap.search_s"),
+                call_sink("ldap.search_st"),
+                call_sink("ldap.search_ext_s"),
+                call_sink("ldap3.Connection.search"),
+                NodeMatcher::MethodName {
+                    method: "search_s".into(),
+                    description: "ldap.search_s".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "search_st".into(),
+                    description: "ldap.search_st".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "search_ext_s".into(),
+                    description: "ldap.search_ext_s".into(),
+                },
+            ],
+            sanitizers: vec![
+                call_sink("ldap.filter.escape_filter_chars"),
+                call_sink("ldap3.utils.conv.escape_filter_chars"),
+            ],
+        }
+    }
+}
+
+impl Rule for TaintLdapInjection {
+    fn id(&self) -> &str {
+        "py/taint-ldap-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-90")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches LDAP search sink"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Use ldap.filter.escape_filter_chars() to sanitize user input before building LDAP filters",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject LDAP filters",
+                src, sink
+            )
+        })
+    }
+}
