@@ -686,6 +686,8 @@ fn test_safe_js_taint_has_no_taint_findings() {
 
     for taint_rule in [
         "js/taint-xss-innerhtml",
+        "js/taint-sql-injection",
+        "js/taint-command-injection",
         "js/taint-ldap-injection",
         "js/taint-nosql-injection",
     ] {

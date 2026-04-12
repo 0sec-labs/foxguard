@@ -1764,11 +1764,20 @@ fn is_sanitizer_call(
         Some(a) => a.resolve(callee_text),
         None => Cow::Borrowed(callee_text),
     };
+    let final_segment = resolved.rsplit('.').next().unwrap_or(&resolved);
     for matcher in &spec.sanitizers {
-        if let NodeMatcher::Call { canonical, .. } = matcher {
-            if callee_text == canonical.as_str() || resolved.as_ref() == canonical.as_str() {
-                return true;
+        match matcher {
+            NodeMatcher::Call { canonical, .. } => {
+                if callee_text == canonical.as_str() || resolved.as_ref() == canonical.as_str() {
+                    return true;
+                }
             }
+            NodeMatcher::MethodName { method, .. } => {
+                if method == final_segment {
+                    return true;
+                }
+            }
+            _ => {}
         }
     }
     false

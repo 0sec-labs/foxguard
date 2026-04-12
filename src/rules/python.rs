@@ -2136,7 +2136,11 @@ impl TaintCommandInjectionFromRequest {
                 call_sink("subprocess.check_call"),
                 call_sink("subprocess.check_output"),
             ],
-            sanitizers: vec![],
+            sanitizers: vec![
+                call_sink("shlex.quote"),
+                call_sink("shlex.join"),
+                call_sink("subprocess.list2cmdline"),
+            ],
         }
     }
 }
@@ -2336,7 +2340,7 @@ impl TaintSqlInjectionFromRequest {
                     description: "sqlite3.Cursor.executescript".into(),
                 },
             ],
-            sanitizers: vec![],
+            sanitizers: vec![call_sink("escape_string"), call_sink("quote_ident")],
         }
     }
 }
@@ -2397,7 +2401,13 @@ impl TaintSsti {
                 call_sink("jinja2.Environment.from_string"),
                 call_sink("mako.template.Template"),
             ],
-            sanitizers: vec![call_sink("markupsafe.escape"), call_sink("jinja2.escape")],
+            sanitizers: vec![
+                call_sink("markupsafe.escape"),
+                call_sink("jinja2.escape"),
+                call_sink("html.escape"),
+                call_sink("cgi.escape"),
+                call_sink("bleach.clean"),
+            ],
         }
     }
 }
@@ -2656,7 +2666,7 @@ impl Rule for TaintLogInjection {
             severity: self.severity(),
             cwe: self.cwe(),
             fix_suggestion: Some(
-                "Sanitize user input before logging — strip newlines and control characters",
+                "Sanitize user input before logging — strip newlines and control characters (no standard sanitizer; use str.replace() or a regex to remove \\n, \\r, and ANSI escape sequences)",
             ),
         };
         map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {

@@ -1947,7 +1947,28 @@ impl TaintXssInnerHtml {
                     description: "document.writeln".into(),
                 },
             ],
-            sanitizers: vec![],
+            sanitizers: vec![
+                JsNodeMatcher::Call {
+                    canonical: "DOMPurify.sanitize".into(),
+                    description: "DOMPurify.sanitize".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "sanitizeHtml".into(),
+                    description: "sanitizeHtml".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "xss".into(),
+                    description: "xss".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "escape".into(),
+                    description: "escape".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "encodeURIComponent".into(),
+                    description: "encodeURIComponent".into(),
+                },
+            ],
         }
     }
 }
@@ -2021,7 +2042,16 @@ impl TaintSqlInjection {
                     description: "SQL .raw() call (knex-style)".into(),
                 },
             ],
-            sanitizers: vec![],
+            sanitizers: vec![
+                JsNodeMatcher::MethodName {
+                    method: "escape".into(),
+                    description: "mysql .escape()".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "escapeLiteral".into(),
+                    description: "pg .escapeLiteral()".into(),
+                },
+            ],
         }
     }
 }
@@ -2169,7 +2199,20 @@ impl TaintCommandInjection {
                     description: "child_process.execFile()".into(),
                 },
             ],
-            sanitizers: vec![],
+            sanitizers: vec![
+                JsNodeMatcher::Call {
+                    canonical: "shellescape".into(),
+                    description: "shellescape".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "shell-escape".into(),
+                    description: "shell-escape".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "escapeShellArg".into(),
+                    description: "escapeShellArg".into(),
+                },
+            ],
         }
     }
 }

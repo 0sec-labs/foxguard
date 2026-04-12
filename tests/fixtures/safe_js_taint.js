@@ -66,3 +66,58 @@ function arrayFind(req) {
     const tainted = req.body.value;
     [1, 2, 3].find(x => x === tainted);
 }
+
+// ─── Sanitizer tests (issue #139) ──────────────────────────────────
+// Each handler flows tainted input through a sanitizer before reaching
+// the sink. The taint rule must NOT fire.
+
+// XSS sanitizers
+function sanitizedXssDomPurify(req) {
+    const dirty = req.body.html;
+    const clean = DOMPurify.sanitize(dirty);
+    document.getElementById("x").innerHTML = clean;
+}
+
+function sanitizedXssSanitizeHtml(req) {
+    const dirty = req.body.html;
+    const clean = sanitizeHtml(dirty);
+    document.getElementById("x").innerHTML = clean;
+}
+
+function sanitizedXssXssPackage(req) {
+    const dirty = req.body.html;
+    const clean = xss(dirty);
+    document.getElementById("x").innerHTML = clean;
+}
+
+function sanitizedXssEncodeURIComponent(req) {
+    const dirty = req.body.html;
+    const clean = encodeURIComponent(dirty);
+    document.getElementById("x").innerHTML = clean;
+}
+
+// SQL injection sanitizers
+function sanitizedSqlEscape(req) {
+    const name = req.body.name;
+    const safe = connection.escape(name);
+    connection.query("SELECT * FROM users WHERE name = " + safe);
+}
+
+function sanitizedSqlEscapeLiteral(req) {
+    const name = req.body.name;
+    const safe = client.escapeLiteral(name);
+    client.query("SELECT * FROM users WHERE name = " + safe);
+}
+
+// Command injection sanitizers
+function sanitizedCmdShellescape(req) {
+    const cmd = req.body.cmd;
+    const safe = shellescape(cmd);
+    child_process.exec(safe);
+}
+
+function sanitizedCmdEscapeShellArg(req) {
+    const cmd = req.body.cmd;
+    const safe = escapeShellArg(cmd);
+    child_process.exec(safe);
+}

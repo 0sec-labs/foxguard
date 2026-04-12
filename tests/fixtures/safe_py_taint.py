@@ -147,3 +147,63 @@ import ldap  # noqa: E402
 def clean_ldap():
     conn = ldap.initialize("ldap://localhost")
     return conn.search_s("dc=example,dc=com", ldap.SCOPE_SUBTREE, "(cn=admin)")
+
+
+# ─── Sanitizer tests (issue #139) ──────────────────────────────────────
+# Each handler below flows tainted input through a sanitizer before
+# reaching the sink. The taint rule must NOT fire.
+
+import shlex  # noqa: E402
+import html as html_mod  # noqa: E402
+import bleach  # noqa: E402
+import markupsafe  # noqa: E402
+
+
+def sanitized_command_shlex_quote():
+    cmd = request.args["cmd"]
+    safe = shlex.quote(cmd)
+    os.system("echo " + safe)
+
+
+def sanitized_command_shlex_join():
+    parts = request.args.getlist("parts")
+    safe = shlex.join(parts)
+    os.system(safe)
+
+
+def sanitized_command_list2cmdline():
+    cmd = request.args["cmd"]
+    safe = subprocess.list2cmdline([cmd])
+    os.system(safe)
+
+
+def sanitized_sql_escape_string():
+    name = request.args["name"]
+    safe = escape_string(name)
+    cur = sqlite3.connect(":memory:").cursor()
+    cur.execute("SELECT * FROM users WHERE name = '" + safe + "'")
+
+
+def sanitized_sql_quote_ident():
+    col = request.args["col"]
+    safe = quote_ident(col)
+    cur = sqlite3.connect(":memory:").cursor()
+    cur.execute("SELECT " + safe + " FROM users")
+
+
+def sanitized_ssti_markupsafe_escape():
+    user_input = request.args["name"]
+    safe = markupsafe.escape(user_input)
+    return render_template_string("<h1>" + safe + "</h1>")
+
+
+def sanitized_ssti_html_escape():
+    user_input = request.args["name"]
+    safe = html_mod.escape(user_input)
+    return render_template_string("<h1>" + safe + "</h1>")
+
+
+def sanitized_ssti_bleach_clean():
+    user_input = request.args["name"]
+    safe = bleach.clean(user_input)
+    return render_template_string("<h1>" + safe + "</h1>")

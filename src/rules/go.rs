@@ -905,7 +905,7 @@ impl Rule for TaintCommandInjection {
             rule_id: self.id(),
             severity: self.severity(),
             cwe: self.cwe(),
-            fix_suggestion: Some("Pass arguments as separate elements to `exec.Command(name, arg1, arg2)` instead of a single shell string"),
+            fix_suggestion: Some("Go has no standard shell-escape function. Pass arguments as separate elements to `exec.Command(name, arg1, arg2)` instead of building a shell string — this avoids shell interpretation entirely"),
         };
         map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
             format!(
