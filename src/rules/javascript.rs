@@ -1955,3 +1955,284 @@ impl Rule for TaintSqlInjection {
             .collect()
     }
 }
+
+// ─── js/taint-eval ──────────────────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches `eval()`
+// or `new Function(...)`. CWE-95 (Improper Neutralization of Directives
+// in Dynamically Evaluated Code).
+
+pub struct TaintEval;
+
+impl TaintEval {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::Call {
+                    canonical: "eval".into(),
+                    description: "eval() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "Function".into(),
+                    description: "new Function() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintEval {
+    fn id(&self) -> &str {
+        "js/taint-eval"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-95")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches eval or Function — arbitrary code execution"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let spec = Self::spec();
+        let raw =
+            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
+        raw.into_iter()
+            .map(|t| Finding {
+                rule_id: self.id().to_string(),
+                severity: self.severity(),
+                cwe: self.cwe().map(|s| s.to_string()),
+                description: format!(
+                    "{} reaches {} — untrusted input can execute arbitrary code",
+                    t.source_description, t.sink_description
+                ),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+            })
+            .collect()
+    }
+}
+
+// ─── js/taint-command-injection ─────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches a
+// child-process execution sink. CWE-78 (OS Command Injection).
+
+pub struct TaintCommandInjection;
+
+impl TaintCommandInjection {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::MethodName {
+                    method: "exec".into(),
+                    description: "child_process .exec() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "execSync".into(),
+                    description: "child_process .execSync() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "spawn".into(),
+                    description: "child_process .spawn() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "spawnSync".into(),
+                    description: "child_process .spawnSync() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "child_process.exec".into(),
+                    description: "child_process.exec() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "child_process.execSync".into(),
+                    description: "child_process.execSync() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintCommandInjection {
+    fn id(&self) -> &str {
+        "js/taint-command-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-78")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches a command execution sink — OS command injection"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let spec = Self::spec();
+        let raw =
+            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
+        raw.into_iter()
+            .map(|t| Finding {
+                rule_id: self.id().to_string(),
+                severity: self.severity(),
+                cwe: self.cwe().map(|s| s.to_string()),
+                description: format!(
+                    "{} reaches {} — untrusted input can inject OS commands",
+                    t.source_description, t.sink_description
+                ),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+            })
+            .collect()
+    }
+}
+
+// ─── js/taint-ssrf ──────────────────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches an
+// outbound HTTP request sink. CWE-918 (Server-Side Request Forgery).
+
+pub struct TaintSsrf;
+
+impl TaintSsrf {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::Call {
+                    canonical: "fetch".into(),
+                    description: "fetch() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "http.get".into(),
+                    description: "http.get() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "http.request".into(),
+                    description: "http.request() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "https.get".into(),
+                    description: "https.get() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "https.request".into(),
+                    description: "https.request() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "axios.get".into(),
+                    description: "axios.get() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "axios.post".into(),
+                    description: "axios.post() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "axios.request".into(),
+                    description: "axios.request() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "got".into(),
+                    description: "got() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "got.get".into(),
+                    description: "got.get() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "got.post".into(),
+                    description: "got.post() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintSsrf {
+    fn id(&self) -> &str {
+        "js/taint-ssrf"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-918")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches an HTTP request sink — possible SSRF"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let spec = Self::spec();
+        let raw =
+            javascript_taint::analyze_tree(tree.root_node(), source, &spec, ctx.javascript_aliases);
+        raw.into_iter()
+            .map(|t| Finding {
+                rule_id: self.id().to_string(),
+                severity: self.severity(),
+                cwe: self.cwe().map(|s| s.to_string()),
+                description: format!(
+                    "{} reaches {} — untrusted input can cause server-side request forgery",
+                    t.source_description, t.sink_description
+                ),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+            })
+            .collect()
+    }
+}

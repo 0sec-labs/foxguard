@@ -179,7 +179,15 @@ fn realistic_django_shop_multifile() {
 /// summaries).
 #[test]
 fn realistic_express_api_multifile() {
-    assert_fixture("express_api", 5, &[("js/taint-sql-injection", 1)]);
+    assert_fixture(
+        "express_api",
+        9,
+        &[
+            ("js/taint-sql-injection", 1),
+            ("js/taint-command-injection", 1),
+            ("js/taint-eval", 1),
+        ],
+    );
 }
 
 /// Multi-file Next.js App Router fixture (issue #48). Same shape as

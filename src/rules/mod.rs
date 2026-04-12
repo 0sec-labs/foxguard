@@ -106,6 +106,9 @@ impl RuleRegistry {
         registry.register(Box::new(javascript::NoUnsafeFormatString));
         registry.register(Box::new(javascript::TaintXssInnerHtml));
         registry.register(Box::new(javascript::TaintSqlInjection));
+        registry.register(Box::new(javascript::TaintEval));
+        registry.register(Box::new(javascript::TaintCommandInjection));
+        registry.register(Box::new(javascript::TaintSsrf));
 
         // Register Python rules
         registry.register(Box::new(python::NoEval));

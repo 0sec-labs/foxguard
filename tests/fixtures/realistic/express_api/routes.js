@@ -8,9 +8,12 @@
 // fixture need to be updated to include the new cross-file findings.
 //
 // Hand-counted expected findings under the current engine:
-//   js/taint-sql-injection : 1  (in-file /user handler)
+//   js/taint-sql-injection        : 1  (in-file /user handler)
+//   js/taint-command-injection    : 1  (in-file /exec handler)
+//   js/taint-eval                 : 1  (in-file /eval handler)
 
 const express = require("express");
+const child_process = require("child_process");
 const services = require("./services");
 
 const app = express();
@@ -21,6 +24,22 @@ app.get("/user", (req, res) => {
     // js/taint-sql-injection — source and sink in the same function
     const name = req.query.name;
     db.query("SELECT * FROM users WHERE name = '" + name + "'");
+    res.send("ok");
+});
+
+// ─── In-file flow — command injection ────────────────────────────────
+app.get("/exec", (req, res) => {
+    // js/taint-command-injection — source and sink in the same function
+    const cmd = req.query.cmd;
+    child_process.exec(cmd);
+    res.send("ok");
+});
+
+// ─── In-file flow — eval injection ──────────────────────────────────
+app.get("/eval", (req, res) => {
+    // js/taint-eval — source and sink in the same function
+    const expr = req.query.expr;
+    eval(expr);
     res.send("ok");
 });
 
