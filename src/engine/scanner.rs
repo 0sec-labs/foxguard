@@ -125,25 +125,24 @@ fn is_noise_path(path: &Path) -> bool {
     false
 }
 
-/// Detect minified files: very long lines suggest bundled/compiled code.
+const MIN_SIZE_FOR_MINIFY_CHECK: usize = 2000;
+const MAX_FIRST_LINE_LEN: usize = 1000;
+const MAX_AVG_LINE_LEN: usize = 300;
+
 fn is_minified(source: &str) -> bool {
-    // If file is small, it's not minified
-    if source.len() < 2000 {
+    if source.len() < MIN_SIZE_FOR_MINIFY_CHECK {
         return false;
     }
-    // Check the first line — minified files usually have one huge line
     if let Some(first_newline) = source.find('\n') {
-        if first_newline > 1000 {
+        if first_newline > MAX_FIRST_LINE_LEN {
             return true;
         }
     } else {
-        // No newline at all and file is over 2KB — definitely minified
-        return source.len() > 2000;
+        return source.len() > MIN_SIZE_FOR_MINIFY_CHECK;
     }
-    // Check average line length
     let line_count = source.bytes().filter(|b| *b == b'\n').count().max(1);
     let avg_line_len = source.len() / line_count;
-    avg_line_len > 300
+    avg_line_len > MAX_AVG_LINE_LEN
 }
 
 fn inline_ignore_regex() -> &'static Regex {

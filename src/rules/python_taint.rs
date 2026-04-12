@@ -32,7 +32,7 @@
 
 use crate::rules::python_aliases::ImportAliases;
 use std::collections::HashMap;
-use tree_sitter::{Node, TreeCursor};
+use tree_sitter::Node;
 
 // ─── Public API ───────────────────────────────────────────────────────────
 
@@ -1043,18 +1043,6 @@ fn leftmost_identifier<'a>(mut node: Node<'_>, source: &'a str) -> Option<&'a st
 
 fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
     &source[node.byte_range()]
-}
-
-#[allow(dead_code)]
-fn debug_tree(node: Node<'_>, depth: usize) {
-    let mut cursor: TreeCursor = node.walk();
-    for _ in 0..depth {
-        eprint!("  ");
-    }
-    eprintln!("{}", node.kind());
-    for child in node.children(&mut cursor) {
-        debug_tree(child, depth + 1);
-    }
 }
 
 #[cfg(test)]
