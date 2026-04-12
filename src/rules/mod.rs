@@ -26,11 +26,11 @@ use std::path::Path;
 #[derive(Default)]
 pub struct FileContext<'a> {
     /// Python import alias table. `None` for non-Python files.
-    pub python_aliases: Option<&'a python_aliases::ImportAliases>,
+    pub python_aliases: Option<&'a common::AliasTable>,
     /// JavaScript/TypeScript import alias table. `None` for non-JS files.
-    pub javascript_aliases: Option<&'a javascript_taint::JsImportAliases>,
+    pub javascript_aliases: Option<&'a common::AliasTable>,
     /// Go import alias table. `None` for non-Go files.
-    pub go_aliases: Option<&'a go_taint::GoImportAliases>,
+    pub go_aliases: Option<&'a common::AliasTable>,
 }
 
 /// A security rule that checks parsed source code for vulnerabilities.

@@ -1,4 +1,61 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+
 use crate::{Finding, Severity};
+
+/// Shared per-file import alias table.
+///
+/// Maps a local identifier (as it appears in source) to its canonical
+/// dotted/qualified path. Each language populates the table with its own
+/// tree-walking logic, but the resolution algorithm is identical.
+#[derive(Debug, Default, Clone)]
+pub struct AliasTable {
+    pub(crate) map: HashMap<String, String>,
+}
+
+impl AliasTable {
+    /// Create a new empty alias table.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Insert an alias mapping.
+    pub fn insert(&mut self, local: String, canonical: String) {
+        self.map.insert(local, canonical);
+    }
+
+    /// Insert only if the key is not already present.
+    pub fn entry_or_insert(&mut self, local: String, canonical: String) {
+        self.map.entry(local).or_insert(canonical);
+    }
+
+    /// Resolve a call-site callee text (as it appears in the source) back to
+    /// its canonical dotted path. Returns the input unchanged when no alias
+    /// matches. For example, with `import pickle as p`:
+    ///   `p.loads`        → `pickle.loads`
+    ///   `pickle.loads`   → `pickle.loads`
+    ///   `eval`           → `eval`
+    pub fn resolve<'a>(&'a self, callee: &'a str) -> Cow<'a, str> {
+        if let Some((head, tail)) = callee.split_once('.') {
+            if let Some(canonical_root) = self.map.get(head) {
+                if canonical_root == head {
+                    return Cow::Borrowed(callee);
+                }
+                return Cow::Owned(format!("{}.{}", canonical_root, tail));
+            }
+            return Cow::Borrowed(callee);
+        }
+        if let Some(canonical) = self.map.get(callee) {
+            return Cow::Borrowed(canonical.as_str());
+        }
+        Cow::Borrowed(callee)
+    }
+
+    #[cfg(test)]
+    pub fn get(&self, local: &str) -> Option<&str> {
+        self.map.get(local).map(String::as_str)
+    }
+}
 
 /// Extract the full source line containing the given byte offset.
 ///

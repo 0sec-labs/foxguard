@@ -1,8 +1,7 @@
-use std::borrow::Cow;
-use std::collections::HashMap;
+use super::common::AliasTable;
 use tree_sitter::{Node, Tree};
 
-/// Per-file Python import alias table.
+/// Build a Python import alias table from a parsed tree.
 ///
 /// Maps a local identifier (as it appears in the source) to its canonical
 /// dotted path. For example `import pickle as p` produces `p -> pickle`,
@@ -16,134 +15,100 @@ use tree_sitter::{Node, Tree};
 /// `pickle = something_else` inside one function are not tracked. Dynamic
 /// forms such as `importlib.import_module(...)` are also out of scope and
 /// tracked separately under the dataflow roadmap.
-#[derive(Debug, Default, Clone)]
-pub struct ImportAliases {
-    map: HashMap<String, String>,
+pub fn from_tree(source: &str, tree: &Tree) -> AliasTable {
+    let mut aliases = AliasTable::new();
+    walk_for_imports(&mut aliases, tree.root_node(), source);
+    aliases
 }
 
-impl ImportAliases {
-    pub fn from_tree(source: &str, tree: &Tree) -> Self {
-        let mut aliases = Self::default();
-        aliases.walk_for_imports(tree.root_node(), source);
-        aliases
-    }
-
-    fn walk_for_imports(&mut self, node: Node, source: &str) {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            match child.kind() {
-                "import_statement" => self.collect_import(child, source),
-                "import_from_statement" => self.collect_import_from(child, source),
-                // Recurse into top-level blocks so `if sys.version_info: import foo`
-                // at the module level still contributes. Stop at function and class
-                // bodies — alias resolution there is explicitly out of scope.
-                "if_statement" | "try_statement" | "with_statement" | "block" | "module" => {
-                    self.walk_for_imports(child, source);
-                }
-                _ => {}
+fn walk_for_imports(aliases: &mut AliasTable, node: Node, source: &str) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "import_statement" => collect_import(aliases, child, source),
+            "import_from_statement" => collect_import_from(aliases, child, source),
+            // Recurse into top-level blocks so `if sys.version_info: import foo`
+            // at the module level still contributes. Stop at function and class
+            // bodies — alias resolution there is explicitly out of scope.
+            "if_statement" | "try_statement" | "with_statement" | "block" | "module" => {
+                walk_for_imports(aliases, child, source);
             }
+            _ => {}
         }
     }
+}
 
-    fn collect_import(&mut self, node: Node, source: &str) {
-        // `import X`, `import X as Y`, `import X.Y`, `import X.Y as Z`
-        let mut cursor = node.walk();
-        for name in node.children_by_field_name("name", &mut cursor) {
-            match name.kind() {
-                "dotted_name" => {
-                    // `import urllib.request` makes the *first* identifier
-                    // (`urllib`) the accessible local name, and the full dotted
-                    // path (`urllib.request`) is what the source will write for
-                    // callees. Record both so either form resolves correctly.
-                    let full = node_text(name, source).to_string();
-                    if let Some(first) = name.child(0) {
-                        let root = node_text(first, source).to_string();
-                        self.map.entry(root.clone()).or_insert(root);
-                    }
-                    self.map.entry(full.clone()).or_insert(full);
+fn collect_import(aliases: &mut AliasTable, node: Node, source: &str) {
+    // `import X`, `import X as Y`, `import X.Y`, `import X.Y as Z`
+    let mut cursor = node.walk();
+    for name in node.children_by_field_name("name", &mut cursor) {
+        match name.kind() {
+            "dotted_name" => {
+                // `import urllib.request` makes the *first* identifier
+                // (`urllib`) the accessible local name, and the full dotted
+                // path (`urllib.request`) is what the source will write for
+                // callees. Record both so either form resolves correctly.
+                let full = node_text(name, source).to_string();
+                if let Some(first) = name.child(0) {
+                    let root = node_text(first, source).to_string();
+                    aliases.entry_or_insert(root.clone(), root);
                 }
-                "aliased_import" => {
-                    // `import X.Y as Z`  →  local `Z` → canonical `X.Y`
-                    let canonical = name
-                        .child_by_field_name("name")
-                        .map(|n| node_text(n, source).to_string());
-                    let alias = name
-                        .child_by_field_name("alias")
-                        .map(|n| node_text(n, source).to_string());
-                    if let (Some(canonical), Some(alias)) = (canonical, alias) {
-                        self.map.insert(alias, canonical);
-                    }
-                }
-                _ => {}
+                aliases.entry_or_insert(full.clone(), full);
             }
-        }
-    }
-
-    fn collect_import_from(&mut self, node: Node, source: &str) {
-        // `from MODULE import NAME [as ALIAS], ...`
-        let Some(module_node) = node.child_by_field_name("module_name") else {
-            return;
-        };
-        let module = node_text(module_node, source).to_string();
-        if module.is_empty() {
-            return;
-        }
-
-        let mut cursor = node.walk();
-        for name in node.children_by_field_name("name", &mut cursor) {
-            match name.kind() {
-                "dotted_name" | "identifier" => {
-                    // `from pickle import loads`  →  `loads` → `pickle.loads`
-                    let local = node_text(name, source).to_string();
-                    if local.is_empty() {
-                        continue;
-                    }
-                    let canonical = format!("{}.{}", module, local);
-                    self.map.insert(local, canonical);
+            "aliased_import" => {
+                // `import X.Y as Z`  →  local `Z` → canonical `X.Y`
+                let canonical = name
+                    .child_by_field_name("name")
+                    .map(|n| node_text(n, source).to_string());
+                let alias = name
+                    .child_by_field_name("alias")
+                    .map(|n| node_text(n, source).to_string());
+                if let (Some(canonical), Some(alias)) = (canonical, alias) {
+                    aliases.insert(alias, canonical);
                 }
-                "aliased_import" => {
-                    // `from pickle import loads as d`  →  `d` → `pickle.loads`
-                    let real = name
-                        .child_by_field_name("name")
-                        .map(|n| node_text(n, source).to_string());
-                    let alias = name
-                        .child_by_field_name("alias")
-                        .map(|n| node_text(n, source).to_string());
-                    if let (Some(real), Some(alias)) = (real, alias) {
-                        let canonical = format!("{}.{}", module, real);
-                        self.map.insert(alias, canonical);
-                    }
-                }
-                _ => {}
             }
+            _ => {}
         }
     }
+}
 
-    /// Resolve a call-site callee text (as it appears in the source) back to
-    /// its canonical dotted path. Returns the input unchanged when no alias
-    /// matches. For example, with `import pickle as p`:
-    ///   `p.loads`        → `pickle.loads`
-    ///   `pickle.loads`   → `pickle.loads`
-    ///   `eval`           → `eval`
-    pub fn resolve<'a>(&'a self, callee: &'a str) -> Cow<'a, str> {
-        if let Some((head, tail)) = callee.split_once('.') {
-            if let Some(canonical_root) = self.map.get(head) {
-                if canonical_root == head {
-                    return Cow::Borrowed(callee);
+fn collect_import_from(aliases: &mut AliasTable, node: Node, source: &str) {
+    // `from MODULE import NAME [as ALIAS], ...`
+    let Some(module_node) = node.child_by_field_name("module_name") else {
+        return;
+    };
+    let module = node_text(module_node, source).to_string();
+    if module.is_empty() {
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for name in node.children_by_field_name("name", &mut cursor) {
+        match name.kind() {
+            "dotted_name" | "identifier" => {
+                // `from pickle import loads`  →  `loads` → `pickle.loads`
+                let local = node_text(name, source).to_string();
+                if local.is_empty() {
+                    continue;
                 }
-                return Cow::Owned(format!("{}.{}", canonical_root, tail));
+                let canonical = format!("{}.{}", module, local);
+                aliases.insert(local, canonical);
             }
-            return Cow::Borrowed(callee);
+            "aliased_import" => {
+                // `from pickle import loads as d`  →  `d` → `pickle.loads`
+                let real = name
+                    .child_by_field_name("name")
+                    .map(|n| node_text(n, source).to_string());
+                let alias = name
+                    .child_by_field_name("alias")
+                    .map(|n| node_text(n, source).to_string());
+                if let (Some(real), Some(alias)) = (real, alias) {
+                    let canonical = format!("{}.{}", module, real);
+                    aliases.insert(alias, canonical);
+                }
+            }
+            _ => {}
         }
-        if let Some(canonical) = self.map.get(callee) {
-            return Cow::Borrowed(canonical.as_str());
-        }
-        Cow::Borrowed(callee)
-    }
-
-    #[cfg(test)]
-    pub fn get(&self, local: &str) -> Option<&str> {
-        self.map.get(local).map(String::as_str)
     }
 }
 
@@ -157,9 +122,9 @@ mod tests {
     use crate::engine::parser::parse_file;
     use crate::Language;
 
-    fn build(source: &str) -> ImportAliases {
+    fn build(source: &str) -> AliasTable {
         let tree = parse_file(source, Language::Python).expect("parse");
-        ImportAliases::from_tree(source, &tree)
+        from_tree(source, &tree)
     }
 
     #[test]

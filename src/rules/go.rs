@@ -1,6 +1,8 @@
+use crate::rules::common::AliasTable;
 use crate::rules::common::{get_source_line, make_finding, make_finding_from_offsets, walk_tree};
 use crate::rules::go_taint::{
-    self, go_taint_sources, GoImportAliases, NodeMatcher as GoNodeMatcher, TaintSpec as GoTaintSpec,
+    self, go_aliases_from_tree, go_taint_sources, NodeMatcher as GoNodeMatcher,
+    TaintSpec as GoTaintSpec,
 };
 use crate::rules::{FileContext, Rule};
 use crate::{Finding, Language, Severity};
@@ -606,12 +608,12 @@ fn map_go_taint_findings(
     // If the scanner never built a per-file Go alias table (e.g.
     // rules are invoked without FileContext), fall back to building
     // one locally so the rule still works.
-    let local_aliases: Option<GoImportAliases> = if ctx.go_aliases.is_none() {
-        Some(GoImportAliases::from_tree(source, tree))
+    let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+        Some(go_aliases_from_tree(source, tree))
     } else {
         None
     };
-    let aliases: Option<&GoImportAliases> = ctx.go_aliases.or(local_aliases.as_ref());
+    let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
     let raw = go_taint::analyze_tree(tree.root_node(), source, spec, aliases);
     raw.into_iter()
         .map(|t| Finding {

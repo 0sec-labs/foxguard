@@ -34,6 +34,7 @@
 //! Everything specific to a library is expressed declaratively via
 //! `TaintSpec`.
 
+use super::common::AliasTable;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use tree_sitter::{Node, Tree};
@@ -125,7 +126,7 @@ pub type ReturnSummary = HashMap<String, Option<String>>;
 struct AnalysisContext<'a> {
     source: &'a str,
     spec: &'a TaintSpec,
-    aliases: Option<&'a GoImportAliases>,
+    aliases: Option<&'a AliasTable>,
     summaries: &'a ReturnSummary,
 }
 
@@ -139,7 +140,7 @@ pub fn analyze_tree(
     root: Node<'_>,
     source: &str,
     spec: &TaintSpec,
-    aliases: Option<&GoImportAliases>,
+    aliases: Option<&AliasTable>,
 ) -> Vec<TaintFinding> {
     let empty_summary = ReturnSummary::new();
     let mut summaries = ReturnSummary::new();
@@ -179,106 +180,75 @@ pub fn analyze_tree(
 ///
 /// Handles:
 ///
-/// - `import "fmt"`              → `fmt`  → `fmt`
-/// - `import f "fmt"`            → `f`    → `fmt`
-/// - `import "net/http"`         → `http` → `http`
-/// - `import net "net/http"`     → `net`  → `http`
+/// - `import "fmt"`              -> `fmt`  -> `fmt`
+/// - `import f "fmt"`            -> `f`    -> `fmt`
+/// - `import "net/http"`         -> `http` -> `http`
+/// - `import net "net/http"`     -> `net`  -> `http`
 /// - Grouped imports inside `import ( ... )` blocks.
 ///
 /// Out of scope for v1 (documented):
 ///
-/// - `import . "fmt"`  — dot imports make names unqualified, rare.
-/// - `import _ "foo"`  — side-effect imports introduce no names.
+/// - `import . "fmt"`  -- dot imports make names unqualified, rare.
+/// - `import _ "foo"`  -- side-effect imports introduce no names.
 ///
 /// File-scope only; function-local rebindings are not tracked.
-#[derive(Debug, Default, Clone)]
-pub struct GoImportAliases {
-    /// Local alias → canonical short package name (e.g. `net` → `http`).
-    map: HashMap<String, String>,
+pub fn go_aliases_from_tree(source: &str, tree: &Tree) -> AliasTable {
+    let mut aliases = AliasTable::new();
+    let root = tree.root_node();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() == "import_declaration" {
+            go_collect_import_decl(&mut aliases, child, source);
+        }
+    }
+    aliases
 }
 
-impl GoImportAliases {
-    pub fn from_tree(source: &str, tree: &Tree) -> Self {
-        let mut aliases = Self::default();
-        let root = tree.root_node();
-        let mut cursor = root.walk();
-        for child in root.children(&mut cursor) {
-            if child.kind() == "import_declaration" {
-                aliases.collect_import_decl(child, source);
-            }
-        }
-        aliases
-    }
-
-    fn collect_import_decl(&mut self, node: Node<'_>, source: &str) {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            match child.kind() {
-                "import_spec" => self.collect_import_spec(child, source),
-                "import_spec_list" => {
-                    let mut inner = child.walk();
-                    for spec in child.children(&mut inner) {
-                        if spec.kind() == "import_spec" {
-                            self.collect_import_spec(spec, source);
-                        }
+fn go_collect_import_decl(aliases: &mut AliasTable, node: Node<'_>, source: &str) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "import_spec" => go_collect_import_spec(aliases, child, source),
+            "import_spec_list" => {
+                let mut inner = child.walk();
+                for spec in child.children(&mut inner) {
+                    if spec.kind() == "import_spec" {
+                        go_collect_import_spec(aliases, spec, source);
                     }
                 }
-                _ => {}
             }
+            _ => {}
         }
     }
+}
 
-    fn collect_import_spec(&mut self, node: Node<'_>, source: &str) {
-        let Some(path_node) = node.child_by_field_name("path") else {
-            return;
-        };
-        let raw = node_text(path_node, source);
-        let path = raw.trim_matches(|c: char| c == '"' || c == '`');
-        if path.is_empty() {
-            return;
-        }
-        // Canonical: last segment of the import path, e.g. `net/http` → `http`.
-        let canonical = path.rsplit('/').next().unwrap_or(path).to_string();
-
-        let name_node = node.child_by_field_name("name");
-        match name_node.map(|n| n.kind()) {
-            // `import . "fmt"` — out of scope; record nothing.
-            Some("dot") => {}
-            // `import _ "foo"` — out of scope; record nothing.
-            Some("blank_identifier") => {}
-            // `import f "fmt"` — local alias `f` → canonical `fmt`.
-            Some("package_identifier") => {
-                let local = node_text(name_node.unwrap(), source).to_string();
-                self.map.insert(local, canonical);
-            }
-            // Plain `import "fmt"` — the local name is the canonical.
-            _ => {
-                self.map.insert(canonical.clone(), canonical);
-            }
-        }
+fn go_collect_import_spec(aliases: &mut AliasTable, node: Node<'_>, source: &str) {
+    let Some(path_node) = node.child_by_field_name("path") else {
+        return;
+    };
+    let raw = node_text(path_node, source);
+    let path = raw.trim_matches(|c: char| c == '"' || c == '`');
+    if path.is_empty() {
+        return;
     }
+    // Canonical: last segment of the import path, e.g. `net/http` -> `http`.
+    let canonical = path.rsplit('/').next().unwrap_or(path).to_string();
 
-    /// Resolve a call-site callee text back to its canonical dotted
-    /// path. `f.Println` → `fmt.Println` when `f` is aliased to `fmt`.
-    pub fn resolve<'a>(&'a self, callee: &'a str) -> Cow<'a, str> {
-        if let Some((head, tail)) = callee.split_once('.') {
-            if let Some(canonical_root) = self.map.get(head) {
-                if canonical_root == head {
-                    return Cow::Borrowed(callee);
-                }
-                return Cow::Owned(format!("{}.{}", canonical_root, tail));
-            }
-            return Cow::Borrowed(callee);
+    let name_node = node.child_by_field_name("name");
+    match name_node.map(|n| n.kind()) {
+        // `import . "fmt"` -- out of scope; record nothing.
+        Some("dot") => {}
+        // `import _ "foo"` -- out of scope; record nothing.
+        Some("blank_identifier") => {}
+        // `import f "fmt"` -- local alias `f` -> canonical `fmt`.
+        Some("package_identifier") => {
+            let local = node_text(name_node.unwrap(), source).to_string();
+            aliases.insert(local, canonical);
         }
-        if let Some(canonical) = self.map.get(callee) {
-            return Cow::Borrowed(canonical.as_str());
+        // Plain `import "fmt"` -- the local name is the canonical.
+        _ => {
+            aliases.insert(canonical.clone(), canonical);
         }
-        Cow::Borrowed(callee)
-    }
-
-    #[cfg(test)]
-    pub fn get(&self, local: &str) -> Option<&str> {
-        self.map.get(local).map(String::as_str)
     }
 }
 
@@ -857,7 +827,7 @@ fn is_sanitizer_call(
     call_node: Node<'_>,
     source: &str,
     spec: &TaintSpec,
-    aliases: Option<&GoImportAliases>,
+    aliases: Option<&AliasTable>,
 ) -> bool {
     if call_node.kind() != "call_expression" {
         return false;
@@ -884,7 +854,7 @@ fn match_source(
     node: Node<'_>,
     source: &str,
     spec: &TaintSpec,
-    aliases: Option<&GoImportAliases>,
+    aliases: Option<&AliasTable>,
 ) -> Option<String> {
     for matcher in &spec.sources {
         match matcher {
@@ -1104,7 +1074,7 @@ mod tests {
 
     fn run_with(source: &str, spec: &TaintSpec) -> Vec<TaintFinding> {
         let tree = parse_file(source, Language::Go).expect("parse");
-        let aliases = GoImportAliases::from_tree(source, &tree);
+        let aliases = go_aliases_from_tree(source, &tree);
         analyze_tree(tree.root_node(), source, spec, Some(&aliases))
     }
 
@@ -1463,7 +1433,7 @@ import (
 )
 "#;
         let tree = parse_file(src, Language::Go).expect("parse");
-        let a = GoImportAliases::from_tree(src, &tree);
+        let a = go_aliases_from_tree(src, &tree);
         assert_eq!(a.get("f"), Some("fmt"));
         assert_eq!(a.get("http"), Some("http"));
         assert_eq!(a.get("alias"), Some("deep"));

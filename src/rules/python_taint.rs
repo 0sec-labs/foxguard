@@ -30,7 +30,7 @@
 //! built-in rule as the first consumer; future rules (including
 //! Semgrep-compatible `mode: taint` YAML) will plug into the same API.
 
-use crate::rules::python_aliases::ImportAliases;
+use crate::rules::common::AliasTable;
 use std::collections::HashMap;
 use tree_sitter::Node;
 
@@ -145,7 +145,7 @@ pub type ReturnSummary = HashMap<String, Option<String>>;
 struct AnalysisContext<'a> {
     source: &'a str,
     spec: &'a TaintSpec,
-    aliases: Option<&'a ImportAliases>,
+    aliases: Option<&'a AliasTable>,
     summaries: &'a ReturnSummary,
 }
 
@@ -176,7 +176,7 @@ pub fn analyze_tree(
     root: Node<'_>,
     source: &str,
     spec: &TaintSpec,
-    aliases: Option<&ImportAliases>,
+    aliases: Option<&AliasTable>,
 ) -> Vec<TaintFinding> {
     // Pass 1: build return summaries using an empty summary map so that
     // calls to local helpers inside helper bodies fall through to the
@@ -717,7 +717,7 @@ fn is_sanitizer_call(
     call_node: Node<'_>,
     source: &str,
     spec: &TaintSpec,
-    aliases: Option<&ImportAliases>,
+    aliases: Option<&AliasTable>,
 ) -> bool {
     if call_node.kind() != "call" {
         return false;
@@ -744,7 +744,7 @@ fn match_source(
     node: Node<'_>,
     source: &str,
     spec: &TaintSpec,
-    aliases: Option<&ImportAliases>,
+    aliases: Option<&AliasTable>,
 ) -> Option<String> {
     for matcher in &spec.sources {
         match matcher {
@@ -1015,6 +1015,7 @@ fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
 mod tests {
     use super::*;
     use crate::engine::parser::parse_file;
+    use crate::rules::python_aliases::from_tree as py_aliases_from_tree;
     use crate::Language;
 
     fn spec_pickle_from_request() -> TaintSpec {
@@ -1060,7 +1061,7 @@ mod tests {
 
     fn run(source: &str) -> Vec<TaintFinding> {
         let tree = parse_file(source, Language::Python).expect("parse");
-        let aliases = ImportAliases::from_tree(source, &tree);
+        let aliases = py_aliases_from_tree(source, &tree);
         analyze_tree(
             tree.root_node(),
             source,
@@ -1233,7 +1234,7 @@ def handler():
 
     fn run_with(source: &str, spec: &TaintSpec) -> Vec<TaintFinding> {
         let tree = parse_file(source, Language::Python).expect("parse");
-        let aliases = ImportAliases::from_tree(source, &tree);
+        let aliases = py_aliases_from_tree(source, &tree);
         analyze_tree(tree.root_node(), source, spec, Some(&aliases))
     }
 

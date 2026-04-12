@@ -24,6 +24,7 @@
 //!
 //! Everything specific to a library is expressed declaratively via `TaintSpec`.
 
+use super::common::AliasTable;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use tree_sitter::{Node, Tree};
@@ -119,7 +120,7 @@ pub type ReturnSummary = HashMap<String, Option<String>>;
 struct AnalysisContext<'a> {
     source: &'a str,
     spec: &'a TaintSpec,
-    aliases: Option<&'a JsImportAliases>,
+    aliases: Option<&'a AliasTable>,
     summaries: &'a ReturnSummary,
 }
 
@@ -135,7 +136,7 @@ pub fn analyze_tree(
     root: Node<'_>,
     source: &str,
     spec: &TaintSpec,
-    aliases: Option<&JsImportAliases>,
+    aliases: Option<&AliasTable>,
 ) -> Vec<TaintFinding> {
     let empty_summary = ReturnSummary::new();
     let mut summaries = ReturnSummary::new();
@@ -292,157 +293,98 @@ fn walk_body_for_summary(
 
 /// Per-file JavaScript/TypeScript import alias table.
 ///
+/// Build a JavaScript/TypeScript import alias table from a parsed tree.
+///
 /// Maps a local identifier (as it appears in the source) to its canonical
 /// dotted path. Handles the common forms:
 ///
-/// - `import { loads } from "pickle"`      → `loads` → `pickle.loads`
-/// - `import { loads as d } from "pickle"` → `d`     → `pickle.loads`
-/// - `import foo from "bar"`               → `foo`   → `bar` (default)
-/// - `import * as ns from "mod"`           → `ns`    → `mod`
-/// - `const pk = require("pickle")`        → `pk`    → `pickle`
-/// - `const { loads } = require("pickle")` → `loads` → `pickle.loads`
-/// - `const { loads: l2 } = require("pickle")` → `l2` → `pickle.loads`
+/// - `import { loads } from "pickle"`      -> `loads` -> `pickle.loads`
+/// - `import { loads as d } from "pickle"` -> `d`     -> `pickle.loads`
+/// - `import foo from "bar"`               -> `foo`   -> `bar` (default)
+/// - `import * as ns from "mod"`           -> `ns`    -> `mod`
+/// - `const pk = require("pickle")`        -> `pk`    -> `pickle`
+/// - `const { loads } = require("pickle")` -> `loads` -> `pickle.loads`
+/// - `const { loads: l2 } = require("pickle")` -> `l2` -> `pickle.loads`
 ///
 /// File-scope only; function-local rebindings are not tracked. Dynamic
 /// forms (`import("mod")`) are out of scope.
-#[derive(Debug, Default, Clone)]
-pub struct JsImportAliases {
-    map: HashMap<String, String>,
+pub fn js_aliases_from_tree(source: &str, tree: &Tree) -> AliasTable {
+    let mut aliases = AliasTable::new();
+    js_walk_for_imports(&mut aliases, tree.root_node(), source);
+    aliases
 }
 
-impl JsImportAliases {
-    pub fn from_tree(source: &str, tree: &Tree) -> Self {
-        let mut aliases = Self::default();
-        aliases.walk_for_imports(tree.root_node(), source);
-        aliases
-    }
-
-    fn walk_for_imports(&mut self, node: Node<'_>, source: &str) {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            match child.kind() {
-                "import_statement" => self.collect_import(child, source),
-                "lexical_declaration" | "variable_declaration" => {
-                    self.collect_require_decl(child, source);
-                }
-                // Recurse into top-level blocks/conditionals but stop at
-                // function bodies — alias resolution there is out of scope.
-                "program" | "statement_block" | "if_statement" | "try_statement"
-                | "labeled_statement" | "export_statement" => {
-                    self.walk_for_imports(child, source);
-                }
-                _ => {}
+fn js_walk_for_imports(aliases: &mut AliasTable, node: Node<'_>, source: &str) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "import_statement" => js_collect_import(aliases, child, source),
+            "lexical_declaration" | "variable_declaration" => {
+                js_collect_require_decl(aliases, child, source);
             }
+            // Recurse into top-level blocks/conditionals but stop at
+            // function bodies — alias resolution there is out of scope.
+            "program" | "statement_block" | "if_statement" | "try_statement"
+            | "labeled_statement" | "export_statement" => {
+                js_walk_for_imports(aliases, child, source);
+            }
+            _ => {}
         }
     }
+}
 
-    fn collect_import(&mut self, node: Node<'_>, source: &str) {
-        // import_statement has a `source` field holding a `string` with an
-        // inner `string_fragment` that carries the module specifier.
-        let Some(src_node) = node.child_by_field_name("source") else {
-            return;
-        };
-        let module = string_literal_text(src_node, source);
-        if module.is_empty() {
-            return;
-        }
-
-        // The import clause is the unnamed child between `import` and `from`.
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() != "import_clause" {
-                continue;
-            }
-            let mut inner = child.walk();
-            for spec in child.children(&mut inner) {
-                match spec.kind() {
-                    // `import foo from "bar"` — default import.
-                    "identifier" => {
-                        let local = node_text(spec, source).to_string();
-                        self.map.insert(local, module.clone());
-                    }
-                    // `import * as ns from "mod"` — namespace import.
-                    "namespace_import" => {
-                        let mut ns_cursor = spec.walk();
-                        for c in spec.children(&mut ns_cursor) {
-                            if c.kind() == "identifier" {
-                                let local = node_text(c, source).to_string();
-                                self.map.insert(local, module.clone());
-                            }
-                        }
-                    }
-                    // `import { a, b as c } from "mod"` — named imports.
-                    "named_imports" => {
-                        let mut n_cursor = spec.walk();
-                        for isp in spec.children(&mut n_cursor) {
-                            if isp.kind() != "import_specifier" {
-                                continue;
-                            }
-                            let name = isp
-                                .child_by_field_name("name")
-                                .map(|n| node_text(n, source).to_string());
-                            let alias = isp
-                                .child_by_field_name("alias")
-                                .map(|n| node_text(n, source).to_string());
-                            if let Some(real) = name {
-                                let canonical = format!("{}.{}", module, real);
-                                let local = alias.unwrap_or(real);
-                                self.map.insert(local, canonical);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+fn js_collect_import(aliases: &mut AliasTable, node: Node<'_>, source: &str) {
+    // import_statement has a `source` field holding a `string` with an
+    // inner `string_fragment` that carries the module specifier.
+    let Some(src_node) = node.child_by_field_name("source") else {
+        return;
+    };
+    let module = string_literal_text(src_node, source);
+    if module.is_empty() {
+        return;
     }
 
-    fn collect_require_decl(&mut self, node: Node<'_>, source: &str) {
-        // Walk each variable_declarator under the decl.
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() != "variable_declarator" {
-                continue;
-            }
-            let Some(value) = child.child_by_field_name("value") else {
-                continue;
-            };
-            // Match `require("mod")` on the RHS.
-            let Some(module) = require_call_module(value, source) else {
-                continue;
-            };
-            let Some(name_node) = child.child_by_field_name("name") else {
-                continue;
-            };
-            match name_node.kind() {
+    // The import clause is the unnamed child between `import` and `from`.
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "import_clause" {
+            continue;
+        }
+        let mut inner = child.walk();
+        for spec in child.children(&mut inner) {
+            match spec.kind() {
+                // `import foo from "bar"` — default import.
                 "identifier" => {
-                    // `const pk = require("pickle")` → pk → pickle
-                    let local = node_text(name_node, source).to_string();
-                    self.map.insert(local, module);
+                    let local = node_text(spec, source).to_string();
+                    aliases.insert(local, module.clone());
                 }
-                "object_pattern" => {
-                    // `const { loads, dumps: d } = require("pickle")`
-                    let mut p_cursor = name_node.walk();
-                    for p in name_node.children(&mut p_cursor) {
-                        match p.kind() {
-                            "shorthand_property_identifier_pattern" => {
-                                let local = node_text(p, source).to_string();
-                                let canonical = format!("{}.{}", module, local);
-                                self.map.insert(local, canonical);
-                            }
-                            "pair_pattern" => {
-                                let key = p
-                                    .child_by_field_name("key")
-                                    .map(|n| node_text(n, source).to_string());
-                                let value = p
-                                    .child_by_field_name("value")
-                                    .map(|n| node_text(n, source).to_string());
-                                if let (Some(key), Some(value)) = (key, value) {
-                                    let canonical = format!("{}.{}", module, key);
-                                    self.map.insert(value, canonical);
-                                }
-                            }
-                            _ => {}
+                // `import * as ns from "mod"` — namespace import.
+                "namespace_import" => {
+                    let mut ns_cursor = spec.walk();
+                    for c in spec.children(&mut ns_cursor) {
+                        if c.kind() == "identifier" {
+                            let local = node_text(c, source).to_string();
+                            aliases.insert(local, module.clone());
+                        }
+                    }
+                }
+                // `import { a, b as c } from "mod"` — named imports.
+                "named_imports" => {
+                    let mut n_cursor = spec.walk();
+                    for isp in spec.children(&mut n_cursor) {
+                        if isp.kind() != "import_specifier" {
+                            continue;
+                        }
+                        let name = isp
+                            .child_by_field_name("name")
+                            .map(|n| node_text(n, source).to_string());
+                        let alias = isp
+                            .child_by_field_name("alias")
+                            .map(|n| node_text(n, source).to_string());
+                        if let Some(real) = name {
+                            let canonical = format!("{}.{}", module, real);
+                            let local = alias.unwrap_or(real);
+                            aliases.insert(local, canonical);
                         }
                     }
                 }
@@ -450,28 +392,59 @@ impl JsImportAliases {
             }
         }
     }
+}
 
-    /// Resolve a call-site callee text back to its canonical dotted path.
-    /// `p.loads` → `pickle.loads` when `p` is aliased to `pickle`.
-    pub fn resolve<'a>(&'a self, callee: &'a str) -> Cow<'a, str> {
-        if let Some((head, tail)) = callee.split_once('.') {
-            if let Some(canonical_root) = self.map.get(head) {
-                if canonical_root == head {
-                    return Cow::Borrowed(callee);
-                }
-                return Cow::Owned(format!("{}.{}", canonical_root, tail));
+fn js_collect_require_decl(aliases: &mut AliasTable, node: Node<'_>, source: &str) {
+    // Walk each variable_declarator under the decl.
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "variable_declarator" {
+            continue;
+        }
+        let Some(value) = child.child_by_field_name("value") else {
+            continue;
+        };
+        // Match `require("mod")` on the RHS.
+        let Some(module) = require_call_module(value, source) else {
+            continue;
+        };
+        let Some(name_node) = child.child_by_field_name("name") else {
+            continue;
+        };
+        match name_node.kind() {
+            "identifier" => {
+                // `const pk = require("pickle")` -> pk -> pickle
+                let local = node_text(name_node, source).to_string();
+                aliases.insert(local, module);
             }
-            return Cow::Borrowed(callee);
+            "object_pattern" => {
+                // `const { loads, dumps: d } = require("pickle")`
+                let mut p_cursor = name_node.walk();
+                for p in name_node.children(&mut p_cursor) {
+                    match p.kind() {
+                        "shorthand_property_identifier_pattern" => {
+                            let local = node_text(p, source).to_string();
+                            let canonical = format!("{}.{}", module, local);
+                            aliases.insert(local, canonical);
+                        }
+                        "pair_pattern" => {
+                            let key = p
+                                .child_by_field_name("key")
+                                .map(|n| node_text(n, source).to_string());
+                            let value = p
+                                .child_by_field_name("value")
+                                .map(|n| node_text(n, source).to_string());
+                            if let (Some(key), Some(value)) = (key, value) {
+                                let canonical = format!("{}.{}", module, key);
+                                aliases.insert(value, canonical);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
         }
-        if let Some(canonical) = self.map.get(callee) {
-            return Cow::Borrowed(canonical.as_str());
-        }
-        Cow::Borrowed(callee)
-    }
-
-    #[cfg(test)]
-    pub fn get(&self, local: &str) -> Option<&str> {
-        self.map.get(local).map(String::as_str)
     }
 }
 
@@ -981,7 +954,7 @@ fn is_sanitizer_call(
     call_node: Node<'_>,
     source: &str,
     spec: &TaintSpec,
-    aliases: Option<&JsImportAliases>,
+    aliases: Option<&AliasTable>,
 ) -> bool {
     if call_node.kind() != "call_expression" {
         return false;
@@ -1008,7 +981,7 @@ fn match_source(
     node: Node<'_>,
     source: &str,
     spec: &TaintSpec,
-    aliases: Option<&JsImportAliases>,
+    aliases: Option<&AliasTable>,
 ) -> Option<String> {
     for matcher in &spec.sources {
         match matcher {
@@ -1294,7 +1267,7 @@ mod tests {
 
     fn run(source: &str) -> Vec<TaintFinding> {
         let tree = parse_file(source, Language::JavaScript).expect("parse");
-        let aliases = JsImportAliases::from_tree(source, &tree);
+        let aliases = js_aliases_from_tree(source, &tree);
         analyze_tree(
             tree.root_node(),
             source,
@@ -1451,7 +1424,7 @@ function handler(req) {
             sanitizers: vec![],
         };
         let tree = parse_file(src, Language::JavaScript).expect("parse");
-        let aliases = JsImportAliases::from_tree(src, &tree);
+        let aliases = js_aliases_from_tree(src, &tree);
         let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
         assert_eq!(findings.len(), 1);
     }
@@ -1473,7 +1446,7 @@ function handler(req) {
             sanitizers: vec![],
         };
         let tree = parse_file(src, Language::JavaScript).expect("parse");
-        let aliases = JsImportAliases::from_tree(src, &tree);
+        let aliases = js_aliases_from_tree(src, &tree);
         let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
         assert_eq!(findings.len(), 1);
     }
@@ -1482,7 +1455,7 @@ function handler(req) {
     fn require_default_binding_resolves() {
         let src = r#"const pk = require("pickle");"#;
         let tree = parse_file(src, Language::JavaScript).expect("parse");
-        let a = JsImportAliases::from_tree(src, &tree);
+        let a = js_aliases_from_tree(src, &tree);
         assert_eq!(a.get("pk"), Some("pickle"));
         assert_eq!(a.resolve("pk.loads"), "pickle.loads");
     }
@@ -1491,7 +1464,7 @@ function handler(req) {
     fn named_import_with_alias_resolves() {
         let src = r#"import { loads as l2 } from "pickle";"#;
         let tree = parse_file(src, Language::JavaScript).expect("parse");
-        let a = JsImportAliases::from_tree(src, &tree);
+        let a = js_aliases_from_tree(src, &tree);
         assert_eq!(a.get("l2"), Some("pickle.loads"));
     }
 
@@ -1672,7 +1645,7 @@ function handler(req) {
 }
 "#;
         let tree = parse_file(src, Language::JavaScript).expect("parse");
-        let aliases = JsImportAliases::from_tree(src, &tree);
+        let aliases = js_aliases_from_tree(src, &tree);
         assert_eq!(
             analyze_tree(tree.root_node(), src, &spec, Some(&aliases)).len(),
             0

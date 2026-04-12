@@ -1,6 +1,6 @@
-use crate::rules::go_taint::GoImportAliases;
-use crate::rules::javascript_taint::JsImportAliases;
-use crate::rules::python_aliases::ImportAliases;
+use crate::rules::go_taint::go_aliases_from_tree;
+use crate::rules::javascript_taint::js_aliases_from_tree;
+use crate::rules::python_aliases::from_tree as py_aliases_from_tree;
 use crate::rules::{FileContext, RuleRegistry};
 use crate::{Finding, Language};
 use ignore::WalkBuilder;
@@ -312,17 +312,17 @@ fn scan_files(
         // rules can resolve aliased callees (`import pickle as p; p.loads(x)`)
         // back to their canonical dotted paths before sink matching.
         let python_aliases = if matches!(language, Language::Python) {
-            Some(ImportAliases::from_tree(&source, &tree))
+            Some(py_aliases_from_tree(&source, &tree))
         } else {
             None
         };
         let javascript_aliases = if matches!(language, Language::JavaScript) {
-            Some(JsImportAliases::from_tree(&source, &tree))
+            Some(js_aliases_from_tree(&source, &tree))
         } else {
             None
         };
         let go_aliases = if matches!(language, Language::Go) {
-            Some(GoImportAliases::from_tree(&source, &tree))
+            Some(go_aliases_from_tree(&source, &tree))
         } else {
             None
         };
