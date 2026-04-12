@@ -1,6 +1,7 @@
 pub mod baseline;
 pub mod cli;
 pub mod config;
+pub mod diff;
 pub mod engine;
 pub mod git;
 pub mod report;

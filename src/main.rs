@@ -1,6 +1,8 @@
 use clap::Parser;
 use foxguard::baseline::{load_baseline, suppress_with_baseline, write_baseline};
-use foxguard::cli::{BaselineArgs, Cli, Command, InitArgs, OutputFormat, ScanArgs, SecretsArgs};
+use foxguard::cli::{
+    BaselineArgs, Cli, Command, DiffArgs, InitArgs, OutputFormat, ScanArgs, SecretsArgs,
+};
 use foxguard::config::{apply_scan_defaults, apply_secrets_defaults, load_for_scan};
 use foxguard::engine::{scan_directory, scan_paths_with_root, ScanResult};
 use foxguard::git::changed_files;
@@ -23,6 +25,7 @@ fn main() {
         Some(Command::Init(args)) => run_init(&args),
         Some(Command::Baseline(args)) => run_baseline(&args),
         Some(Command::Secrets(args)) => run_secrets(&args),
+        Some(Command::Diff(args)) => run_diff_cmd(&args),
         None => run_scan(&cli.scan),
     };
 
@@ -287,6 +290,84 @@ fn run_secrets(args: &SecretsArgs) -> i32 {
     }
 
     if !findings.is_empty() {
+        return 1;
+    }
+
+    0
+}
+
+fn run_diff_cmd(args: &DiffArgs) -> i32 {
+    let scan_path = Path::new(&args.path);
+    if !scan_path.exists() {
+        eprintln!("Error: path '{}' does not exist", args.path);
+        return 2;
+    }
+
+    let mut registry = if args.no_builtins {
+        RuleRegistry::empty()
+    } else {
+        RuleRegistry::new()
+    };
+
+    if let Some(ref rules_path) = args.rules {
+        let path = Path::new(rules_path);
+        if !path.exists() {
+            eprintln!("Error: rules path '{}' does not exist", rules_path);
+            return 2;
+        }
+        let semgrep_rules = load_semgrep_rules(path);
+        let count = semgrep_rules.len();
+        for rule in semgrep_rules {
+            registry.register(rule);
+        }
+        if count > 0 {
+            eprintln!("Loaded {} Semgrep rule(s) from {}", count, rules_path);
+        }
+    }
+
+    let (scan_result, mut diff_result) =
+        match foxguard::diff::run_diff(&args.path, &args.target, &registry, args.max_file_size) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                return 2;
+            }
+        };
+
+    // Filter by severity if specified
+    if let Some(ref min_severity) = args.severity {
+        let min = min_severity.to_severity();
+        diff_result.new_findings.retain(|f| f.severity >= min);
+    }
+
+    let new_count = diff_result.new_findings.len();
+    let total = diff_result.total_current;
+    let existing = diff_result.existing_count;
+
+    match args.format {
+        OutputFormat::Terminal => {
+            use colored::Colorize;
+            eprintln!(
+                "\n  {} {} {} {} new issue{} ({} total, {} existing)\n",
+                "foxguard diff".truecolor(245, 158, 11).bold(),
+                "vs".dimmed(),
+                args.target.bold(),
+                "\u{00b7}".dimmed(),
+                if new_count == 1 { "" } else { "s" },
+                total,
+                existing,
+            );
+            foxguard::report::terminal::print_findings(
+                &diff_result.new_findings,
+                scan_result.files_scanned,
+                scan_result.duration,
+            );
+        }
+        OutputFormat::Json => foxguard::report::json::print_json(&diff_result.new_findings),
+        OutputFormat::Sarif => foxguard::report::sarif::print_sarif(&diff_result.new_findings),
+    }
+
+    if new_count > 0 {
         return 1;
     }
 

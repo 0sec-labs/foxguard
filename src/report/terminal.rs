@@ -134,10 +134,7 @@ fn print_finding(f: &Finding, explain: bool) {
         .unwrap_or_default();
 
     // Line 1: badge + description (the main thing you read)
-    println!(
-        "    {accent} {badge} {}",
-        f.description,
-    );
+    println!("    {accent} {badge} {}", f.description,);
 
     // Line 2: rule ID + CWE + location (secondary info, dimmed)
     println!(
@@ -189,23 +186,50 @@ fn print_finding(f: &Finding, explain: bool) {
 }
 
 fn print_summary(findings: &[Finding], files_scanned: usize, duration: std::time::Duration) {
-    let critical = findings.iter().filter(|f| f.severity == Severity::Critical).count();
-    let high = findings.iter().filter(|f| f.severity == Severity::High).count();
-    let medium = findings.iter().filter(|f| f.severity == Severity::Medium).count();
-    let low = findings.iter().filter(|f| f.severity == Severity::Low).count();
+    let critical = findings
+        .iter()
+        .filter(|f| f.severity == Severity::Critical)
+        .count();
+    let high = findings
+        .iter()
+        .filter(|f| f.severity == Severity::High)
+        .count();
+    let medium = findings
+        .iter()
+        .filter(|f| f.severity == Severity::Medium)
+        .count();
+    let low = findings
+        .iter()
+        .filter(|f| f.severity == Severity::Low)
+        .count();
 
     let mut badges = Vec::new();
     if critical > 0 {
-        badges.push(format!("{}", format!(" {critical} critical ").on_truecolor(130, 50, 180).white().bold()));
+        badges.push(format!(
+            "{}",
+            format!(" {critical} critical ")
+                .on_truecolor(130, 50, 180)
+                .white()
+                .bold()
+        ));
     }
     if high > 0 {
-        badges.push(format!("{}", format!(" {high} high ").on_red().white().bold()));
+        badges.push(format!(
+            "{}",
+            format!(" {high} high ").on_red().white().bold()
+        ));
     }
     if medium > 0 {
-        badges.push(format!("{}", format!(" {medium} medium ").on_yellow().black().bold()));
+        badges.push(format!(
+            "{}",
+            format!(" {medium} medium ").on_yellow().black().bold()
+        ));
     }
     if low > 0 {
-        badges.push(format!("{}", format!(" {low} low ").on_blue().white().bold()));
+        badges.push(format!(
+            "{}",
+            format!(" {low} low ").on_blue().white().bold()
+        ));
     }
 
     let total = findings.len();

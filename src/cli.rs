@@ -153,6 +153,37 @@ pub struct SecretsArgs {
     pub max_file_size: u64,
 }
 
+#[derive(Args, Debug, Clone)]
+pub struct DiffArgs {
+    /// Target branch to compare against (e.g., "main", "origin/main")
+    #[arg()]
+    pub target: String,
+
+    /// Path to scan
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: OutputFormat,
+
+    /// Minimum severity to report
+    #[arg(short, long, value_enum)]
+    pub severity: Option<SeverityFilter>,
+
+    /// Path to Semgrep YAML rule file or directory
+    #[arg(short, long)]
+    pub rules: Option<String>,
+
+    /// Disable built-in rules and run only external rules loaded via --rules
+    #[arg(long, default_value_t = false)]
+    pub no_builtins: bool,
+
+    /// Maximum file size in bytes to scan (default: 1 MB)
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_file_size: u64,
+}
+
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
     /// Install a pre-commit hook for local foxguard runs
@@ -161,6 +192,8 @@ pub enum Command {
     Baseline(BaselineArgs),
     /// Scan repositories and changed files for common secrets
     Secrets(SecretsArgs),
+    /// Show only new findings compared to a target branch
+    Diff(DiffArgs),
 }
 
 #[derive(Parser, Debug)]
