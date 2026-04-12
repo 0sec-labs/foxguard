@@ -1289,7 +1289,17 @@ pub fn go_taint_sources() -> Vec<NodeMatcher> {
             canonical: "c.Params".into(),
             description: "fiber Ctx.Params".into(),
         },
+        NodeMatcher::Call {
+            canonical: "c.Body".into(),
+            description: "fiber Ctx.Body".into(),
+        },
         // (c.Query / c.FormValue are shared with Gin above.)
+        // ─── Chi (github.com/go-chi/chi) ────────────────────────────
+        NodeMatcher::Call {
+            canonical: "chi.URLParam".into(),
+            description: "chi.URLParam".into(),
+        },
+        // (r.URL.Query().Get is already covered by net/http sources.)
         // ─── Generic ────────────────────────────────────────────────
         NodeMatcher::Call {
             canonical: "os.Getenv".into(),
@@ -1759,5 +1769,62 @@ func handler(c *gin.Context) {
         let f = run(src);
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].sink_description, "exec.Command");
+    }
+
+    #[test]
+    fn fiber_ctx_body_to_exec() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(c *fiber.Ctx) error {
+    data := c.Body()
+    exec.Command(string(data))
+    return nil
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("fiber"));
+    }
+
+    #[test]
+    fn fiber_ctx_params_to_exec() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(c *fiber.Ctx) error {
+    id := c.Params("id")
+    exec.Command(id)
+    return nil
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("fiber"));
+    }
+
+    #[test]
+    fn chi_url_param_to_exec() {
+        let src = r#"
+package main
+
+import (
+    "net/http"
+    "os/exec"
+    "github.com/go-chi/chi/v5"
+)
+
+func handler(w http.ResponseWriter, r *http.Request) {
+    slug := chi.URLParam(r, "slug")
+    exec.Command(slug)
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("chi"));
     }
 }
