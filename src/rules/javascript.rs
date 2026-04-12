@@ -2480,6 +2480,81 @@ impl Rule for TaintLdapInjection {
     }
 }
 
+// ─── Rule: taint-log-injection ────────────────────────────────────────────
+
+pub struct TaintLogInjection;
+
+impl TaintLogInjection {
+    pub(crate) fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::MethodName {
+                    method: "log".into(),
+                    description: "console.log".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "warn".into(),
+                    description: "console.warn".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "error".into(),
+                    description: "console.error".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "info".into(),
+                    description: "console.info / logger.info".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintLogInjection {
+    fn id(&self) -> &str {
+        "js/taint-log-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Medium
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-117")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches a logging sink — possible log injection"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = JsTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Sanitize user input before logging — strip newlines and control characters",
+            ),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can forge log entries",
+                src, sink
+            )
+        })
+    }
+}
+
 /// Returns the taint rule ID and spec pairs for all JavaScript taint rules.
 /// Used by the scanner's pass 1 to extract cross-file summaries: each
 /// rule's sinks are tested against function bodies with synthetic
@@ -2494,5 +2569,6 @@ pub fn js_taint_rule_specs() -> Vec<(&'static str, JsTaintSpec)> {
         ("js/taint-ssti", TaintSsti::spec()),
         ("js/taint-xpath-injection", TaintXpathInjection::spec()),
         ("js/taint-ldap-injection", TaintLdapInjection::spec()),
+        ("js/taint-log-injection", TaintLogInjection::spec()),
     ]
 }

@@ -1054,6 +1054,71 @@ impl Rule for TaintSsrf {
     }
 }
 
+// ─── Rule: taint-log-injection ────────────────────────────────────────────
+
+pub struct TaintLogInjection;
+
+impl TaintLogInjection {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                go_call_sink("log.Printf"),
+                go_call_sink("log.Println"),
+                go_call_sink("log.Print"),
+                go_call_sink("log.Fatalf"),
+                go_call_sink("fmt.Printf"),
+                go_call_sink("fmt.Println"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintLogInjection {
+    fn id(&self) -> &str {
+        "go/taint-log-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Medium
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-117")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches a logging sink — possible log injection"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = GoTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Sanitize user input before logging — strip newlines and control characters",
+            ),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can forge log entries",
+                src, sink
+            )
+        })
+    }
+}
+
 /// All Go taint rule IDs paired with their specs.
 ///
 /// Used by the scanner's pass 1 to extract cross-file summaries: each
@@ -1067,5 +1132,6 @@ pub fn go_taint_rule_specs() -> Vec<(&'static str, GoTaintSpec)> {
         ("go/taint-xpath-injection", TaintXpathInjection::spec()),
         ("go/taint-ldap-injection", TaintLdapInjection::spec()),
         ("go/taint-ssrf", TaintSsrf::spec()),
+        ("go/taint-log-injection", TaintLogInjection::spec()),
     ]
 }

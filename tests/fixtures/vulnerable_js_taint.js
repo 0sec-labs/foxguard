@@ -64,3 +64,9 @@ function interproceduralArrow() {
 function methodCallOnTaintedRoot(req) {
     document.getElementById("x").innerHTML = req.body.toString();
 }
+
+// ─── js/taint-log-injection ──────────────────────────────────────────
+function logInjection(req) {
+    const userInput = req.body.username;
+    console.log(userInput);
+}

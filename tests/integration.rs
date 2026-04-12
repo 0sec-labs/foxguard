@@ -343,6 +343,7 @@ fn test_vulnerable_py_taint_catches_every_flow() {
         ("py/taint-ssti", 1usize),
         ("py/taint-xpath-injection", 1),
         ("py/taint-ldap-injection", 1),
+        ("py/taint-log-injection", 1),
     ] {
         assert_eq!(
             counts.get(taint_rule).copied(),
@@ -382,6 +383,7 @@ fn test_safe_py_taint_has_no_taint_findings() {
         "py/taint-ssti",
         "py/taint-xpath-injection",
         "py/taint-ldap-injection",
+        "py/taint-log-injection",
     ] {
         let n = findings
             .iter()
@@ -2444,6 +2446,7 @@ fn test_vulnerable_go_taint_catches_every_flow() {
         ("go/taint-ssti", 1usize),
         ("go/taint-xpath-injection", 1),
         ("go/taint-ldap-injection", 1),
+        ("go/taint-log-injection", 1),
     ] {
         assert_eq!(
             counts.get(taint_rule).copied(),
@@ -2477,6 +2480,7 @@ fn test_safe_go_taint_has_no_taint_findings() {
         "go/taint-ssti",
         "go/taint-xpath-injection",
         "go/taint-ldap-injection",
+        "go/taint-log-injection",
     ] {
         let n = findings
             .iter()

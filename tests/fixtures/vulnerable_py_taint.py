@@ -219,3 +219,11 @@ def ldap_injection_from_request():
 def command_injection_from_environ_get():
     cmd = os.environ.get("USER_CMD")
     os.system(cmd)
+
+
+# ═══ py/taint-log-injection ══════════════════════════════════════════
+import logging  # noqa: E402
+
+def log_injection_from_request():
+    user_input = request.args["username"]
+    logging.info(user_input)

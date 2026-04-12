@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"os/exec"
 )
@@ -109,4 +110,12 @@ func httpFormValueToNewRequest(w http.ResponseWriter, r *http.Request) {
 func envToHttpPostForm() {
 	url := os.Getenv("WEBHOOK_URL")
 	http.PostForm(url, nil)
+}
+
+// ─── go/taint-log-injection ──────────────────────────────────────────────
+
+// 15. gin Context.Query → log.Printf
+func ginQueryToLogPrintf(c *gin.Context) {
+	name := c.Query("name")
+	log.Printf("user: %s", name)
 }

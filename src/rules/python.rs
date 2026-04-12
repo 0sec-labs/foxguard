@@ -2430,6 +2430,92 @@ impl Rule for TaintLdapInjection {
     }
 }
 
+// ─── Rule: taint-log-injection ────────────────────────────────────────────
+
+pub struct TaintLogInjection;
+
+impl TaintLogInjection {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("logging.info"),
+                call_sink("logging.warning"),
+                call_sink("logging.error"),
+                call_sink("logging.debug"),
+                call_sink("logging.critical"),
+                call_sink("logging.log"),
+                call_sink("print"),
+                NodeMatcher::MethodName {
+                    method: "info".into(),
+                    description: "logger.info".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "warning".into(),
+                    description: "logger.warning".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "error".into(),
+                    description: "logger.error".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "debug".into(),
+                    description: "logger.debug".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "critical".into(),
+                    description: "logger.critical".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintLogInjection {
+    fn id(&self) -> &str {
+        "py/taint-log-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Medium
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-117")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches a logging sink — possible log injection"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Sanitize user input before logging — strip newlines and control characters",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can forge log entries",
+                src, sink
+            )
+        })
+    }
+}
+
 // ─── Cross-file summary extraction ──────────────────────────────────────
 
 /// Returns all Python taint rule specs paired with their rule IDs.
@@ -2458,5 +2544,6 @@ pub fn python_taint_rule_specs() -> Vec<(&'static str, TaintSpec)> {
         ("py/taint-ssti", TaintSsti::spec()),
         ("py/taint-xpath-injection", TaintXpathInjection::spec()),
         ("py/taint-ldap-injection", TaintLdapInjection::spec()),
+        ("py/taint-log-injection", TaintLogInjection::spec()),
     ]
 }
