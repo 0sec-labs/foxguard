@@ -156,6 +156,8 @@ impl RuleRegistry {
         registry.register(Box::new(python::WtfCsrfCheckDefaultDisabled));
         registry.register(Box::new(python::DjangoAllowedHostsWildcard));
         registry.register(Box::new(python::SecureSslRedirectDisabled));
+        registry.register(Box::new(python::JwtNoVerify));
+        registry.register(Box::new(python::JwtHardcodedSecret));
         registry.register(Box::new(python::TaintPickleDeserialization));
         registry.register(Box::new(python::TaintEvalFromRequest));
         registry.register(Box::new(python::TaintCommandInjectionFromRequest));
@@ -176,6 +178,8 @@ impl RuleRegistry {
         registry.register(Box::new(go::InsecureTlsSkipVerify));
         registry.register(Box::new(go::GinNoTrustedProxies));
         registry.register(Box::new(go::NetHttpNoTimeout));
+        registry.register(Box::new(go::JwtNoVerify));
+        registry.register(Box::new(go::JwtHardcodedSecret));
         registry.register(Box::new(go::TaintCommandInjection));
         registry.register(Box::new(go::TaintSqlInjection));
         registry.register(Box::new(go::TaintSsrf));

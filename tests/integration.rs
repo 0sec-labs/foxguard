@@ -167,10 +167,11 @@ fn test_vulnerable_py_finds_all_rules() {
     // #29/#30): `dangerous()` now additionally fires py/taint-eval on
     // `eval(input("Enter code: "))` alongside the conservative
     // py/no-eval finding.
+    // Count grew to 33 after adding JWT rules (issue #98).
     assert_eq!(
         findings.len(),
-        31,
-        "vulnerable.py should have 31 findings, got {}",
+        33,
+        "vulnerable.py should have 33 findings, got {}",
         findings.len()
     );
 
@@ -206,6 +207,8 @@ fn test_vulnerable_py_finds_all_rules() {
         "py/wtf-csrf-check-default-disabled",
         "py/django-allowed-hosts-wildcard",
         "py/secure-ssl-redirect-disabled",
+        "py/jwt-no-verify",
+        "py/jwt-hardcoded-secret",
     ];
 
     for rule in &expected_rules {
@@ -861,8 +864,8 @@ fn test_vulnerable_go_finds_all_rules() {
 
     assert_eq!(
         findings.len(),
-        10,
-        "vulnerable.go should have 10 findings, got {}",
+        12,
+        "vulnerable.go should have 12 findings, got {}",
         findings.len()
     );
 
@@ -879,6 +882,8 @@ fn test_vulnerable_go_finds_all_rules() {
         "go/no-ssrf",
         "go/insecure-tls-skip-verify",
         "go/net-http-no-timeout",
+        "go/jwt-no-verify",
+        "go/jwt-hardcoded-secret",
     ];
 
     for rule in &expected_rules {

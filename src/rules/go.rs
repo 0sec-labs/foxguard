@@ -570,6 +570,217 @@ impl Rule for InsecureTlsSkipVerify {
     }
 }
 
+// ─── Rule 9: jwt-no-verify ─────────────────────────────────────────────────
+
+pub struct JwtNoVerify;
+
+impl Rule for JwtNoVerify {
+    fn id(&self) -> &str {
+        "go/jwt-no-verify"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-347")
+    }
+    fn description(&self) -> &str {
+        "JWT parsed without proper signature verification"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+
+            // Pattern 1: jwt.Parse(token, nil) — nil key function
+            if func_text == "jwt.Parse"
+                || func_text == "jwt.ParseWithClaims"
+                || func_text == "jwt.ParseUnverified"
+            {
+                // ParseUnverified is always a finding
+                if func_text == "jwt.ParseUnverified" {
+                    let mut finding = make_finding(
+                        self.id(),
+                        self.severity(),
+                        self.cwe(),
+                        "jwt.ParseUnverified skips signature verification — tokens can be forged",
+                        node,
+                        src,
+                    );
+                    finding.fix_suggestion =
+                        Some("Always provide a valid key function to jwt.Parse()".to_string());
+                    findings.push(finding);
+                    return;
+                }
+
+                let Some(args) = node.child_by_field_name("arguments") else {
+                    return;
+                };
+
+                // Check if the key function argument is nil
+                let key_func_idx = if func_text == "jwt.ParseWithClaims" {
+                    2
+                } else {
+                    1
+                };
+                if let Some(key_arg) = args.named_child(key_func_idx) {
+                    let key_text = &src[key_arg.byte_range()];
+                    if key_text == "nil" {
+                        let mut finding = make_finding(
+                            self.id(),
+                            self.severity(),
+                            self.cwe(),
+                            "JWT key function is nil — signature will not be verified",
+                            node,
+                            src,
+                        );
+                        finding.fix_suggestion =
+                            Some("Always provide a valid key function to jwt.Parse()".to_string());
+                        findings.push(finding);
+                        return;
+                    }
+
+                    // Check if the key function returns nil
+                    let key_func_text = &src[key_arg.byte_range()];
+                    if key_func_text.contains("return nil") {
+                        let mut finding = make_finding(
+                            self.id(),
+                            self.severity(),
+                            self.cwe(),
+                            "JWT key function returns nil — signature will not be verified",
+                            node,
+                            src,
+                        );
+                        finding.fix_suggestion =
+                            Some("Always provide a valid key function to jwt.Parse()".to_string());
+                        findings.push(finding);
+                    }
+                }
+            }
+        });
+
+        findings
+    }
+}
+
+// ─── Rule 10: jwt-hardcoded-secret ─────────────────────────────────────────
+
+pub struct JwtHardcodedSecret;
+
+impl Rule for JwtHardcodedSecret {
+    fn id(&self) -> &str {
+        "go/jwt-hardcoded-secret"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-798")
+    }
+    fn description(&self) -> &str {
+        "JWT signing or verification with a hardcoded secret"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+
+            // jwt.Parse or jwt.ParseWithClaims with an inline key function
+            // containing []byte("secret")
+            if func_text != "jwt.Parse"
+                && func_text != "jwt.ParseWithClaims"
+                && func_text != "token.SignedString"
+            {
+                return;
+            }
+
+            let Some(args) = node.child_by_field_name("arguments") else {
+                return;
+            };
+
+            if func_text == "token.SignedString" {
+                // token.SignedString([]byte("secret"))
+                if let Some(first_arg) = args.named_child(0) {
+                    let arg_text = &src[first_arg.byte_range()];
+                    if is_go_hardcoded_byte_slice(arg_text) {
+                        let mut finding = make_finding(
+                            self.id(),
+                            self.severity(),
+                            self.cwe(),
+                            "JWT signing secret is hardcoded — load keys from environment or a secrets manager",
+                            node,
+                            src,
+                        );
+                        finding.fix_suggestion =
+                            Some("Load JWT secrets from environment variables".to_string());
+                        findings.push(finding);
+                    }
+                }
+                return;
+            }
+
+            // jwt.Parse / jwt.ParseWithClaims — check the key function body
+            let key_func_idx = if func_text == "jwt.ParseWithClaims" {
+                2
+            } else {
+                1
+            };
+            if let Some(key_arg) = args.named_child(key_func_idx) {
+                let key_func_text = &src[key_arg.byte_range()];
+                if key_func_text.contains("[]byte(\"") || key_func_text.contains("[]byte(`") {
+                    // Extract the string content to check length
+                    let re = Regex::new(r#"\[\]byte\(["` ]([^"` ]{4,})["` ]\)"#).unwrap();
+                    if re.is_match(key_func_text) {
+                        let mut finding = make_finding(
+                            self.id(),
+                            self.severity(),
+                            self.cwe(),
+                            "JWT secret is hardcoded in key function — load keys from environment or a secrets manager",
+                            node,
+                            src,
+                        );
+                        finding.fix_suggestion =
+                            Some("Load JWT secrets from environment variables".to_string());
+                        findings.push(finding);
+                    }
+                }
+            }
+        });
+
+        findings
+    }
+}
+
+/// Check if a Go expression is a hardcoded byte slice like `[]byte("secret")`.
+fn is_go_hardcoded_byte_slice(text: &str) -> bool {
+    let re = Regex::new(r#"^\[\]byte\(["` ]([^"` ]{4,})["` ]\)$"#).unwrap();
+    re.is_match(text.trim())
+}
+
 // ─── Taint rules ───────────────────────────────────────────────────────────
 //
 // These rules consume the intraprocedural taint engine in

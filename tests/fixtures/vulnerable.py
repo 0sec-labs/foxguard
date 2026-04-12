@@ -4,6 +4,7 @@ import hashlib
 import pickle
 import requests
 import yaml
+import jwt
 from flask import Flask, redirect, request
 from django.views.decorators.csrf import csrf_exempt
 
@@ -103,3 +104,11 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 # py/flask-debug-mode
 app.run(debug=True)
+
+# py/jwt-no-verify
+def decode_jwt_insecure(token):
+    return jwt.decode(token, options={"verify_signature": False})
+
+# py/jwt-hardcoded-secret
+def sign_jwt_hardcoded(payload):
+    return jwt.encode(payload, "super-secret-key-1234", algorithms=["HS256"])

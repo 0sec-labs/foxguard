@@ -1761,6 +1761,195 @@ impl Rule for SecureSslRedirectDisabled {
     }
 }
 
+// ─── Rule 26: jwt-no-verify ────────────────────────────────────────────────
+
+pub struct JwtNoVerify;
+
+impl Rule for JwtNoVerify {
+    fn id(&self) -> &str {
+        "py/jwt-no-verify"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-347")
+    }
+    fn description(&self) -> &str {
+        "JWT decoded without signature verification"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+            let resolved = resolve_callee(func_text, ctx);
+            if resolved.as_ref() != "jwt.decode" && resolved.as_ref() != "PyJWT.decode" {
+                return;
+            }
+
+            let Some(args) = node.child_by_field_name("arguments") else {
+                return;
+            };
+            let args_text = &src[args.byte_range()];
+
+            // Pattern 1: options={"verify_signature": False} or
+            //            options={"verify_signature":False}
+            let disables_verify = args_text.contains("\"verify_signature\": False")
+                || args_text.contains("\"verify_signature\":False")
+                || args_text.contains("'verify_signature': False")
+                || args_text.contains("'verify_signature':False")
+                || args_text.contains("\"verify_exp\": False")
+                || args_text.contains("\"verify_exp\":False")
+                || args_text.contains("'verify_exp': False")
+                || args_text.contains("'verify_exp':False");
+
+            // Pattern 2: algorithms=["none"] or algorithms=['none']
+            let uses_none = args_text.contains("algorithms=[\"none\"]")
+                || args_text.contains("algorithms=['none']")
+                || args_text.contains("algorithms=[\"None\"]")
+                || args_text.contains("algorithms=['None']");
+
+            if disables_verify || uses_none {
+                let mut finding = make_finding(
+                    self.id(),
+                    self.severity(),
+                    self.cwe(),
+                    "JWT signature verification is disabled — tokens can be forged",
+                    node,
+                    src,
+                );
+                finding.fix_suggestion = Some(
+                    "Always verify JWT signatures: jwt.decode(token, key, algorithms=['HS256'])"
+                        .to_string(),
+                );
+                findings.push(finding);
+            }
+        });
+
+        findings
+    }
+}
+
+// ─── Rule 27: jwt-hardcoded-secret ─────────────────────────────────────────
+
+pub struct JwtHardcodedSecret;
+
+impl Rule for JwtHardcodedSecret {
+    fn id(&self) -> &str {
+        "py/jwt-hardcoded-secret"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-798")
+    }
+    fn description(&self) -> &str {
+        "JWT signing or verification with a hardcoded secret"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+            let resolved = resolve_callee(func_text, ctx);
+            if resolved.as_ref() != "jwt.encode"
+                && resolved.as_ref() != "jwt.decode"
+                && resolved.as_ref() != "PyJWT.encode"
+                && resolved.as_ref() != "PyJWT.decode"
+            {
+                return;
+            }
+
+            let Some(args) = node.child_by_field_name("arguments") else {
+                return;
+            };
+
+            // The second positional argument is the secret/key
+            let Some(secret_arg) = args.named_child(1) else {
+                return;
+            };
+
+            // Skip keyword arguments — only check positional string literals
+            if secret_arg.kind() == "keyword_argument" {
+                return;
+            }
+
+            if secret_arg.kind() != "string" && secret_arg.kind() != "concatenated_string" {
+                return;
+            }
+
+            let secret = &src[secret_arg.byte_range()];
+            // Strip quotes to get the inner value
+            let inner = secret
+                .trim_matches(|c| c == '"' || c == '\'')
+                .trim_start_matches("f\"")
+                .trim_start_matches("f'")
+                .trim_start_matches("b\"")
+                .trim_start_matches("b'");
+            if inner.len() < 4 {
+                return;
+            }
+
+            let mut finding = make_finding(
+                self.id(),
+                self.severity(),
+                self.cwe(),
+                "JWT secret is hardcoded — load signing keys from environment or a secrets manager",
+                node,
+                src,
+            );
+            finding.fix_suggestion = Some(
+                "Load JWT secrets from environment variables, not hardcoded strings".to_string(),
+            );
+            findings.push(finding);
+        });
+
+        findings
+    }
+}
+
 // ─── Rule: taint-pickle-deserialization ────────────────────────────────────
 //
 // Proof-of-concept rule exercising the new per-function taint engine.

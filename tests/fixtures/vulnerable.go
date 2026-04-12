@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func vulnerable() {
@@ -40,10 +42,20 @@ func vulnerable() {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 
+	// 10. go/jwt-no-verify (Critical) — nil key function
+	token1, _ := jwt.Parse(userInput, nil)
+
+	// 11. go/jwt-hardcoded-secret (High) — hardcoded key in key function
+	token2, _ := jwt.Parse(userInput, func(token *jwt.Token) (interface{}, error) {
+		return []byte("my-secret-key-1234"), nil
+	})
+
 	_ = query1
 	_ = query2
 	_ = apiKey
 	_ = transport
+	_ = token1
+	_ = token2
 }
 
 func getUserInput() string {

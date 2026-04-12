@@ -62,6 +62,8 @@ const pyRules: Rule[] = [
   { id: 'py/django-secret-key-hardcoded', cwe: 'CWE-798', desc: 'Django SECRET_KEY hardcoded in source code', severity: 'high' },
   { id: 'py/flask-debug-mode', cwe: 'CWE-489', desc: 'Flask app.run(debug=True) exposes debugger and reloader in production', severity: 'high' },
   { id: 'py/flask-secret-key-hardcoded', cwe: 'CWE-798', desc: 'Flask SECRET_KEY hardcoded in source code', severity: 'high' },
+  { id: 'py/jwt-hardcoded-secret', cwe: 'CWE-798', desc: 'JWT signing or verification with a hardcoded secret', severity: 'high' },
+  { id: 'py/jwt-no-verify', cwe: 'CWE-347', desc: 'JWT decoded without signature verification', severity: 'critical' },
   { id: 'py/no-command-injection', cwe: 'CWE-78', desc: 'Potential command injection via os.system/subprocess with user input', severity: 'critical' },
   { id: 'py/no-cors-star', cwe: 'CWE-942', desc: 'CORS misconfiguration allowing all origins', severity: 'medium' },
   { id: 'py/no-debug-true', cwe: 'CWE-489', desc: 'DEBUG = True left enabled — disable in production', severity: 'medium' },
@@ -95,6 +97,8 @@ const pyRules: Rule[] = [
 const goRules: Rule[] = [
   { id: 'go/gin-no-trusted-proxies', cwe: 'CWE-346', desc: 'Gin engine created without SetTrustedProxies configuration', severity: 'medium' },
   { id: 'go/insecure-tls-skip-verify', cwe: 'CWE-295', desc: 'TLS certificate verification disabled with InsecureSkipVerify', severity: 'high' },
+  { id: 'go/jwt-hardcoded-secret', cwe: 'CWE-798', desc: 'JWT signing or verification with a hardcoded secret', severity: 'high' },
+  { id: 'go/jwt-no-verify', cwe: 'CWE-347', desc: 'JWT parsed without proper signature verification', severity: 'critical' },
   { id: 'go/net-http-no-timeout', cwe: 'CWE-400', desc: 'http.ListenAndServe without timeout configuration enables slowloris attacks', severity: 'medium' },
   { id: 'go/no-command-injection', cwe: 'CWE-78', desc: 'Potential command injection via exec.Command with dynamic input', severity: 'critical' },
   { id: 'go/no-hardcoded-secret', cwe: 'CWE-798', desc: 'Hardcoded secret or credential detected', severity: 'high' },
