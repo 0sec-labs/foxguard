@@ -1,6 +1,27 @@
 use crate::Finding;
 use serde_json::json;
 
+/// Encode a file path as a URI suitable for SARIF `artifactLocation.uri`.
+/// Normalizes backslashes to forward slashes and percent-encodes characters
+/// that are not valid in URI path segments.
+fn path_to_uri(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let encoded = normalized
+        .split('/')
+        .map(|segment| {
+            segment
+                .replace('%', "%25")
+                .replace(' ', "%20")
+                .replace('#', "%23")
+                .replace('?', "%3F")
+                .replace('[', "%5B")
+                .replace(']', "%5D")
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    format!("file://{encoded}")
+}
+
 pub fn print_sarif(findings: &[Finding]) {
     let results: Vec<_> = findings
         .iter()
@@ -23,7 +44,7 @@ pub fn print_sarif(findings: &[Finding]) {
                 "locations": [{
                     "physicalLocation": {
                         "artifactLocation": {
-                            "uri": f.file
+                            "uri": path_to_uri(&f.file)
                         },
                         "region": {
                             "startLine": f.line,

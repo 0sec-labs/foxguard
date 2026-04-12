@@ -67,6 +67,7 @@ pub fn scan_directory(root: &str, registry: &RuleRegistry, max_file_size: u64) -
         }
     } else {
         WalkBuilder::new(root)
+            .follow_links(false) // never follow symlinks
             .hidden(true) // skip hidden files
             .git_ignore(true) // respect .gitignore
             .build()
@@ -370,6 +371,9 @@ fn scan_files(
         python_files
             .par_iter()
             .filter_map(|(path, _)| {
+                if std::fs::metadata(path).ok()?.len() > max_file_size {
+                    return None;
+                }
                 let source = std::fs::read_to_string(path).ok()?;
                 if is_minified(&source) {
                     return None;
@@ -401,6 +405,9 @@ fn scan_files(
         let js_summaries: CrossFileSummaryMap = js_files
             .par_iter()
             .filter_map(|(path, _)| {
+                if std::fs::metadata(path).ok()?.len() > max_file_size {
+                    return None;
+                }
                 let source = std::fs::read_to_string(path).ok()?;
                 if is_minified(&source) {
                     return None;
@@ -430,6 +437,9 @@ fn scan_files(
         let go_summaries: CrossFileSummaryMap = go_files
             .par_iter()
             .filter_map(|(path, _)| {
+                if std::fs::metadata(path).ok()?.len() > max_file_size {
+                    return None;
+                }
                 let source = std::fs::read_to_string(path).ok()?;
                 if is_minified(&source) {
                     return None;
