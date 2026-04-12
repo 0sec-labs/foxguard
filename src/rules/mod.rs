@@ -267,6 +267,9 @@ impl RuleRegistry {
         registry.register(Box::new(kotlin::NoXxe));
         registry.register(Box::new(kotlin::NoCorsStar));
         registry.register(Box::new(kotlin::NoEval));
+        registry.register(Box::new(kotlin::TaintSqlInjection));
+        registry.register(Box::new(kotlin::TaintCommandInjection));
+        registry.register(Box::new(kotlin::TaintSsrf));
 
         // Register Rust rules
         registry.register(Box::new(rust_lang::UnsafeBlock));

@@ -211,6 +211,9 @@ const kotlinRules: Rule[] = [
   { id: 'kt/no-unsafe-deserialization', cwe: 'CWE-502', desc: 'Unsafe deserialization can lead to remote code execution', severity: 'critical' },
   { id: 'kt/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic algorithm', severity: 'medium' },
   { id: 'kt/no-xxe', cwe: 'CWE-611', desc: 'XML parser created without disabling external entities (XXE)', severity: 'high' },
+  { id: 'kt/taint-command-injection', cwe: 'CWE-78', desc: 'Untrusted input from Ktor/Spring handler reaches command execution sink', severity: 'critical' },
+  { id: 'kt/taint-sql-injection', cwe: 'CWE-89', desc: 'Untrusted input from Ktor/Spring handler reaches SQL query sink', severity: 'critical' },
+  { id: 'kt/taint-ssrf', cwe: 'CWE-918', desc: 'Untrusted input from Ktor/Spring handler reaches HTTP/URL sink', severity: 'high' },
 ];
 
 export const ruleGroups: RuleGroup[] = [
