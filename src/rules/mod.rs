@@ -156,6 +156,9 @@ impl RuleRegistry {
         registry.register(Box::new(go::TaintCommandInjection));
         registry.register(Box::new(go::TaintSqlInjection));
         registry.register(Box::new(go::TaintSsrf));
+        registry.register(Box::new(go::TaintSsti));
+        registry.register(Box::new(go::TaintXpathInjection));
+        registry.register(Box::new(go::TaintLdapInjection));
 
         // Register Java rules
         registry.register(Box::new(java::NoSqlInjection));

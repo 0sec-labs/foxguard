@@ -783,6 +783,196 @@ impl Rule for TaintSqlInjection {
     }
 }
 
+// ─── Rule: taint-ssti ─────────────────────────────────────────────────────
+
+pub struct TaintSsti;
+
+impl TaintSsti {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                GoNodeMatcher::MethodName {
+                    method: "Parse".into(),
+                    description: "template.Parse".into(),
+                },
+                go_call_sink("template.Must"),
+                go_call_sink("template.New"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintSsti {
+    fn id(&self) -> &str {
+        "go/taint-ssti"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-1336")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches template parsing sink (potential SSTI)"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = GoTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some("Use pre-defined template files with template.ParseFiles() instead of parsing user-controlled template strings"),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject server-side templates",
+                src, sink
+            )
+        })
+    }
+}
+
+// ─── Rule: taint-xpath-injection ──────────────────────────────────────────
+
+pub struct TaintXpathInjection;
+
+impl TaintXpathInjection {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                go_call_sink("xmlpath.Compile"),
+                go_call_sink("xpath.Compile"),
+                go_call_sink("xmlquery.QueryAll"),
+                go_call_sink("xmlquery.Query"),
+                go_call_sink("htmlquery.QueryAll"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintXpathInjection {
+    fn id(&self) -> &str {
+        "go/taint-xpath-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-643")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches XPath query sink (potential XPath injection)"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = GoTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Validate and sanitize user input before building XPath expressions",
+            ),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject XPath queries",
+                src, sink
+            )
+        })
+    }
+}
+
+// ─── Rule: taint-ldap-injection ───────────────────────────────────────────
+
+pub struct TaintLdapInjection;
+
+impl TaintLdapInjection {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                go_call_sink("ldap.NewSearchRequest"),
+                go_call_sink("ldap.SearchRequest"),
+                GoNodeMatcher::MethodName {
+                    method: "Search".into(),
+                    description: "ldap.Conn.Search".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintLdapInjection {
+    fn id(&self) -> &str {
+        "go/taint-ldap-injection"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-90")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches LDAP search sink (potential LDAP injection)"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = GoTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some("Use ldap.EscapeFilter() to sanitize user input before building LDAP filter strings"),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject LDAP queries",
+                src, sink
+            )
+        })
+    }
+}
+
 // ─── Rule: taint-ssrf ──────────────────────────────────────────────────────
 
 pub struct TaintSsrf;

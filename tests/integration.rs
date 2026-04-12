@@ -2391,7 +2391,8 @@ fn test_vulnerable_go_taint_catches_every_flow() {
         }
     }
 
-    // Five command-injection handlers, three SQL, three SSRF.
+    // Five command-injection handlers, three SQL, three SSRF,
+    // one SSTI, one XPath, one LDAP.
     for (taint_rule, conservative_rule, expected) in [
         (
             "go/taint-command-injection",
@@ -2417,6 +2418,22 @@ fn test_vulnerable_go_taint_catches_every_flow() {
             counts
         );
     }
+
+    // New taint rules without conservative counterparts.
+    for (taint_rule, expected) in [
+        ("go/taint-ssti", 1usize),
+        ("go/taint-xpath-injection", 1),
+        ("go/taint-ldap-injection", 1),
+    ] {
+        assert_eq!(
+            counts.get(taint_rule).copied(),
+            Some(expected),
+            "{} should fire exactly {} time(s) on vulnerable_go_taint.go. counts={:?}",
+            taint_rule,
+            expected,
+            counts
+        );
+    }
 }
 
 /// Negative counterpart for the Go taint engine. Every handler in
@@ -2437,6 +2454,9 @@ fn test_safe_go_taint_has_no_taint_findings() {
         "go/taint-command-injection",
         "go/taint-sql-injection",
         "go/taint-ssrf",
+        "go/taint-ssti",
+        "go/taint-xpath-injection",
+        "go/taint-ldap-injection",
     ] {
         let n = findings
             .iter()

@@ -7,6 +7,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"html/template"
 	"net/http"
 	"os/exec"
 )
@@ -63,6 +64,31 @@ func httpQueryToTxExec(w http.ResponseWriter, r *http.Request, tx *sql.Tx) {
 func ginPostFormToQueryRow(c *gin.Context, db *sql.DB) {
 	email := c.PostForm("email")
 	db.QueryRow("SELECT id FROM users WHERE email = " + email)
+}
+
+// ─── go/taint-ssti ────────────────────────────────────────────────────────
+
+// 12. gin Context.Query → template.Parse
+func ginQueryToTemplateParse(c *gin.Context) {
+	tmplStr := c.Query("template")
+	t := template.New("page")
+	t.Parse(tmplStr)
+}
+
+// ─── go/taint-xpath-injection ─────────────────────────────────────────────
+
+// 13. net/http r.FormValue → xmlpath.Compile
+func httpFormValueToXpathCompile(w http.ResponseWriter, r *http.Request) {
+	expr := r.FormValue("xpath")
+	xmlpath.Compile(expr)
+}
+
+// ─── go/taint-ldap-injection ──────────────────────────────────────────────
+
+// 14. gin Context.Query → ldap.NewSearchRequest
+func ginQueryToLdapSearch(c *gin.Context) {
+	filter := c.Query("filter")
+	ldap.NewSearchRequest("dc=example,dc=com", 2, 0, 0, 0, false, filter, nil, nil)
 }
 
 // ─── go/taint-ssrf ────────────────────────────────────────────────────────
