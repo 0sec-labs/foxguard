@@ -2578,7 +2578,9 @@ function handler(req, res) {
             !findings.is_empty(),
             "expected LDAP injection finding for .search()"
         );
-        assert!(findings[0].sink_description.contains("LDAP .search()"));
+        assert!(findings[0]
+            .sink_description
+            .contains("LDAP client.search()"));
     }
 
     #[test]
@@ -2593,6 +2595,44 @@ function handler(req, res) {
         let aliases = js_aliases_from_tree(src, &tree);
         let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
         assert!(findings.is_empty(), "static LDAP filter should not fire");
+    }
+
+    // Issue #133: String.prototype.search() must not trigger LDAP rule.
+    #[test]
+    fn ldap_no_finding_for_string_search() {
+        let spec = super::super::javascript::TaintLdapInjection::spec();
+        let src = r#"
+function handler(req, res) {
+    const pattern = req.body.pattern;
+    "hello world".search(pattern);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(
+            findings.is_empty(),
+            "String.prototype.search() should not fire LDAP rule"
+        );
+    }
+
+    // Issue #133: Function.prototype.bind() must not trigger LDAP rule.
+    #[test]
+    fn ldap_no_finding_for_function_bind() {
+        let spec = super::super::javascript::TaintLdapInjection::spec();
+        let src = r#"
+function handler(req, res) {
+    const ctx = req.body.context;
+    handler.bind(ctx);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(
+            findings.is_empty(),
+            "Function.prototype.bind() should not fire LDAP rule"
+        );
     }
 
     #[test]

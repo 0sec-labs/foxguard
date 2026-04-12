@@ -2504,13 +2504,29 @@ impl TaintLdapInjection {
         JsTaintSpec {
             sources: javascript_taint_sources(),
             sinks: vec![
-                JsNodeMatcher::MethodName {
-                    method: "search".into(),
-                    description: "LDAP .search() call".into(),
+                JsNodeMatcher::Call {
+                    canonical: "client.search".into(),
+                    description: "LDAP client.search() call".into(),
                 },
-                JsNodeMatcher::MethodName {
-                    method: "bind".into(),
-                    description: "LDAP .bind() call".into(),
+                JsNodeMatcher::Call {
+                    canonical: "ldap.search".into(),
+                    description: "LDAP ldap.search() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "conn.search".into(),
+                    description: "LDAP conn.search() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "client.bind".into(),
+                    description: "LDAP client.bind() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "ldap.bind".into(),
+                    description: "LDAP ldap.bind() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "conn.bind".into(),
+                    description: "LDAP conn.bind() call".into(),
                 },
             ],
             sanitizers: vec![],

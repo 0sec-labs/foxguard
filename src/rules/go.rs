@@ -1141,10 +1141,9 @@ impl TaintLdapInjection {
             sinks: vec![
                 go_call_sink("ldap.NewSearchRequest"),
                 go_call_sink("ldap.SearchRequest"),
-                GoNodeMatcher::MethodName {
-                    method: "Search".into(),
-                    description: "ldap.Conn.Search".into(),
-                },
+                go_call_sink("conn.Search"),
+                go_call_sink("client.Search"),
+                go_call_sink("l.Search"),
             ],
             sanitizers: vec![],
         }

@@ -46,3 +46,23 @@ function interproceduralCleanHelper() {
 function literalMethodCall() {
     document.getElementById("x").innerHTML = "literal".toUpperCase();
 }
+
+// ─── Negative cases for LDAP false positives (issue #133) ───────────
+// String.prototype.search() must NOT fire js/taint-ldap-injection.
+function stringSearch(req) {
+    const pattern = req.body.pattern;
+    "hello world".search(pattern);
+}
+
+// Function.prototype.bind() must NOT fire js/taint-ldap-injection.
+function functionBind(req) {
+    const ctx = req.body.context;
+    handler.bind(ctx);
+}
+
+// ─── Negative case for NoSQL false positives (issue #136) ───────────
+// Array.prototype.find() must NOT fire js/taint-nosql-injection.
+function arrayFind(req) {
+    const tainted = req.body.value;
+    [1, 2, 3].find(x => x === tainted);
+}

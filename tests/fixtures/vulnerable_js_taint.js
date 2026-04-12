@@ -89,3 +89,9 @@ function nosqlInjection(req) {
     const filter = req.body.filter;
     db.collection("users").find(filter);
 }
+
+// ─── js/taint-ldap-injection ───────────────────────────────────────
+function ldapSearchInjection(req) {
+    const filter = req.body.filter;
+    client.search(filter);
+}

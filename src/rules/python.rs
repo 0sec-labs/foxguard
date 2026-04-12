@@ -2523,18 +2523,12 @@ impl TaintLdapInjection {
                 call_sink("ldap.search_st"),
                 call_sink("ldap.search_ext_s"),
                 call_sink("ldap3.Connection.search"),
-                NodeMatcher::MethodName {
-                    method: "search_s".into(),
-                    description: "ldap.search_s".into(),
-                },
-                NodeMatcher::MethodName {
-                    method: "search_st".into(),
-                    description: "ldap.search_st".into(),
-                },
-                NodeMatcher::MethodName {
-                    method: "search_ext_s".into(),
-                    description: "ldap.search_ext_s".into(),
-                },
+                call_sink("conn.search_s"),
+                call_sink("conn.search_st"),
+                call_sink("conn.search_ext_s"),
+                call_sink("l.search_s"),
+                call_sink("l.search_st"),
+                call_sink("l.search_ext_s"),
             ],
             sanitizers: vec![
                 call_sink("ldap.filter.escape_filter_chars"),

@@ -659,6 +659,14 @@ fn test_vulnerable_js_taint_catches_every_flow() {
         "js/no-document-write must coexist with the taint rule. counts={:?}",
         counts
     );
+
+    // LDAP injection test added for issue #133.
+    assert_eq!(
+        counts.get("js/taint-ldap-injection").copied(),
+        Some(1),
+        "js/taint-ldap-injection should fire exactly once. counts={:?}",
+        counts
+    );
 }
 
 /// Negative counterpart for the JS/TS taint POC. Every innerHTML/
@@ -676,15 +684,21 @@ fn test_safe_js_taint_has_no_taint_findings() {
     let findings: Vec<serde_json::Value> =
         serde_json::from_slice(&output.stdout).expect("invalid JSON output");
 
-    let n = findings
-        .iter()
-        .filter(|f| f["rule_id"].as_str() == Some("js/taint-xss-innerhtml"))
-        .count();
-    assert_eq!(
-        n, 0,
-        "js/taint-xss-innerhtml should not fire on safe_js_taint.js, got {} findings",
-        n
-    );
+    for taint_rule in [
+        "js/taint-xss-innerhtml",
+        "js/taint-ldap-injection",
+        "js/taint-nosql-injection",
+    ] {
+        let n = findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some(taint_rule))
+            .count();
+        assert_eq!(
+            n, 0,
+            "{} should not fire on safe_js_taint.js, got {} findings",
+            taint_rule, n
+        );
+    }
 }
 
 /// Issue #32 — Next.js App Router taint sources. `request` is the
