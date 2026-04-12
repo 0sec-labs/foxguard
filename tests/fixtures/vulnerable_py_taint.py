@@ -227,3 +227,11 @@ import logging  # noqa: E402
 def log_injection_from_request():
     user_input = request.args["username"]
     logging.info(user_input)
+
+
+# ═══ py/taint-xxe ══════════════════════════════════════════════════════
+from xml.etree import ElementTree  # noqa: E402
+
+def xxe_from_request():
+    xml_data = request.data
+    return ElementTree.fromstring(xml_data)

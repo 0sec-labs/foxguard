@@ -70,3 +70,10 @@ function logInjection(req) {
     const userInput = req.body.username;
     console.log(userInput);
 }
+
+// ─── js/taint-xxe ───────────────────────────────────────────────────
+function xxeInjection(req) {
+    const xmlData = req.body.xml;
+    const parser = new DOMParser();
+    parser.parseFromString(xmlData, "text/xml");
+}
