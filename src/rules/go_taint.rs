@@ -9,8 +9,9 @@
 //!
 //! # Scope (same as Python/JS)
 //!
-//! - **Per function / method.** Each `function_declaration` and
-//!   `method_declaration` body is analyzed independently.
+//! - **Per function / method / closure.** Each `function_declaration`,
+//!   `method_declaration`, and `func_literal` (closure / anonymous
+//!   function) body is analyzed independently.
 //! - **Per file.** No cross-file analysis.
 //! - **Flow-insensitive.** Statements are processed in source order; a
 //!   reassignment with a clean RHS clears the target's taint.
@@ -263,16 +264,24 @@ impl GoImportAliases {
 
 // ─── Internals ────────────────────────────────────────────────────────────
 
-/// Walk `root` and visit every top-level function/method declaration.
-/// Does NOT descend into their bodies, since each function body gets
-/// its own independent analysis.
+/// Walk `root` and visit every function/method declaration **and**
+/// every `func_literal` (closure / anonymous function). Named
+/// declarations and closures both get independent taint analysis.
+/// We recurse into function bodies so that closures nested inside
+/// call arguments (e.g. `r.GET("/path", func(c *gin.Context) { … })`)
+/// are discovered.
 fn collect_function_defs<'tree, F>(node: Node<'tree>, visit: &mut F)
 where
     F: FnMut(Node<'tree>),
 {
-    if matches!(node.kind(), "function_declaration" | "method_declaration") {
+    if matches!(
+        node.kind(),
+        "function_declaration" | "method_declaration" | "func_literal"
+    ) {
         visit(node);
-        return;
+        // Continue recursing: the body may contain nested func_literals
+        // (closures passed as arguments, goroutines, etc.) that also
+        // need independent analysis.
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -353,8 +362,8 @@ fn walk_body_for_summary(
     return_taint: &mut Option<String>,
 ) {
     // Don't descend into nested function literals / closures — their
-    // own returns belong to their own summary (though v1 only
-    // analyzes top-level function / method declarations).
+    // own returns belong to their own summary. Each closure gets its
+    // own independent analysis via `collect_function_defs`.
     if node.kind() == "func_literal" {
         return;
     }
@@ -475,9 +484,9 @@ fn walk_body(
     findings: &mut Vec<TaintFinding>,
     summaries: &ReturnSummary,
 ) {
-    // Nested function literal / closure. Skip — analyze_tree picks up
-    // only top-level `function_declaration` / `method_declaration` in
-    // v1, so closures are intentionally not analyzed.
+    // Nested function literal / closure — skip. Each closure gets its
+    // own independent analysis via `collect_function_defs`, so we must
+    // not walk into its body here (that would mix taint states).
     if node.kind() == "func_literal" {
         return;
     }
@@ -1447,6 +1456,54 @@ func handler(c *gin.Context) {
 "#;
         let findings = run_with(src, &spec);
         assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn closure_gin_handler_fires_taint() {
+        // Closures passed as arguments to Gin router methods must be
+        // analyzed. This is the idiomatic way to write Gin handlers.
+        let src = r#"
+package main
+
+import (
+    "os/exec"
+    "github.com/gin-gonic/gin"
+)
+
+func main() {
+    r := gin.Default()
+    r.GET("/run", func(c *gin.Context) {
+        cmd := c.Query("cmd")
+        exec.Command(cmd).Output()
+    })
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("gin"));
+        assert_eq!(f[0].sink_description, "exec.Command");
+    }
+
+    #[test]
+    fn closure_net_http_handler_fires_taint() {
+        // net/http handler written as a closure.
+        let src = r#"
+package main
+
+import (
+    "net/http"
+    "os/exec"
+)
+
+func main() {
+    http.HandleFunc("/run", func(w http.ResponseWriter, r *http.Request) {
+        cmd := r.FormValue("cmd")
+        exec.Command(cmd)
+    })
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
     }
 
     #[test]

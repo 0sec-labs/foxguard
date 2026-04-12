@@ -280,9 +280,10 @@ We rely on the explicit method-call matchers above instead. The
 - **Interface dispatch**: a call through an interface type
   (`handler.ServeHTTP(w, r)`) is resolved as a method-name lookup
   only. Concrete implementers of the interface are not considered.
-- **Closure bodies**: only top-level `function_declaration` and
-  `method_declaration` are summarized. `func_literal` closures are
-  skipped by the walker.
+- **Closure bodies**: `func_literal` closures (anonymous functions)
+  are now analyzed alongside top-level `function_declaration` and
+  `method_declaration` nodes (issue #55). Each closure gets its own
+  independent taint state seeded from its parameter list.
 - **Cross-package imports**: alias resolution only covers the
   file-local `import` statement; calls to functions in imported
   packages are matched by canonical dotted path, not by tracing into

@@ -6,7 +6,7 @@
 // counts will need to be updated.
 //
 // Hand-counted expected findings under the current engine:
-//   go/taint-command-injection : 1   (in-file runCmd)
+//   go/taint-command-injection : 1   (in-file closure in Register)
 //   go/taint-ssrf              : 1   (in-file proxyFetch)
 
 package gin_service
@@ -18,15 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// In-file flow — should fire today.
-func runCmd(c *gin.Context) {
-	// go/taint-command-injection — source and sink in the same function
-	cmd := c.Query("cmd")
-	_, _ = exec.Command(cmd).Output()
-	c.String(http.StatusOK, "ok")
-}
-
-// In-file SSRF — should fire today.
+// In-file SSRF — should fire today (named function form).
 func proxyFetch(c *gin.Context) {
 	// go/taint-ssrf
 	url := c.Query("url")
@@ -41,15 +33,19 @@ func search(c *gin.Context) {
 	c.JSON(http.StatusOK, rows)
 }
 
-// NEAR-MISS — literal, no source
-func healthz(c *gin.Context) {
-	_, _ = exec.Command("uptime").Output()
-	c.String(http.StatusOK, "ok")
-}
-
 func Register(r *gin.Engine) {
-	r.GET("/run", runCmd)
+	// In-file flow as a closure — should fire today (issue #55).
+	// go/taint-command-injection — source and sink in the same closure
+	r.GET("/run", func(c *gin.Context) {
+		cmd := c.Query("cmd")
+		_, _ = exec.Command(cmd).Output()
+		c.String(http.StatusOK, "ok")
+	})
 	r.GET("/fetch", proxyFetch)
 	r.GET("/search", search)
-	r.GET("/healthz", healthz)
+	// NEAR-MISS — literal, no source
+	r.GET("/healthz", func(c *gin.Context) {
+		_, _ = exec.Command("uptime").Output()
+		c.String(http.StatusOK, "ok")
+	})
 }
