@@ -32,5 +32,9 @@ serde_yaml = "0.9"
 sha2 = "0.10"
 globset = "0.4"
 
+[[bin]]
+name = "foxguard-mcp"
+path = "src/bin/foxguard_mcp.rs"
+
 [dev-dependencies]
 tempfile = "3"
