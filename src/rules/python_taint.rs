@@ -435,6 +435,9 @@ fn walk_body_for_summary(
     if node.kind() == "call" {
         handle_call(node, ctx, state, findings);
     }
+    if node.kind() == "with_statement" {
+        handle_with_statement(node, ctx, state);
+    }
     if node.kind() == "return_statement" && return_taint.is_none() {
         // The return's argument is the first named child, if any.
         let mut cursor = node.walk();
@@ -589,6 +592,12 @@ fn walk_body(
         handle_call(node, ctx, state, findings);
     }
 
+    // `with` statement: `with expr as name: ...`
+    // If the context expression is tainted, the `as` target inherits taint.
+    if node.kind() == "with_statement" {
+        handle_with_statement(node, ctx, state);
+    }
+
     // Tree-sitter's cursor walks in document order, which is exactly the
     // "process statements in source order, unioning taint across branches"
     // semantics the POC wants.
@@ -654,6 +663,76 @@ fn handle_assignment(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut Tain
                 state.clear(target);
             }
         }
+    }
+}
+
+/// Handle `with expr as name: ...` statements. If the context expression
+/// is tainted, the `as` target inherits taint.
+///
+/// Tree-sitter structure (tree-sitter-python):
+/// ```text
+/// with_statement
+///   with_clause
+///     with_item
+///       as_pattern
+///         <value expression>   (first named child)
+///         as_pattern_target
+///           identifier          (the alias)
+/// ```
+fn handle_with_statement(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintState) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "with_clause" {
+            continue;
+        }
+        let mut clause_cursor = child.walk();
+        for item in child.children(&mut clause_cursor) {
+            if item.kind() != "with_item" {
+                continue;
+            }
+            // Inside with_item, look for an as_pattern which wraps the
+            // value expression and the alias target.
+            let mut item_cursor = item.walk();
+            for item_child in item.named_children(&mut item_cursor) {
+                if item_child.kind() == "as_pattern" {
+                    handle_as_pattern(item_child, ctx, state);
+                }
+            }
+        }
+    }
+}
+
+/// Process an `as_pattern` node: the first named child is the value
+/// expression and the `as_pattern_target` child contains the alias
+/// identifier. If the value is tainted, taint the alias.
+fn handle_as_pattern(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintState) {
+    let mut cursor = node.walk();
+    let named: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+    // First named child = value expression, look for as_pattern_target among rest.
+    let value = match named.first() {
+        Some(n) => *n,
+        None => return,
+    };
+    let alias_ident = named.iter().find_map(|n| {
+        if n.kind() == "as_pattern_target" {
+            // The identifier is the first named child of the target.
+            let mut inner = n.walk();
+            let found = n
+                .named_children(&mut inner)
+                .find(|c| c.kind() == "identifier");
+            found
+        } else {
+            None
+        }
+    });
+    let Some(alias_node) = alias_ident else {
+        return;
+    };
+    let alias_name = node_text(alias_node, ctx.source).to_string();
+    if let Some((desc, src_line)) = expression_taint(value, ctx, state) {
+        state.taint(alias_name, desc, src_line);
+    } else {
+        state.clear(&alias_name);
     }
 }
 
@@ -1397,6 +1476,46 @@ pub fn python_taint_sources() -> Vec<NodeMatcher> {
         NodeMatcher::Call {
             canonical: "os.environ.get".into(),
             description: "os.environ.get(...)".into(),
+        },
+        // ─── Tornado ──────────────────────────────────────────────
+        // Tornado request handlers use `self.get_argument()`,
+        // `self.get_body_argument()`, `self.get_query_argument()`
+        // for user input, and `self.request.body` for raw body.
+        NodeMatcher::Call {
+            canonical: "self.get_argument".into(),
+            description: "tornado.self.get_argument()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "self.get_body_argument".into(),
+            description: "tornado.self.get_body_argument()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "self.get_query_argument".into(),
+            description: "tornado.self.get_query_argument()".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "self".into(),
+            field: "body".into(),
+            description: "tornado.self.request.body".into(),
+        },
+        // ─── Bottle ─────────────────────────────────────────────
+        // Bottle uses `request.params`, `request.forms`,
+        // `request.query` for user input. `request.json` is already
+        // covered by the Flask entry above.
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "params".into(),
+            description: "bottle.request.params".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "forms".into(),
+            description: "bottle.request.forms".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "query".into(),
+            description: "bottle.request.query".into(),
         },
         // ─── Handler-parameter sources ────────────────────────────
         // Covers `def view(request): ...` across Flask/Django and
@@ -2349,6 +2468,154 @@ def handler():
 "#;
         let f = run(src);
         assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn with_statement_tainted_context_propagates_to_alias() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    with open(request.data) as f:
+        pickle.loads(f.read())
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].sink_description, "pickle.loads");
+    }
+
+    #[test]
+    fn with_statement_clean_context_does_not_taint_alias() {
+        let src = r#"
+import pickle
+
+def handler():
+    with open("literal.txt") as f:
+        pickle.loads(f.read())
+"#;
+        assert!(run(src).is_empty());
+    }
+
+    /// Helper that uses the full `python_taint_sources()` with pickle sinks.
+    fn run_full_sources(source: &str) -> Vec<TaintFinding> {
+        let spec = TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![NodeMatcher::Call {
+                canonical: "pickle.loads".into(),
+                description: "pickle.loads".into(),
+            }],
+            sanitizers: vec![],
+        };
+        run_with(source, &spec)
+    }
+
+    // ─── Tornado source tests ────────────────────────────────────────
+
+    #[test]
+    fn tornado_get_argument_is_tainted() {
+        let src = r#"
+import pickle
+
+class Handler:
+    def post(self):
+        data = self.get_argument("payload")
+        pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("get_argument"));
+    }
+
+    #[test]
+    fn tornado_get_body_argument_is_tainted() {
+        let src = r#"
+import pickle
+
+class Handler:
+    def post(self):
+        data = self.get_body_argument("payload")
+        pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("get_body_argument"));
+    }
+
+    #[test]
+    fn tornado_get_query_argument_is_tainted() {
+        let src = r#"
+import pickle
+
+class Handler:
+    def get(self):
+        data = self.get_query_argument("q")
+        pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("get_query_argument"));
+    }
+
+    #[test]
+    fn tornado_request_body_is_tainted() {
+        let src = r#"
+import pickle
+
+class Handler:
+    def post(self):
+        data = self.request.body
+        pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    // ─── Bottle source tests ────────────────────────────────────────
+
+    #[test]
+    fn bottle_request_params_is_tainted() {
+        let src = r#"
+import pickle
+from bottle import request
+
+def handler():
+    data = request.params
+    pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("params"));
+    }
+
+    #[test]
+    fn bottle_request_forms_is_tainted() {
+        let src = r#"
+import pickle
+from bottle import request
+
+def handler():
+    data = request.forms
+    pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("forms"));
+    }
+
+    #[test]
+    fn bottle_request_query_is_tainted() {
+        let src = r#"
+import pickle
+from bottle import request
+
+def handler():
+    data = request.query
+    pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("query"));
     }
 
     #[test]
