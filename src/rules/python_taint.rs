@@ -140,6 +140,15 @@ pub struct TaintFinding {
 /// last-write-wins, which is a known v1 limitation.
 pub type ReturnSummary = HashMap<String, Option<String>>;
 
+/// Bundles the read-only context that every internal walker needs,
+/// replacing the repeated `(source, spec, aliases, summaries)` tuple.
+struct AnalysisContext<'a> {
+    source: &'a str,
+    spec: &'a TaintSpec,
+    aliases: Option<&'a ImportAliases>,
+    summaries: &'a ReturnSummary,
+}
+
 /// Run the taint engine over every function definition inside `root` and
 /// return one [`TaintFinding`] per source→sink flow discovered.
 ///
@@ -174,9 +183,14 @@ pub fn analyze_tree(
     // default behavior. This is the one-level interprocedural limit.
     let empty_summary = ReturnSummary::new();
     let mut summaries = ReturnSummary::new();
+    let pass1_ctx = AnalysisContext {
+        source,
+        spec,
+        aliases,
+        summaries: &empty_summary,
+    };
     collect_function_defs(root, &mut |func_node| {
-        let (name, ret_taint) =
-            summarize_function(func_node, source, spec, aliases, &empty_summary);
+        let (name, ret_taint) = summarize_function(func_node, &pass1_ctx);
         if let Some(name) = name {
             // Last-write-wins on name collisions (v1 limitation).
             summaries.insert(name, ret_taint);
@@ -184,9 +198,15 @@ pub fn analyze_tree(
     });
 
     // Pass 2: full analysis with the summary map available.
+    let ctx = AnalysisContext {
+        source,
+        spec,
+        aliases,
+        summaries: &summaries,
+    };
     let mut findings = Vec::new();
     collect_function_defs(root, &mut |func_node| {
-        analyze_function(func_node, source, spec, aliases, &summaries, &mut findings);
+        analyze_function(func_node, &ctx, &mut findings);
     });
     findings
 }
@@ -197,18 +217,15 @@ pub fn analyze_tree(
 /// function bodies, which have their own summary).
 fn summarize_function(
     func_node: Node<'_>,
-    source: &str,
-    spec: &TaintSpec,
-    aliases: Option<&ImportAliases>,
-    summaries: &ReturnSummary,
+    ctx: &AnalysisContext<'_>,
 ) -> (Option<String>, Option<String>) {
     let name = func_node
         .child_by_field_name("name")
-        .map(|n| node_text(n, source).to_string());
+        .map(|n| node_text(n, ctx.source).to_string());
 
     let mut state = TaintState::default();
     if let Some(params) = func_node.child_by_field_name("parameters") {
-        seed_param_sources(params, source, spec, &mut state);
+        seed_param_sources(params, ctx.source, ctx.spec, &mut state);
     }
     let Some(body) = func_node.child_by_field_name("body") else {
         return (name, None);
@@ -218,28 +235,15 @@ fn summarize_function(
     // Reuse the normal walker but throw away sink findings — we only want
     // to update the taint state and inspect return statements.
     let mut scratch: Vec<TaintFinding> = Vec::new();
-    walk_body_for_summary(
-        body,
-        source,
-        spec,
-        aliases,
-        &mut state,
-        &mut scratch,
-        summaries,
-        &mut return_taint,
-    );
+    walk_body_for_summary(body, ctx, &mut state, &mut scratch, &mut return_taint);
     (name, return_taint)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn walk_body_for_summary(
     node: Node<'_>,
-    source: &str,
-    spec: &TaintSpec,
-    aliases: Option<&ImportAliases>,
+    ctx: &AnalysisContext<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
-    summaries: &ReturnSummary,
     return_taint: &mut Option<String>,
 ) {
     // Don't descend into nested function definitions — their own returns
@@ -249,16 +253,16 @@ fn walk_body_for_summary(
     }
 
     if node.kind() == "assignment" {
-        handle_assignment(node, source, spec, aliases, state, summaries);
+        handle_assignment(node, ctx, state);
     }
     if node.kind() == "call" {
-        handle_call(node, source, spec, aliases, state, findings, summaries);
+        handle_call(node, ctx, state, findings);
     }
     if node.kind() == "return_statement" && return_taint.is_none() {
         // The return's argument is the first named child, if any.
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
-            if let Some(desc) = expression_taint(child, source, spec, aliases, state, summaries) {
+            if let Some(desc) = expression_taint(child, ctx, state) {
                 *return_taint = Some(desc);
                 break;
             }
@@ -267,16 +271,7 @@ fn walk_body_for_summary(
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk_body_for_summary(
-            child,
-            source,
-            spec,
-            aliases,
-            state,
-            findings,
-            summaries,
-            return_taint,
-        );
+        walk_body_for_summary(child, ctx, state, findings, return_taint);
     }
 }
 
@@ -318,17 +313,14 @@ impl TaintState {
 
 fn analyze_function(
     func_node: Node<'_>,
-    source: &str,
-    spec: &TaintSpec,
-    aliases: Option<&ImportAliases>,
-    summaries: &ReturnSummary,
+    ctx: &AnalysisContext<'_>,
     findings: &mut Vec<TaintFinding>,
 ) {
     let mut state = TaintState::default();
 
     // Seed the state with any parameters marked as implicit sources.
     if let Some(params) = func_node.child_by_field_name("parameters") {
-        seed_param_sources(params, source, spec, &mut state);
+        seed_param_sources(params, ctx.source, ctx.spec, &mut state);
     }
 
     // Walk the body in source order, updating taint state at assignments
@@ -336,7 +328,7 @@ fn analyze_function(
     let Some(body) = func_node.child_by_field_name("body") else {
         return;
     };
-    walk_body(body, source, spec, aliases, &mut state, findings, summaries);
+    walk_body(body, ctx, &mut state, findings);
 }
 
 fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &mut TaintState) {
@@ -375,12 +367,9 @@ fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &
 
 fn walk_body(
     node: Node<'_>,
-    source: &str,
-    spec: &TaintSpec,
-    aliases: Option<&ImportAliases>,
+    ctx: &AnalysisContext<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
-    summaries: &ReturnSummary,
 ) {
     // Nested function definitions have their own scope. Skip them — they'll
     // be picked up independently by analyze_tree.
@@ -389,11 +378,11 @@ fn walk_body(
     }
 
     if node.kind() == "assignment" {
-        handle_assignment(node, source, spec, aliases, state, summaries);
+        handle_assignment(node, ctx, state);
     }
 
     if node.kind() == "call" {
-        handle_call(node, source, spec, aliases, state, findings, summaries);
+        handle_call(node, ctx, state, findings);
     }
 
     // Tree-sitter's cursor walks in document order, which is exactly the
@@ -401,18 +390,11 @@ fn walk_body(
     // semantics the POC wants.
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk_body(child, source, spec, aliases, state, findings, summaries);
+        walk_body(child, ctx, state, findings);
     }
 }
 
-fn handle_assignment(
-    node: Node<'_>,
-    source: &str,
-    spec: &TaintSpec,
-    aliases: Option<&ImportAliases>,
-    state: &mut TaintState,
-    summaries: &ReturnSummary,
-) {
+fn handle_assignment(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintState) {
     let (Some(left), Some(right)) = (
         node.child_by_field_name("left"),
         node.child_by_field_name("right"),
@@ -422,8 +404,8 @@ fn handle_assignment(
 
     // Simple identifier LHS: the common case.
     if left.kind() == "identifier" {
-        let lhs_name = node_text(left, source).to_string();
-        if let Some(desc) = expression_taint(right, source, spec, aliases, state, summaries) {
+        let lhs_name = node_text(left, ctx.source).to_string();
+        if let Some(desc) = expression_taint(right, ctx, state) {
             state.taint(lhs_name, desc);
         } else {
             // Reassignment with a clean RHS kills any previous taint on LHS.
@@ -440,7 +422,7 @@ fn handle_assignment(
     // fall back to conservative semantics: if the RHS is tainted at all,
     // taint every LHS target (we lack type info to pick the slot).
     if is_destructuring_pattern(left) {
-        let lhs_targets = collect_destructuring_targets(left, source);
+        let lhs_targets = collect_destructuring_targets(left, ctx.source);
         if lhs_targets.is_empty() {
             return;
         }
@@ -448,9 +430,7 @@ fn handle_assignment(
         if let Some(rhs_elems) = tuple_like_elements(right) {
             if rhs_elems.len() == lhs_targets.len() {
                 for (target, rhs) in lhs_targets.iter().zip(rhs_elems.iter()) {
-                    if let Some(desc) =
-                        expression_taint(*rhs, source, spec, aliases, state, summaries)
-                    {
+                    if let Some(desc) = expression_taint(*rhs, ctx, state) {
                         state.taint(target.clone(), desc);
                     } else {
                         state.clear(target);
@@ -461,7 +441,7 @@ fn handle_assignment(
         }
 
         // Arity mismatch or opaque RHS: apply conservative semantics.
-        if let Some(desc) = expression_taint(right, source, spec, aliases, state, summaries) {
+        if let Some(desc) = expression_taint(right, ctx, state) {
             for target in &lhs_targets {
                 state.taint(target.clone(), desc.clone());
             }
@@ -524,18 +504,15 @@ fn tuple_like_elements<'tree>(node: Node<'tree>) -> Option<Vec<Node<'tree>>> {
 
 fn handle_call(
     node: Node<'_>,
-    source: &str,
-    spec: &TaintSpec,
-    aliases: Option<&ImportAliases>,
+    ctx: &AnalysisContext<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
-    summaries: &ReturnSummary,
 ) {
     let Some(func) = node.child_by_field_name("function") else {
         return;
     };
-    let callee_text = node_text(func, source);
-    let resolved = match aliases {
+    let callee_text = node_text(func, ctx.source);
+    let resolved = match ctx.aliases {
         Some(a) => a.resolve(callee_text).into_owned(),
         None => callee_text.to_string(),
     };
@@ -546,7 +523,7 @@ fn handle_call(
     let final_segment = resolved.rsplit('.').next().unwrap_or(resolved.as_str());
 
     // Is this a sink?
-    let sink_desc = spec.sinks.iter().find_map(|m| match m {
+    let sink_desc = ctx.spec.sinks.iter().find_map(|m| match m {
         NodeMatcher::Call {
             canonical,
             description,
@@ -567,7 +544,7 @@ fn handle_call(
     };
     let mut cursor = args.walk();
     for arg in args.named_children(&mut cursor) {
-        if let Some(source_desc) = expression_taint(arg, source, spec, aliases, state, summaries) {
+        if let Some(source_desc) = expression_taint(arg, ctx, state) {
             let start = node.start_position();
             let end = node.end_position();
             findings.push(TaintFinding {
@@ -591,20 +568,17 @@ fn handle_call(
 /// tainted value, otherwise `None`.
 fn expression_taint(
     expr: Node<'_>,
-    source: &str,
-    spec: &TaintSpec,
-    aliases: Option<&ImportAliases>,
+    ctx: &AnalysisContext<'_>,
     state: &TaintState,
-    summaries: &ReturnSummary,
 ) -> Option<String> {
     // Direct source match on this expression.
-    if let Some(desc) = match_source(expr, source, spec, aliases) {
+    if let Some(desc) = match_source(expr, ctx.source, ctx.spec, ctx.aliases) {
         return Some(desc);
     }
 
     // Tainted identifier reference.
     if expr.kind() == "identifier" {
-        let name = node_text(expr, source);
+        let name = node_text(expr, ctx.source);
         if let Some(desc) = state.describe(name) {
             return Some(desc.to_string());
         }
@@ -614,7 +588,7 @@ fn expression_taint(
     if expr.kind() == "attribute" {
         if let Some(object) = expr.child_by_field_name("object") {
             if object.kind() == "identifier" {
-                let name = node_text(object, source);
+                let name = node_text(object, ctx.source);
                 if let Some(desc) = state.describe(name) {
                     return Some(desc.to_string());
                 }
@@ -630,7 +604,7 @@ fn expression_taint(
     // identifier roots via the recursive call.
     if expr.kind() == "subscript" {
         if let Some(value) = expr.child_by_field_name("value") {
-            if let Some(desc) = expression_taint(value, source, spec, aliases, state, summaries) {
+            if let Some(desc) = expression_taint(value, ctx, state) {
                 return Some(desc);
             }
         }
@@ -648,9 +622,7 @@ fn expression_taint(
             if child.kind() == "interpolation" {
                 let mut inner = child.walk();
                 for inner_child in child.named_children(&mut inner) {
-                    if let Some(desc) =
-                        expression_taint(inner_child, source, spec, aliases, state, summaries)
-                    {
+                    if let Some(desc) = expression_taint(inner_child, ctx, state) {
                         return Some(desc);
                     }
                 }
@@ -666,18 +638,14 @@ fn expression_taint(
     // both recursive calls return None.
     if expr.kind() == "binary_operator" {
         if let Some(op) = expr.child_by_field_name("operator") {
-            if node_text(op, source) == "+" {
+            if node_text(op, ctx.source) == "+" {
                 if let Some(left) = expr.child_by_field_name("left") {
-                    if let Some(desc) =
-                        expression_taint(left, source, spec, aliases, state, summaries)
-                    {
+                    if let Some(desc) = expression_taint(left, ctx, state) {
                         return Some(desc);
                     }
                 }
                 if let Some(right) = expr.child_by_field_name("right") {
-                    if let Some(desc) =
-                        expression_taint(right, source, spec, aliases, state, summaries)
-                    {
+                    if let Some(desc) = expression_taint(right, ctx, state) {
                         return Some(desc);
                     }
                 }
@@ -693,13 +661,13 @@ fn expression_taint(
     // clean regardless of whether any argument was tainted. This is the
     // "collapse to clean" semantics documented at the top of the module.
     if expr.kind() == "call" {
-        if is_sanitizer_call(expr, source, spec, aliases) {
+        if is_sanitizer_call(expr, ctx.source, ctx.spec, ctx.aliases) {
             return None;
         }
         if let Some(args) = expr.child_by_field_name("arguments") {
             let mut cursor = args.walk();
             for arg in args.named_children(&mut cursor) {
-                if let Some(desc) = expression_taint(arg, source, spec, aliases, state, summaries) {
+                if let Some(desc) = expression_taint(arg, ctx, state) {
                     return Some(desc);
                 }
             }
@@ -715,9 +683,7 @@ fn expression_taint(
         if let Some(func) = expr.child_by_field_name("function") {
             if func.kind() == "attribute" {
                 if let Some(object) = func.child_by_field_name("object") {
-                    if let Some(desc) =
-                        expression_taint(object, source, spec, aliases, state, summaries)
-                    {
+                    if let Some(desc) = expression_taint(object, ctx, state) {
                         return Some(desc);
                     }
                 }
@@ -733,8 +699,8 @@ fn expression_taint(
         // different semantics and are out of scope for v1.
         if let Some(func) = expr.child_by_field_name("function") {
             if func.kind() == "identifier" {
-                let callee = node_text(func, source);
-                if let Some(Some(desc)) = summaries.get(callee) {
+                let callee = node_text(func, ctx.source);
+                if let Some(Some(desc)) = ctx.summaries.get(callee) {
                     return Some(format!("{desc} (via {callee})"));
                 }
             }

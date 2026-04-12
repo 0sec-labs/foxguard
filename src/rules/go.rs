@@ -589,11 +589,14 @@ fn go_call_sink(canonical: &str) -> GoNodeMatcher {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn map_go_taint_findings(
-    rule_id: &str,
+struct GoTaintRuleMeta<'a> {
+    rule_id: &'a str,
     severity: Severity,
-    cwe: Option<&str>,
+    cwe: Option<&'a str>,
+}
+
+fn map_go_taint_findings(
+    meta: &GoTaintRuleMeta<'_>,
     source: &str,
     tree: &tree_sitter::Tree,
     ctx: &FileContext<'_>,
@@ -612,9 +615,9 @@ fn map_go_taint_findings(
     let raw = go_taint::analyze_tree(tree.root_node(), source, spec, aliases);
     raw.into_iter()
         .map(|t| Finding {
-            rule_id: rule_id.to_string(),
-            severity,
-            cwe: cwe.map(|s| s.to_string()),
+            rule_id: meta.rule_id.to_string(),
+            severity: meta.severity,
+            cwe: meta.cwe.map(|s| s.to_string()),
             description: format_description(&t.source_description, &t.sink_description),
             file: String::new(),
             line: t.sink_line,
@@ -670,21 +673,17 @@ impl Rule for TaintCommandInjection {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        map_go_taint_findings(
-            self.id(),
-            self.severity(),
-            self.cwe(),
-            source,
-            tree,
-            ctx,
-            &Self::spec(),
-            |src, sink| {
-                format!(
-                    "{} reaches {} — untrusted input can inject OS commands",
-                    src, sink
-                )
-            },
-        )
+        let meta = GoTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject OS commands",
+                src, sink
+            )
+        })
     }
 }
 
@@ -763,16 +762,14 @@ impl Rule for TaintSqlInjection {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        map_go_taint_findings(
-            self.id(),
-            self.severity(),
-            self.cwe(),
-            source,
-            tree,
-            ctx,
-            &Self::spec(),
-            |src, sink| format!("{} reaches {} — untrusted input can inject SQL", src, sink),
-        )
+        let meta = GoTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!("{} reaches {} — untrusted input can inject SQL", src, sink)
+        })
     }
 }
 
@@ -824,20 +821,16 @@ impl Rule for TaintSsrf {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        map_go_taint_findings(
-            self.id(),
-            self.severity(),
-            self.cwe(),
-            source,
-            tree,
-            ctx,
-            &Self::spec(),
-            |src, sink| {
-                format!(
-                    "{} reaches {} — untrusted input can drive server-side request forgery",
-                    src, sink
-                )
-            },
-        )
+        let meta = GoTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can drive server-side request forgery",
+                src, sink
+            )
+        })
     }
 }

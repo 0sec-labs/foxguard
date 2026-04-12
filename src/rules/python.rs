@@ -1792,11 +1792,14 @@ fn call_sink(canonical: &str) -> NodeMatcher {
 /// Shared mapper from engine-level `TaintFinding` to the public `Finding`
 /// shape, parameterized by the rule's metadata and a description template
 /// that receives the source and sink descriptions.
-#[allow(clippy::too_many_arguments)]
-fn map_taint_findings(
-    rule_id: &str,
+struct TaintRuleMeta<'a> {
+    rule_id: &'a str,
     severity: Severity,
-    cwe: Option<&str>,
+    cwe: Option<&'a str>,
+}
+
+fn map_taint_findings(
+    meta: &TaintRuleMeta<'_>,
     source: &str,
     tree: &tree_sitter::Tree,
     ctx: &FileContext<'_>,
@@ -1806,9 +1809,9 @@ fn map_taint_findings(
     let raw = python_taint::analyze_tree(tree.root_node(), source, spec, ctx.python_aliases);
     raw.into_iter()
         .map(|t| Finding {
-            rule_id: rule_id.to_string(),
-            severity,
-            cwe: cwe.map(|s| s.to_string()),
+            rule_id: meta.rule_id.to_string(),
+            severity: meta.severity,
+            cwe: meta.cwe.map(|s| s.to_string()),
             description: format_description(&t.source_description, &t.sink_description),
             file: String::new(),
             line: t.sink_line,
@@ -1864,21 +1867,17 @@ impl Rule for TaintPickleDeserialization {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        map_taint_findings(
-            self.id(),
-            self.severity(),
-            self.cwe(),
-            source,
-            tree,
-            ctx,
-            &Self::spec(),
-            |src, sink| {
-                format!(
-                    "{} reaches {} — untrusted input can execute arbitrary code via pickle",
-                    src, sink
-                )
-            },
-        )
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can execute arbitrary code via pickle",
+                src, sink
+            )
+        })
     }
 }
 
@@ -1922,21 +1921,17 @@ impl Rule for TaintEvalFromRequest {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        map_taint_findings(
-            self.id(),
-            self.severity(),
-            self.cwe(),
-            source,
-            tree,
-            ctx,
-            &Self::spec(),
-            |src, sink| {
-                format!(
-                    "{} reaches {} — untrusted input can execute arbitrary Python code",
-                    src, sink
-                )
-            },
-        )
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can execute arbitrary Python code",
+                src, sink
+            )
+        })
     }
 }
 
@@ -1988,21 +1983,17 @@ impl Rule for TaintCommandInjectionFromRequest {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        map_taint_findings(
-            self.id(),
-            self.severity(),
-            self.cwe(),
-            source,
-            tree,
-            ctx,
-            &Self::spec(),
-            |src, sink| {
-                format!(
-                    "{} reaches {} — untrusted input can inject OS commands",
-                    src, sink
-                )
-            },
-        )
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject OS commands",
+                src, sink
+            )
+        })
     }
 }
 
@@ -2055,21 +2046,17 @@ impl Rule for TaintSsrfFromRequest {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        map_taint_findings(
-            self.id(),
-            self.severity(),
-            self.cwe(),
-            source,
-            tree,
-            ctx,
-            &Self::spec(),
-            |src, sink| {
-                format!(
-                    "{} reaches {} — untrusted input can drive server-side request forgery",
-                    src, sink
-                )
-            },
-        )
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can drive server-side request forgery",
+                src, sink
+            )
+        })
     }
 }
 
@@ -2117,21 +2104,17 @@ impl Rule for TaintYamlLoadFromRequest {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        map_taint_findings(
-            self.id(),
-            self.severity(),
-            self.cwe(),
-            source,
-            tree,
-            ctx,
-            &Self::spec(),
-            |src, sink| {
-                format!(
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
                     "{} reaches {} — untrusted input can execute arbitrary code via YAML deserialization",
                     src, sink
                 )
-            },
-        )
+        })
     }
 }
 
@@ -2193,15 +2176,13 @@ impl Rule for TaintSqlInjectionFromRequest {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        map_taint_findings(
-            self.id(),
-            self.severity(),
-            self.cwe(),
-            source,
-            tree,
-            ctx,
-            &Self::spec(),
-            |src, sink| format!("{} reaches {} — untrusted input can inject SQL", src, sink),
-        )
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!("{} reaches {} — untrusted input can inject SQL", src, sink)
+        })
     }
 }
