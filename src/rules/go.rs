@@ -570,6 +570,210 @@ impl Rule for InsecureTlsSkipVerify {
     }
 }
 
+// ─── Rule 9: no-unsafe-deserialization ─────────────────────────────────────
+
+pub struct NoUnsafeDeserialization;
+
+impl Rule for NoUnsafeDeserialization {
+    fn id(&self) -> &str {
+        "go/no-unsafe-deserialization"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-502")
+    }
+    fn description(&self) -> &str {
+        "Unsafe deserialization via gob or yaml.Unmarshal into interface{}/any"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+
+            // Flag gob.NewDecoder()
+            if func_text == "gob.NewDecoder" {
+                findings.push(make_finding(
+                    self.id(),
+                    self.severity(),
+                    self.cwe(),
+                    "Use JSON instead of gob for untrusted input. Unmarshal into concrete types, not interface{}.",
+                    node,
+                    src,
+                ));
+                return;
+            }
+
+            // Flag yaml.Unmarshal into interface{} or any
+            if func_text == "yaml.Unmarshal" {
+                let call_text = &src[node.byte_range()];
+                if call_text.contains("interface{}") || call_text.contains("any") {
+                    findings.push(make_finding(
+                        self.id(),
+                        self.severity(),
+                        self.cwe(),
+                        "Use JSON instead of gob for untrusted input. Unmarshal into concrete types, not interface{}.",
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+
+        findings
+    }
+}
+
+// ─── Rule 10: jwt-no-verify ───────────────────────────────────────────────
+
+pub struct JwtNoVerify;
+
+impl Rule for JwtNoVerify {
+    fn id(&self) -> &str {
+        "go/jwt-no-verify"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-347")
+    }
+    fn description(&self) -> &str {
+        "JWT parsed without signature verification"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+
+            // Flag jwt.ParseUnverified
+            if func_text == "jwt.ParseUnverified" {
+                findings.push(make_finding(
+                    self.id(),
+                    self.severity(),
+                    self.cwe(),
+                    "JWT parsed without verification — use jwt.Parse with a proper key function",
+                    node,
+                    src,
+                ));
+                return;
+            }
+
+            // Flag jwt.Parse with nil key function
+            if func_text == "jwt.Parse" || func_text == "jwt.ParseWithClaims" {
+                if let Some(args) = node.child_by_field_name("arguments") {
+                    // Key function is the second argument for jwt.Parse,
+                    // third for jwt.ParseWithClaims
+                    let key_fn_idx = if func_text == "jwt.ParseWithClaims" {
+                        2
+                    } else {
+                        1
+                    };
+                    if let Some(key_fn_arg) = args.named_child(key_fn_idx) {
+                        let key_fn_text = &src[key_fn_arg.byte_range()];
+                        if key_fn_text == "nil" {
+                            findings.push(make_finding(
+                                self.id(),
+                                self.severity(),
+                                self.cwe(),
+                                "JWT parsed with nil key function — provide a proper key validation function",
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+
+        findings
+    }
+}
+
+// ─── Rule 11: jwt-hardcoded-secret ────────────────────────────────────────
+
+pub struct JwtHardcodedSecret;
+
+impl Rule for JwtHardcodedSecret {
+    fn id(&self) -> &str {
+        "go/jwt-hardcoded-secret"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-798")
+    }
+    fn description(&self) -> &str {
+        "JWT key function uses a hardcoded secret"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+        let hardcoded_byte_re = Regex::new(r#"\[\]byte\(\s*"[^"]{4,}"\s*\)"#).unwrap();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+
+            if func_text != "jwt.Parse"
+                && func_text != "jwt.ParseWithClaims"
+                && func_text != "jwt.NewWithClaims"
+            {
+                return;
+            }
+
+            let node_text = &src[node.byte_range()];
+            if hardcoded_byte_re.is_match(node_text) {
+                findings.push(make_finding(
+                    self.id(),
+                    self.severity(),
+                    self.cwe(),
+                    "JWT secret is hardcoded — load signing keys from environment or a secrets manager",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+    }
+}
+
 // ─── Taint rules ───────────────────────────────────────────────────────────
 //
 // These rules consume the intraprocedural taint engine in

@@ -129,6 +129,7 @@ impl RuleRegistry {
         registry.register(Box::new(javascript::TaintLdapInjection));
         registry.register(Box::new(javascript::TaintLogInjection));
         registry.register(Box::new(javascript::TaintXxe));
+        registry.register(Box::new(javascript::NoUnsafeDeserialization));
 
         // Register Python rules
         registry.register(Box::new(python::NoEval));
@@ -168,6 +169,8 @@ impl RuleRegistry {
         registry.register(Box::new(python::TaintLdapInjection));
         registry.register(Box::new(python::TaintLogInjection));
         registry.register(Box::new(python::TaintXxe));
+        registry.register(Box::new(python::JwtNoVerify));
+        registry.register(Box::new(python::JwtHardcodedSecret));
 
         // Register Go rules
         registry.register(Box::new(go::NoSqlInjection));
@@ -185,6 +188,9 @@ impl RuleRegistry {
         registry.register(Box::new(go::TaintXpathInjection));
         registry.register(Box::new(go::TaintLdapInjection));
         registry.register(Box::new(go::TaintLogInjection));
+        registry.register(Box::new(go::NoUnsafeDeserialization));
+        registry.register(Box::new(go::JwtNoVerify));
+        registry.register(Box::new(go::JwtHardcodedSecret));
 
         // Register Java rules
         registry.register(Box::new(java::NoSqlInjection));

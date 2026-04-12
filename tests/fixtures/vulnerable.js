@@ -89,3 +89,9 @@ const weakVerify = jwt.verify(token, publicKey);
 function handler(req, res) {
   res.send(req.query.name);
 }
+
+// 27. js/no-unsafe-deserialization — node-serialize (Critical)
+const obj = serialize.unserialize(userInput);
+
+// 28. js/no-unsafe-deserialization — yaml.load without safe schema (Critical)
+const data = yaml.load(userInput);

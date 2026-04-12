@@ -1779,6 +1779,86 @@ impl Rule for NoUnsafeFormatString {
     }
 }
 
+// ─── Rule: no-unsafe-deserialization ───────────────────────────────────────
+
+pub struct NoUnsafeDeserialization;
+
+impl Rule for NoUnsafeDeserialization {
+    fn id(&self) -> &str {
+        "js/no-unsafe-deserialization"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Critical
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-502")
+    }
+    fn description(&self) -> &str {
+        "Unsafe deserialization of untrusted data"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+
+            // node-serialize: serialize.unserialize() / unserialize()
+            if func_text == "serialize.unserialize"
+                || func_text == "unserialize"
+                || func_text == "cryo.parse"
+                || func_text == "funcster.deepDeserialize"
+            {
+                findings.push(make_finding(
+                    self.id(),
+                    self.severity(),
+                    self.cwe(),
+                    "Avoid deserializing untrusted data with node-serialize. Use JSON.parse() for structured data.",
+                    node,
+                    src,
+                ));
+                return;
+            }
+
+            // yaml.load() / jsyaml.load() without safe schema
+            if func_text == "yaml.load" || func_text == "jsyaml.load" {
+                // Check if a safe schema option is provided
+                if let Some(args) = node.child_by_field_name("arguments") {
+                    let args_text = &src[args.byte_range()];
+                    // Safe if schema is explicitly set to a safe variant
+                    if args_text.contains("SAFE_SCHEMA")
+                        || args_text.contains("JSON_SCHEMA")
+                        || args_text.contains("FAILSAFE_SCHEMA")
+                        || args_text.contains("safeLoad")
+                    {
+                        return;
+                    }
+                }
+                findings.push(make_finding(
+                    self.id(),
+                    self.severity(),
+                    self.cwe(),
+                    "Avoid deserializing untrusted data with node-serialize. Use JSON.parse() for structured data.",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+    }
+}
+
 // ─── js/taint-xss-innerhtml ───────────────────────────────────────────────
 //
 // Intraprocedural taint rule: fires when untrusted Express-style input

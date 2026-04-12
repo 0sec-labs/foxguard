@@ -40,10 +40,27 @@ func vulnerable() {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 
+	// 10. go/no-unsafe-deserialization — gob.NewDecoder (High)
+	dec := gob.NewDecoder(conn)
+
+	// 11. go/no-unsafe-deserialization — yaml.Unmarshal into interface{} (High)
+	var out interface{}
+	yaml.Unmarshal(data, new(interface{}))
+
+	// 12. go/jwt-no-verify — jwt.ParseUnverified (Critical)
+	jwt.ParseUnverified(tokenStr, &jwt.StandardClaims{})
+
+	// 13. go/jwt-no-verify — jwt.Parse with nil key function (Critical)
+	jwt.Parse(tokenStr, nil)
+
+	// 14. go/jwt-hardcoded-secret (High)
+	jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return []byte("my-secret-key"), nil })
+
 	_ = query1
 	_ = query2
 	_ = apiKey
 	_ = transport
+	_ = dec
 }
 
 func getUserInput() string {

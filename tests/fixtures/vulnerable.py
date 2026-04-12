@@ -103,3 +103,10 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 # py/flask-debug-mode
 app.run(debug=True)
+
+# py/jwt-no-verify
+import jwt
+decoded = jwt.decode(token, "secret", options={"verify_signature": False})
+
+# py/jwt-hardcoded-secret
+token = jwt.encode(payload, "my-hardcoded-jwt-secret", algorithm="HS256")
