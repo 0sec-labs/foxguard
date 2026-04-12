@@ -128,6 +128,8 @@ pub struct TaintFinding {
     pub source_description: String,
     /// Description of the sink matcher that flagged this flow.
     pub sink_description: String,
+    /// 1-indexed line where the taint source was introduced.
+    pub source_line: usize,
 }
 
 /// Return-taint summary for a single function. Keyed by the function's
@@ -262,7 +264,7 @@ fn walk_body_for_summary(
         // The return's argument is the first named child, if any.
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
-            if let Some(desc) = expression_taint(child, ctx, state) {
+            if let Some((desc, _line)) = expression_taint(child, ctx, state) {
                 *return_taint = Some(desc);
                 break;
             }
@@ -290,24 +292,32 @@ where
     }
 }
 
+/// Taint metadata carried alongside a tainted variable: the human-readable
+/// description and the 1-indexed source line where the taint was introduced.
+#[derive(Clone, Debug)]
+struct TaintInfo {
+    description: String,
+    line: usize,
+}
+
 /// State maintained while walking a single function body. Maps local
 /// identifier names to a description of the source that tainted them.
 #[derive(Default)]
 struct TaintState {
-    tainted: HashMap<String, String>,
+    tainted: HashMap<String, TaintInfo>,
 }
 
 impl TaintState {
-    fn taint(&mut self, name: String, description: String) {
-        self.tainted.insert(name, description);
+    fn taint(&mut self, name: String, description: String, line: usize) {
+        self.tainted.insert(name, TaintInfo { description, line });
     }
 
     fn clear(&mut self, name: &str) {
         self.tainted.remove(name);
     }
 
-    fn describe(&self, name: &str) -> Option<&str> {
-        self.tainted.get(name).map(String::as_str)
+    fn info(&self, name: &str) -> Option<&TaintInfo> {
+        self.tainted.get(name)
     }
 }
 
@@ -357,7 +367,8 @@ fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &
         for matcher in &spec.sources {
             if let NodeMatcher::ParamName { names, description } = matcher {
                 if names.iter().any(|n| n == param_name) {
-                    state.taint(param_name.to_string(), description.clone());
+                    let line = child.start_position().row + 1;
+                    state.taint(param_name.to_string(), description.clone(), line);
                     break;
                 }
             }
@@ -405,8 +416,8 @@ fn handle_assignment(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut Tain
     // Simple identifier LHS: the common case.
     if left.kind() == "identifier" {
         let lhs_name = node_text(left, ctx.source).to_string();
-        if let Some(desc) = expression_taint(right, ctx, state) {
-            state.taint(lhs_name, desc);
+        if let Some((desc, src_line)) = expression_taint(right, ctx, state) {
+            state.taint(lhs_name, desc, src_line);
         } else {
             // Reassignment with a clean RHS kills any previous taint on LHS.
             state.clear(&lhs_name);
@@ -430,8 +441,8 @@ fn handle_assignment(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut Tain
         if let Some(rhs_elems) = tuple_like_elements(right) {
             if rhs_elems.len() == lhs_targets.len() {
                 for (target, rhs) in lhs_targets.iter().zip(rhs_elems.iter()) {
-                    if let Some(desc) = expression_taint(*rhs, ctx, state) {
-                        state.taint(target.clone(), desc);
+                    if let Some((desc, src_line)) = expression_taint(*rhs, ctx, state) {
+                        state.taint(target.clone(), desc, src_line);
                     } else {
                         state.clear(target);
                     }
@@ -441,9 +452,9 @@ fn handle_assignment(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut Tain
         }
 
         // Arity mismatch or opaque RHS: apply conservative semantics.
-        if let Some(desc) = expression_taint(right, ctx, state) {
+        if let Some((desc, src_line)) = expression_taint(right, ctx, state) {
             for target in &lhs_targets {
-                state.taint(target.clone(), desc.clone());
+                state.taint(target.clone(), desc.clone(), src_line);
             }
         } else {
             for target in &lhs_targets {
@@ -544,7 +555,7 @@ fn handle_call(
     };
     let mut cursor = args.walk();
     for arg in args.named_children(&mut cursor) {
-        if let Some(source_desc) = expression_taint(arg, ctx, state) {
+        if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
             let start = node.start_position();
             let end = node.end_position();
             findings.push(TaintFinding {
@@ -556,6 +567,7 @@ fn handle_call(
                 sink_end_column: end.column + 1,
                 source_description: source_desc,
                 sink_description: sink_desc.clone(),
+                source_line: src_line,
             });
             // One finding per sink call is enough — don't double-report
             // when multiple args are tainted.
@@ -564,23 +576,25 @@ fn handle_call(
     }
 }
 
-/// Returns the source description if `expr` evaluates to (or references) a
-/// tainted value, otherwise `None`.
+/// Returns the (source description, source line) if `expr` evaluates to (or
+/// references) a tainted value, otherwise `None`.
 fn expression_taint(
     expr: Node<'_>,
     ctx: &AnalysisContext<'_>,
     state: &TaintState,
-) -> Option<String> {
+) -> Option<(String, usize)> {
+    let expr_line = expr.start_position().row + 1;
+
     // Direct source match on this expression.
     if let Some(desc) = match_source(expr, ctx.source, ctx.spec, ctx.aliases) {
-        return Some(desc);
+        return Some((desc, expr_line));
     }
 
     // Tainted identifier reference.
     if expr.kind() == "identifier" {
         let name = node_text(expr, ctx.source);
-        if let Some(desc) = state.describe(name) {
-            return Some(desc.to_string());
+        if let Some(info) = state.info(name) {
+            return Some((info.description.clone(), info.line));
         }
     }
 
@@ -589,8 +603,8 @@ fn expression_taint(
         if let Some(object) = expr.child_by_field_name("object") {
             if object.kind() == "identifier" {
                 let name = node_text(object, ctx.source);
-                if let Some(desc) = state.describe(name) {
-                    return Some(desc.to_string());
+                if let Some(info) = state.info(name) {
+                    return Some((info.description.clone(), info.line));
                 }
             }
         }
@@ -604,8 +618,8 @@ fn expression_taint(
     // identifier roots via the recursive call.
     if expr.kind() == "subscript" {
         if let Some(value) = expr.child_by_field_name("value") {
-            if let Some(desc) = expression_taint(value, ctx, state) {
-                return Some(desc);
+            if let Some(result) = expression_taint(value, ctx, state) {
+                return Some(result);
             }
         }
     }
@@ -622,8 +636,8 @@ fn expression_taint(
             if child.kind() == "interpolation" {
                 let mut inner = child.walk();
                 for inner_child in child.named_children(&mut inner) {
-                    if let Some(desc) = expression_taint(inner_child, ctx, state) {
-                        return Some(desc);
+                    if let Some(result) = expression_taint(inner_child, ctx, state) {
+                        return Some(result);
                     }
                 }
             }
@@ -640,13 +654,13 @@ fn expression_taint(
         if let Some(op) = expr.child_by_field_name("operator") {
             if node_text(op, ctx.source) == "+" {
                 if let Some(left) = expr.child_by_field_name("left") {
-                    if let Some(desc) = expression_taint(left, ctx, state) {
-                        return Some(desc);
+                    if let Some(result) = expression_taint(left, ctx, state) {
+                        return Some(result);
                     }
                 }
                 if let Some(right) = expr.child_by_field_name("right") {
-                    if let Some(desc) = expression_taint(right, ctx, state) {
-                        return Some(desc);
+                    if let Some(result) = expression_taint(right, ctx, state) {
+                        return Some(result);
                     }
                 }
             }
@@ -667,8 +681,8 @@ fn expression_taint(
         if let Some(args) = expr.child_by_field_name("arguments") {
             let mut cursor = args.walk();
             for arg in args.named_children(&mut cursor) {
-                if let Some(desc) = expression_taint(arg, ctx, state) {
-                    return Some(desc);
+                if let Some(result) = expression_taint(arg, ctx, state) {
+                    return Some(result);
                 }
             }
         }
@@ -683,8 +697,8 @@ fn expression_taint(
         if let Some(func) = expr.child_by_field_name("function") {
             if func.kind() == "attribute" {
                 if let Some(object) = func.child_by_field_name("object") {
-                    if let Some(desc) = expression_taint(object, ctx, state) {
-                        return Some(desc);
+                    if let Some(result) = expression_taint(object, ctx, state) {
+                        return Some(result);
                     }
                 }
             }
@@ -701,7 +715,7 @@ fn expression_taint(
             if func.kind() == "identifier" {
                 let callee = node_text(func, ctx.source);
                 if let Some(Some(desc)) = ctx.summaries.get(callee) {
-                    return Some(format!("{desc} (via {callee})"));
+                    return Some((format!("{desc} (via {callee})"), expr_line));
                 }
             }
         }

@@ -55,6 +55,10 @@ pub struct ScanArgs {
     /// Write the current findings to a baseline file
     #[arg(long)]
     pub write_baseline: Option<String>,
+
+    /// Show source-to-sink dataflow traces on taint findings
+    #[arg(long, default_value_t = false)]
+    pub explain: bool,
 }
 
 #[derive(Args, Debug, Clone)]

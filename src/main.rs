@@ -163,7 +163,12 @@ fn run_scan(scan: &ScanArgs) -> i32 {
 
     match scan.format {
         OutputFormat::Terminal => {
-            foxguard::report::terminal::print_findings(&findings, files_scanned, duration);
+            foxguard::report::terminal::print_findings_with_options(
+                &findings,
+                files_scanned,
+                duration,
+                scan.explain,
+            );
         }
         OutputFormat::Json => foxguard::report::json::print_json(&findings),
         OutputFormat::Sarif => foxguard::report::sarif::print_sarif(&findings),
@@ -366,6 +371,7 @@ fn run_init(args: &InitArgs) -> i32 {
                 changed: false,
                 baseline: None,
                 write_baseline: None,
+                explain: false,
             },
             output: repo_root.join(&args.baseline).display().to_string(),
         };

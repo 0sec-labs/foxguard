@@ -197,6 +197,10 @@ impl Rule for SemgrepRule {
                 end_line: matched_node_range.end_line,
                 end_column: matched_node_range.end_column,
                 snippet: matched_node_range.snippet,
+                source_line: None,
+                source_description: None,
+                sink_line: None,
+                sink_description: None,
             });
         }
 

@@ -1865,6 +1865,10 @@ impl Rule for TaintXssInnerHtml {
                 end_line: t.sink_end_line,
                 end_column: t.sink_end_column,
                 snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
             })
             .collect()
     }
@@ -1950,6 +1954,10 @@ impl Rule for TaintSqlInjection {
                 end_line: t.sink_end_line,
                 end_column: t.sink_end_column,
                 snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
             })
             .collect()
     }
@@ -2027,6 +2035,10 @@ impl Rule for TaintEval {
                 end_line: t.sink_end_line,
                 end_column: t.sink_end_column,
                 snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
             })
             .collect()
     }
@@ -2115,6 +2127,10 @@ impl Rule for TaintCommandInjection {
                 end_line: t.sink_end_line,
                 end_column: t.sink_end_column,
                 snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
             })
             .collect()
     }
@@ -2227,6 +2243,10 @@ impl Rule for TaintSsrf {
                 end_line: t.sink_end_line,
                 end_column: t.sink_end_column,
                 snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
             })
             .collect()
     }

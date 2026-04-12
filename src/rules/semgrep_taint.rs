@@ -200,6 +200,7 @@ struct TaintFindingView {
     sink_end_column: usize,
     source_description: String,
     sink_description: String,
+    source_line: usize,
 }
 
 impl TaintFindingView {
@@ -212,6 +213,7 @@ impl TaintFindingView {
             sink_end_column: f.sink_end_column,
             source_description: f.source_description,
             sink_description: f.sink_description,
+            source_line: f.source_line,
         }
     }
     fn from_js(f: javascript_taint::TaintFinding) -> Self {
@@ -223,6 +225,7 @@ impl TaintFindingView {
             sink_end_column: f.sink_end_column,
             source_description: f.source_description,
             sink_description: f.sink_description,
+            source_line: f.source_line,
         }
     }
     fn from_go(f: go_taint::TaintFinding) -> Self {
@@ -234,6 +237,7 @@ impl TaintFindingView {
             sink_end_column: f.sink_end_column,
             source_description: f.source_description,
             sink_description: f.sink_description,
+            source_line: f.source_line,
         }
     }
 }
@@ -311,6 +315,10 @@ impl Rule for SemgrepTaintRule {
                 end_line: t.sink_end_line,
                 end_column: t.sink_end_column,
                 snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
             })
             .collect()
     }

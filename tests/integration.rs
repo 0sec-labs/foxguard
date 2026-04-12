@@ -2486,3 +2486,114 @@ fn test_realistic_gin_app_findings() {
         );
     }
 }
+
+// ─── --explain flag tests (issue #47) ─────────────────────────────────────
+
+/// With --explain, taint findings show source/sink trace lines.
+#[test]
+fn test_explain_flag_shows_trace_on_taint_findings() {
+    let output = foxguard_cmd()
+        .args(["--explain", "tests/fixtures/realistic/flask_app.py"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Taint findings should have source/sink trace lines
+    assert!(
+        stdout.contains("source"),
+        "expected 'source' trace line in --explain output"
+    );
+    assert!(
+        stdout.contains("sink"),
+        "expected 'sink' trace line in --explain output"
+    );
+    // Check that source arrow points to a file:line pattern
+    assert!(
+        stdout.contains("flask_app.py:"),
+        "expected file:line in trace output"
+    );
+}
+
+/// Without --explain, taint findings must NOT show source/sink trace lines.
+#[test]
+fn test_no_explain_flag_hides_trace() {
+    let output = foxguard_cmd()
+        .args(["tests/fixtures/realistic/flask_app.py"])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The "source →" trace line should not appear
+    assert!(
+        !stdout.contains("source \u{2192}"),
+        "trace lines should not appear without --explain"
+    );
+    assert!(
+        !stdout.contains("sink   \u{2192}"),
+        "trace lines should not appear without --explain"
+    );
+}
+
+/// JSON output with --explain includes source/sink fields on taint findings.
+#[test]
+fn test_explain_json_includes_trace_fields() {
+    let output = foxguard_cmd()
+        .args([
+            "--explain",
+            "-f",
+            "json",
+            "tests/fixtures/realistic/flask_app.py",
+        ])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let taint_findings: Vec<&serde_json::Value> = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str().is_some_and(|r| r.contains("taint")))
+        .collect();
+
+    assert!(
+        !taint_findings.is_empty(),
+        "should have at least one taint finding"
+    );
+
+    for f in &taint_findings {
+        assert!(
+            f["source_line"].is_number(),
+            "taint finding {} should have source_line",
+            f["rule_id"]
+        );
+        assert!(
+            f["source_description"].is_string(),
+            "taint finding {} should have source_description",
+            f["rule_id"]
+        );
+        assert!(
+            f["sink_line"].is_number(),
+            "taint finding {} should have sink_line",
+            f["rule_id"]
+        );
+        assert!(
+            f["sink_description"].is_string(),
+            "taint finding {} should have sink_description",
+            f["rule_id"]
+        );
+    }
+
+    // Non-taint findings should NOT have trace fields
+    let nontaint_findings: Vec<&serde_json::Value> = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str().is_some_and(|r| !r.contains("taint")))
+        .collect();
+
+    for f in &nontaint_findings {
+        assert!(
+            f.get("source_line").is_none() || f["source_line"].is_null(),
+            "non-taint finding {} should not have source_line",
+            f["rule_id"]
+        );
+    }
+}

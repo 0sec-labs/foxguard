@@ -215,6 +215,10 @@ pub fn scan_paths_with_config(
                         end_line: line_idx + 1,
                         end_column: matched.end() + 1,
                         snippet: redact_match(line, matched.start(), matched.end()),
+                        source_line: None,
+                        source_description: None,
+                        sink_line: None,
+                        sink_description: None,
                     });
                 }
             }

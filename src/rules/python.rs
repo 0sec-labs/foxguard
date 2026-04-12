@@ -1819,6 +1819,10 @@ fn map_taint_findings(
             end_line: t.sink_end_line,
             end_column: t.sink_end_column,
             snippet: get_source_line(source, t.sink_start_byte),
+            source_line: Some(t.source_line),
+            source_description: Some(t.source_description),
+            sink_line: Some(t.sink_line),
+            sink_description: Some(t.sink_description),
         })
         .collect()
 }

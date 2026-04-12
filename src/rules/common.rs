@@ -109,6 +109,10 @@ pub fn make_finding(
         end_line: end.row + 1,
         end_column: end.column + 1,
         snippet: get_source_line(source, node.start_byte()),
+        source_line: None,
+        source_description: None,
+        sink_line: None,
+        sink_description: None,
     }
 }
 
@@ -145,6 +149,10 @@ pub fn make_finding_from_offsets(
         end_line,
         end_column,
         snippet: get_source_line(source, start_byte),
+        source_line: None,
+        source_description: None,
+        sink_line: None,
+        sink_description: None,
     }
 }
 

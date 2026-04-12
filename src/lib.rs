@@ -71,4 +71,12 @@ pub struct Finding {
     pub end_line: usize,
     pub end_column: usize,
     pub snippet: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sink_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sink_description: Option<String>,
 }

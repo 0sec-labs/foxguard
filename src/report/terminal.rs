@@ -2,6 +2,15 @@ use crate::{Finding, Severity};
 use colored::Colorize;
 
 pub fn print_findings(findings: &[Finding], files_scanned: usize, duration: std::time::Duration) {
+    print_findings_with_options(findings, files_scanned, duration, false);
+}
+
+pub fn print_findings_with_options(
+    findings: &[Finding],
+    files_scanned: usize,
+    duration: std::time::Duration,
+    explain: bool,
+) {
     if findings.is_empty() {
         if files_scanned > 0 {
             println!(
@@ -50,6 +59,31 @@ pub fn print_findings(findings: &[Finding], files_scanned: usize, duration: std:
         if !f.snippet.is_empty() {
             for line in f.snippet.lines() {
                 println!("    {}", line.dimmed());
+            }
+        }
+
+        // When --explain is active, print source/sink trace for taint findings
+        if explain {
+            if let (Some(src_line), Some(src_desc)) = (f.source_line, f.source_description.as_ref())
+            {
+                println!(
+                    "    {} {} {}:{}   {}",
+                    "source".yellow().bold(),
+                    "\u{2192}".dimmed(),
+                    f.file.dimmed(),
+                    src_line.to_string().dimmed(),
+                    src_desc,
+                );
+            }
+            if let (Some(snk_line), Some(snk_desc)) = (f.sink_line, f.sink_description.as_ref()) {
+                println!(
+                    "    {} {} {}:{}   {}",
+                    "sink  ".yellow().bold(),
+                    "\u{2192}".dimmed(),
+                    f.file.dimmed(),
+                    snk_line.to_string().dimmed(),
+                    snk_desc,
+                );
             }
         }
     }
