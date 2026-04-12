@@ -127,6 +127,7 @@ impl RuleRegistry {
         registry.register(Box::new(javascript::TaintSsti));
         registry.register(Box::new(javascript::TaintXpathInjection));
         registry.register(Box::new(javascript::TaintLdapInjection));
+        registry.register(Box::new(javascript::TaintXxe));
 
         // Register Python rules
         registry.register(Box::new(python::NoEval));
@@ -164,6 +165,7 @@ impl RuleRegistry {
         registry.register(Box::new(python::TaintSsti));
         registry.register(Box::new(python::TaintXpathInjection));
         registry.register(Box::new(python::TaintLdapInjection));
+        registry.register(Box::new(python::TaintXxe));
 
         // Register Go rules
         registry.register(Box::new(go::NoSqlInjection));

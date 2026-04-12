@@ -50,6 +50,7 @@ const jsRules: Rule[] = [
   { id: 'js/taint-ssti', cwe: 'CWE-1336', desc: 'Untrusted input reaches a template rendering sink — possible server-side template injection', severity: 'critical' },
   { id: 'js/taint-xpath-injection', cwe: 'CWE-643', desc: 'Untrusted input reaches an XPath evaluation sink — possible XPath injection', severity: 'high' },
   { id: 'js/taint-xss-innerhtml', cwe: 'CWE-79', desc: 'Untrusted input reaches innerHTML or document.write sink', severity: 'high' },
+  { id: 'js/taint-xxe', cwe: 'CWE-611', desc: 'Untrusted input reaches an XML parsing sink — potential XXE', severity: 'high' },
 ];
 
 const pyRules: Rule[] = [
@@ -85,6 +86,7 @@ const pyRules: Rule[] = [
   { id: 'py/taint-ssrf', cwe: 'CWE-918', desc: 'Untrusted input reaches outbound HTTP sink (potential SSRF)', severity: 'high' },
   { id: 'py/taint-ssti', cwe: 'CWE-1336', desc: 'Untrusted input reaches template rendering sink (potential SSTI)', severity: 'critical' },
   { id: 'py/taint-xpath-injection', cwe: 'CWE-643', desc: 'Untrusted input reaches XPath query sink', severity: 'high' },
+  { id: 'py/taint-xxe', cwe: 'CWE-611', desc: 'Untrusted input reaches XML parsing sink — potential XXE', severity: 'high' },
   { id: 'py/taint-yaml-load', cwe: 'CWE-502', desc: 'Untrusted input reaches unsafe YAML loader', severity: 'critical' },
   { id: 'py/wtf-csrf-check-default-disabled', cwe: 'CWE-352', desc: 'Flask-WTF default CSRF checks disabled in source code', severity: 'high' },
   { id: 'py/wtf-csrf-disabled', cwe: 'CWE-352', desc: 'Flask-WTF CSRF protection disabled in source code', severity: 'high' },

@@ -215,6 +215,15 @@ def ldap_injection_from_request():
     return conn.search_s("dc=example,dc=com", ldap.SCOPE_SUBTREE, user_input)
 
 
+# ═══ py/taint-xxe ════════════════════════════════════════════════════
+from xml.etree import ElementTree  # noqa: E402
+
+
+def xxe_from_request():
+    xml_data = request.data
+    ElementTree.fromstring(xml_data)
+
+
 # ═══ os.environ.get() source ══════════════════════════════════════════
 def command_injection_from_environ_get():
     cmd = os.environ.get("USER_CMD")

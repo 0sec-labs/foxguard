@@ -2430,6 +2430,93 @@ impl Rule for TaintLdapInjection {
     }
 }
 
+// ─── py/taint-xxe ─────────────────────────────────────────────────────
+
+pub struct TaintXxe;
+
+impl TaintXxe {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("xml.etree.ElementTree.parse"),
+                call_sink("xml.etree.ElementTree.fromstring"),
+                call_sink("xml.etree.cElementTree.parse"),
+                call_sink("xml.etree.cElementTree.fromstring"),
+                call_sink("etree.parse"),
+                call_sink("etree.fromstring"),
+                call_sink("ElementTree.parse"),
+                call_sink("ElementTree.fromstring"),
+                call_sink("xml.sax.parseString"),
+                call_sink("xml.dom.minidom.parseString"),
+                call_sink("xml.dom.pulldom.parse"),
+                call_sink("minidom.parseString"),
+                call_sink("pulldom.parse"),
+                NodeMatcher::MethodName {
+                    method: "parseString".into(),
+                    description: "xml.sax.parseString".into(),
+                },
+            ],
+            sanitizers: vec![
+                call_sink("defusedxml.parse"),
+                call_sink("defusedxml.fromstring"),
+                call_sink("defusedxml.parseString"),
+                call_sink("defusedxml.ElementTree.parse"),
+                call_sink("defusedxml.ElementTree.fromstring"),
+                call_sink("defusedxml.minidom.parse"),
+                call_sink("defusedxml.minidom.parseString"),
+                call_sink("defusedxml.pulldom.parse"),
+                call_sink("defusedxml.sax.parse"),
+                call_sink("defusedxml.sax.parseString"),
+            ],
+        }
+    }
+}
+
+impl Rule for TaintXxe {
+    fn id(&self) -> &str {
+        "py/taint-xxe"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-611")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches XML parsing sink — potential XXE"
+    }
+    fn language(&self) -> Language {
+        Language::Python
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = TaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some(
+                "Use defusedxml instead of xml.etree.ElementTree for untrusted XML input",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input may enable XML external entity injection",
+                src, sink
+            )
+        })
+    }
+}
+
 // ─── Cross-file summary extraction ──────────────────────────────────────
 
 /// Returns all Python taint rule specs paired with their rule IDs.
@@ -2458,5 +2545,6 @@ pub fn python_taint_rule_specs() -> Vec<(&'static str, TaintSpec)> {
         ("py/taint-ssti", TaintSsti::spec()),
         ("py/taint-xpath-injection", TaintXpathInjection::spec()),
         ("py/taint-ldap-injection", TaintLdapInjection::spec()),
+        ("py/taint-xxe", TaintXxe::spec()),
     ]
 }

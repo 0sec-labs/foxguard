@@ -343,6 +343,7 @@ fn test_vulnerable_py_taint_catches_every_flow() {
         ("py/taint-ssti", 1usize),
         ("py/taint-xpath-injection", 1),
         ("py/taint-ldap-injection", 1),
+        ("py/taint-xxe", 1),
     ] {
         assert_eq!(
             counts.get(taint_rule).copied(),
@@ -382,6 +383,7 @@ fn test_safe_py_taint_has_no_taint_findings() {
         "py/taint-ssti",
         "py/taint-xpath-injection",
         "py/taint-ldap-injection",
+        "py/taint-xxe",
     ] {
         let n = findings
             .iter()

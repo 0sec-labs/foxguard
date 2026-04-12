@@ -2480,6 +2480,79 @@ impl Rule for TaintLdapInjection {
     }
 }
 
+// ─── js/taint-xxe ─────────────────────────────────────────────────────
+
+pub struct TaintXxe;
+
+impl TaintXxe {
+    pub(crate) fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::MethodName {
+                    method: "parseString".into(),
+                    description: "xml2js parseString".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "parseXml".into(),
+                    description: "libxmljs parseXml".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "parseFromString".into(),
+                    description: "DOMParser.parseFromString".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "XMLReader".into(),
+                    description: "XMLReader".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl Rule for TaintXxe {
+    fn id(&self) -> &str {
+        "js/taint-xxe"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-611")
+    }
+    fn description(&self) -> &str {
+        "Untrusted input reaches an XML parsing sink — potential XXE"
+    }
+    fn language(&self) -> Language {
+        Language::JavaScript
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let meta = JsTaintRuleMeta {
+            rule_id: self.id(),
+            severity: self.severity(),
+            cwe: self.cwe(),
+            fix_suggestion: Some("Disable external entity resolution in XML parser configuration"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input may enable XML external entity injection",
+                src, sink
+            )
+        })
+    }
+}
+
 /// Returns the taint rule ID and spec pairs for all JavaScript taint rules.
 /// Used by the scanner's pass 1 to extract cross-file summaries: each
 /// rule's sinks are tested against function bodies with synthetic
@@ -2494,5 +2567,6 @@ pub fn js_taint_rule_specs() -> Vec<(&'static str, JsTaintSpec)> {
         ("js/taint-ssti", TaintSsti::spec()),
         ("js/taint-xpath-injection", TaintXpathInjection::spec()),
         ("js/taint-ldap-injection", TaintLdapInjection::spec()),
+        ("js/taint-xxe", TaintXxe::spec()),
     ]
 }
