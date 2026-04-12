@@ -514,7 +514,17 @@ where
                             if let Some(name) = c.child_by_field_name("name") {
                                 let n = node_text(name, source).to_string();
                                 func_defs.insert(n.clone(), c);
-                                visit(n, c);
+                                visit(n.clone(), c);
+                                // If this is a default export, also register
+                                // under the name "default" so that
+                                // `import X from "..."` can resolve it.
+                                let is_default = child.children(&mut child.walk()).any(|sib| {
+                                    !sib.is_named() && node_text(sib, source) == "default"
+                                });
+                                if is_default {
+                                    func_defs.insert("default".to_string(), c);
+                                    visit("default".to_string(), c);
+                                }
                             }
                         }
                         "lexical_declaration" | "variable_declaration" => {
@@ -537,6 +547,22 @@ where
                                         }
                                     }
                                 }
+                            }
+                        }
+                        // `export default function handler(req) {}` — named
+                        // default export. Also handles anonymous:
+                        // `export default function(req) {}` (function_expression
+                        // without a name field).
+                        "function_expression" | "arrow_function" => {
+                            // Check if this export_statement has a `default` keyword.
+                            let is_default = child
+                                .children(&mut child.walk())
+                                .any(|sib| !sib.is_named() && node_text(sib, source) == "default");
+                            if is_default {
+                                // Anonymous default export — use "default" as the name.
+                                let n = "default".to_string();
+                                func_defs.insert(n.clone(), c);
+                                visit(n, c);
                             }
                         }
                         _ => {}
@@ -751,29 +777,41 @@ fn resolve_js_import_statement(
         }
         let mut inner = child.walk();
         for spec in child.children(&mut inner) {
-            if spec.kind() == "named_imports" {
-                let mut n_cursor = spec.walk();
-                for isp in spec.children(&mut n_cursor) {
-                    if isp.kind() != "import_specifier" {
-                        continue;
-                    }
-                    let name = isp
-                        .child_by_field_name("name")
-                        .map(|n| node_text(n, source).to_string());
-                    let alias = isp
-                        .child_by_field_name("alias")
-                        .map(|n| node_text(n, source).to_string());
-                    if let Some(real) = name {
-                        let local = alias.unwrap_or_else(|| real.clone());
-                        let key = format!("__from__:{}:{}", module, real);
-                        result.insert(key, resolved.clone());
-                        // Also map the local name → module for attribute-style calls
-                        let local_key = format!("__from__:{}:{}", module, local);
-                        if local != real {
-                            result.insert(local_key, resolved.clone());
+            match spec.kind() {
+                "named_imports" => {
+                    let mut n_cursor = spec.walk();
+                    for isp in spec.children(&mut n_cursor) {
+                        if isp.kind() != "import_specifier" {
+                            continue;
+                        }
+                        let name = isp
+                            .child_by_field_name("name")
+                            .map(|n| node_text(n, source).to_string());
+                        let alias = isp
+                            .child_by_field_name("alias")
+                            .map(|n| node_text(n, source).to_string());
+                        if let Some(real) = name {
+                            let local = alias.unwrap_or_else(|| real.clone());
+                            let key = format!("__from__:{}:{}", module, real);
+                            result.insert(key, resolved.clone());
+                            // Also map the local name → module for
+                            // attribute-style calls
+                            let local_key = format!("__from__:{}:{}", module, local);
+                            if local != real {
+                                result.insert(local_key, resolved.clone());
+                            }
                         }
                     }
                 }
+                // `import handler from "./mod"` — default import.
+                // The identifier inside import_clause is the local
+                // binding for the default export.
+                "identifier" => {
+                    let local = node_text(spec, source).to_string();
+                    let key = format!("__default__:{}:{}", module, local);
+                    result.insert(key, resolved.clone());
+                }
+                _ => {}
             }
         }
     }
@@ -1514,6 +1552,20 @@ fn resolve_cross_file_callee(
         if parts.len() == 2 {
             if let Some(file_path) = cross_file.import_to_path.get(parts[0]) {
                 return Some((file_path.clone(), parts[1].to_string()));
+            }
+        }
+    }
+
+    // Pattern 4: default import — `import handler from "./mod"; handler(...)`.
+    // The import resolution stores `__default__:./mod:handler` entries.
+    if func.kind() == "identifier" {
+        for (key, file_path) in cross_file.import_to_path.iter() {
+            if let Some(rest) = key.strip_prefix("__default__:") {
+                if let Some((_module, local_name)) = rest.split_once(':') {
+                    if local_name == callee_text {
+                        return Some((file_path.clone(), "default".to_string()));
+                    }
+                }
             }
         }
     }
@@ -2564,6 +2616,171 @@ module.exports = { runQuery, evalExpression };
                 .any(|f| f.sink_rule_id == "js/taint-eval"),
             "expected evalExpression to have eval sink flow, got {:?}",
             ee.params_to_sink
+        );
+    }
+
+    #[test]
+    fn export_default_named_function_produces_summary() {
+        let src = r#"
+export default function handler(req) {
+    db.query("SELECT " + req.body);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        let summaries =
+            extract_cross_file_summaries(tree.root_node(), src, Some(&aliases), &rule_specs);
+
+        eprintln!("summaries: {:#?}", summaries);
+        let names: Vec<&str> = summaries.iter().map(|s| s.name.as_str()).collect();
+        // Should produce both the named export and a "default" alias.
+        assert!(
+            names.contains(&"handler"),
+            "expected 'handler' in summaries, got {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"default"),
+            "expected 'default' in summaries, got {:?}",
+            names
+        );
+
+        let def = summaries.iter().find(|s| s.name == "default").unwrap();
+        assert!(
+            def.params_to_sink
+                .iter()
+                .any(|f| f.sink_rule_id == "js/taint-sql-injection"),
+            "expected default export to have sql-injection sink flow, got {:?}",
+            def.params_to_sink
+        );
+    }
+
+    #[test]
+    fn export_default_anonymous_function_produces_summary() {
+        let src = r#"
+export default function(req) {
+    db.query("SELECT " + req.body);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        let summaries =
+            extract_cross_file_summaries(tree.root_node(), src, Some(&aliases), &rule_specs);
+
+        let names: Vec<&str> = summaries.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"default"),
+            "expected 'default' in summaries, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn export_default_arrow_function_produces_summary() {
+        let src = r#"
+export default (req) => {
+    db.query("SELECT " + req.body);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        let summaries =
+            extract_cross_file_summaries(tree.root_node(), src, Some(&aliases), &rule_specs);
+
+        let names: Vec<&str> = summaries.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"default"),
+            "expected 'default' in summaries for arrow default export, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn import_default_cross_file_finding() {
+        // Simulate cross-file: module exports a default function with a
+        // SQL-injection sink; a caller imports it as default and passes
+        // tainted data.
+        let module_src = r#"
+export default function handler(req) {
+    db.query("SELECT " + req.body);
+}
+"#;
+        let module_tree = parse_file(module_src, Language::JavaScript).expect("parse module");
+        let module_aliases = js_aliases_from_tree(module_src, &module_tree);
+        let rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        let summaries = extract_cross_file_summaries(
+            module_tree.root_node(),
+            module_src,
+            Some(&module_aliases),
+            &rule_specs,
+        );
+        assert!(
+            !summaries.is_empty(),
+            "expected at least one summary from default export"
+        );
+
+        // Build the cross-file summary map keyed by file path.
+        let module_path = PathBuf::from("/fake/handler.js");
+        let mut summary_map: CrossFileSummaryMap = HashMap::new();
+        summary_map.insert(module_path.clone(), summaries);
+
+        // Caller source: `import handler from "./handler"; handler(req.body);`
+        let caller_src = r#"
+import handler from "./handler";
+function route(req) {
+    handler(req.body);
+}
+"#;
+        let caller_tree = parse_file(caller_src, Language::JavaScript).expect("parse caller");
+        let caller_aliases = js_aliases_from_tree(caller_src, &caller_tree);
+
+        // Build import map manually (we can't resolve files on disk in
+        // a unit test, so we wire the mapping by hand).
+        let mut import_to_path: HashMap<String, PathBuf> = HashMap::new();
+        import_to_path.insert("./handler".to_string(), module_path.clone());
+        // Default import entry: __default__:./handler:handler
+        import_to_path.insert(
+            "__default__:./handler:handler".to_string(),
+            module_path.clone(),
+        );
+
+        let cross_file = CrossFileInfo {
+            import_to_path: &import_to_path,
+            summaries: &summary_map,
+            current_rule_id: "js/taint-sql-injection",
+        };
+
+        let spec = rule_specs
+            .iter()
+            .find(|(id, _)| *id == "js/taint-sql-injection")
+            .map(|(_, s)| s)
+            .expect("sql-injection spec");
+
+        let findings = analyze_tree_with_cross_file(
+            caller_tree.root_node(),
+            caller_src,
+            spec,
+            Some(&caller_aliases),
+            Some(&cross_file),
+        );
+
+        eprintln!("findings: {:#?}", findings);
+        assert!(
+            !findings.is_empty(),
+            "expected cross-file finding for default import call"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.sink_description.contains("cross-file")),
+            "expected finding to mention cross-file, got: {:?}",
+            findings
+                .iter()
+                .map(|f| &f.sink_description)
+                .collect::<Vec<_>>()
         );
     }
 
