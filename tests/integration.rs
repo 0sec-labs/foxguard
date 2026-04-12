@@ -2233,6 +2233,138 @@ fn test_semgrep_taint_yaml_bridge_pattern_either_safe() {
     );
 }
 
+// ─── Semgrep taint YAML bridge: JavaScript (issue #68) ───────────────────────
+
+/// The Semgrep taint YAML bridge should fire on JavaScript files when the
+/// rule targets `languages: [javascript]`. This test uses a minimal
+/// req.query/body/params → eval() rule.
+#[test]
+fn test_semgrep_taint_yaml_bridge_js_vulnerable() {
+    let output = foxguard_cmd()
+        .args([
+            "tests/fixtures/semgrep_taint/vulnerable_js_eval.js",
+            "-f",
+            "json",
+            "--no-builtins",
+            "--rules",
+            "tests/fixtures/semgrep_taint/js_taint_eval.yml",
+        ])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let lines: Vec<u64> = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("semgrep/semgrep-js-taint-eval"))
+        .filter_map(|f| f["line"].as_u64())
+        .collect();
+
+    assert_eq!(
+        lines.len(),
+        3,
+        "semgrep JS taint rule should fire on all 3 eval flows, got {} (lines: {:?})",
+        lines.len(),
+        lines
+    );
+}
+
+#[test]
+fn test_semgrep_taint_yaml_bridge_js_safe() {
+    let output = foxguard_cmd()
+        .args([
+            "tests/fixtures/semgrep_taint/safe_js_eval.js",
+            "-f",
+            "json",
+            "--no-builtins",
+            "--rules",
+            "tests/fixtures/semgrep_taint/js_taint_eval.yml",
+        ])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let n = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("semgrep/semgrep-js-taint-eval"))
+        .count();
+
+    assert_eq!(
+        n, 0,
+        "semgrep JS taint rule should not fire on safe_js_eval.js, got {} findings",
+        n
+    );
+}
+
+// ─── Semgrep taint YAML bridge: Go (issue #68) ──────────────────────────────
+
+/// The Semgrep taint YAML bridge should fire on Go files when the rule
+/// targets `languages: [go]`. This test uses a c.Query/c.Param/r.URL →
+/// exec.Command() rule.
+#[test]
+fn test_semgrep_taint_yaml_bridge_go_vulnerable() {
+    let output = foxguard_cmd()
+        .args([
+            "tests/fixtures/semgrep_taint/vulnerable_go_exec.go",
+            "-f",
+            "json",
+            "--no-builtins",
+            "--rules",
+            "tests/fixtures/semgrep_taint/go_taint_exec.yml",
+        ])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let lines: Vec<u64> = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("semgrep/semgrep-go-taint-exec"))
+        .filter_map(|f| f["line"].as_u64())
+        .collect();
+
+    assert_eq!(
+        lines.len(),
+        3,
+        "semgrep Go taint rule should fire on all 3 exec.Command flows, got {} (lines: {:?})",
+        lines.len(),
+        lines
+    );
+}
+
+#[test]
+fn test_semgrep_taint_yaml_bridge_go_safe() {
+    let output = foxguard_cmd()
+        .args([
+            "tests/fixtures/semgrep_taint/safe_go_exec.go",
+            "-f",
+            "json",
+            "--no-builtins",
+            "--rules",
+            "tests/fixtures/semgrep_taint/go_taint_exec.yml",
+        ])
+        .output()
+        .expect("failed to execute foxguard");
+
+    let findings: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+    let n = findings
+        .iter()
+        .filter(|f| f["rule_id"].as_str() == Some("semgrep/semgrep-go-taint-exec"))
+        .count();
+
+    assert_eq!(
+        n, 0,
+        "semgrep Go taint rule should not fire on safe_go_exec.go, got {} findings",
+        n
+    );
+}
+
 // ─── Go taint engine (issue #31) ───────────────────────────────────────────
 
 /// Positive fixture for the Go taint engine: each handler flows an

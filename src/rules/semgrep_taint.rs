@@ -6,9 +6,10 @@
 //!
 //! # Supported today
 //!
-//! - `mode: taint` with `languages: [python]` (other languages are rejected
-//!   with a warning and the rule is skipped; non-taint rules fall through to
-//!   the regular Semgrep bridge).
+//! - `mode: taint` with `languages: [python]`, `languages: [javascript]` /
+//!   `[typescript]` / `[js]` / `[ts]`, or `languages: [go]` / `[golang]`.
+//!   Other languages are rejected with a warning and the rule is skipped;
+//!   non-taint rules fall through to the regular Semgrep bridge.
 //! - `pattern-sources`, `pattern-sinks`, `pattern-sanitizers` as lists of
 //!   single-`pattern:` entries *or* `pattern-either:` lists (which may nest
 //!   recursively and flatten into multiple matchers for the same role).
@@ -20,7 +21,8 @@
 //!
 //! - `pattern-inside:`, `metavariable-pattern:`, `patterns:` inside
 //!   source/sink blocks.
-//! - Any `mode: taint` rule that does not target Python.
+//! - Any `mode: taint` rule that does not target Python, JavaScript/TypeScript,
+//!   or Go.
 //! - Any `pattern:` string whose shape is not one of:
 //!   - bare identifier (`request`) — compiled to `ParamName`
 //!   - dotted attribute chain (`request.data`, `request.json`) — compiled
@@ -36,10 +38,148 @@
 //! clear signal rather than a silently-degraded match surface.
 
 use crate::rules::common::get_source_line;
-use crate::rules::python_taint::{self, NodeMatcher, TaintSpec};
+use crate::rules::go_taint;
+use crate::rules::javascript_taint;
+use crate::rules::python_taint;
 use crate::rules::{FileContext, Rule};
 use crate::{Finding, Language, Severity};
 use serde_yaml::Value as YamlValue;
+
+// ─── Language-agnostic intermediate representation ───────────────────────
+//
+// The YAML bridge only produces three matcher shapes (Attribute, Call,
+// ParamName).  Each engine has its own `NodeMatcher` enum with extra
+// variants, but the YAML-compiled subset is identical across all three.
+// We compile YAML into `GenericMatcher` first, then convert to the
+// engine-specific type at analysis time.
+
+#[derive(Clone, Debug)]
+enum GenericMatcher {
+    Attribute {
+        root: String,
+        field: String,
+        description: String,
+    },
+    Call {
+        canonical: String,
+        description: String,
+    },
+    ParamName {
+        names: Vec<String>,
+        description: String,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct GenericSpec {
+    sources: Vec<GenericMatcher>,
+    sinks: Vec<GenericMatcher>,
+    sanitizers: Vec<GenericMatcher>,
+}
+
+/// Convert the generic spec into a Python taint spec.
+fn to_python_spec(g: &GenericSpec) -> python_taint::TaintSpec {
+    python_taint::TaintSpec {
+        sources: g.sources.iter().map(to_python_matcher).collect(),
+        sinks: g.sinks.iter().map(to_python_matcher).collect(),
+        sanitizers: g.sanitizers.iter().map(to_python_matcher).collect(),
+    }
+}
+
+fn to_python_matcher(m: &GenericMatcher) -> python_taint::NodeMatcher {
+    match m {
+        GenericMatcher::Attribute {
+            root,
+            field,
+            description,
+        } => python_taint::NodeMatcher::Attribute {
+            root: root.clone(),
+            field: field.clone(),
+            description: description.clone(),
+        },
+        GenericMatcher::Call {
+            canonical,
+            description,
+        } => python_taint::NodeMatcher::Call {
+            canonical: canonical.clone(),
+            description: description.clone(),
+        },
+        GenericMatcher::ParamName { names, description } => python_taint::NodeMatcher::ParamName {
+            names: names.clone(),
+            description: description.clone(),
+        },
+    }
+}
+
+/// Convert the generic spec into a JavaScript taint spec.
+fn to_js_spec(g: &GenericSpec) -> javascript_taint::TaintSpec {
+    javascript_taint::TaintSpec {
+        sources: g.sources.iter().map(to_js_matcher).collect(),
+        sinks: g.sinks.iter().map(to_js_matcher).collect(),
+        sanitizers: g.sanitizers.iter().map(to_js_matcher).collect(),
+    }
+}
+
+fn to_js_matcher(m: &GenericMatcher) -> javascript_taint::NodeMatcher {
+    match m {
+        GenericMatcher::Attribute {
+            root,
+            field,
+            description,
+        } => javascript_taint::NodeMatcher::Attribute {
+            root: root.clone(),
+            field: field.clone(),
+            description: description.clone(),
+        },
+        GenericMatcher::Call {
+            canonical,
+            description,
+        } => javascript_taint::NodeMatcher::Call {
+            canonical: canonical.clone(),
+            description: description.clone(),
+        },
+        GenericMatcher::ParamName { names, description } => {
+            javascript_taint::NodeMatcher::ParamName {
+                names: names.clone(),
+                description: description.clone(),
+            }
+        }
+    }
+}
+
+/// Convert the generic spec into a Go taint spec.
+fn to_go_spec(g: &GenericSpec) -> go_taint::TaintSpec {
+    go_taint::TaintSpec {
+        sources: g.sources.iter().map(to_go_matcher).collect(),
+        sinks: g.sinks.iter().map(to_go_matcher).collect(),
+        sanitizers: g.sanitizers.iter().map(to_go_matcher).collect(),
+    }
+}
+
+fn to_go_matcher(m: &GenericMatcher) -> go_taint::NodeMatcher {
+    match m {
+        GenericMatcher::Attribute {
+            root,
+            field,
+            description,
+        } => go_taint::NodeMatcher::Attribute {
+            root: root.clone(),
+            field: field.clone(),
+            description: description.clone(),
+        },
+        GenericMatcher::Call {
+            canonical,
+            description,
+        } => go_taint::NodeMatcher::Call {
+            canonical: canonical.clone(),
+            description: description.clone(),
+        },
+        GenericMatcher::ParamName { names, description } => go_taint::NodeMatcher::ParamName {
+            names: names.clone(),
+            description: description.clone(),
+        },
+    }
+}
 
 /// A compiled Semgrep `mode: taint` rule.
 pub struct SemgrepTaintRule {
@@ -48,7 +188,54 @@ pub struct SemgrepTaintRule {
     pub severity: Severity,
     pub cwe: Option<String>,
     pub lang: Language,
-    pub spec: TaintSpec,
+    spec: GenericSpec,
+}
+
+/// Unified view over the three engine-specific `TaintFinding` types.
+struct TaintFindingView {
+    sink_start_byte: usize,
+    sink_line: usize,
+    sink_column: usize,
+    sink_end_line: usize,
+    sink_end_column: usize,
+    source_description: String,
+    sink_description: String,
+}
+
+impl TaintFindingView {
+    fn from_python(f: python_taint::TaintFinding) -> Self {
+        Self {
+            sink_start_byte: f.sink_start_byte,
+            sink_line: f.sink_line,
+            sink_column: f.sink_column,
+            sink_end_line: f.sink_end_line,
+            sink_end_column: f.sink_end_column,
+            source_description: f.source_description,
+            sink_description: f.sink_description,
+        }
+    }
+    fn from_js(f: javascript_taint::TaintFinding) -> Self {
+        Self {
+            sink_start_byte: f.sink_start_byte,
+            sink_line: f.sink_line,
+            sink_column: f.sink_column,
+            sink_end_line: f.sink_end_line,
+            sink_end_column: f.sink_end_column,
+            source_description: f.source_description,
+            sink_description: f.sink_description,
+        }
+    }
+    fn from_go(f: go_taint::TaintFinding) -> Self {
+        Self {
+            sink_start_byte: f.sink_start_byte,
+            sink_line: f.sink_line,
+            sink_column: f.sink_column,
+            sink_end_line: f.sink_end_line,
+            sink_end_column: f.sink_end_column,
+            source_description: f.source_description,
+            sink_description: f.sink_description,
+        }
+    }
 }
 
 impl Rule for SemgrepTaintRule {
@@ -78,8 +265,37 @@ impl Rule for SemgrepTaintRule {
         tree: &tree_sitter::Tree,
         ctx: &FileContext<'_>,
     ) -> Vec<Finding> {
-        let raw =
-            python_taint::analyze_tree(tree.root_node(), source, &self.spec, ctx.python_aliases);
+        // Dispatch to the appropriate taint engine based on the rule's
+        // target language. Each engine returns the same TaintFinding shape.
+        let raw: Vec<TaintFindingView> = match self.lang {
+            Language::Python => {
+                let spec = to_python_spec(&self.spec);
+                python_taint::analyze_tree(tree.root_node(), source, &spec, ctx.python_aliases)
+                    .into_iter()
+                    .map(TaintFindingView::from_python)
+                    .collect()
+            }
+            Language::JavaScript => {
+                let spec = to_js_spec(&self.spec);
+                javascript_taint::analyze_tree(
+                    tree.root_node(),
+                    source,
+                    &spec,
+                    ctx.javascript_aliases,
+                )
+                .into_iter()
+                .map(TaintFindingView::from_js)
+                .collect()
+            }
+            Language::Go => {
+                let spec = to_go_spec(&self.spec);
+                go_taint::analyze_tree(tree.root_node(), source, &spec, ctx.go_aliases)
+                    .into_iter()
+                    .map(TaintFindingView::from_go)
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
         raw.into_iter()
             .map(|t| Finding {
                 rule_id: self.id.clone(),
@@ -132,20 +348,37 @@ pub fn parse_taint_rule(yaml: &YamlValue) -> TaintRuleParse {
         None => return TaintRuleParse::Skip("taint rule missing `id`".into()),
     };
 
-    // Language: Python only for now.
+    // Determine the target language. We support Python, JavaScript/TypeScript,
+    // and Go. The first recognised language wins.
     let lang = match yaml.get("languages").and_then(YamlValue::as_sequence) {
         Some(langs) => {
-            let has_python = langs
-                .iter()
-                .filter_map(YamlValue::as_str)
-                .any(|s| matches!(s.to_lowercase().as_str(), "python" | "py"));
-            if !has_python {
-                return TaintRuleParse::Skip(format!(
-                    "taint rule `{}` targets non-Python languages; only Python is supported",
-                    id
-                ));
+            let mut detected: Option<Language> = None;
+            for s in langs.iter().filter_map(YamlValue::as_str) {
+                match s.to_lowercase().as_str() {
+                    "python" | "py" => {
+                        detected = Some(Language::Python);
+                        break;
+                    }
+                    "javascript" | "js" | "typescript" | "ts" => {
+                        detected = Some(Language::JavaScript);
+                        break;
+                    }
+                    "go" | "golang" => {
+                        detected = Some(Language::Go);
+                        break;
+                    }
+                    _ => {}
+                }
             }
-            Language::Python
+            match detected {
+                Some(l) => l,
+                None => {
+                    return TaintRuleParse::Skip(format!(
+                        "taint rule `{}` targets unsupported languages; Python, JavaScript/TypeScript, and Go are supported",
+                        id
+                    ));
+                }
+            }
         }
         None => return TaintRuleParse::Skip(format!("taint rule `{}` missing `languages`", id)),
     };
@@ -197,7 +430,7 @@ pub fn parse_taint_rule(yaml: &YamlValue) -> TaintRuleParse {
         severity,
         cwe,
         lang,
-        spec: TaintSpec {
+        spec: GenericSpec {
             sources,
             sinks,
             sanitizers,
@@ -241,7 +474,7 @@ fn compile_matcher_list(
     node: Option<&YamlValue>,
     role: MatcherRole,
     rule_id: &str,
-) -> Result<Vec<NodeMatcher>, String> {
+) -> Result<Vec<GenericMatcher>, String> {
     let Some(node) = node else {
         return Ok(Vec::new());
     };
@@ -259,7 +492,12 @@ fn compile_matcher_list(
 /// Compile a single entry from a source/sink/sanitizer list, flattening
 /// nested `pattern-either:` blocks. Invalid entries emit a warning and are
 /// skipped rather than aborting the whole rule.
-fn compile_entry(entry: &YamlValue, role: MatcherRole, rule_id: &str, out: &mut Vec<NodeMatcher>) {
+fn compile_entry(
+    entry: &YamlValue,
+    role: MatcherRole,
+    rule_id: &str,
+    out: &mut Vec<GenericMatcher>,
+) {
     let Some(map) = entry.as_mapping() else {
         eprintln!(
             "Warning: taint rule `{}` {} entry is not a mapping; skipping",
@@ -347,7 +585,7 @@ fn compile_entry(entry: &YamlValue, role: MatcherRole, rule_id: &str, out: &mut 
 /// Returns `None` if the pattern shape is not one of the supported forms
 /// (see module docs). Callers surface that as a skip-with-warning at the
 /// rule level.
-fn compile_pattern(pattern: &str, role: MatcherRole) -> Option<NodeMatcher> {
+fn compile_pattern(pattern: &str, role: MatcherRole) -> Option<GenericMatcher> {
     let pat = pattern.trim();
     if pat.is_empty() {
         return None;
@@ -367,7 +605,7 @@ fn compile_pattern(pattern: &str, role: MatcherRole) -> Option<NodeMatcher> {
             return None;
         }
         let canonical = callee.to_string();
-        return Some(NodeMatcher::Call {
+        return Some(GenericMatcher::Call {
             canonical: canonical.clone(),
             description: describe(&canonical, role),
         });
@@ -388,7 +626,7 @@ fn compile_pattern(pattern: &str, role: MatcherRole) -> Option<NodeMatcher> {
             return None;
         }
         let desc = describe(pat, role);
-        return Some(NodeMatcher::Attribute {
+        return Some(GenericMatcher::Attribute {
             root,
             field,
             description: desc,
@@ -398,7 +636,7 @@ fn compile_pattern(pattern: &str, role: MatcherRole) -> Option<NodeMatcher> {
     // Bare identifier → treat as a ParamName source / sink would not make
     // sense, so for non-source roles we refuse this shape.
     match role {
-        MatcherRole::Source => Some(NodeMatcher::ParamName {
+        MatcherRole::Source => Some(GenericMatcher::ParamName {
             names: vec![pat.to_string()],
             description: format!("untrusted `{}` parameter", pat),
         }),
@@ -459,7 +697,7 @@ fn extract_cwe(yaml: &YamlValue) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn compile(pattern: &str, role: MatcherRole) -> Option<NodeMatcher> {
+    fn compile(pattern: &str, role: MatcherRole) -> Option<GenericMatcher> {
         compile_pattern(pattern, role)
     }
 
@@ -467,7 +705,7 @@ mod tests {
     fn compile_attribute_source() {
         let m = compile("request.data", MatcherRole::Source).expect("attribute");
         match m {
-            NodeMatcher::Attribute { root, field, .. } => {
+            GenericMatcher::Attribute { root, field, .. } => {
                 assert_eq!(root, "request");
                 assert_eq!(field, "data");
             }
@@ -479,7 +717,7 @@ mod tests {
     fn compile_nested_attribute_takes_leftmost_root_and_outermost_field() {
         let m = compile("request.session.user_id", MatcherRole::Source).expect("attribute");
         match m {
-            NodeMatcher::Attribute { root, field, .. } => {
+            GenericMatcher::Attribute { root, field, .. } => {
                 assert_eq!(root, "request");
                 assert_eq!(field, "user_id");
             }
@@ -491,7 +729,7 @@ mod tests {
     fn compile_call_with_metavar() {
         let m = compile("pickle.loads($X)", MatcherRole::Sink).expect("call");
         match m {
-            NodeMatcher::Call { canonical, .. } => assert_eq!(canonical, "pickle.loads"),
+            GenericMatcher::Call { canonical, .. } => assert_eq!(canonical, "pickle.loads"),
             _ => panic!("expected Call"),
         }
     }
@@ -500,7 +738,7 @@ mod tests {
     fn compile_call_with_ellipsis() {
         let m = compile("pickle.loads(...)", MatcherRole::Sink).expect("call");
         match m {
-            NodeMatcher::Call { canonical, .. } => assert_eq!(canonical, "pickle.loads"),
+            GenericMatcher::Call { canonical, .. } => assert_eq!(canonical, "pickle.loads"),
             _ => panic!("expected Call"),
         }
     }
@@ -509,7 +747,7 @@ mod tests {
     fn compile_bare_func_call() {
         let m = compile("eval($X)", MatcherRole::Sink).expect("call");
         match m {
-            NodeMatcher::Call { canonical, .. } => assert_eq!(canonical, "eval"),
+            GenericMatcher::Call { canonical, .. } => assert_eq!(canonical, "eval"),
             _ => panic!("expected Call"),
         }
     }
@@ -518,7 +756,9 @@ mod tests {
     fn compile_bare_identifier_source() {
         let m = compile("request", MatcherRole::Source).expect("paramname");
         match m {
-            NodeMatcher::ParamName { names, .. } => assert_eq!(names, vec!["request".to_string()]),
+            GenericMatcher::ParamName { names, .. } => {
+                assert_eq!(names, vec!["request".to_string()])
+            }
             _ => panic!("expected ParamName"),
         }
     }
@@ -579,11 +819,11 @@ languages: [python]
     }
 
     #[test]
-    fn taint_rule_with_non_python_language_is_skipped() {
+    fn taint_rule_with_unsupported_language_is_skipped() {
         let yaml = r#"
 id: x
 mode: taint
-languages: [javascript]
+languages: [ruby]
 severity: ERROR
 message: m
 pattern-sources: [{pattern: req}]
@@ -591,6 +831,71 @@ pattern-sinks: [{pattern: eval($X)}]
 "#;
         let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
         assert!(matches!(parse_taint_rule(&v), TaintRuleParse::Skip(_)));
+    }
+
+    #[test]
+    fn taint_rule_with_javascript_language_compiles() {
+        let yaml = r#"
+id: js-taint
+mode: taint
+languages: [javascript]
+severity: ERROR
+message: m
+pattern-sources: [{pattern: req.query}]
+pattern-sinks: [{pattern: eval($X)}]
+"#;
+        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        match parse_taint_rule(&v) {
+            TaintRuleParse::Compiled(r) => {
+                assert_eq!(r.lang, Language::JavaScript);
+                assert_eq!(r.spec.sources.len(), 1);
+                assert_eq!(r.spec.sinks.len(), 1);
+            }
+            TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
+            TaintRuleParse::NotTaint => panic!("expected taint rule"),
+        }
+    }
+
+    #[test]
+    fn taint_rule_with_typescript_language_compiles_as_javascript() {
+        let yaml = r#"
+id: ts-taint
+mode: taint
+languages: [typescript]
+severity: ERROR
+message: m
+pattern-sources: [{pattern: req.body}]
+pattern-sinks: [{pattern: eval($X)}]
+"#;
+        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        match parse_taint_rule(&v) {
+            TaintRuleParse::Compiled(r) => assert_eq!(r.lang, Language::JavaScript),
+            TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
+            TaintRuleParse::NotTaint => panic!("expected taint rule"),
+        }
+    }
+
+    #[test]
+    fn taint_rule_with_go_language_compiles() {
+        let yaml = r#"
+id: go-taint
+mode: taint
+languages: [go]
+severity: ERROR
+message: m
+pattern-sources: [{pattern: c.Query($X)}]
+pattern-sinks: [{pattern: exec.Command($X)}]
+"#;
+        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        match parse_taint_rule(&v) {
+            TaintRuleParse::Compiled(r) => {
+                assert_eq!(r.lang, Language::Go);
+                assert_eq!(r.spec.sources.len(), 1);
+                assert_eq!(r.spec.sinks.len(), 1);
+            }
+            TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
+            TaintRuleParse::NotTaint => panic!("expected taint rule"),
+        }
     }
 
     fn compiled(yaml: &str) -> SemgrepTaintRule {

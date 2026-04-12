@@ -1,0 +1,14 @@
+rules:
+  - id: semgrep-go-taint-exec
+    mode: taint
+    languages: [go]
+    severity: ERROR
+    message: "Untrusted input reaches exec.Command()"
+    metadata:
+      cwe: "CWE-78"
+    pattern-sources:
+      - pattern: c.Query($X)
+      - pattern: c.Param($X)
+      - pattern: r.URL
+    pattern-sinks:
+      - pattern: exec.Command($X)

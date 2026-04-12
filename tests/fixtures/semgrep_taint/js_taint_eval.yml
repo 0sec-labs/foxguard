@@ -1,0 +1,14 @@
+rules:
+  - id: semgrep-js-taint-eval
+    mode: taint
+    languages: [javascript]
+    severity: ERROR
+    message: "Untrusted request input reaches eval()"
+    metadata:
+      cwe: "CWE-95"
+    pattern-sources:
+      - pattern: req.query
+      - pattern: req.body
+      - pattern: req.params
+    pattern-sinks:
+      - pattern: eval($X)
