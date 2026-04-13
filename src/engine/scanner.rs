@@ -3,7 +3,7 @@ use crate::rules::go_taint::{self, go_aliases_from_tree};
 use crate::rules::javascript_taint::{self, js_aliases_from_tree};
 use crate::rules::python_aliases::{from_tree as py_aliases_from_tree, resolve_imports_to_paths};
 use crate::rules::python_taint;
-use crate::rules::{FileContext, RuleRegistry};
+use crate::rules::{common::AliasTable, FileContext, RuleRegistry};
 use crate::{Finding, Language};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
@@ -20,6 +20,13 @@ pub struct ScanResult {
     pub findings: Vec<Finding>,
     pub files_scanned: usize,
     pub duration: std::time::Duration,
+}
+
+struct PreparedFile {
+    source: String,
+    tree: tree_sitter::Tree,
+    aliases: AliasTable,
+    canonical_path: PathBuf,
 }
 
 #[derive(Default)]
@@ -453,6 +460,7 @@ fn scan_files(
     let has_go_taint_rules = rules_by_lang
         .get(&Language::Go)
         .is_some_and(|rules| rules.iter().any(|rule| rule.id().contains("/taint-")));
+    let mut prepared_files: HashMap<PathBuf, PreparedFile> = HashMap::new();
 
     // ── Pass 1: Extract cross-file taint summaries ────────────────────
     // Run pass 1 for Python, Go, and JS files when there are multiple
@@ -475,7 +483,7 @@ fn scan_files(
     let (mut cross_file_summaries, has_python_cross_file): (CrossFileSummaryMap, bool) =
         if has_python_taint_rules && python_files.len() > 1 {
             let rule_specs = crate::rules::python::python_taint_rule_specs();
-            let summaries: CrossFileSummaryMap = python_files
+            let prepared_python: Vec<_> = python_files
                 .par_iter()
                 .filter_map(|(path, _)| {
                     if std::fs::metadata(path).ok()?.len() > max_file_size {
@@ -493,16 +501,27 @@ fn scan_files(
                         Some(&aliases),
                         &rule_specs,
                     );
-                    if summaries.is_empty() {
-                        None
-                    } else {
-                        // Canonicalize the path for consistent lookups.
-                        let canonical =
-                            std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
-                        Some((canonical, summaries))
-                    }
+                    // Canonicalize the path for consistent lookups.
+                    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                    Some((
+                        path.clone(),
+                        PreparedFile {
+                            source,
+                            tree,
+                            aliases,
+                            canonical_path: canonical,
+                        },
+                        summaries,
+                    ))
                 })
                 .collect();
+            let mut summaries = CrossFileSummaryMap::new();
+            for (path, prepared, file_summaries) in prepared_python {
+                if !file_summaries.is_empty() {
+                    summaries.insert(prepared.canonical_path.clone(), file_summaries);
+                }
+                prepared_files.insert(path, prepared);
+            }
             let has_summaries = !summaries.is_empty();
             (summaries, has_summaries)
         } else {
@@ -513,7 +532,7 @@ fn scan_files(
     let mut has_js_cross_file = false;
     if has_js_taint_rules && js_files.len() > 1 {
         let js_rule_specs = crate::rules::javascript::js_taint_rule_specs();
-        let js_summaries: CrossFileSummaryMap = js_files
+        let prepared_js: Vec<_> = js_files
             .par_iter()
             .filter_map(|(path, _)| {
                 if std::fs::metadata(path).ok()?.len() > max_file_size {
@@ -531,14 +550,26 @@ fn scan_files(
                     Some(&aliases),
                     &js_rule_specs,
                 );
-                if summaries.is_empty() {
-                    None
-                } else {
-                    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
-                    Some((canonical, summaries))
-                }
+                let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                Some((
+                    path.clone(),
+                    PreparedFile {
+                        source,
+                        tree,
+                        aliases,
+                        canonical_path: canonical,
+                    },
+                    summaries,
+                ))
             })
             .collect();
+        let mut js_summaries = CrossFileSummaryMap::new();
+        for (path, prepared, file_summaries) in prepared_js {
+            if !file_summaries.is_empty() {
+                js_summaries.insert(prepared.canonical_path.clone(), file_summaries);
+            }
+            prepared_files.insert(path, prepared);
+        }
         has_js_cross_file = !js_summaries.is_empty();
         cross_file_summaries.extend(js_summaries);
     }
@@ -547,7 +578,7 @@ fn scan_files(
     let mut has_go_cross_file = false;
     if has_go_taint_rules && go_files.len() > 1 {
         let go_rule_specs = crate::rules::go::go_taint_rule_specs();
-        let go_summaries: CrossFileSummaryMap = go_files
+        let prepared_go: Vec<_> = go_files
             .par_iter()
             .filter_map(|(path, _)| {
                 if std::fs::metadata(path).ok()?.len() > max_file_size {
@@ -565,14 +596,26 @@ fn scan_files(
                     Some(&aliases),
                     &go_rule_specs,
                 );
-                if summaries.is_empty() {
-                    None
-                } else {
-                    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
-                    Some((canonical, summaries))
-                }
+                let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                Some((
+                    path.clone(),
+                    PreparedFile {
+                        source,
+                        tree,
+                        aliases,
+                        canonical_path: canonical,
+                    },
+                    summaries,
+                ))
             })
             .collect();
+        let mut go_summaries = CrossFileSummaryMap::new();
+        for (path, prepared, file_summaries) in prepared_go {
+            if !file_summaries.is_empty() {
+                go_summaries.insert(prepared.canonical_path.clone(), file_summaries);
+            }
+            prepared_files.insert(path, prepared);
+        }
         has_go_cross_file = !go_summaries.is_empty();
         cross_file_summaries.extend(go_summaries);
     }
@@ -586,7 +629,12 @@ fn scan_files(
         for (path, lang) in &files {
             if matches!(lang, Language::Go) && !is_noise_path(path) {
                 if let Some(dir) = path.parent() {
-                    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                    let canonical = prepared_files
+                        .get(path)
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| {
+                            std::fs::canonicalize(path).unwrap_or_else(|_| path.clone())
+                        });
                     index.entry(dir.to_path_buf()).or_default().push(canonical);
                 }
             }
@@ -624,19 +672,32 @@ fn scan_files(
                 _ => {}
             }
 
-            let Ok(source) = std::fs::read_to_string(path) else {
-                return Vec::new();
+            let prepared = prepared_files.get(path);
+            let owned_source;
+            let source = if let Some(prepared) = prepared {
+                prepared.source.as_str()
+            } else {
+                let Ok(read_source) = std::fs::read_to_string(path) else {
+                    return Vec::new();
+                };
+                if is_minified(&read_source) {
+                    return Vec::new();
+                }
+                owned_source = read_source;
+                owned_source.as_str()
             };
 
-            // Skip minified files (likely bundled/compiled assets)
-            if is_minified(&source) {
-                return Vec::new();
-            }
+            let inline_ignores = inline_ignore_directives(source, *language);
 
-            let inline_ignores = inline_ignore_directives(&source, *language);
-
-            let Some(tree) = super::parser::parse_file(&source, *language) else {
-                return Vec::new();
+            let owned_tree;
+            let tree = if let Some(prepared) = prepared {
+                &prepared.tree
+            } else {
+                let Some(parsed_tree) = super::parser::parse_file(source, *language) else {
+                    return Vec::new();
+                };
+                owned_tree = parsed_tree;
+                &owned_tree
             };
 
             let file_str = path.display().to_string();
@@ -648,18 +709,36 @@ fn scan_files(
             // Per-file analysis context. Python builds an import alias table so
             // rules can resolve aliased callees (`import pickle as p; p.loads(x)`)
             // back to their canonical dotted paths before sink matching.
+            let owned_python_aliases;
             let python_aliases = if matches!(language, Language::Python) {
-                Some(py_aliases_from_tree(&source, &tree))
+                if let Some(prepared) = prepared {
+                    Some(&prepared.aliases)
+                } else {
+                    owned_python_aliases = py_aliases_from_tree(source, tree);
+                    Some(&owned_python_aliases)
+                }
             } else {
                 None
             };
+            let owned_javascript_aliases;
             let javascript_aliases = if matches!(language, Language::JavaScript) {
-                Some(js_aliases_from_tree(&source, &tree))
+                if let Some(prepared) = prepared {
+                    Some(&prepared.aliases)
+                } else {
+                    owned_javascript_aliases = js_aliases_from_tree(source, tree);
+                    Some(&owned_javascript_aliases)
+                }
             } else {
                 None
             };
+            let owned_go_aliases;
             let go_aliases = if matches!(language, Language::Go) {
-                Some(go_aliases_from_tree(&source, &tree))
+                if let Some(prepared) = prepared {
+                    Some(&prepared.aliases)
+                } else {
+                    owned_go_aliases = go_aliases_from_tree(source, tree);
+                    Some(&owned_go_aliases)
+                }
             } else {
                 None
             };
@@ -667,12 +746,15 @@ fn scan_files(
             // Build Python import-to-path map for cross-file resolution.
             let python_import_paths =
                 if has_python_cross_file && matches!(language, Language::Python) {
-                    let mut imports = resolve_imports_to_paths(&source, &tree, path);
+                    let mut imports = resolve_imports_to_paths(source, tree, path);
                     // Canonicalize all paths to match the summary map keys.
                     let canonical: HashMap<String, PathBuf> = imports
                         .drain()
                         .map(|(k, v)| {
-                            let canon = std::fs::canonicalize(&v).unwrap_or(v);
+                            let canon = prepared_files
+                                .get(&v)
+                                .map(|prepared| prepared.canonical_path.clone())
+                                .unwrap_or_else(|| std::fs::canonicalize(&v).unwrap_or(v));
                             (k, canon)
                         })
                         .collect();
@@ -682,29 +764,35 @@ fn scan_files(
                 };
 
             // Build JavaScript import-to-path map for cross-file resolution.
-            let javascript_import_paths =
-                if has_js_cross_file && matches!(language, Language::JavaScript) {
-                    let mut imports =
-                        javascript_taint::resolve_js_imports_to_paths(&source, &tree, path);
-                    let canonical: HashMap<String, PathBuf> = imports
-                        .drain()
-                        .map(|(k, v)| {
-                            let canon = std::fs::canonicalize(&v).unwrap_or(v);
-                            (k, canon)
-                        })
-                        .collect();
-                    Some(canonical)
-                } else {
-                    None
-                };
+            let javascript_import_paths = if has_js_cross_file
+                && matches!(language, Language::JavaScript)
+            {
+                let mut imports = javascript_taint::resolve_js_imports_to_paths(source, tree, path);
+                let canonical: HashMap<String, PathBuf> = imports
+                    .drain()
+                    .map(|(k, v)| {
+                        let canon = prepared_files
+                            .get(&v)
+                            .map(|prepared| prepared.canonical_path.clone())
+                            .unwrap_or_else(|| std::fs::canonicalize(&v).unwrap_or(v));
+                        (k, canon)
+                    })
+                    .collect();
+                Some(canonical)
+            } else {
+                None
+            };
 
             // Build Go same-package paths for cross-file resolution.
             // All .go files in the same directory share a package, so
             // we provide the paths of sibling files (excluding self).
             let go_same_package_paths = if has_go_cross_file && matches!(language, Language::Go) {
                 path.parent().and_then(|dir| {
-                    let canonical_self =
-                        std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                    let canonical_self = prepared
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| {
+                            std::fs::canonicalize(path).unwrap_or_else(|_| path.clone())
+                        });
                     go_dir_index.get(dir).map(|siblings| {
                         siblings
                             .iter()
@@ -718,9 +806,9 @@ fn scan_files(
             };
 
             let ctx = FileContext {
-                python_aliases: python_aliases.as_ref(),
-                javascript_aliases: javascript_aliases.as_ref(),
-                go_aliases: go_aliases.as_ref(),
+                python_aliases,
+                javascript_aliases,
+                go_aliases,
                 cross_file_summaries: if has_cross_file {
                     Some(&cross_file_summaries)
                 } else {
@@ -736,7 +824,7 @@ fn scan_files(
                 if !rule.applies_to_path(&relative_path) {
                     continue;
                 }
-                let mut rule_findings = rule.check_with_context(&source, &tree, &ctx);
+                let mut rule_findings = rule.check_with_context(source, tree, &ctx);
                 for f in &mut rule_findings {
                     f.file = file_str.clone();
                 }
