@@ -12,74 +12,88 @@
     <span class="w-2.5 h-2.5 rounded-full bg-[#22c55e]/80"></span>
     <span class="font-mono text-[10px] text-noir-600 mx-auto tracking-wider">terminal</span>
   </div>
-  <div class="p-4 sm:p-5 font-mono text-[11px] sm:text-[12px] leading-[1.7] text-left">
-
-    <!-- Banner -->
-    <div class="mb-3">
+  <div class="p-4 sm:p-5 font-mono text-[11px] sm:text-[12px] leading-[1.72] text-left">
+    <div class="mb-4">
       <span class="text-fox-light font-bold">foxguard</span>
-      <span class="text-noir-600"> v0.6.2</span>
+      <span class="text-noir-600"> v0.6.3</span>
     </div>
 
-    <!-- File 1 -->
     <div class="mb-1">
-      <span class="text-noir-300 font-semibold">src/auth/login.js</span>
+      <span class="text-noir-100 font-semibold">src/auth/login.js</span>
       <span class="text-noir-700"> · </span>
       <span class="text-noir-600">2 issues</span>
     </div>
-    <div class="mb-3 ml-4 space-y-2">
-      <div>
+
+    <div class="mb-5">
+      <div class="mb-3">
         <div>
           <span class="text-purple-400">█</span>
-          <span class="bg-purple-900/80 text-white text-[9px] px-1.5 py-0.5 rounded font-bold ml-0.5">CRITICAL</span>
-          <span class="text-noir-300 ml-1">Untrusted input reaches db.query — SQL injection</span>
+          <span class="inline-block bg-[rgb(130,50,180)] text-white text-[9px] px-1.5 py-0.5 font-bold tracking-[0.04em] ml-1">CRITICAL</span>
+          <span class="text-noir-300 ml-1.5">Untrusted input reaches `db.query`</span>
         </div>
-        <div class="text-noir-600 ml-4">js/taint-sql-injection (CWE-89)  line 14:5</div>
-        <div class="text-noir-600 ml-4">db.query("SELECT * FROM users WHERE id = '" + req.param...</div>
-        <div class="ml-4">
-          <span class="text-green-600">Fix:</span>
-          <span class="text-green-700"> Use parameterized queries</span>
+        <div class="text-noir-600 ml-5">
+          <span class="text-cyan-400/80">js/taint-sql-injection</span>
+          <span> (CWE-89)</span>
+          <span class="ml-2">line 14:5</span>
+        </div>
+        <div class="text-noir-600 ml-5">db.query("SELECT * FROM users WHERE id = '" + req.params.id + "'")</div>
+        <div class="ml-5">
+          <span class="text-purple-400">█</span>
+          <span class="text-green-500 font-bold ml-2">Fix:</span>
+          <span class="text-noir-300"> Use parameterized queries</span>
         </div>
       </div>
+
       <div>
         <div>
           <span class="text-red-500">█</span>
-          <span class="bg-red-900/80 text-white text-[9px] px-1.5 py-0.5 rounded font-bold ml-0.5">HIGH</span>
-          <span class="text-noir-300 ml-1">Hardcoded JWT secret</span>
+          <span class="inline-block bg-red-700 text-white text-[9px] px-1.5 py-0.5 font-bold tracking-[0.04em] ml-1">HIGH</span>
+          <span class="text-noir-300 ml-1.5">Hardcoded JWT secret</span>
         </div>
-        <div class="text-noir-600 ml-4">js/jwt-hardcoded-secret (CWE-798)  line 8:1</div>
+        <div class="text-noir-600 ml-5">
+          <span class="text-cyan-400/80">js/jwt-hardcoded-secret</span>
+          <span> (CWE-798)</span>
+          <span class="ml-2">line 8:1</span>
+        </div>
+        <div class="text-noir-600 ml-5">const JWT_SECRET = "super-secret-prod-key"</div>
       </div>
     </div>
 
-    <!-- File 2 -->
     <div class="mb-1">
-      <span class="text-noir-300 font-semibold">app/views.py</span>
+      <span class="text-noir-100 font-semibold">app/views.py</span>
       <span class="text-noir-700"> · </span>
       <span class="text-noir-600">1 issue</span>
     </div>
-    <div class="mb-3 ml-4">
+
+    <div class="mb-5">
       <div>
         <span class="text-purple-400">█</span>
-        <span class="bg-purple-900/80 text-white text-[9px] px-1.5 py-0.5 rounded font-bold ml-0.5">CRITICAL</span>
-        <span class="text-noir-300 ml-1">request.GET reaches cursor.execute</span>
+        <span class="inline-block bg-[rgb(130,50,180)] text-white text-[9px] px-1.5 py-0.5 font-bold tracking-[0.04em] ml-1">CRITICAL</span>
+        <span class="text-noir-300 ml-1.5">`request.GET` reaches `cursor.execute`</span>
       </div>
-      <div class="text-noir-600 ml-4">py/taint-sql-injection (CWE-89)  line 52:12</div>
-      <div class="text-yellow-700 ml-4">source → views.py:51  django.request.GET</div>
-      <div class="text-red-700 ml-4">sink   → views.py:52  cursor.execute (via cross-file call)</div>
-      <div class="ml-4">
-        <span class="text-green-600">Fix:</span>
-        <span class="text-green-700"> Use parameterized queries</span>
+      <div class="text-noir-600 ml-5">
+        <span class="text-cyan-400/80">py/taint-sql-injection</span>
+        <span> (CWE-89)</span>
+        <span class="ml-2">line 52:12</span>
+      </div>
+      <div class="text-noir-600 ml-5">cursor.execute("SELECT * FROM users WHERE id = '%s'" % user_id)</div>
+      <div class="ml-5">
+        <span class="text-purple-400">█</span>
+        <span class="text-green-500 font-bold ml-2">Fix:</span>
+        <span class="text-noir-300"> Use parameterized queries</span>
       </div>
     </div>
 
-    <!-- Summary -->
-    <div class="border-t border-noir-800 pt-3 mt-1">
-      <div class="mb-2">
-        <span class="text-noir-100 font-bold">3 issues</span>
-        <span class="text-noir-600"> 1,204 files · 0.14s</span>
+    <div class="border-t border-noir-800 pt-4 mt-2">
+      <div class="text-noir-700 tracking-[0.2em] overflow-hidden whitespace-nowrap">--------------------------------------------------</div>
+      <div class="mt-4 mb-3">
+        <span class="text-noir-100 font-bold">3</span>
+        <span class="text-noir-600 ml-1">issues</span>
+        <span class="text-noir-600 ml-3">1,204 files · 0.14s</span>
       </div>
-      <div class="flex gap-2">
-        <span class="bg-purple-900/80 text-white text-[9px] px-1.5 py-0.5 rounded font-bold">2 critical</span>
-        <span class="bg-red-900/80 text-white text-[9px] px-1.5 py-0.5 rounded font-bold">1 high</span>
+      <div class="flex flex-wrap gap-2">
+        <span class="bg-[rgb(130,50,180)] text-white text-[10px] px-2 py-1 font-bold">2 critical</span>
+        <span class="bg-red-700 text-white text-[10px] px-2 py-1 font-bold">1 high</span>
       </div>
     </div>
   </div>
