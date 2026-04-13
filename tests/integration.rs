@@ -2020,6 +2020,96 @@ rules:
         );
     }
 
+    #[test]
+    fn test_scan_exclude_skips_directory_prefixes() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        fs::create_dir_all(repo.path().join("src")).expect("failed to create src dir");
+        fs::create_dir_all(repo.path().join("vendor/nested")).expect("failed to create vendor dir");
+        fs::write(repo.path().join("src/included.js"), "eval(userInput);\n")
+            .expect("failed to write included fixture");
+        fs::write(
+            repo.path().join("vendor/nested/ignored.js"),
+            "eval(userInput);\n",
+        )
+        .expect("failed to write ignored fixture");
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([".", "-f", "json", "--exclude", "vendor"])
+            .output()
+            .expect("failed to execute foxguard with excludes");
+
+        assert!(
+            !output.status.success(),
+            "non-excluded vulnerable files should still produce findings"
+        );
+
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        assert!(
+            !findings.is_empty(),
+            "expected included file to still produce findings"
+        );
+        assert!(
+            findings.iter().all(|finding| finding["file"]
+                .as_str()
+                .is_some_and(|file| file.ends_with("src/included.js"))),
+            "expected excluded vendor files to be skipped"
+        );
+    }
+
+    #[test]
+    fn test_scan_exclude_glob_applies_to_changed_mode() {
+        let repo = setup_git_repo(&[]);
+        fs::create_dir_all(repo.path().join("src")).expect("failed to create src dir");
+        fs::create_dir_all(repo.path().join("generated/nested"))
+            .expect("failed to create generated dir");
+        fs::write(repo.path().join("src/included.js"), "eval(userInput);\n")
+            .expect("failed to write included fixture");
+        fs::write(
+            repo.path().join("generated/nested/ignored.js"),
+            "eval(userInput);\n",
+        )
+        .expect("failed to write ignored fixture");
+
+        Command::new("git")
+            .args(["add", "src/included.js", "generated/nested/ignored.js"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to stage fixtures");
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([
+                "--changed",
+                ".",
+                "-f",
+                "json",
+                "--exclude",
+                "generated/**/*.js",
+            ])
+            .output()
+            .expect("failed to execute foxguard changed scan with excludes");
+
+        assert!(
+            !output.status.success(),
+            "non-excluded changed files should still produce findings"
+        );
+
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        assert!(
+            !findings.is_empty(),
+            "expected included changed file to still produce findings"
+        );
+        assert!(
+            findings.iter().all(|finding| finding["file"]
+                .as_str()
+                .is_some_and(|file| file.ends_with("src/included.js"))),
+            "expected excluded changed files to be skipped"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn test_secrets_rejects_config_symlink_escape() {

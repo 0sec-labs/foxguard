@@ -48,6 +48,10 @@ pub struct ScanArgs {
     #[arg(long, default_value_t = false)]
     pub changed: bool,
 
+    /// Exclude scan-relative paths by glob or prefix (repeatable)
+    #[arg(long)]
+    pub exclude: Vec<String>,
+
     /// Apply a baseline file to suppress known findings
     #[arg(long)]
     pub baseline: Option<String>,

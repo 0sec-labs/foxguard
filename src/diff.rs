@@ -117,6 +117,7 @@ fn scan_target_branch_files(
         &temp_paths,
         registry,
         max_file_size,
+        None,
     ))
 }
 
@@ -179,7 +180,7 @@ pub fn run_diff(
         .map_err(|_| format!("Target ref '{}' does not exist", target))?;
 
     // Scan current working tree
-    let current_result = scan_directory(scan_path, registry, max_file_size);
+    let current_result = scan_directory(scan_path, registry, max_file_size, None);
 
     // Get changed files between target and HEAD
     let changed = changed_files_vs_target(&repo, target)?;

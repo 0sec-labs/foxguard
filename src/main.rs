@@ -4,7 +4,7 @@ use foxguard::cli::{
     BaselineArgs, Cli, Command, DiffArgs, InitArgs, OutputFormat, ScanArgs, SecretsArgs,
 };
 use foxguard::config::{apply_scan_defaults, apply_secrets_defaults, load_for_scan};
-use foxguard::engine::{scan_directory, scan_paths_with_root, ScanResult};
+use foxguard::engine::{scan_directory, scan_paths_with_root, PathExcludeMatcher, ScanResult};
 use foxguard::git::changed_files;
 use foxguard::rules::semgrep_compat::load_semgrep_rules;
 use foxguard::rules::RuleRegistry;
@@ -116,12 +116,25 @@ fn scan_findings(scan: &ScanArgs) -> Result<ScanResult, i32> {
     validate_scan_inputs(scan)?;
 
     let registry = build_registry(scan);
+    let excludes = match PathExcludeMatcher::new(&scan.exclude) {
+        Ok(excludes) => excludes,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            return Err(2);
+        }
+    };
     let targets = collect_changed_targets(&scan.path, scan.changed)?;
 
     let mut result = if let Some(files) = targets {
-        scan_paths_with_root(Path::new(&scan.path), &files, &registry, scan.max_file_size)
+        scan_paths_with_root(
+            Path::new(&scan.path),
+            &files,
+            &registry,
+            scan.max_file_size,
+            Some(&excludes),
+        )
     } else {
-        scan_directory(&scan.path, &registry, scan.max_file_size)
+        scan_directory(&scan.path, &registry, scan.max_file_size, Some(&excludes))
     };
 
     // Filter by severity if specified
@@ -474,6 +487,7 @@ fn run_init(args: &InitArgs) -> i32 {
                 rules: None,
                 no_builtins: false,
                 changed: false,
+                exclude: Vec::new(),
                 baseline: None,
                 write_baseline: None,
                 explain: false,

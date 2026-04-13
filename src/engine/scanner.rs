@@ -5,6 +5,7 @@ use crate::rules::python_aliases::{from_tree as py_aliases_from_tree, resolve_im
 use crate::rules::python_taint;
 use crate::rules::{FileContext, RuleRegistry};
 use crate::{Finding, Language};
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
 use rayon::prelude::*;
 use regex::Regex;
@@ -19,6 +20,66 @@ pub struct ScanResult {
     pub findings: Vec<Finding>,
     pub files_scanned: usize,
     pub duration: std::time::Duration,
+}
+
+#[derive(Default)]
+pub struct PathExcludeMatcher {
+    prefixes: Vec<String>,
+    globset: Option<GlobSet>,
+}
+
+impl PathExcludeMatcher {
+    pub fn new(patterns: &[String]) -> Result<Self, String> {
+        if patterns.is_empty() {
+            return Ok(Self::default());
+        }
+
+        let mut prefixes = Vec::new();
+        let mut builder = GlobSetBuilder::new();
+        let mut has_globs = false;
+
+        for pattern in patterns {
+            let normalized = normalize_match_path(Path::new(pattern));
+            if normalized.is_empty() {
+                continue;
+            }
+
+            if has_glob_metacharacters(pattern) {
+                let glob = Glob::new(&normalized)
+                    .map_err(|e| format!("Invalid exclude glob '{}': {}", pattern, e))?;
+                builder.add(glob);
+                has_globs = true;
+            } else {
+                prefixes.push(normalized.trim_end_matches('/').to_string());
+            }
+        }
+
+        let globset = if has_globs {
+            Some(
+                builder
+                    .build()
+                    .map_err(|e| format!("Failed to build exclude patterns: {}", e))?,
+            )
+        } else {
+            None
+        };
+
+        Ok(Self { prefixes, globset })
+    }
+
+    fn is_excluded(&self, path: &Path) -> bool {
+        let normalized = normalize_match_path(path);
+
+        self.prefixes.iter().any(|prefix| {
+            normalized == *prefix
+                || normalized
+                    .strip_prefix(prefix)
+                    .is_some_and(|suffix| suffix.starts_with('/'))
+        }) || self
+            .globset
+            .as_ref()
+            .is_some_and(|globset| globset.is_match(&normalized))
+    }
 }
 
 #[derive(Default)]
@@ -56,12 +117,24 @@ fn detect_language(path: &Path) -> Option<Language> {
 }
 
 /// Scan a directory (or single file) and return findings with metadata.
-pub fn scan_directory(root: &str, registry: &RuleRegistry, max_file_size: u64) -> ScanResult {
+pub fn scan_directory(
+    root: &str,
+    registry: &RuleRegistry,
+    max_file_size: u64,
+    excludes: Option<&PathExcludeMatcher>,
+) -> ScanResult {
     let root_path = Path::new(root);
+    let scan_root = scan_root(root_path);
 
     let files: Vec<_> = if root_path.is_file() {
         if let Some(lang) = detect_language(root_path) {
-            vec![(root_path.to_path_buf(), lang)]
+            if excludes.is_some_and(|matcher| {
+                matcher.is_excluded(&relative_scan_path(scan_root, root_path))
+            }) {
+                vec![]
+            } else {
+                vec![(root_path.to_path_buf(), lang)]
+            }
         } else {
             vec![]
         }
@@ -75,17 +148,27 @@ pub fn scan_directory(root: &str, registry: &RuleRegistry, max_file_size: u64) -
             .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
             .filter_map(|entry| {
                 let path = entry.into_path();
+                if excludes.is_some_and(|matcher| {
+                    matcher.is_excluded(&relative_scan_path(scan_root, &path))
+                }) {
+                    return None;
+                }
                 detect_language(&path).map(|lang| (path, lang))
             })
             .collect()
     };
 
-    scan_files(scan_root(root_path), files, registry, max_file_size)
+    scan_files(scan_root, files, registry, max_file_size)
 }
 
 /// Scan an explicit list of paths.
-pub fn scan_paths(paths: &[PathBuf], registry: &RuleRegistry, max_file_size: u64) -> ScanResult {
-    scan_paths_with_root(Path::new("."), paths, registry, max_file_size)
+pub fn scan_paths(
+    paths: &[PathBuf],
+    registry: &RuleRegistry,
+    max_file_size: u64,
+    excludes: Option<&PathExcludeMatcher>,
+) -> ScanResult {
+    scan_paths_with_root(Path::new("."), paths, registry, max_file_size, excludes)
 }
 
 /// Scan an explicit list of paths relative to a scan root.
@@ -94,12 +177,18 @@ pub fn scan_paths_with_root(
     paths: &[PathBuf],
     registry: &RuleRegistry,
     max_file_size: u64,
+    excludes: Option<&PathExcludeMatcher>,
 ) -> ScanResult {
+    let scan_root = scan_root(root);
     let files = paths
         .iter()
+        .filter(|path| {
+            !excludes
+                .is_some_and(|matcher| matcher.is_excluded(&relative_scan_path(scan_root, path)))
+        })
         .filter_map(|path| detect_language(path).map(|lang| (path.clone(), lang)))
         .collect();
-    scan_files(scan_root(root), files, registry, max_file_size)
+    scan_files(scan_root, files, registry, max_file_size)
 }
 
 /// Check if a file path is in a directory that typically contains
@@ -655,6 +744,17 @@ fn relative_scan_path(scan_root: &Path, path: &Path) -> PathBuf {
     path.strip_prefix(scan_root).unwrap_or(path).to_path_buf()
 }
 
+fn has_glob_metacharacters(pattern: &str) -> bool {
+    pattern.contains('*') || pattern.contains('?') || pattern.contains('[') || pattern.contains('{')
+}
+
+fn normalize_match_path(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -700,5 +800,24 @@ mod tests {
         let (_, spec) = result.unwrap();
         assert!(!spec.all_rules);
         assert!(spec.rule_ids.contains("js/no-eval"));
+    }
+
+    #[test]
+    fn path_exclude_matcher_matches_prefixes_recursively() {
+        let matcher =
+            PathExcludeMatcher::new(&["vendor".to_string()]).expect("failed to build matcher");
+
+        assert!(matcher.is_excluded(Path::new("vendor/file.js")));
+        assert!(matcher.is_excluded(Path::new("vendor/nested/file.js")));
+        assert!(!matcher.is_excluded(Path::new("src/vendor/file.js")));
+    }
+
+    #[test]
+    fn path_exclude_matcher_matches_globs() {
+        let matcher = PathExcludeMatcher::new(&["generated/**/*.js".to_string()])
+            .expect("failed to build matcher");
+
+        assert!(matcher.is_excluded(Path::new("generated/foo/bar.js")));
+        assert!(!matcher.is_excluded(Path::new("generated/foo/bar.ts")));
     }
 }

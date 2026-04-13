@@ -161,7 +161,7 @@ fn handle_tools_call(request: &Value, registry: &RuleRegistry) -> Result<Value, 
             if !p.is_file() {
                 return Err(format!("Path is not a file: {}", path));
             }
-            let result = scan_directory(path, registry, 1_048_576);
+            let result = scan_directory(path, registry, 1_048_576, None);
             Ok(format_scan_result(result))
         }
         "scan_directory" => {
@@ -172,7 +172,7 @@ fn handle_tools_call(request: &Value, registry: &RuleRegistry) -> Result<Value, 
             if !p.is_dir() {
                 return Err(format!("Path is not a directory: {}", path));
             }
-            let result = scan_directory(path, registry, 1_048_576);
+            let result = scan_directory(path, registry, 1_048_576, None);
             Ok(format_scan_result(result))
         }
         _ => Err(format!("Unknown tool: {}", tool_name)),
