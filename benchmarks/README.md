@@ -21,6 +21,12 @@ BENCH_MODE=compat ./benchmarks/run.sh
 
 # Pin tool paths explicitly if needed.
 SEMGREP=/opt/homebrew/bin/semgrep OPENGREP=/path/to/opengrep ./benchmarks/run.sh
+
+# Cross-version foxguard-only benchmark (issue #174).
+python3 benchmarks/compare_versions.py --refs v0.4.0,v0.6.3,main
+
+# Faster local smoke run.
+python3 benchmarks/compare_versions.py --refs v0.4.0,v0.6.3,main --iterations 3 --warmup 1
 ```
 
 ### Required and optional tools
@@ -45,6 +51,21 @@ The benchmark suite measures foxguard, Semgrep, and OpenGrep against small and l
 | [sentry](https://github.com/getsentry/sentry) | Python | large (~500k LoC) | Production application monitoring platform — larger-corpus stress target |
 
 The small targets stay in the matrix for a fast local loop; `sentry` is the larger-corpus target added under #8 to stress the benchmark beyond framework-sized repos. Skip it with `BENCH_SKIP_LARGE=1` when you want a fast run.
+
+## Cross-version regression workflow
+
+When investigating foxguard-to-foxguard performance changes, use:
+
+`python3 benchmarks/compare_versions.py`
+
+What it does:
+
+1. Fetches tags/refs and creates isolated `git worktree` checkouts per ref
+2. Builds each ref with `cargo build --release`
+3. Benchmarks each built binary against the same local fixture repos (`express`, `flask`, `gin`)
+4. Writes a markdown report to `benchmarks/results-version-compare.md` with `avg/p50/p95` in milliseconds
+
+This keeps the benchmark apples-to-apples when validating regressions like #174.
 
 ### What is measured
 
