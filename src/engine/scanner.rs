@@ -317,6 +317,10 @@ fn parse_block_comment_ignore(line: &str) -> Option<(bool, InlineIgnoreSpec)> {
 }
 
 fn inline_ignore_directives(source: &str, language: Language) -> HashMap<usize, InlineIgnoreSpec> {
+    if !source.contains("foxguard") {
+        return HashMap::new();
+    }
+
     let lines: Vec<&str> = source.lines().collect();
     let mut directives = HashMap::new();
 
@@ -642,6 +646,21 @@ fn scan_files(
 
     let has_cross_file = !cross_file_summaries.is_empty();
 
+    let canonical_path_lookup: HashMap<PathBuf, PathBuf> = prepared_files
+        .iter()
+        .flat_map(|(path, prepared)| {
+            let canonical = prepared.canonical_path.clone();
+            let mut entries = vec![
+                (path.clone(), canonical.clone()),
+                (canonical.clone(), canonical),
+            ];
+            if path.is_relative() {
+                entries.push((scan_root.join(path), prepared.canonical_path.clone()));
+            }
+            entries
+        })
+        .collect();
+
     // Build a directory→files index for Go same-package resolution.
     // All .go files in the same directory share the same package.
     let go_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_go_cross_file {
@@ -652,9 +671,7 @@ fn scan_files(
                     let canonical = prepared_files
                         .get(path)
                         .map(|prepared| prepared.canonical_path.clone())
-                        .unwrap_or_else(|| {
-                            std::fs::canonicalize(path).unwrap_or_else(|_| path.clone())
-                        });
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
                     index.entry(dir.to_path_buf()).or_default().push(canonical);
                 }
             }
@@ -771,10 +788,7 @@ fn scan_files(
                     let canonical: HashMap<String, PathBuf> = imports
                         .drain()
                         .map(|(k, v)| {
-                            let canon = prepared_files
-                                .get(&v)
-                                .map(|prepared| prepared.canonical_path.clone())
-                                .unwrap_or_else(|| std::fs::canonicalize(&v).unwrap_or(v));
+                            let canon = resolve_canonical_path(&canonical_path_lookup, &v);
                             (k, canon)
                         })
                         .collect();
@@ -791,10 +805,7 @@ fn scan_files(
                 let canonical: HashMap<String, PathBuf> = imports
                     .drain()
                     .map(|(k, v)| {
-                        let canon = prepared_files
-                            .get(&v)
-                            .map(|prepared| prepared.canonical_path.clone())
-                            .unwrap_or_else(|| std::fs::canonicalize(&v).unwrap_or(v));
+                        let canon = resolve_canonical_path(&canonical_path_lookup, &v);
                         (k, canon)
                     })
                     .collect();
@@ -810,9 +821,7 @@ fn scan_files(
                 path.parent().and_then(|dir| {
                     let canonical_self = prepared
                         .map(|prepared| prepared.canonical_path.clone())
-                        .unwrap_or_else(|| {
-                            std::fs::canonicalize(path).unwrap_or_else(|_| path.clone())
-                        });
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
                     go_dir_index.get(dir).map(|siblings| {
                         siblings
                             .iter()
@@ -844,14 +853,14 @@ fn scan_files(
                 if !rule.applies_to_path(&relative_path) {
                     continue;
                 }
-                let mut rule_findings = rule.check_with_context(source, tree, &ctx);
-                for f in &mut rule_findings {
-                    f.file = file_str.clone();
-                }
-                let rule_findings = apply_inline_ignores(rule_findings, &inline_ignores);
-                file_findings.extend(rule_findings);
+                file_findings.extend(rule.check_with_context(source, tree, &ctx));
             }
-            file_findings
+
+            for finding in &mut file_findings {
+                finding.file = file_str.clone();
+            }
+
+            apply_inline_ignores(file_findings, &inline_ignores)
         })
         .collect();
 
@@ -869,6 +878,13 @@ fn scan_files(
         },
         warnings.into_inner().unwrap_or_default(),
     )
+}
+
+fn resolve_canonical_path(lookup: &HashMap<PathBuf, PathBuf>, path: &Path) -> PathBuf {
+    if let Some(canonical) = lookup.get(path) {
+        return canonical.clone();
+    }
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn scan_root(path: &Path) -> &Path {
