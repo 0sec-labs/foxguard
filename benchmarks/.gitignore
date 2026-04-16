@@ -2,3 +2,4 @@ repos/
 results*.md
 results.tmp.*
 .benchmark-lock/
+__pycache__/
