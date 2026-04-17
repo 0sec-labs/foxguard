@@ -113,7 +113,7 @@ mod python {
         assert_eq!(
             findings.len(),
             38,
-            "vulnerable.py should have 34 findings, got {}",
+            "vulnerable.py should have 38 findings, got {}",
             findings.len()
         );
 
@@ -621,7 +621,7 @@ mod javascript {
         assert_eq!(
             findings.len(),
             35,
-            "vulnerable.js should have 32 findings, got {}",
+            "vulnerable.js should have 35 findings, got {}",
             findings.len()
         );
 
@@ -932,8 +932,8 @@ mod go {
 
         assert_eq!(
             findings.len(),
-            23,
-            "vulnerable.go should have 15 findings, got {}",
+            26,
+            "vulnerable.go should have 26 findings, got {}",
             findings.len()
         );
 
@@ -1106,7 +1106,7 @@ mod java {
         assert_eq!(
             findings.len(),
             26,
-            "vulnerable.java should have 22 findings, got {}",
+            "vulnerable.java should have 26 findings, got {}",
             findings.len()
         );
 
@@ -1371,8 +1371,8 @@ mod rust_lang {
 
         assert_eq!(
             findings.len(),
-            21,
-            "vulnerable.rs should have 18 findings, got {}",
+            22,
+            "vulnerable.rs should have 22 findings, got {}",
             findings.len()
         );
 

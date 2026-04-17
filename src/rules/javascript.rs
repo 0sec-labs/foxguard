@@ -532,7 +532,8 @@ impl_rule! {
                     }
 
                     // crypto.sign / crypto.verify with ed25519/ed448 algorithm string
-                    if func_name == "sign" || func_name == "verify" {
+                    // Require member expression (contains dot) to avoid matching bare sign()/verify() calls
+                    if (func_name == "sign" || func_name == "verify") && func_text.contains('.') {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
                                 if first_arg.kind() == "string" {
