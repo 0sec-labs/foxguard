@@ -93,4 +93,4 @@ git push origin "${TAG}"
 
 echo ""
 echo "=== ${TAG} queued ==="
-echo "GitHub Actions release workflow will build binaries and publish GitHub, crates.io, npm, VS Code, and the Homebrew tap if the required secrets are configured."
+echo "GitHub Actions release workflow will build binaries and publish GitHub, crates.io, npm, and VS Code if the required secrets are configured."
