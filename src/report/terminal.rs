@@ -46,6 +46,21 @@ pub fn print_findings_with_options(
     duration: std::time::Duration,
     explain: bool,
 ) {
+    print_findings_with_options_and_confidence(findings, files_scanned, duration, explain, false);
+}
+
+/// Variant of [`print_findings_with_options`] that also controls whether
+/// per-finding confidence scores are displayed. Terminal output keeps
+/// them hidden by default because they're too noisy; callers that want
+/// them pass `show_confidence: true` (typically from the
+/// `--show-confidence` CLI flag).
+pub fn print_findings_with_options_and_confidence(
+    findings: &[Finding],
+    files_scanned: usize,
+    duration: std::time::Duration,
+    explain: bool,
+    show_confidence: bool,
+) {
     if findings.is_empty() {
         if files_scanned > 0 {
             println!(
@@ -86,7 +101,7 @@ pub fn print_findings_with_options(
         println!();
 
         for f in file_findings {
-            print_finding(f, explain);
+            print_finding(f, explain, show_confidence);
         }
         println!();
     }
@@ -124,7 +139,7 @@ fn truncate_snippet(line: &str) -> String {
     format!("{}...", &trimmed[..end])
 }
 
-fn print_finding(f: &Finding, explain: bool) {
+fn print_finding(f: &Finding, explain: bool, show_confidence: bool) {
     let accent = severity_accent(f.severity);
     let badge = severity_badge(f.severity);
     let cwe = f
@@ -137,11 +152,19 @@ fn print_finding(f: &Finding, explain: bool) {
     println!("    {accent} {badge} {}", f.description,);
 
     // Line 2: rule ID + CWE + location (secondary info, dimmed)
+    // Confidence is intentionally off by default — it's noisy for most
+    // users. `--show-confidence` opts in.
+    let conf_suffix = if show_confidence {
+        format!("  conf {:.2}", f.confidence.clamp(0.0, 1.0))
+    } else {
+        String::new()
+    };
     println!(
-        "    {accent}   {}{}  {}",
+        "    {accent}   {}{}  {}{}",
         f.rule_id.cyan().dimmed(),
         cwe.dimmed(),
         format!("line {}:{}", f.line, f.column).dimmed(),
+        conf_suffix.dimmed(),
     );
 
     // Code snippet (recessed further)

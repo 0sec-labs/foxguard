@@ -65,6 +65,13 @@ impl std::fmt::Display for Language {
     }
 }
 
+/// Default confidence score for a finding when nothing else is specified.
+/// Used by [`Finding::confidence`] via `#[serde(default)]` so baseline files
+/// written before the field existed still deserialize correctly.
+pub fn default_confidence() -> f32 {
+    1.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub rule_id: String,
@@ -91,4 +98,12 @@ pub struct Finding {
     pub sink_start_byte: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sink_end_byte: Option<usize>,
+    /// Detection certainty in the closed interval [0.0, 1.0].
+    ///
+    /// Defaults to 1.0 ("no confidence information; treat as certain").
+    /// Taint findings lower this based on hop count; Semgrep-compat
+    /// findings default to 0.7 because external pattern rules are
+    /// inherently fuzzier than curated built-in AST-walked rules.
+    #[serde(default = "default_confidence")]
+    pub confidence: f32,
 }

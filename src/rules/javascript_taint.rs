@@ -112,6 +112,11 @@ pub struct TaintFinding {
     /// dispatch a finding back to the correct rule. `None` for
     /// single-rule callers of [`analyze_tree`] / [`analyze_tree_with_cross_file`].
     pub rule_id_hint: Option<String>,
+    /// Approximate number of hops along the source→sink flow. 1 for a
+    /// direct in-function flow, 2 for a flow that crosses a file
+    /// boundary via cross-file summaries. Used by the reporting layer
+    /// to derive a confidence score.
+    pub hops: u8,
 }
 
 /// Cross-file context passed to `analyze_tree_with_cross_file` to enable
@@ -1624,6 +1629,7 @@ fn handle_assignment(
                         sink_description: sink_desc,
                         source_line: src_line,
                         rule_id_hint,
+                        hops: 1,
                     });
                 }
             }
@@ -1715,6 +1721,7 @@ fn handle_call(
                     sink_description: sink_desc.clone(),
                     source_line: src_line,
                     rule_id_hint: sink_rule_id.clone(),
+                    hops: 1,
                 });
                 break;
             }
@@ -1791,6 +1798,7 @@ fn handle_cross_file_call(
                 ),
                 source_line: src_line,
                 rule_id_hint: Some(flow.sink_rule_id.clone()),
+                hops: 2,
             });
             return;
         }

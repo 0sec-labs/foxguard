@@ -201,6 +201,7 @@ struct TaintFindingView {
     source_description: String,
     sink_description: String,
     source_line: usize,
+    hops: u8,
 }
 
 impl TaintFindingView {
@@ -214,6 +215,7 @@ impl TaintFindingView {
             source_description: f.source_description,
             sink_description: f.sink_description,
             source_line: f.source_line,
+            hops: f.hops,
         }
     }
     fn from_js(f: javascript_taint::TaintFinding) -> Self {
@@ -226,6 +228,7 @@ impl TaintFindingView {
             source_description: f.source_description,
             sink_description: f.sink_description,
             source_line: f.source_line,
+            hops: f.hops,
         }
     }
     fn from_go(f: go_taint::TaintFinding) -> Self {
@@ -238,6 +241,7 @@ impl TaintFindingView {
             source_description: f.source_description,
             sink_description: f.sink_description,
             source_line: f.source_line,
+            hops: f.hops,
         }
     }
 }
@@ -322,6 +326,7 @@ impl Rule for SemgrepTaintRule {
                 fix_suggestion: None,
                 sink_start_byte: None,
                 sink_end_byte: None,
+                confidence: crate::rules::common::confidence_for_hops(t.hops),
             })
             .collect()
     }

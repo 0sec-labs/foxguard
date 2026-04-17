@@ -279,6 +279,7 @@ pub fn scan_paths_with_config_and_notices(
                         fix_suggestion: None,
                         sink_start_byte: None,
                         sink_end_byte: None,
+                        confidence: crate::default_confidence(),
                     });
                 }
             }

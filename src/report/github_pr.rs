@@ -181,6 +181,7 @@ mod tests {
             ),
             sink_start_byte: None,
             sink_end_byte: None,
+            confidence: crate::default_confidence(),
         }
     }
 
