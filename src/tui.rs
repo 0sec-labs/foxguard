@@ -1,7 +1,11 @@
 use crate::app::{execute_tui, DiffSummary, TuiExecution, TuiMode};
 use crate::baseline::append_finding_to_baseline;
 use crate::cli::TuiArgs;
-use crate::config::{add_scan_ignore_rule, add_secrets_ignored_rule, load_for_scan};
+use crate::config::{
+    add_disabled_rule_to_config, add_scan_ignore_rule, add_secrets_ignored_rule,
+    add_severity_override_to_config, current_severity_override, is_rule_disabled_in_config,
+    load_for_scan,
+};
 use crate::{Finding, Severity};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use crossterm::execute;
@@ -115,6 +119,15 @@ struct TuiApp {
     search_mode: bool,
     search_query: String,
     min_severity: Option<Severity>,
+    /// Session-only lower bound on [`Finding::confidence`]. Cycled via the
+    /// `c` keybind (feature C). This filters already-emitted findings in
+    /// the UI; it is intentionally independent from the `scan.min_confidence`
+    /// config field (which filters at scan time) and from `--show-confidence`
+    /// (which only controls non-TUI rendering of the score).
+    session_min_confidence: f32,
+    /// Selected sort order for the findings list. Defaults to the
+    /// legacy severity-desc ordering; cycled via `Shift+C` (feature B).
+    sort_mode: SortMode,
     selected: usize,
     show_notices: bool,
     show_help: bool,
@@ -127,6 +140,7 @@ struct TuiApp {
     source_context_cache: Option<SourceContextCache>,
     open_focus: OpenFocus,
     action_menu: Option<ActionMenu>,
+    severity_picker: Option<SeverityPicker>,
     review_states: HashMap<String, ReviewState>,
 }
 
@@ -146,6 +160,8 @@ impl TuiApp {
             search_mode: false,
             search_query: String::new(),
             min_severity: None,
+            session_min_confidence: 0.0,
+            sort_mode: SortMode::default(),
             selected: 0,
             show_notices: true,
             show_help: false,
@@ -158,6 +174,7 @@ impl TuiApp {
             source_context_cache: None,
             open_focus: OpenFocus::Finding,
             action_menu: None,
+            severity_picker: None,
             review_states: HashMap::new(),
         }
     }
@@ -177,6 +194,7 @@ impl TuiApp {
         self.source_context_cache = None;
         self.open_focus = OpenFocus::Finding;
         self.action_menu = None;
+        self.severity_picker = None;
         let request_id = self.next_request_id;
         self.next_request_id += 1;
         self.active_request_id = request_id;
@@ -241,6 +259,10 @@ impl TuiApp {
 
         if self.show_launch {
             return self.handle_launch_key(key.code);
+        }
+
+        if self.severity_picker.is_some() {
+            return self.handle_severity_picker_key(key.code);
         }
 
         if self.action_menu.is_some() {
@@ -318,6 +340,14 @@ impl TuiApp {
             KeyCode::Enter => ControlFlow::OpenSelected,
             KeyCode::Char('o') => ControlFlow::OpenSelected,
             KeyCode::Char('r') => ControlFlow::Rescan,
+            KeyCode::Char('c') => {
+                self.cycle_session_min_confidence();
+                ControlFlow::Continue
+            }
+            KeyCode::Char('C') => {
+                self.cycle_sort_mode();
+                ControlFlow::Continue
+            }
             _ => ControlFlow::Continue,
         }
     }
@@ -405,11 +435,112 @@ impl TuiApp {
             }
             KeyCode::Enter => {
                 let action = menu.actions[menu.selected];
+                if !self.action_enabled(action) {
+                    return ControlFlow::Continue;
+                }
+                if matches!(action, TriageAction::LowerSeverity) {
+                    self.open_severity_picker();
+                    return ControlFlow::Continue;
+                }
                 self.action_menu = None;
                 ControlFlow::ApplyAction(action)
             }
             _ => ControlFlow::Continue,
         }
+    }
+
+    fn handle_severity_picker_key(&mut self, key: KeyCode) -> ControlFlow {
+        let Some(picker) = self.severity_picker.as_mut() else {
+            return ControlFlow::Continue;
+        };
+
+        match key {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.severity_picker = None;
+                ControlFlow::Continue
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                picker.selected =
+                    (picker.selected + 1).min(SEVERITY_PICKER_CHOICES.len().saturating_sub(1));
+                ControlFlow::Continue
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                picker.selected = picker.selected.saturating_sub(1);
+                ControlFlow::Continue
+            }
+            KeyCode::Enter => {
+                let severity = SEVERITY_PICKER_CHOICES[picker.selected];
+                self.severity_picker = None;
+                ControlFlow::ApplyAction(TriageAction::ApplySeverityOverride(severity))
+            }
+            _ => ControlFlow::Continue,
+        }
+    }
+
+    fn cycle_session_min_confidence(&mut self) {
+        // Cycle 0.0 → 0.7 → 0.9 → 1.0 → 0.0. The exact thresholds mirror
+        // common "high-confidence only" review presets without requiring a
+        // numeric prompt — the feature is deliberately a display filter,
+        // not a scan-time knob (see `scan.min_confidence` in config for that).
+        self.session_min_confidence = match self.session_min_confidence {
+            value if value <= 0.0 => 0.7,
+            value if value < 0.85 => 0.9,
+            value if value < 0.95 => 1.0,
+            _ => 0.0,
+        };
+        self.clamp_selection();
+    }
+
+    fn cycle_sort_mode(&mut self) {
+        self.sort_mode = self.sort_mode.next();
+        self.clamp_selection();
+    }
+
+    fn action_enabled(&self, action: TriageAction) -> bool {
+        match action {
+            TriageAction::DisableRuleGlobally => self
+                .selected_finding()
+                .map(|finding| {
+                    !matches!(
+                        is_rule_disabled_in_config(
+                            Path::new(&self.request.path),
+                            self.request.config.as_deref(),
+                            &finding.rule_id,
+                        ),
+                        Ok(true)
+                    )
+                })
+                .unwrap_or(true),
+            _ => true,
+        }
+    }
+
+    fn open_severity_picker(&mut self) {
+        let Some(finding) = self.selected_finding() else {
+            self.push_runtime_notice("no finding selected".to_string());
+            return;
+        };
+
+        // Pre-select the current override if the user already dialed this
+        // rule once before — saves a keystroke and makes the popup's current
+        // value visible as the highlighted row.
+        let current = current_severity_override(
+            Path::new(&self.request.path),
+            self.request.config.as_deref(),
+            &finding.rule_id,
+        )
+        .ok()
+        .flatten();
+        let selected = current
+            .and_then(|severity| {
+                SEVERITY_PICKER_CHOICES
+                    .iter()
+                    .position(|choice| *choice == severity)
+            })
+            .unwrap_or(0);
+
+        self.action_menu = None;
+        self.severity_picker = Some(SeverityPicker { selected, current });
     }
 
     fn open_action_menu(&mut self) -> ControlFlow {
@@ -437,6 +568,8 @@ impl TuiApp {
             Some(TuiMode::Scan) => vec![
                 TriageAction::AddToBaseline,
                 TriageAction::IgnoreRuleInFile,
+                TriageAction::LowerSeverity,
+                TriageAction::DisableRuleGlobally,
                 TriageAction::MarkReviewed,
                 TriageAction::MarkTodo,
                 TriageAction::MarkIgnoreCandidate,
@@ -547,14 +680,41 @@ impl TuiApp {
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
 
+        let sort_mode = self.sort_mode;
         indices.sort_by(|left, right| {
-            compare_findings(&result.findings[*left], &result.findings[*right])
+            compare_findings_by(&result.findings[*left], &result.findings[*right], sort_mode)
         });
 
         indices
     }
 
+    /// Count of findings rejected by the session confidence filter alone.
+    /// Used in the footer to show "12 of 45" style progress when a filter
+    /// is active. Note: search + severity filters also run; this only
+    /// tracks the confidence slice so the footer reads naturally.
+    fn total_after_severity_and_search(&self) -> usize {
+        let Some(result) = self.result.as_ref() else {
+            return 0;
+        };
+        let needle = self.search_query.to_ascii_lowercase();
+        result
+            .findings
+            .iter()
+            .filter(|finding| self.matches_non_confidence_filters(finding, &needle))
+            .count()
+    }
+
     fn matches_filters(&self, finding: &Finding, needle: &str) -> bool {
+        if !self.matches_non_confidence_filters(finding, needle) {
+            return false;
+        }
+        // Confidence filter is last so it reads naturally as the "final
+        // cut" and so the footer counts above (non-confidence filtered)
+        // stay independent of the `c` keybind.
+        finding.confidence + 1e-6 >= self.session_min_confidence
+    }
+
+    fn matches_non_confidence_filters(&self, finding: &Finding, needle: &str) -> bool {
         if let Some(min_severity) = self.min_severity {
             if finding.severity < min_severity {
                 return false;
@@ -627,6 +787,10 @@ impl TuiApp {
 
         if self.action_menu.is_some() {
             self.draw_action_menu(frame);
+        }
+
+        if self.severity_picker.is_some() {
+            self.draw_severity_picker(frame);
         }
     }
 
@@ -1162,15 +1326,43 @@ impl TuiApp {
             Span::raw(" search  "),
             footer_key_span("i"),
             Span::raw(" triage  "),
+            footer_key_span("c"),
+            Span::raw(" conf  "),
+            footer_key_span("C"),
+            Span::raw(" sort  "),
             footer_key_span("w"),
             Span::raw(" notices  "),
             footer_key_span("?"),
             Span::raw(" help  "),
-            footer_key_span("Tab"),
-            Span::raw(" cycle  "),
             footer_key_span("Enter"),
             Span::raw(" open"),
         ];
+
+        let mut right_spans: Vec<Span<'static>> = Vec::new();
+
+        // Confidence filter summary — only surfaces when non-zero so users
+        // whose session matches the default see an uncluttered footer.
+        if self.session_min_confidence > 0.0 {
+            let filtered_len = self.filtered_indices().len();
+            let total = self.total_after_severity_and_search();
+            right_spans.push(footer_label_span("conf"));
+            right_spans.push(Span::raw(" "));
+            right_spans.push(footer_value_span(&format!(
+                "≥ {:.2} ({}/{})",
+                self.session_min_confidence, filtered_len, total
+            )));
+            right_spans.push(Span::raw("  "));
+        }
+
+        // Only surface the sort label when it's off-default; the legacy
+        // severity-desc ordering is the least surprising starting point so
+        // we don't advertise it until the user explicitly cycles.
+        if self.sort_mode != SortMode::default() {
+            right_spans.push(footer_label_span("sort"));
+            right_spans.push(Span::raw(" "));
+            right_spans.push(footer_value_span(self.sort_mode.label()));
+            right_spans.push(Span::raw("  "));
+        }
 
         let search_text = if self.search_mode {
             format!("/{}", self.search_query)
@@ -1179,16 +1371,18 @@ impl TuiApp {
         } else {
             self.search_query.clone()
         };
-        let search_line = if search_text.is_empty() {
+        if !search_text.is_empty() {
+            right_spans.push(footer_label_span("search"));
+            right_spans.push(Span::raw(" "));
+            right_spans.push(footer_value_span(&search_text));
+        }
+
+        let right_line = if right_spans.is_empty() {
             Line::from("")
         } else {
-            Line::from(vec![
-                footer_label_span("search"),
-                Span::raw(" "),
-                footer_value_span(&search_text),
-            ])
+            Line::from(right_spans)
         };
-        draw_status_bar(frame, area, Line::from(key_spans), search_line);
+        draw_status_bar(frame, area, Line::from(key_spans), right_line);
     }
 
     fn draw_launch_footer(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1236,6 +1430,8 @@ impl TuiApp {
             Line::from("j/k or arrows  move between findings"),
             Line::from("/              search findings"),
             Line::from("0-4            set minimum severity filter"),
+            Line::from("c              cycle session confidence filter"),
+            Line::from("Shift+C        cycle list sort (severity | confidence)"),
             Line::from("Tab            cycle open target between finding/source/sink"),
             Line::from("i              open triage actions for the selected finding"),
             Line::from("Enter          open the current target in your editor"),
@@ -1278,7 +1474,21 @@ impl TuiApp {
         let items = menu
             .actions
             .iter()
-            .map(|action| ListItem::new(Line::from(action.label())))
+            .map(|action| {
+                let enabled = self.action_enabled(*action);
+                let style = if enabled {
+                    Style::default()
+                } else {
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM)
+                };
+                let mut label = action.label();
+                if !enabled {
+                    label.push_str("  (already disabled)");
+                }
+                ListItem::new(Line::from(Span::styled(label, style)))
+            })
             .collect::<Vec<_>>();
         let list = List::new(items)
             .block(panel_block(Some("Triage"), PANEL_BG))
@@ -1326,6 +1536,89 @@ impl TuiApp {
                 layout[2],
             );
         }
+        frame.render_widget(
+            Paragraph::new("Enter apply  Esc cancel")
+                .style(Style::default().bg(PANEL_BG).fg(Color::Gray))
+                .alignment(Alignment::Left),
+            layout[3],
+        );
+    }
+
+    fn draw_severity_picker(&self, frame: &mut ratatui::Frame) {
+        let Some(picker) = self.severity_picker.as_ref() else {
+            return;
+        };
+
+        let area = centered_rect(44, 34, frame.area());
+        let rule_id = self
+            .selected_finding()
+            .map(|finding| finding.rule_id.clone())
+            .unwrap_or_else(|| "no finding selected".to_string());
+        let items = SEVERITY_PICKER_CHOICES
+            .iter()
+            .map(|severity| {
+                let mut spans = vec![
+                    severity_badge_span(*severity),
+                    Span::raw("  "),
+                    Span::styled(severity.to_string(), Style::default().fg(Color::White)),
+                ];
+                if picker.current == Some(*severity) {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled("(current)", Style::default().fg(Color::Gray)));
+                }
+                ListItem::new(Line::from(spans))
+            })
+            .collect::<Vec<_>>();
+        let list = List::new(items)
+            .block(panel_block(Some("Lower severity"), PANEL_BG))
+            .highlight_style(
+                Style::default()
+                    .fg(Color::White)
+                    .bg(DETAIL_BG)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("> ");
+
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2),
+                Constraint::Length(SEVERITY_PICKER_CHOICES.len() as u16 + 2),
+                Constraint::Length(3),
+                Constraint::Length(1),
+            ])
+            .split(area);
+
+        frame.render_widget(Clear, area);
+        frame.render_widget(Block::default().style(Style::default().bg(PANEL_BG)), area);
+
+        let subtitle = match picker.current {
+            Some(current) => format!("{}  (current: {})", rule_id, current),
+            None => rule_id,
+        };
+        frame.render_widget(
+            Paragraph::new(Text::from(vec![
+                Line::from(Span::styled(
+                    "choose a new severity",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(subtitle, Style::default().fg(Color::Gray))),
+            ]))
+            .style(Style::default().bg(PANEL_BG)),
+            layout[0],
+        );
+
+        let mut state = ListState::default();
+        state.select(Some(picker.selected));
+        frame.render_stateful_widget(list, layout[1], &mut state);
+        frame.render_widget(
+            Paragraph::new("writes scan.severity_overrides to the repo config")
+                .style(Style::default().bg(PANEL_BG).fg(Color::Gray))
+                .wrap(Wrap { trim: false }),
+            layout[2],
+        );
         frame.render_widget(
             Paragraph::new("Enter apply  Esc cancel")
                 .style(Style::default().bg(PANEL_BG).fg(Color::Gray))
@@ -1491,6 +1784,72 @@ impl TuiApp {
                 }
                 Ok(true)
             }
+            TriageAction::LowerSeverity => {
+                // `LowerSeverity` opens the severity picker; the picker
+                // dispatches `ApplySeverityOverride(sev)` when the user picks.
+                // We should never land here for a direct apply, but keep the
+                // arm so adding the variant to `available_actions_for_finding`
+                // stays exhaustive without requiring two layers of state.
+                self.open_severity_picker();
+                Ok(false)
+            }
+            TriageAction::ApplySeverityOverride(severity) => {
+                let (config_path, previous) = add_severity_override_to_config(
+                    Path::new(&self.request.path),
+                    self.request.config.as_deref(),
+                    &finding.rule_id,
+                    severity,
+                )?;
+                match previous {
+                    Some(prev) if prev != severity => {
+                        self.push_runtime_notice(format!(
+                            "lowered {} from {} to {} via {}",
+                            finding.rule_id,
+                            prev,
+                            severity,
+                            config_path.display()
+                        ));
+                    }
+                    Some(_) => {
+                        self.push_runtime_notice(format!(
+                            "{} already set to {} in {}",
+                            finding.rule_id,
+                            severity,
+                            config_path.display()
+                        ));
+                    }
+                    None => {
+                        self.push_runtime_notice(format!(
+                            "set severity_overrides[{}] = {} via {}",
+                            finding.rule_id,
+                            severity,
+                            config_path.display()
+                        ));
+                    }
+                }
+                Ok(true)
+            }
+            TriageAction::DisableRuleGlobally => {
+                let (config_path, added) = add_disabled_rule_to_config(
+                    Path::new(&self.request.path),
+                    self.request.config.as_deref(),
+                    &finding.rule_id,
+                )?;
+                if added {
+                    self.push_runtime_notice(format!(
+                        "added {} to scan.disable_rules in {}",
+                        finding.rule_id,
+                        config_path.display()
+                    ));
+                } else {
+                    self.push_runtime_notice(format!(
+                        "{} already in scan.disable_rules in {}",
+                        finding.rule_id,
+                        config_path.display()
+                    ));
+                }
+                Ok(true)
+            }
             TriageAction::MarkReviewed => {
                 self.review_states.insert(review_key, ReviewState::Reviewed);
                 self.push_runtime_notice("marked finding as reviewed".to_string());
@@ -1546,6 +1905,66 @@ impl TuiApp {
                     &format!("secrets.ignore_rules += {}", finding.rule_id),
                 ),
             ],
+            TriageAction::LowerSeverity => {
+                let current = current_severity_override(
+                    Path::new(&self.request.path),
+                    self.request.config.as_deref(),
+                    &finding.rule_id,
+                )
+                .ok()
+                .flatten();
+                let mut lines = vec![
+                    preview_line("writes", &self.config_path_display()),
+                    preview_line(
+                        "entry",
+                        &format!(
+                            "scan.severity_overrides[{}] = <pick low|medium|high|critical>",
+                            finding.rule_id
+                        ),
+                    ),
+                ];
+                if let Some(current) = current {
+                    lines.push(Line::from(Span::styled(
+                        format!("current override: {}", current),
+                        Style::default().fg(Color::Gray),
+                    )));
+                }
+                lines
+            }
+            TriageAction::ApplySeverityOverride(severity) => vec![
+                preview_line("writes", &self.config_path_display()),
+                preview_line(
+                    "entry",
+                    &format!(
+                        "scan.severity_overrides[{}] = {}",
+                        finding.rule_id, severity
+                    ),
+                ),
+            ],
+            TriageAction::DisableRuleGlobally => {
+                let already = matches!(
+                    is_rule_disabled_in_config(
+                        Path::new(&self.request.path),
+                        self.request.config.as_deref(),
+                        &finding.rule_id,
+                    ),
+                    Ok(true)
+                );
+                let mut lines = vec![
+                    preview_line("writes", &self.config_path_display()),
+                    preview_line(
+                        "entry",
+                        &format!("scan.disable_rules += {}", finding.rule_id),
+                    ),
+                ];
+                if already {
+                    lines.push(Line::from(Span::styled(
+                        "already disabled — this action is a no-op",
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
+                lines
+            }
             TriageAction::MarkReviewed => vec![
                 preview_line("session", "mark as reviewed"),
                 Line::from("no files are changed"),
@@ -1710,6 +2129,13 @@ enum TriageAction {
     AddToBaseline,
     IgnoreRuleInFile,
     IgnoreSecretRule,
+    /// Open the severity picker for the selected finding's rule. The picker
+    /// dispatches an `ApplySeverityOverride(_)` once a severity is chosen.
+    LowerSeverity,
+    /// Emitted by the severity picker — writes `scan.severity_overrides`.
+    ApplySeverityOverride(Severity),
+    /// Append the rule to `scan.disable_rules` (global denylist).
+    DisableRuleGlobally,
     MarkReviewed,
     MarkTodo,
     MarkIgnoreCandidate,
@@ -1717,15 +2143,20 @@ enum TriageAction {
 }
 
 impl TriageAction {
-    fn label(self) -> &'static str {
+    fn label(self) -> String {
         match self {
-            TriageAction::AddToBaseline => "Add to baseline",
-            TriageAction::IgnoreRuleInFile => "Ignore this rule in this file",
-            TriageAction::IgnoreSecretRule => "Ignore this secret rule",
-            TriageAction::MarkReviewed => "Mark as reviewed",
-            TriageAction::MarkTodo => "Mark as todo",
-            TriageAction::MarkIgnoreCandidate => "Mark as ignore candidate",
-            TriageAction::ClearReviewState => "Clear review state",
+            TriageAction::AddToBaseline => "Add to baseline".to_string(),
+            TriageAction::IgnoreRuleInFile => "Ignore this rule in this file".to_string(),
+            TriageAction::IgnoreSecretRule => "Ignore this secret rule".to_string(),
+            TriageAction::LowerSeverity => "Lower severity for this rule".to_string(),
+            TriageAction::ApplySeverityOverride(severity) => {
+                format!("Apply severity override: {}", severity)
+            }
+            TriageAction::DisableRuleGlobally => "Disable rule globally".to_string(),
+            TriageAction::MarkReviewed => "Mark as reviewed".to_string(),
+            TriageAction::MarkTodo => "Mark as todo".to_string(),
+            TriageAction::MarkIgnoreCandidate => "Mark as ignore candidate".to_string(),
+            TriageAction::ClearReviewState => "Clear review state".to_string(),
         }
     }
 }
@@ -1750,6 +2181,48 @@ impl ReviewState {
 struct ActionMenu {
     actions: Vec<TriageAction>,
     selected: usize,
+}
+
+/// Modal sub-picker shown when the user chooses "Lower severity" from the
+/// triage menu. Owns a highlight cursor over `SEVERITY_PICKER_CHOICES` and
+/// remembers the rule's current override (if any) so the UI can show it.
+struct SeverityPicker {
+    selected: usize,
+    current: Option<Severity>,
+}
+
+/// Severities the "Lower severity" picker offers, ordered low → critical to
+/// match how humans tend to think about "dialing down" a noisy rule.
+const SEVERITY_PICKER_CHOICES: [Severity; 4] = [
+    Severity::Low,
+    Severity::Medium,
+    Severity::High,
+    Severity::Critical,
+];
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SortMode {
+    /// Severity desc, then path/line (the pre-existing default behaviour).
+    #[default]
+    SeverityDesc,
+    /// Confidence desc, with severity-desc as a stable tiebreaker.
+    ConfidenceDesc,
+}
+
+impl SortMode {
+    fn next(self) -> Self {
+        match self {
+            SortMode::SeverityDesc => SortMode::ConfidenceDesc,
+            SortMode::ConfidenceDesc => SortMode::SeverityDesc,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            SortMode::SeverityDesc => "severity",
+            SortMode::ConfidenceDesc => "confidence",
+        }
+    }
 }
 
 fn available_open_focuses(finding: &Finding) -> Vec<OpenFocus> {
@@ -2772,6 +3245,382 @@ mod tests {
     }
 
     #[test]
+    fn confidence_badge_is_hidden_at_full_confidence() {
+        assert!(confidence_badge_span(1.0).is_none());
+        assert!(confidence_badge_span(0.9999).is_none());
+    }
+
+    #[test]
+    fn confidence_badge_renders_for_partial_confidence() {
+        let span = confidence_badge_span(0.87).expect("should render badge");
+        assert_eq!(span.content, "[.87]");
+    }
+
+    #[test]
+    fn cycle_session_min_confidence_advances_through_presets() {
+        let mut app = TuiApp::new(TuiArgs {
+            path: ".".to_string(),
+            config: None,
+            severity: None,
+            rules: None,
+            no_builtins: false,
+            changed: false,
+            exclude: Vec::new(),
+            baseline: None,
+            diff: None,
+            secrets: false,
+            explain: false,
+            max_file_size: 1_048_576,
+        });
+
+        assert_eq!(app.session_min_confidence, 0.0);
+        app.cycle_session_min_confidence();
+        assert!((app.session_min_confidence - 0.7).abs() < 1e-6);
+        app.cycle_session_min_confidence();
+        assert!((app.session_min_confidence - 0.9).abs() < 1e-6);
+        app.cycle_session_min_confidence();
+        assert!((app.session_min_confidence - 1.0).abs() < 1e-6);
+        app.cycle_session_min_confidence();
+        assert_eq!(app.session_min_confidence, 0.0);
+    }
+
+    #[test]
+    fn cycle_sort_mode_toggles_between_severity_and_confidence() {
+        let mut app = TuiApp::new(TuiArgs {
+            path: ".".to_string(),
+            config: None,
+            severity: None,
+            rules: None,
+            no_builtins: false,
+            changed: false,
+            exclude: Vec::new(),
+            baseline: None,
+            diff: None,
+            secrets: false,
+            explain: false,
+            max_file_size: 1_048_576,
+        });
+
+        assert_eq!(app.sort_mode, SortMode::SeverityDesc);
+        app.cycle_sort_mode();
+        assert_eq!(app.sort_mode, SortMode::ConfidenceDesc);
+        app.cycle_sort_mode();
+        assert_eq!(app.sort_mode, SortMode::SeverityDesc);
+    }
+
+    #[test]
+    fn handle_key_binds_c_to_confidence_and_shift_c_to_sort() {
+        let mut app = TuiApp::new(TuiArgs {
+            path: ".".to_string(),
+            config: None,
+            severity: None,
+            rules: None,
+            no_builtins: false,
+            changed: false,
+            exclude: Vec::new(),
+            baseline: None,
+            diff: None,
+            secrets: false,
+            explain: false,
+            max_file_size: 1_048_576,
+        });
+        app.show_launch = false;
+
+        let _ = app.handle_key(KeyEvent::from(KeyCode::Char('c')));
+        assert!((app.session_min_confidence - 0.7).abs() < 1e-6);
+
+        let _ = app.handle_key(KeyEvent::from(KeyCode::Char('C')));
+        assert_eq!(app.sort_mode, SortMode::ConfidenceDesc);
+    }
+
+    #[test]
+    fn confidence_sort_places_high_confidence_before_low_regardless_of_severity() {
+        let high_conf_low_sev = Finding {
+            rule_id: "js/rule".to_string(),
+            severity: Severity::Low,
+            file: "a.js".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            description: "low sev but confident".to_string(),
+            snippet: "x".to_string(),
+            cwe: None,
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+            confidence: 0.95,
+        };
+        let low_conf_high_sev = Finding {
+            severity: Severity::Critical,
+            confidence: 0.5,
+            file: "b.js".to_string(),
+            ..high_conf_low_sev.clone()
+        };
+
+        assert_eq!(
+            compare_findings_by(
+                &high_conf_low_sev,
+                &low_conf_high_sev,
+                SortMode::ConfidenceDesc
+            ),
+            std::cmp::Ordering::Less,
+            "confidence sort should put the high-confidence finding first"
+        );
+        assert_eq!(
+            compare_findings_by(
+                &high_conf_low_sev,
+                &low_conf_high_sev,
+                SortMode::SeverityDesc
+            ),
+            std::cmp::Ordering::Greater,
+            "default sort should still put the higher-severity finding first"
+        );
+    }
+
+    #[test]
+    fn session_confidence_filter_hides_low_confidence_findings() {
+        let mut app = TuiApp::new(TuiArgs {
+            path: ".".to_string(),
+            config: None,
+            severity: None,
+            rules: None,
+            no_builtins: false,
+            changed: false,
+            exclude: Vec::new(),
+            baseline: None,
+            diff: None,
+            secrets: false,
+            explain: false,
+            max_file_size: 1_048_576,
+        });
+        let base = Finding {
+            rule_id: "js/rule".to_string(),
+            severity: Severity::High,
+            file: "a.js".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            description: "desc".to_string(),
+            snippet: "x".to_string(),
+            cwe: None,
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+            confidence: 1.0,
+        };
+        let low_conf = Finding {
+            confidence: 0.5,
+            file: "b.js".to_string(),
+            ..base.clone()
+        };
+        app.result = Some(TuiExecution {
+            mode: TuiMode::Scan,
+            path: ".".to_string(),
+            findings: vec![base.clone(), low_conf.clone()],
+            files_scanned: 2,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        });
+
+        assert_eq!(app.filtered_indices().len(), 2);
+
+        app.session_min_confidence = 0.7;
+        assert_eq!(
+            app.filtered_indices().len(),
+            1,
+            "only the high-confidence finding should survive"
+        );
+        // The "total before confidence filter" count should still be 2 for
+        // the footer's "X of Y" summary.
+        assert_eq!(app.total_after_severity_and_search(), 2);
+    }
+
+    #[test]
+    fn open_action_menu_in_scan_mode_exposes_new_triage_actions() {
+        let mut app = TuiApp::new(TuiArgs {
+            path: ".".to_string(),
+            config: None,
+            severity: None,
+            rules: None,
+            no_builtins: false,
+            changed: false,
+            exclude: Vec::new(),
+            baseline: None,
+            diff: None,
+            secrets: false,
+            explain: false,
+            max_file_size: 1_048_576,
+        });
+        app.result = Some(TuiExecution {
+            mode: TuiMode::Scan,
+            path: ".".to_string(),
+            findings: vec![Finding {
+                rule_id: "js/rule".to_string(),
+                severity: Severity::High,
+                file: "a.js".to_string(),
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 5,
+                description: "desc".to_string(),
+                snippet: "x".to_string(),
+                cwe: None,
+                source_line: None,
+                source_description: None,
+                sink_line: None,
+                sink_description: None,
+                fix_suggestion: None,
+                sink_start_byte: None,
+                sink_end_byte: None,
+                confidence: crate::default_confidence(),
+            }],
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        });
+        app.show_launch = false;
+
+        let _ = app.handle_key(KeyEvent::from(KeyCode::Char('i')));
+        let menu = app.action_menu.as_ref().expect("menu should be open");
+        assert!(menu.actions.contains(&TriageAction::LowerSeverity));
+        assert!(menu.actions.contains(&TriageAction::DisableRuleGlobally));
+    }
+
+    #[test]
+    fn apply_action_lower_severity_writes_override_and_replaces() {
+        let repo = tempfile::TempDir::new().expect("tempdir");
+        let mut app = TuiApp::new(TuiArgs {
+            path: repo.path().display().to_string(),
+            config: None,
+            severity: None,
+            rules: None,
+            no_builtins: false,
+            changed: false,
+            exclude: Vec::new(),
+            baseline: None,
+            diff: None,
+            secrets: false,
+            explain: false,
+            max_file_size: 1_048_576,
+        });
+        let finding = Finding {
+            rule_id: "js/rule".to_string(),
+            severity: Severity::High,
+            file: "a.js".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            description: "desc".to_string(),
+            snippet: "x".to_string(),
+            cwe: None,
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+            confidence: crate::default_confidence(),
+        };
+        app.result = Some(TuiExecution {
+            mode: TuiMode::Scan,
+            path: repo.path().display().to_string(),
+            findings: vec![finding.clone()],
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        });
+
+        let rescan = app
+            .apply_action(TriageAction::ApplySeverityOverride(Severity::Low))
+            .expect("override should apply");
+        assert!(rescan, "severity override should trigger a rescan");
+        assert_eq!(
+            crate::config::current_severity_override(repo.path(), None, "js/rule").unwrap(),
+            Some(Severity::Low)
+        );
+    }
+
+    #[test]
+    fn apply_action_disable_rule_globally_appends_and_detects_duplicate() {
+        let repo = tempfile::TempDir::new().expect("tempdir");
+        let mut app = TuiApp::new(TuiArgs {
+            path: repo.path().display().to_string(),
+            config: None,
+            severity: None,
+            rules: None,
+            no_builtins: false,
+            changed: false,
+            exclude: Vec::new(),
+            baseline: None,
+            diff: None,
+            secrets: false,
+            explain: false,
+            max_file_size: 1_048_576,
+        });
+        let finding = Finding {
+            rule_id: "js/rule".to_string(),
+            severity: Severity::High,
+            file: "a.js".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            description: "desc".to_string(),
+            snippet: "x".to_string(),
+            cwe: None,
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+            confidence: crate::default_confidence(),
+        };
+        app.result = Some(TuiExecution {
+            mode: TuiMode::Scan,
+            path: repo.path().display().to_string(),
+            findings: vec![finding.clone()],
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        });
+
+        let first = app
+            .apply_action(TriageAction::DisableRuleGlobally)
+            .expect("first disable should succeed");
+        assert!(first);
+        assert!(crate::config::is_rule_disabled_in_config(repo.path(), None, "js/rule").unwrap());
+
+        // Once disabled, the action is still "applied" (writer is a no-op and
+        // reports `added = false`), so the UI reports without blowing up.
+        let second = app
+            .apply_action(TriageAction::DisableRuleGlobally)
+            .expect("second disable should succeed");
+        assert!(second);
+    }
+
+    #[test]
     fn render_source_context_truncates_long_lines_around_selected_range() {
         let finding = Finding {
             rule_id: "js/no-command-injection".to_string(),
@@ -2833,6 +3682,15 @@ fn list_item(finding: &Finding, review_state: Option<ReviewState>) -> ListItem<'
             Style::default().add_modifier(Modifier::BOLD),
         ),
     ];
+    // Feature B: confidence badge — list-only, low-confidence-only. We render
+    // nothing when confidence is 1.0 because 95%+ of findings are high-
+    // confidence and a badge on every row would be pure noise. This display
+    // is independent of the `--show-confidence` CLI flag (which only affects
+    // non-TUI output) and of `scan.min_confidence` (scan-time filter).
+    if let Some(span) = confidence_badge_span(finding.confidence) {
+        title_spans.push(Span::raw(" "));
+        title_spans.push(span);
+    }
     if let Some(state) = review_state {
         title_spans.push(Span::raw(" "));
         title_spans.push(review_badge_span(state));
@@ -2845,6 +3703,31 @@ fn list_item(finding: &Finding, review_state: Option<ReviewState>) -> ListItem<'
             Style::default().fg(Color::Gray),
         )),
     ])
+}
+
+/// Small dimmed confidence indicator shown next to findings with
+/// `confidence < 1.0`. Returns `None` when the finding is at full
+/// confidence — the common case — so the list stays visually restrained.
+/// Format: `[.87]` (two decimals, no leading digit), dim gray foreground.
+fn confidence_badge_span(confidence: f32) -> Option<Span<'static>> {
+    if confidence >= 0.995 {
+        return None;
+    }
+    let clamped = confidence.clamp(0.0, 1.0);
+    let hundredths = (clamped * 100.0).round() as i32;
+    let label = if hundredths <= 0 {
+        "[.00]".to_string()
+    } else if hundredths >= 100 {
+        "[.99]".to_string()
+    } else {
+        format!("[.{:02}]", hundredths)
+    };
+    Some(Span::styled(
+        label,
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM),
+    ))
 }
 
 fn dataflow_lines(finding: &Finding, active_focus: OpenFocus) -> Vec<Line<'static>> {
@@ -3191,12 +4074,26 @@ struct RenderedContextLine {
     highlight: Option<(usize, usize)>,
 }
 
+#[cfg(test)]
 fn compare_findings(left: &Finding, right: &Finding) -> std::cmp::Ordering {
-    severity_rank(right.severity)
+    compare_findings_by(left, right, SortMode::SeverityDesc)
+}
+
+fn compare_findings_by(left: &Finding, right: &Finding, mode: SortMode) -> std::cmp::Ordering {
+    let severity_then_location = severity_rank(right.severity)
         .cmp(&severity_rank(left.severity))
         .then(left.file.cmp(&right.file))
         .then(left.line.cmp(&right.line))
-        .then(left.column.cmp(&right.column))
+        .then(left.column.cmp(&right.column));
+
+    match mode {
+        SortMode::SeverityDesc => severity_then_location,
+        SortMode::ConfidenceDesc => right
+            .confidence
+            .partial_cmp(&left.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(severity_then_location),
+    }
 }
 
 fn severity_rank(severity: Severity) -> u8 {

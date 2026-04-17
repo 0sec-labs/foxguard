@@ -577,6 +577,246 @@ pub fn add_scan_ignore_rule(
     Ok((config_path, added))
 }
 
+/// Write `scan.severity_overrides[<rule_id>]: <severity>` into the editable
+/// config file for `scan_path`, creating the file/structure if necessary.
+///
+/// Returns `(config_path, previous_severity)`. `previous_severity` is
+/// `Some(prev)` when the rule already had a different override (which this
+/// function replaces), `None` when the rule is new to the map. An unchanged
+/// override is not rewritten: the file is left untouched and `Ok((path,
+/// None))` is returned.
+///
+/// Used by the TUI triage menu as a non-destructive alternative to
+/// `ignore_rules` — operators can dial a noisy rule down to `low` instead
+/// of silencing it entirely.
+pub fn add_severity_override_to_config(
+    scan_path: &Path,
+    explicit_config: Option<&str>,
+    rule_id: &str,
+    severity: Severity,
+) -> Result<(PathBuf, Option<Severity>), String> {
+    let config_path = editable_config_path(scan_path, explicit_config)?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "failed to create config directory '{}': {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+
+    let mut root = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("failed to read config '{}': {}", config_path.display(), e))?;
+        if content.trim().is_empty() {
+            Value::Mapping(Mapping::new())
+        } else {
+            serde_yaml::from_str(&content)
+                .map_err(|e| format!("failed to parse config '{}': {}", config_path.display(), e))?
+        }
+    } else {
+        Value::Mapping(Mapping::new())
+    };
+
+    let mapping = root
+        .as_mapping_mut()
+        .ok_or_else(|| format!("config '{}' must be a YAML mapping", config_path.display()))?;
+    let scan = mapping
+        .entry(Value::String("scan".to_string()))
+        .or_insert_with(|| Value::Mapping(Mapping::new()));
+    let scan_mapping = scan.as_mapping_mut().ok_or_else(|| {
+        format!(
+            "config '{}' field 'scan' must be a mapping",
+            config_path.display()
+        )
+    })?;
+    let overrides = scan_mapping
+        .entry(Value::String("severity_overrides".to_string()))
+        .or_insert_with(|| Value::Mapping(Mapping::new()));
+    let overrides_mapping = overrides.as_mapping_mut().ok_or_else(|| {
+        format!(
+            "config '{}' field 'scan.severity_overrides' must be a mapping",
+            config_path.display()
+        )
+    })?;
+
+    let key = Value::String(rule_id.to_string());
+    let new_value = Value::String(severity_yaml_name(severity).to_string());
+    let previous = overrides_mapping
+        .get(&key)
+        .and_then(Value::as_str)
+        .and_then(parse_severity_yaml_name);
+    if previous == Some(severity) {
+        return Ok((config_path, None));
+    }
+    overrides_mapping.insert(key, new_value);
+
+    let content = serde_yaml::to_string(&root).map_err(|e| {
+        format!(
+            "failed to serialize config '{}': {}",
+            config_path.display(),
+            e
+        )
+    })?;
+    fs::write(&config_path, content)
+        .map_err(|e| format!("failed to write config '{}': {}", config_path.display(), e))?;
+
+    Ok((config_path, previous))
+}
+
+/// Append `rule_id` to `scan.disable_rules` in the editable config, creating
+/// the file/structure if necessary. Returns `(config_path, added)` where
+/// `added` is `false` when the rule was already in the list (the file is
+/// left untouched in that case).
+pub fn add_disabled_rule_to_config(
+    scan_path: &Path,
+    explicit_config: Option<&str>,
+    rule_id: &str,
+) -> Result<(PathBuf, bool), String> {
+    let config_path = editable_config_path(scan_path, explicit_config)?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "failed to create config directory '{}': {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+
+    let mut root = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("failed to read config '{}': {}", config_path.display(), e))?;
+        if content.trim().is_empty() {
+            Value::Mapping(Mapping::new())
+        } else {
+            serde_yaml::from_str(&content)
+                .map_err(|e| format!("failed to parse config '{}': {}", config_path.display(), e))?
+        }
+    } else {
+        Value::Mapping(Mapping::new())
+    };
+
+    let mapping = root
+        .as_mapping_mut()
+        .ok_or_else(|| format!("config '{}' must be a YAML mapping", config_path.display()))?;
+    let scan = mapping
+        .entry(Value::String("scan".to_string()))
+        .or_insert_with(|| Value::Mapping(Mapping::new()));
+    let scan_mapping = scan.as_mapping_mut().ok_or_else(|| {
+        format!(
+            "config '{}' field 'scan' must be a mapping",
+            config_path.display()
+        )
+    })?;
+    let disable_rules = scan_mapping
+        .entry(Value::String("disable_rules".to_string()))
+        .or_insert_with(|| Value::Sequence(Sequence::new()));
+    let sequence = disable_rules.as_sequence_mut().ok_or_else(|| {
+        format!(
+            "config '{}' field 'scan.disable_rules' must be a list",
+            config_path.display()
+        )
+    })?;
+
+    if sequence.iter().any(|value| value.as_str() == Some(rule_id)) {
+        return Ok((config_path, false));
+    }
+
+    sequence.push(Value::String(rule_id.to_string()));
+
+    let content = serde_yaml::to_string(&root).map_err(|e| {
+        format!(
+            "failed to serialize config '{}': {}",
+            config_path.display(),
+            e
+        )
+    })?;
+    fs::write(&config_path, content)
+        .map_err(|e| format!("failed to write config '{}': {}", config_path.display(), e))?;
+
+    Ok((config_path, true))
+}
+
+/// Check whether `rule_id` is already listed in `scan.disable_rules` for the
+/// resolved config file. Returns `Ok(false)` when no config file exists.
+/// The TUI uses this to grey out the "Disable rule globally" action when
+/// it would be a no-op.
+pub fn is_rule_disabled_in_config(
+    scan_path: &Path,
+    explicit_config: Option<&str>,
+    rule_id: &str,
+) -> Result<bool, String> {
+    let Some(path) = resolve_config_path(scan_path, explicit_config)? else {
+        return Ok(false);
+    };
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("failed to read config '{}': {}", path.display(), e))?;
+    if content.trim().is_empty() {
+        return Ok(false);
+    }
+    let value: Value = serde_yaml::from_str(&content)
+        .map_err(|e| format!("failed to parse config '{}': {}", path.display(), e))?;
+    let Some(disable_rules) = value
+        .get("scan")
+        .and_then(|scan| scan.get("disable_rules"))
+        .and_then(Value::as_sequence)
+    else {
+        return Ok(false);
+    };
+    Ok(disable_rules
+        .iter()
+        .any(|item| item.as_str() == Some(rule_id)))
+}
+
+/// Look up the current `scan.severity_overrides[rule_id]` value in the
+/// resolved config file, if any. Returns `Ok(None)` when no config exists,
+/// the rule is not in the map, or the stored value isn't a valid severity.
+pub fn current_severity_override(
+    scan_path: &Path,
+    explicit_config: Option<&str>,
+    rule_id: &str,
+) -> Result<Option<Severity>, String> {
+    let Some(path) = resolve_config_path(scan_path, explicit_config)? else {
+        return Ok(None);
+    };
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("failed to read config '{}': {}", path.display(), e))?;
+    if content.trim().is_empty() {
+        return Ok(None);
+    }
+    let value: Value = serde_yaml::from_str(&content)
+        .map_err(|e| format!("failed to parse config '{}': {}", path.display(), e))?;
+    Ok(value
+        .get("scan")
+        .and_then(|scan| scan.get("severity_overrides"))
+        .and_then(|overrides| overrides.get(rule_id))
+        .and_then(Value::as_str)
+        .and_then(parse_severity_yaml_name))
+}
+
+fn severity_yaml_name(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Low => "low",
+        Severity::Medium => "medium",
+        Severity::High => "high",
+        Severity::Critical => "critical",
+    }
+}
+
+fn parse_severity_yaml_name(value: &str) -> Option<Severity> {
+    match value {
+        "low" => Some(Severity::Low),
+        "medium" => Some(Severity::Medium),
+        "high" => Some(Severity::High),
+        "critical" => Some(Severity::Critical),
+        _ => None,
+    }
+}
+
 pub fn add_secrets_ignored_rule(
     scan_path: &Path,
     explicit_config: Option<&str>,
@@ -1333,5 +1573,120 @@ mod tests {
             .expect("expected config");
         apply_scan_thresholds(Some(&fresh));
         assert_eq!(hardcoded_secret_min_length(), 4);
+    }
+
+    // ── TUI triage helpers: severity override + disable rule writers ──────
+
+    #[test]
+    fn add_severity_override_creates_config_and_records_previous() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+
+        let (path, previous) =
+            add_severity_override_to_config(repo.path(), None, "py/no-eval", Severity::Low)
+                .expect("should write severity override");
+        assert!(path.ends_with(".foxguard.yml"));
+        assert!(previous.is_none(), "no prior override should exist");
+
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        assert_eq!(
+            loaded.scan.severity_overrides.get("py/no-eval"),
+            Some(&Severity::Low)
+        );
+
+        // Replacing with a different severity returns the previous one.
+        let (_, previous_again) =
+            add_severity_override_to_config(repo.path(), None, "py/no-eval", Severity::Medium)
+                .expect("should replace severity override");
+        assert_eq!(previous_again, Some(Severity::Low));
+
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        assert_eq!(
+            loaded.scan.severity_overrides.get("py/no-eval"),
+            Some(&Severity::Medium)
+        );
+    }
+
+    #[test]
+    fn add_severity_override_is_noop_when_value_unchanged() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        add_severity_override_to_config(repo.path(), None, "py/no-eval", Severity::Low)
+            .expect("first write");
+
+        let (_, previous) =
+            add_severity_override_to_config(repo.path(), None, "py/no-eval", Severity::Low)
+                .expect("second write");
+        assert!(
+            previous.is_none(),
+            "unchanged override should report no previous"
+        );
+    }
+
+    #[test]
+    fn current_severity_override_reads_existing_value() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  severity_overrides:\n    py/no-eval: high\n",
+        );
+
+        assert_eq!(
+            current_severity_override(repo.path(), None, "py/no-eval")
+                .expect("should read override"),
+            Some(Severity::High)
+        );
+        assert_eq!(
+            current_severity_override(repo.path(), None, "py/unrelated")
+                .expect("should return None"),
+            None
+        );
+    }
+
+    #[test]
+    fn add_disabled_rule_appends_to_disable_rules() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+
+        let (path, added) =
+            add_disabled_rule_to_config(repo.path(), None, "py/no-eval").expect("should write");
+        assert!(path.ends_with(".foxguard.yml"));
+        assert!(added);
+
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        assert_eq!(loaded.scan.disable_rules, vec!["py/no-eval".to_string()]);
+
+        // Second invocation is a no-op.
+        let (_, added_again) =
+            add_disabled_rule_to_config(repo.path(), None, "py/no-eval").expect("second write");
+        assert!(!added_again);
+    }
+
+    #[test]
+    fn is_rule_disabled_in_config_reports_membership() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  disable_rules:\n    - py/no-eval\n",
+        );
+
+        assert!(is_rule_disabled_in_config(repo.path(), None, "py/no-eval")
+            .expect("should probe config"));
+        assert!(
+            !is_rule_disabled_in_config(repo.path(), None, "py/no-pickle-loads")
+                .expect("should probe config")
+        );
+    }
+
+    #[test]
+    fn is_rule_disabled_in_config_returns_false_when_no_config() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        assert!(!is_rule_disabled_in_config(repo.path(), None, "py/no-eval")
+            .expect("should probe missing config"));
     }
 }
