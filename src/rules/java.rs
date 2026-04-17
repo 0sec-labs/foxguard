@@ -460,7 +460,6 @@ impl_rule! {
 /// Classify a Java algorithm string as quantum-vulnerable.
 /// Returns (algo_label, default_replacement) or None if not PQ-vulnerable.
 fn classify_java_pq_algo(algo: &str) -> Option<(&'static str, &'static str)> {
-    let upper = algo.to_uppercase();
     // Exact matches for KeyPairGenerator / KeyAgreement / KeyFactory
     match algo {
         "RSA" => return Some(("RSA", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)")),
@@ -471,6 +470,8 @@ fn classify_java_pq_algo(algo: &str) -> Option<(&'static str, &'static str)> {
         "X25519" | "X448" | "XDH" => return Some(("XDH", "ML-KEM (FIPS 203)")),
         _ => {}
     }
+    // Non-exact matches need case-insensitive comparison
+    let upper = algo.to_uppercase();
     // RSA cipher modes: "RSA/ECB/PKCS1Padding", "RSA/ECB/OAEPWithSHA-256..."
     if upper.starts_with("RSA/") || upper.starts_with("RSA_") {
         return Some(("RSA", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"));

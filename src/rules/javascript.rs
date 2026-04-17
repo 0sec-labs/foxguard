@@ -475,7 +475,7 @@ impl_rule! {
 
                     // crypto.generateKeyPair('rsa'|'ec'|'dsa'|'ed25519'|'ed448')
                     // crypto.generateKeyPairSync(...)
-                    if func_name == "generateKeyPair" || func_name == "generateKeyPairSync" {
+                    if (func_name == "generateKeyPair" || func_name == "generateKeyPairSync") && func_text.starts_with("crypto.") {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
                                 if first_arg.kind() == "string" {
