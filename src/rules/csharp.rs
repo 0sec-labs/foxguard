@@ -1,5 +1,5 @@
 use crate::impl_rule;
-use crate::rules::common::{make_finding, walk_tree};
+use crate::rules::common::{is_secret_value_long_enough, make_finding, walk_tree};
 use crate::{Language, Severity};
 use regex::Regex;
 
@@ -464,7 +464,7 @@ impl_rule! {
                                 let val = &src[child.byte_range()];
                                 let trimmed = val.trim_matches(|c| c == '"' || c == '@');
                                 let trimmed = trimmed.trim_matches('"');
-                                if trimmed.len() >= 4 {
+                                if is_secret_value_long_enough(trimmed) {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),
@@ -494,7 +494,7 @@ impl_rule! {
                                 let val = &src[right.byte_range()];
                                 let trimmed = val.trim_matches(|c| c == '"' || c == '@');
                                 let trimmed = trimmed.trim_matches('"');
-                                if trimmed.len() >= 4 {
+                                if is_secret_value_long_enough(trimmed) {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),

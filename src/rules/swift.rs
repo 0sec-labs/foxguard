@@ -1,5 +1,7 @@
 use crate::impl_rule;
-use crate::rules::common::{make_finding, make_finding_from_offsets, walk_tree};
+use crate::rules::common::{
+    is_secret_value_long_enough, make_finding, make_finding_from_offsets, walk_tree,
+};
 use crate::{Language, Severity};
 use regex::Regex;
 
@@ -45,7 +47,7 @@ impl_rule! {
                         if has_string_value {
                             let inner = string_val.trim_matches('"');
                             let line = node.start_position().row;
-                            if inner.len() >= 4 && reported_lines.insert(line) {
+                            if is_secret_value_long_enough(inner) && reported_lines.insert(line) {
                                 findings.push(make_finding(
                                     _self.id(),
                                     _self.severity(),
@@ -80,7 +82,7 @@ impl_rule! {
                             {
                                 let val = &src[child.byte_range()];
                                 let inner = val.trim_matches('"');
-                                if inner.len() >= 4 && reported_lines.insert(line) {
+                                if is_secret_value_long_enough(inner) && reported_lines.insert(line) {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),

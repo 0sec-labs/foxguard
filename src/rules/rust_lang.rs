@@ -1,5 +1,5 @@
 use crate::impl_rule;
-use crate::rules::common::{make_finding, walk_tree};
+use crate::rules::common::{is_secret_value_long_enough, make_finding, walk_tree};
 use crate::{Language, Severity};
 use regex::Regex;
 
@@ -272,7 +272,7 @@ impl_rule! {
                             if value.kind() == "string_literal" {
                                 let val = &src[value.byte_range()];
                                 let inner = val.trim_matches('"');
-                                if inner.len() >= 4 {
+                                if is_secret_value_long_enough(inner) {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),

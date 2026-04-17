@@ -1,7 +1,54 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{Finding, Severity};
+
+/// Default minimum length for strings flagged as a hardcoded secret.
+///
+/// Historically this was hardcoded as `>= 4` across every language-specific
+/// `no-hardcoded-secret` rule. It is now exposed as `scan.secrets.min_length`
+/// in `.foxguard.yml` (refs #210) while defaulting to the same value so
+/// behavior is unchanged out of the box.
+pub const DEFAULT_HARDCODED_SECRET_MIN_LENGTH: usize = 4;
+
+/// Process-wide override for the hardcoded-secret minimum length threshold.
+///
+/// Stored as an atomic so rule checks (which run in a rayon thread pool)
+/// can read it without locking. `0` means "no override, use the default".
+/// Callers set this from the loaded `FoxguardConfig` before scanning.
+static HARDCODED_SECRET_MIN_LENGTH_OVERRIDE: AtomicUsize = AtomicUsize::new(0);
+
+/// Install a process-wide `scan.secrets.min_length` override. Pass `None` to
+/// clear (reverting to [`DEFAULT_HARDCODED_SECRET_MIN_LENGTH`]).
+///
+/// Intentionally process-scoped rather than per-scan because rule structs
+/// are zero-sized and the rule-trait `check` method does not take a config
+/// parameter. Keeping the override in an atomic avoids a wide-reaching
+/// refactor of the `Rule` trait while still giving users a single config
+/// knob. A per-rule `configure()` hook (see issue #210) would subsume this.
+pub fn set_hardcoded_secret_min_length_override(value: Option<usize>) {
+    HARDCODED_SECRET_MIN_LENGTH_OVERRIDE.store(value.unwrap_or(0), Ordering::Relaxed);
+}
+
+/// Minimum length (in bytes) a string must have before a `*-hardcoded-secret`
+/// rule will fire. Returns the configured override, falling back to
+/// [`DEFAULT_HARDCODED_SECRET_MIN_LENGTH`].
+pub fn hardcoded_secret_min_length() -> usize {
+    let override_value = HARDCODED_SECRET_MIN_LENGTH_OVERRIDE.load(Ordering::Relaxed);
+    if override_value == 0 {
+        DEFAULT_HARDCODED_SECRET_MIN_LENGTH
+    } else {
+        override_value
+    }
+}
+
+/// True when `inner` (the unquoted content of a string literal) is long
+/// enough to be reported by a `*-hardcoded-secret` rule, per the
+/// `scan.secrets.min_length` threshold.
+pub fn is_secret_value_long_enough(inner: &str) -> bool {
+    inner.len() >= hardcoded_secret_min_length()
+}
 
 /// Shared per-file import alias table.
 ///

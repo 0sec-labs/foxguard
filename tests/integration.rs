@@ -3176,4 +3176,126 @@ rules:
             );
         }
     }
+
+    // ── scan.thresholds.secrets.min_length (issue #210) ─────────────────
+
+    /// Fixture with three variable-width "secret" assignments.
+    ///   - `password = "abc"`   (3 chars, below default min_length=4)
+    ///   - `password = "test"`  (4 chars, at default)
+    ///   - `password = "hunter2pass"` (10 chars, fires at any realistic threshold)
+    fn write_python_secret_fixture(dir: &Path) -> PathBuf {
+        let path = dir.join("secrets.py");
+        fs::write(
+            &path,
+            "password_short = \"abc\"\npassword_mid = \"test\"\npassword_long = \"hunter2pass\"\n",
+        )
+        .expect("failed to write python fixture");
+        path
+    }
+
+    fn count_py_hardcoded_secret_findings(stdout: &[u8]) -> usize {
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_slice(stdout).unwrap_or_else(|e| panic!("invalid JSON output: {e}"));
+        findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some("py/no-hardcoded-secret"))
+            .count()
+    }
+
+    #[test]
+    fn test_secrets_min_length_default_matches_hardcoded_four() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_python_secret_fixture(repo.path());
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args(["secrets.py", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+        // With no config the threshold must match the previous hardcoded
+        // `>= 4` check: `test` (4) + `hunter2pass` (10) fire, `abc` (3)
+        // is rejected.
+        let count = count_py_hardcoded_secret_findings(&output.stdout);
+        assert_eq!(
+            count, 2,
+            "default min_length should match pre-#210 `>= 4` behavior \
+             (expected 2 findings for `test` and `hunter2pass`, got {count})"
+        );
+    }
+
+    #[test]
+    fn test_secrets_min_length_raising_drops_short_matches() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_python_secret_fixture(repo.path());
+        write_config_file(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  thresholds:\n    secrets:\n      min_length: 8\n",
+        );
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args(["secrets.py", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+        // `test` (4 chars) now falls below min_length=8 and is dropped;
+        // only `hunter2pass` (10) remains.
+        let count = count_py_hardcoded_secret_findings(&output.stdout);
+        assert_eq!(
+            count, 1,
+            "raising min_length to 8 should drop `test`; expected 1, got {count}"
+        );
+    }
+
+    #[test]
+    fn test_secrets_min_length_lowering_catches_shorter_matches() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_python_secret_fixture(repo.path());
+        write_config_file(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  thresholds:\n    secrets:\n      min_length: 3\n",
+        );
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args(["secrets.py", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+        // Lowering min_length to 3 now catches `abc` in addition to the
+        // two longer strings.
+        let count = count_py_hardcoded_secret_findings(&output.stdout);
+        assert_eq!(
+            count, 3,
+            "lowering min_length to 3 should also flag `abc`; expected 3, got {count}"
+        );
+    }
+
+    #[test]
+    fn test_secrets_min_length_invalid_config_fails_loudly() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_python_secret_fixture(repo.path());
+        write_config_file(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  thresholds:\n    secrets:\n      min_length: 0\n",
+        );
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args(["secrets.py", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+        assert!(
+            !output.status.success(),
+            "min_length: 0 must fail the scan; stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("min_length"),
+            "error should mention min_length, got: {stderr}"
+        );
+    }
 }

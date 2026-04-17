@@ -1,5 +1,5 @@
 use crate::impl_rule;
-use crate::rules::common::{get_source_line, make_finding, walk_tree};
+use crate::rules::common::{get_source_line, is_secret_value_long_enough, make_finding, walk_tree};
 use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
 use regex::Regex;
@@ -74,7 +74,7 @@ impl_rule! {
                         let val = &src[value_node.byte_range()];
                         // Skip empty strings and short placeholders
                         let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
-                        if inner.len() >= 4 {
+                        if is_secret_value_long_enough(inner) {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
@@ -104,7 +104,7 @@ impl_rule! {
                     {
                         let val = &src[right.byte_range()];
                         let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
-                        if inner.len() >= 4 {
+                        if is_secret_value_long_enough(inner) {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
@@ -780,7 +780,7 @@ impl_rule! {
                         // Walk up to check if we're in an arguments > object > call_expression chain
                         let val = &src[value.byte_range()];
                         let inner = val.trim_matches(|c| c == '"' || c == '\'');
-                        if inner.len() >= 4 {
+                        if is_secret_value_long_enough(inner) {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
@@ -1166,7 +1166,7 @@ impl_rule! {
 
             let secret = &src[secret_arg.byte_range()];
             let inner = secret.trim_matches(|c| c == '"' || c == '\'' || c == '`');
-            if inner.len() < 4 {
+            if !is_secret_value_long_enough(inner) {
                 return;
             }
 
