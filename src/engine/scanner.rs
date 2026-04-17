@@ -901,18 +901,43 @@ fn scan_files(
                 ));
             }
 
+            // JavaScript taint rules: same batched approach as Go/Python
+            // above — see `crate::rules::javascript::run_js_taint_batched`.
+            let enabled_js_taint_ids: std::collections::HashSet<&str> =
+                if matches!(language, Language::JavaScript) {
+                    rules
+                        .iter()
+                        .filter(|r| {
+                            crate::rules::javascript::is_js_taint_rule_id(r.id())
+                                && r.applies_to_path(&relative_path)
+                        })
+                        .map(|r| r.id())
+                        .collect()
+                } else {
+                    std::collections::HashSet::new()
+                };
+            if !enabled_js_taint_ids.is_empty() {
+                file_findings.extend(crate::rules::javascript::run_js_taint_batched(
+                    source,
+                    tree,
+                    &ctx,
+                    &enabled_js_taint_ids,
+                ));
+            }
+
             for rule in rules {
                 if !rule.applies_to_path(&relative_path) {
                     continue;
                 }
-                // Skip rules already handled by the batched Go taint
-                // runner above.
+                // Skip rules already handled by the batched taint
+                // runners above.
                 if enabled_go_taint_ids.contains(rule.id()) {
                     continue;
                 }
-                // Skip rules already handled by the batched Python taint
-                // runner above.
                 if enabled_py_taint_ids.contains(rule.id()) {
+                    continue;
+                }
+                if enabled_js_taint_ids.contains(rule.id()) {
                     continue;
                 }
                 file_findings.extend(rule.check_with_context(source, tree, &ctx));

@@ -1676,7 +1676,7 @@ fn map_js_taint_findings(
         (Some(summaries), Some(import_paths)) => Some(javascript_taint::CrossFileInfo {
             import_to_path: import_paths,
             summaries,
-            current_rule_id: meta.rule_id,
+            rule_filter: javascript_taint::RuleFilter::Single(meta.rule_id),
         }),
         _ => None,
     };
@@ -2490,4 +2490,225 @@ pub fn js_taint_rule_specs() -> Vec<(&'static str, JsTaintSpec)> {
         ("js/taint-xxe", TaintXxe::spec()),
         ("js/taint-nosql-injection", TaintNosqlInjection::spec()),
     ]
+}
+
+/// Returns `true` if `rule_id` is one of the built-in JS taint rules
+/// handled by [`run_js_taint_batched`]. The scanner uses this to avoid
+/// running those rules individually in the per-rule loop.
+pub fn is_js_taint_rule_id(rule_id: &str) -> bool {
+    rule_id.starts_with("js/taint-")
+}
+
+/// Per-rule metadata used by the batched JS taint runner to shape
+/// findings (severity, CWE, fix hint, description formatter).
+struct JsTaintRuleDispatch {
+    meta: JsTaintRuleMeta<'static>,
+    format_description: fn(&str, &str) -> String,
+}
+
+fn js_taint_xss_innerhtml_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can lead to XSS")
+}
+fn js_taint_sql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject SQL")
+}
+fn js_taint_eval_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can execute arbitrary code")
+}
+fn js_taint_command_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject OS commands")
+}
+fn js_taint_ssrf_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can cause server-side request forgery")
+}
+fn js_taint_ssti_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject server-side templates")
+}
+fn js_taint_xpath_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject XPath expressions")
+}
+fn js_taint_ldap_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject LDAP filters")
+}
+fn js_taint_log_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can forge log entries")
+}
+fn js_taint_xxe_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can trigger XML External Entity processing")
+}
+fn js_taint_nosql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject NoSQL operators")
+}
+
+fn js_taint_rule_dispatch_table() -> Vec<JsTaintRuleDispatch> {
+    vec![
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-xss-innerhtml",
+                severity: Severity::High,
+                cwe: Some("CWE-79"),
+                fix_suggestion: Some("Use `DOMPurify.sanitize()` or `textContent` instead of `innerHTML`/`document.write`"),
+            },
+            format_description: js_taint_xss_innerhtml_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-sql-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-89"),
+                fix_suggestion: Some("Use parameterized queries: `db.query(\"SELECT * FROM users WHERE name = $1\", [name])`"),
+            },
+            format_description: js_taint_sql_injection_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-eval",
+                severity: Severity::Critical,
+                cwe: Some("CWE-95"),
+                fix_suggestion: Some("Remove `eval()`/`new Function()` and use safe alternatives like `JSON.parse()`"),
+            },
+            format_description: js_taint_eval_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-command-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-78"),
+                fix_suggestion: Some("Pass arguments as an array to `child_process.execFile()` instead of building a shell string"),
+            },
+            format_description: js_taint_command_injection_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-ssrf",
+                severity: Severity::High,
+                cwe: Some("CWE-918"),
+                fix_suggestion: Some("Validate URLs against an allowlist of permitted hosts before making requests"),
+            },
+            format_description: js_taint_ssrf_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-ssti",
+                severity: Severity::Critical,
+                cwe: Some("CWE-1336"),
+                fix_suggestion: Some("Use pre-compiled templates with auto-escaping instead of rendering user input as template strings"),
+            },
+            format_description: js_taint_ssti_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-xpath-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-643"),
+                fix_suggestion: Some("Validate and sanitize user input before building XPath expressions"),
+            },
+            format_description: js_taint_xpath_injection_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-ldap-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-90"),
+                fix_suggestion: Some("Use ldap-escape or sanitize special LDAP characters before building filter strings"),
+            },
+            format_description: js_taint_ldap_injection_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-log-injection",
+                severity: Severity::Medium,
+                cwe: Some("CWE-117"),
+                fix_suggestion: Some("Sanitize user input before logging — strip newlines and control characters"),
+            },
+            format_description: js_taint_log_injection_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-xxe",
+                severity: Severity::High,
+                cwe: Some("CWE-611"),
+                fix_suggestion: Some("Disable external entity resolution in XML parser configuration"),
+            },
+            format_description: js_taint_xxe_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-nosql-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-943"),
+                fix_suggestion: Some("Validate and sanitize user input before using in MongoDB queries. Use mongo-sanitize to strip $ operators."),
+            },
+            format_description: js_taint_nosql_injection_desc,
+        },
+    ]
+}
+
+/// Run every built-in JS taint rule over `tree` in a single batched
+/// pass, returning per-rule [`Finding`]s.
+///
+/// Rules are grouped by their sanitizer profile so that rules sharing
+/// the same sanitizers collapse into a single AST walk. The default
+/// JS taint ruleset has two groups (no-sanitizer x 8, sanitizer x 3),
+/// which means 2 walks per file instead of 11.
+pub fn run_js_taint_batched(
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &FileContext<'_>,
+    enabled_rule_ids: &std::collections::HashSet<&str>,
+) -> Vec<Finding> {
+    let dispatch = js_taint_rule_dispatch_table();
+    let rule_specs = js_taint_rule_specs();
+
+    // Only include rules the caller actually registered.
+    let rules: Vec<javascript_taint::BatchedRule<'_>> = rule_specs
+        .iter()
+        .filter(|(id, _)| enabled_rule_ids.contains(id))
+        .map(|(id, spec)| javascript_taint::BatchedRule { rule_id: id, spec })
+        .collect();
+
+    if rules.is_empty() {
+        return Vec::new();
+    }
+
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.javascript_import_paths) {
+        (Some(summaries), Some(import_paths)) => Some(javascript_taint::CrossFileInfoBatched {
+            import_to_path: import_paths,
+            summaries,
+        }),
+        _ => None,
+    };
+
+    let raw = javascript_taint::analyze_tree_batched(
+        tree.root_node(),
+        source,
+        &rules,
+        ctx.javascript_aliases,
+        cross_file_info.as_ref(),
+    );
+
+    raw.into_iter()
+        .filter_map(|(rule_id, t)| {
+            let d = dispatch.iter().find(|d| d.meta.rule_id == rule_id)?;
+            Some(Finding {
+                rule_id: d.meta.rule_id.to_string(),
+                severity: d.meta.severity,
+                cwe: d.meta.cwe.map(|s| s.to_string()),
+                description: (d.format_description)(&t.source_description, &t.sink_description),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
+                fix_suggestion: d.meta.fix_suggestion.map(|s| s.to_string()),
+                sink_start_byte: Some(t.sink_start_byte),
+                sink_end_byte: Some(t.sink_end_byte),
+            })
+        })
+        .collect()
 }
