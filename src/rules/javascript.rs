@@ -459,14 +459,13 @@ pub struct PqVulnerableCrypto;
 impl_rule! {
     PqVulnerableCrypto,
     id = "js/pq-vulnerable-crypto",
-    severity = Severity::Medium,
+    severity = Severity::High,
     cwe = Some("CWE-327"),
     description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DH/Ed25519)",
     language = Language::JavaScript,
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let pq_key_types = Regex::new(r"(?i)^['\x22`](rsa|ec|dsa|ed25519|ed448)['\x22`]$").unwrap();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
@@ -481,27 +480,25 @@ impl_rule! {
                             if let Some(first_arg) = args.named_child(0) {
                                 if first_arg.kind() == "string" {
                                     let val = &src[first_arg.byte_range()];
-                                    if pq_key_types.is_match(val) {
-                                        let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
-                                        let (algo, replacement) = match inner.to_lowercase().as_str() {
+                                    let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                                    let (algo, replacement) = match inner.to_lowercase().as_str() {
                                             "rsa" => ("RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
                                             "ec" => ("EC", "ML-KEM (FIPS 203) for key exchange or ML-DSA (FIPS 204) for signatures"),
                                             "dsa" => ("DSA", "ML-DSA (FIPS 204)"),
                                             "ed25519" | "ed448" => ("Ed25519/Ed448", "ML-DSA (FIPS 204)"),
                                             _ => return,
                                         };
-                                        findings.push(make_finding(
-                                            _self.id(),
-                                            _self.severity(),
-                                            _self.cwe(),
-                                            &format!(
-                                                "generateKeyPair('{}') uses quantum-vulnerable {} — migrate to {}",
-                                                inner, algo, replacement
-                                            ),
-                                            node,
-                                            src,
-                                        ));
-                                    }
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "generateKeyPair('{}') uses quantum-vulnerable {} — migrate to {}",
+                                            inner, algo, replacement
+                                        ),
+                                        node,
+                                        src,
+                                    ));
                                 }
                             }
                         }

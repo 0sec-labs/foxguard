@@ -2587,8 +2587,8 @@ rules:
         // High and Critical only
         assert_eq!(
             findings.len(),
-            21,
-            "high severity filter on vulnerable.js should yield 21 findings, got {}",
+            24,
+            "high severity filter on vulnerable.js should yield 24 findings, got {}",
             findings.len()
         );
 
