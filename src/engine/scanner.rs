@@ -847,8 +847,42 @@ fn scan_files(
             };
 
             let mut file_findings = Vec::new();
+
+            // Go taint rules share identical Pass 1 summaries across all
+            // rules in the same sanitizer-group. Instead of walking the
+            // AST once per rule, run them all through a single batched
+            // call that computes summaries once and emits per-rule
+            // findings in a single walk per sanitizer-group. See
+            // `crate::rules::go::run_go_taint_batched` for details.
+            let enabled_go_taint_ids: std::collections::HashSet<&str> =
+                if matches!(language, Language::Go) {
+                    rules
+                        .iter()
+                        .filter(|r| {
+                            crate::rules::go::is_go_taint_rule_id(r.id())
+                                && r.applies_to_path(&relative_path)
+                        })
+                        .map(|r| r.id())
+                        .collect()
+                } else {
+                    std::collections::HashSet::new()
+                };
+            if !enabled_go_taint_ids.is_empty() {
+                file_findings.extend(crate::rules::go::run_go_taint_batched(
+                    source,
+                    tree,
+                    &ctx,
+                    &enabled_go_taint_ids,
+                ));
+            }
+
             for rule in rules {
                 if !rule.applies_to_path(&relative_path) {
+                    continue;
+                }
+                // Skip rules already handled by the batched Go taint
+                // runner above.
+                if enabled_go_taint_ids.contains(rule.id()) {
                     continue;
                 }
                 file_findings.extend(rule.check_with_context(source, tree, &ctx));

@@ -738,7 +738,7 @@ fn map_go_taint_findings(
         (Some(summaries), Some(paths)) => Some(go_taint::CrossFileInfo {
             same_package_paths: paths,
             summaries,
-            current_rule_id: meta.rule_id,
+            rule_filter: go_taint::RuleFilter::Single(meta.rule_id),
         }),
         _ => None,
     };
@@ -1282,4 +1282,214 @@ pub fn go_taint_rule_specs() -> Vec<(&'static str, GoTaintSpec)> {
         ("go/taint-nosql-injection", TaintNosqlInjection::spec()),
         ("go/taint-path-traversal", TaintPathTraversal::spec()),
     ]
+}
+
+/// Per-rule metadata used by the batched Go taint runner to shape
+/// findings (severity, CWE, fix hint, description formatter).
+struct GoTaintRuleDispatch {
+    meta: GoTaintRuleMeta<'static>,
+    format_description: fn(&str, &str) -> String,
+}
+
+fn go_taint_command_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject OS commands")
+}
+fn go_taint_sql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject SQL")
+}
+fn go_taint_ssti_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject server-side templates")
+}
+fn go_taint_xpath_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject XPath queries")
+}
+fn go_taint_ldap_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject LDAP queries")
+}
+fn go_taint_ssrf_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can drive server-side request forgery")
+}
+fn go_taint_log_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can forge log entries")
+}
+fn go_taint_nosql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject NoSQL operators")
+}
+fn go_taint_path_traversal_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can traverse the filesystem")
+}
+
+fn go_taint_rule_dispatch_table() -> Vec<GoTaintRuleDispatch> {
+    vec![
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-command-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-78"),
+                fix_suggestion: Some("Go has no standard shell-escape function. Pass arguments as separate elements to `exec.Command(name, arg1, arg2)` instead of building a shell string — this avoids shell interpretation entirely"),
+            },
+            format_description: go_taint_command_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-sql-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-89"),
+                fix_suggestion: Some("Use parameterized queries: `db.Query(\"SELECT * FROM users WHERE name = $1\", name)`"),
+            },
+            format_description: go_taint_sql_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-ssti",
+                severity: Severity::Critical,
+                cwe: Some("CWE-1336"),
+                fix_suggestion: Some("Use pre-defined template files with template.ParseFiles() instead of parsing user-controlled template strings"),
+            },
+            format_description: go_taint_ssti_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-xpath-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-643"),
+                fix_suggestion: Some("Validate and sanitize user input before building XPath expressions"),
+            },
+            format_description: go_taint_xpath_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-ldap-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-90"),
+                fix_suggestion: Some("Use ldap.EscapeFilter() to sanitize user input before building LDAP filter strings"),
+            },
+            format_description: go_taint_ldap_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-ssrf",
+                severity: Severity::High,
+                cwe: Some("CWE-918"),
+                fix_suggestion: Some("Validate URLs against an allowlist of permitted hosts before making requests"),
+            },
+            format_description: go_taint_ssrf_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-log-injection",
+                severity: Severity::Medium,
+                cwe: Some("CWE-117"),
+                fix_suggestion: Some("Sanitize user input before logging — strip newlines and control characters"),
+            },
+            format_description: go_taint_log_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-nosql-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-943"),
+                fix_suggestion: Some("Validate and sanitize user input before building MongoDB queries."),
+            },
+            format_description: go_taint_nosql_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-path-traversal",
+                severity: Severity::High,
+                cwe: Some("CWE-22"),
+                fix_suggestion: Some("Validate file paths with filepath.Clean() and ensure they don't escape the intended directory"),
+            },
+            format_description: go_taint_path_traversal_desc,
+        },
+    ]
+}
+
+/// Returns `true` if `rule_id` is one of the built-in Go taint rules
+/// handled by [`run_go_taint_batched`]. The scanner uses this to avoid
+/// running those rules individually in the per-rule loop.
+pub fn is_go_taint_rule_id(rule_id: &str) -> bool {
+    rule_id.starts_with("go/taint-")
+}
+
+/// Run every built-in Go taint rule over `tree` in a single batched
+/// pass, returning per-rule [`Finding`]s.
+///
+/// This replaces the historical code path where each of the nine Go
+/// taint rules called [`go_taint::analyze_tree_with_cross_file`]
+/// individually — which recomputed rule-agnostic Pass 1 summaries and
+/// re-walked every function body once per rule.
+///
+/// Rules are grouped by their sanitizer profile so that rules sharing
+/// the same sanitizers collapse into a single AST walk. The default
+/// ruleset has two groups (no-sanitizer × 8 rules, path-traversal × 1
+/// rule), which means 2 walks per file instead of 9.
+pub fn run_go_taint_batched(
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &FileContext<'_>,
+    enabled_rule_ids: &std::collections::HashSet<&str>,
+) -> Vec<Finding> {
+    // Resolve aliases (prefer the one from FileContext).
+    let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+        Some(go_aliases_from_tree(source, tree))
+    } else {
+        None
+    };
+    let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+
+    let dispatch = go_taint_rule_dispatch_table();
+    let rule_specs = go_taint_rule_specs();
+
+    // Only include rules the caller actually registered.
+    let rules: Vec<go_taint::BatchedRule<'_>> = rule_specs
+        .iter()
+        .filter(|(id, _)| enabled_rule_ids.contains(id))
+        .map(|(id, spec)| go_taint::BatchedRule { rule_id: id, spec })
+        .collect();
+
+    if rules.is_empty() {
+        return Vec::new();
+    }
+
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.go_same_package_paths.as_ref()) {
+        (Some(summaries), Some(paths)) => Some(go_taint::CrossFileInfoBatched {
+            same_package_paths: paths,
+            summaries,
+        }),
+        _ => None,
+    };
+
+    let raw = go_taint::analyze_tree_batched(
+        tree.root_node(),
+        source,
+        &rules,
+        aliases,
+        cross_file_info.as_ref(),
+    );
+
+    raw.into_iter()
+        .filter_map(|(rule_id, t)| {
+            let d = dispatch.iter().find(|d| d.meta.rule_id == rule_id)?;
+            Some(Finding {
+                rule_id: d.meta.rule_id.to_string(),
+                severity: d.meta.severity,
+                cwe: d.meta.cwe.map(|s| s.to_string()),
+                description: (d.format_description)(&t.source_description, &t.sink_description),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
+                fix_suggestion: d.meta.fix_suggestion.map(|s| s.to_string()),
+                sink_start_byte: Some(t.sink_start_byte),
+                sink_end_byte: Some(t.sink_end_byte),
+            })
+        })
+        .collect()
 }
