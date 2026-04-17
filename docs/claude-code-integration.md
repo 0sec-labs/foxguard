@@ -83,7 +83,7 @@ To avoid network fetches on every commit, pin the version:
 { "command": "npx foxguard@0.6.2 --changed --severity high ." }
 ```
 
-Or install foxguard globally / via Homebrew and reference the binary directly:
+Or install foxguard globally (`curl -fsSL https://foxguard.dev/install.sh | sh`) and reference the binary directly:
 
 ```json
 { "command": "foxguard --changed --severity high ." }

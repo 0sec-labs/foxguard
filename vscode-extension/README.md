@@ -16,7 +16,7 @@ A security scanner as fast as a linter, written in Rust. Scans your code on ever
 foxguard must be installed:
 
 ```sh
-brew install peaktwilight/tap/foxguard
+curl -fsSL https://foxguard.dev/install.sh | sh
 # or
 npm install -g foxguard
 # or

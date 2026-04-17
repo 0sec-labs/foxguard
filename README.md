@@ -103,9 +103,9 @@ That boundary is deliberate. It keeps local scans fast, rule support understanda
 ## Install
 
 ```sh
-npx foxguard .                         # no install needed
-brew install peaktwilight/tap/foxguard # Homebrew (macOS/Linux)
-cargo install foxguard                 # crates.io
+npx foxguard .                                           # no install needed
+curl -fsSL https://foxguard.dev/install.sh | sh          # prebuilt binary (macOS/Linux)
+cargo install foxguard                                   # crates.io
 ```
 
 **Editor:** Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=peaktwilight.foxguard) — scans on save, shows findings as underlines.
