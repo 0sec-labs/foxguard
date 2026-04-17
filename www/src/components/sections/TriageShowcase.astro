@@ -1,0 +1,43 @@
+---
+---
+
+<section class="py-24" id="tui">
+  <div class="max-w-5xl mx-auto px-6">
+
+    <h2 class="font-heading text-noir-50 text-3xl sm:text-4xl mb-4">Triage without leaving the terminal</h2>
+    <p class="text-noir-500 text-base mb-2">
+      <code class="text-noir-400">foxguard tui .</code> opens an interactive view over scan, diff, and secrets modes.
+    </p>
+    <p class="text-noir-500 text-base mb-12">
+      Browse findings, read full dataflow traces, and mark false positives or fixes in place &mdash; no context switching.
+    </p>
+
+    <!-- Screenshot -->
+    <div class="rounded-xl overflow-hidden border border-noir-800 bg-noir-950 mb-8">
+      <img
+        src="/tui/findings.png"
+        alt="foxguard TUI showing the findings list on the left and the full dataflow detail for a selected SQL injection on the right"
+        class="block w-full h-auto"
+        loading="lazy"
+        decoding="async"
+      />
+    </div>
+
+    <!-- Copy command -->
+    <div class="flex items-center gap-3">
+      <code class="flex-1 bg-noir-950 border border-noir-800 rounded-lg px-4 py-3 font-mono text-sm text-noir-300">
+        <span class="text-noir-600">$</span> npx foxguard tui .
+      </code>
+      <button
+        type="button"
+        class="copy-btn rounded-lg border border-noir-700 px-4 py-3 text-sm text-noir-300 hover:border-noir-600 hover:text-noir-100 transition-colors"
+        data-copy="npx foxguard tui ."
+        aria-label="Copy command"
+      >
+        <span class="copy-icon">copy</span>
+        <span class="check-icon hidden">copied!</span>
+      </button>
+    </div>
+
+  </div>
+</section>
