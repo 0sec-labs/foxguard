@@ -361,6 +361,35 @@ impl_rule! {
                     if func.kind() != "selector_expression" {
                         return;
                     }
+                    // Skip calls nested as arguments to another PQ-vulnerable call
+                    // (e.g. elliptic.P256() inside ecdsa.GenerateKey(elliptic.P256(), ...))
+                    if let Some(parent) = node.parent() {
+                        if parent.kind() == "argument_list" {
+                            if let Some(grandparent) = parent.parent() {
+                                if grandparent.kind() == "call_expression" {
+                                    if let Some(outer_func) = grandparent.child_by_field_name("function") {
+                                        if outer_func.kind() == "selector_expression" {
+                                            let outer_raw = &src[outer_func.byte_range()];
+                                            let outer_text = if let Some(al) = aliases {
+                                                al.resolve(outer_raw)
+                                            } else {
+                                                std::borrow::Cow::Borrowed(outer_raw)
+                                            };
+                                            if outer_text.as_ref().starts_with("rsa.")
+                                                || outer_text.as_ref().starts_with("ecdsa.")
+                                                || outer_text.as_ref().starts_with("ecdh.")
+                                                || outer_text.as_ref().starts_with("dsa.")
+                                                || outer_text.as_ref().starts_with("elliptic.")
+                                                || outer_text.as_ref().starts_with("ed25519.")
+                                            {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     let raw = &src[func.byte_range()];
                     let func_text = if let Some(al) = aliases {
                         al.resolve(raw)
