@@ -62,3 +62,8 @@ fn unwrap_usage() {
     x.unwrap();
     x.expect("should exist");
 }
+
+// rs/pq-vulnerable-crypto
+use rsa::RsaPrivateKey;
+use p256::ecdsa::SigningKey;
+use ed25519_dalek::SigningKey as Ed25519Key;

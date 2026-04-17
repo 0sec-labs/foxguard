@@ -516,6 +516,86 @@ impl_rule! {
     }
 }
 
+// ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "py/pq-vulnerable-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519/X25519)",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        // Canonical prefixes for quantum-vulnerable asymmetric crypto
+        let pq_vulnerable: &[(&str, &str, &str)] = &[
+            ("cryptography.hazmat.primitives.asymmetric.rsa", "RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
+            ("cryptography.hazmat.primitives.asymmetric.ec", "ECDSA/ECDH", "ML-KEM (FIPS 203) for key exchange or ML-DSA (FIPS 204) for signatures"),
+            ("cryptography.hazmat.primitives.asymmetric.dsa", "DSA", "ML-DSA (FIPS 204)"),
+            ("cryptography.hazmat.primitives.asymmetric.ed25519", "Ed25519", "ML-DSA (FIPS 204)"),
+            ("cryptography.hazmat.primitives.asymmetric.x25519", "X25519", "ML-KEM (FIPS 203)"),
+            ("Crypto.PublicKey.RSA", "RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
+            ("Crypto.PublicKey.DSA", "DSA", "ML-DSA (FIPS 204)"),
+            ("Crypto.PublicKey.ECC", "ECC", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
+        ];
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect import statements: from X import Y, import X
+            if node.kind() == "import_from_statement" {
+                if let Some(module_node) = node.child_by_field_name("module_name") {
+                    let module = &src[module_node.byte_range()];
+                    for &(prefix, algo, replacement) in pq_vulnerable {
+                        if module == prefix || module.starts_with(&format!("{}.", prefix)) {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "Import of quantum-vulnerable {} — migrate to {}",
+                                    algo, replacement
+                                ),
+                                node,
+                                src,
+                            ));
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Detect calls via alias resolution
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
+                    for &(prefix, algo, replacement) in pq_vulnerable {
+                        if resolved.as_ref().starts_with(prefix) {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "{} is quantum-vulnerable — migrate to {}",
+                                    algo, replacement
+                                ),
+                                node,
+                                src,
+                            ));
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── Rule 7: no-pickle ─────────────────────────────────────────────────────
 
 pub struct NoPickle;
