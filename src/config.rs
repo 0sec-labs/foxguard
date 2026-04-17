@@ -25,6 +25,7 @@ pub struct ScanConfig {
     pub severity: Option<SeverityFilter>,
     pub baseline: Option<String>,
     pub ignore_rules: Vec<ScanIgnoreRule>,
+    pub rule_options: std::collections::HashMap<String, serde_yaml::Value>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -57,6 +58,8 @@ struct RawScanConfig {
     baseline: Option<String>,
     #[serde(default)]
     ignore_rules: Vec<RawScanIgnoreRule>,
+    #[serde(default)]
+    rule_options: std::collections::HashMap<String, serde_yaml::Value>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -196,6 +199,7 @@ impl FoxguardConfig {
                 severity: raw.scan.severity,
                 baseline: scan_baseline,
                 ignore_rules: scan_ignore_rules,
+                rule_options: raw.scan.rule_options,
             },
             secrets: SecretsConfig {
                 baseline: secrets_baseline,

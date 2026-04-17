@@ -162,6 +162,13 @@ pub trait Rule: Send + Sync {
     ) -> Vec<Finding> {
         self.check(source, tree)
     }
+
+    /// Apply per-rule options from config. Rules that support tuning override
+    /// this to parse their options from the YAML value. Returns an error
+    /// message if the options are invalid.
+    fn configure(&mut self, _opts: &serde_yaml::Value) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Registry holding all available rules.
@@ -395,6 +402,25 @@ impl RuleRegistry {
             .filter(|r| r.language() == language)
             .map(|r| r.as_ref())
             .collect()
+    }
+
+    /// Apply per-rule options from config. Warns on stderr for unknown rule IDs
+    /// and returns errors for invalid option values.
+    pub fn configure_rules(
+        &mut self,
+        rule_options: &std::collections::HashMap<String, serde_yaml::Value>,
+    ) -> Result<Vec<String>, String> {
+        let mut warnings = Vec::new();
+        for (rule_id, opts) in rule_options {
+            let Some(rule) = self.rules.iter_mut().find(|r| r.id() == rule_id) else {
+                warnings.push(format!("rule_options: unknown rule '{}'", rule_id));
+                continue;
+            };
+            rule.configure(opts).map_err(|e| {
+                format!("rule_options: invalid config for '{}': {}", rule_id, e)
+            })?;
+        }
+        Ok(warnings)
     }
 
     #[allow(dead_code)]
