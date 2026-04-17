@@ -1135,6 +1135,7 @@ fn run_kt_taint(
                     sink_end_byte: None,
                     confidence: crate::default_confidence(),
                     taint_hops: None,
+                    tags: vec![],
                 });
             }
         }

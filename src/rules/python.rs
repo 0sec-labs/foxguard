@@ -572,7 +572,7 @@ impl_rule! {
                     let resolved = resolve_callee(func_text, ctx);
                     for &(prefix, algo, replacement) in pq_vulnerable {
                         if resolved.as_ref().starts_with(prefix) {
-                            findings.push(make_finding(
+                            let mut f = make_finding(
                                 _self.id(),
                                 _self.severity(),
                                 _self.cwe(),
@@ -582,7 +582,9 @@ impl_rule! {
                                 ),
                                 node,
                                 src,
-                            ));
+                            );
+                            f.tags = vec!["PQ".into()];
+                            findings.push(f);
                             return;
                         }
                     }
@@ -1776,6 +1778,7 @@ fn map_taint_findings(
             sink_end_byte: Some(t.sink_end_byte),
             confidence: crate::rules::common::confidence_for_hops(t.hops),
             taint_hops: Some(t.hops),
+            tags: vec![],
         })
         .collect()
 }
@@ -2718,6 +2721,7 @@ pub fn run_py_taint_batched(
                 sink_end_byte: Some(t.sink_end_byte),
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
                 taint_hops: Some(t.hops),
+                tags: vec![],
             })
         })
         .collect()

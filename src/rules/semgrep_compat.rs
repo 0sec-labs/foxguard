@@ -208,6 +208,7 @@ impl Rule for SemgrepRule {
                 // curated built-in AST-walked rules. See issue #207.
                 confidence: 0.7,
                 taint_hops: None,
+                tags: vec![],
             });
         }
 
