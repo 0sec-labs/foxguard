@@ -71,6 +71,25 @@ npx foxguard tui --secrets .          # interactive secrets triage
 npx foxguard init                     # install a local pre-commit hook
 ```
 
+## Interactive triage (v0.7.0)
+
+`foxguard tui` opens a full terminal UI for local triage: pick a mode, walk findings, and mark/baseline/ignore without leaving the terminal.
+
+<p align="center">
+  <img src="assets/tui-launch.png" alt="foxguard TUI launch picker" width="640" />
+  <br/><em>Launch picker: Scan, Diff, or Secrets</em>
+</p>
+
+<p align="center">
+  <img src="assets/tui-findings.png" alt="foxguard TUI findings list with detail pane" width="640" />
+  <br/><em>Findings list with source/sink dataflow and open-target controls</em>
+</p>
+
+<p align="center">
+  <img src="assets/tui-triage.png" alt="foxguard TUI triage action popup" width="640" />
+  <br/><em>Triage popup: review state, baseline, and ignore-rule actions</em>
+</p>
+
 ## What it is
 
 Rust + [tree-sitter](https://tree-sitter.github.io/) for AST parsing + [rayon](https://github.com/rayon-rs/rayon) for parallelism. No JVM startup, no Python interpreter, no network calls, no rule download step. Just a native binary that reads your files and reports findings.
@@ -162,7 +181,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      - uses: PwnKit-Labs/foxguard/action@v0.6.0
+      - uses: PwnKit-Labs/foxguard/action@v0.7.0
         with:
           path: .
           severity: medium
@@ -191,7 +210,7 @@ npx foxguard@latest secrets .                      # secrets
 ```yaml
 repos:
   - repo: https://github.com/PwnKit-Labs/foxguard
-    rev: v0.6.0
+    rev: v0.7.0
     hooks:
       - id: foxguard
       - id: foxguard-secrets

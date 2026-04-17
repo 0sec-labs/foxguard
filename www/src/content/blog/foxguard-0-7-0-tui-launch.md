@@ -43,7 +43,7 @@ npx foxguard tui --secrets .
 
 We renamed the public command surface from `ui` to `tui` to keep `ui` available for future web experiences.
 
-### Launch screen and loading transitions
+### Launch screen
 
 The TUI now opens into a dedicated launch picker with three modes:
 
@@ -53,7 +53,7 @@ The TUI now opens into a dedicated launch picker with three modes:
 
 Scans do not start automatically. You choose mode first, then launch.
 
-We also added a shared loading transition with shimmer placeholders, so initial run and rescan flow feel consistent.
+![foxguard TUI launch picker with Scan, Diff, and Secrets modes](/tui/launch.png)
 
 ### Better detail view and open-target workflow
 
@@ -68,6 +68,8 @@ Inside findings, the detail pane now shows:
 
 Even when no source/sink trace exists, the open target remains visible so the `Enter` behavior is clear.
 
+![foxguard TUI findings list with detail pane showing dataflow and open-target controls](/tui/findings.png)
+
 ### Triage actions directly in the TUI
 
 Press `i` on a finding to open triage actions.
@@ -80,6 +82,8 @@ Actions include:
 - ignore rules in config (scan and secrets flows)
 
 The action menu includes a preview of what will be written before you apply it.
+
+![foxguard TUI triage popup with review, baseline, and ignore actions](/tui/triage.png)
 
 ### Diff and secrets workflows feel native
 
@@ -102,16 +106,6 @@ We made a long series of improvements while building this release:
 - more deliberate color and spacing for selected states
 
 The result is less "terminal clutter" and a tighter triage loop.
-
-## Screenshot / demo placeholders
-
-Add your screenshots in this section before publishing:
-
-1. Launch screen mode picker
-2. Loading shimmer transition
-3. Findings + detail split view
-4. Triage action menu
-5. Dataflow with source/sink open targets
 
 ## Upgrade notes
 
