@@ -1,6 +1,6 @@
 [package]
 name = "foxguard"
-version = "0.6.3"
+version = "0.7.0"
 edition = "2021"
 description = "Security scanner as fast as a linter. 170+ built-in rules, 10 languages, sub-second scans."
 license = "MIT"
