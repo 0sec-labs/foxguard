@@ -523,7 +523,7 @@ pub struct PqVulnerableCrypto;
 impl_rule! {
     PqVulnerableCrypto,
     id = "py/pq-vulnerable-crypto",
-    severity = Severity::Medium,
+    severity = Severity::High,
     cwe = Some("CWE-327"),
     description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519/X25519)",
     language = Language::Python,
@@ -550,7 +550,21 @@ impl_rule! {
             if node.kind() == "call" {
                 if let Some(parent) = node.parent() {
                     if parent.kind() == "argument_list" {
-                        return;
+                        // Only skip if the outer call is also PQ-vulnerable
+                        // (e.g. ec.generate_private_key(ec.SECP256R1()))
+                        if let Some(grandparent) = parent.parent() {
+                            if grandparent.kind() == "call" {
+                                if let Some(outer_func) = grandparent.child_by_field_name("function") {
+                                    let outer_text = &src[outer_func.byte_range()];
+                                    let outer_resolved = resolve_callee(outer_text, ctx);
+                                    for &(prefix, _, _) in pq_vulnerable {
+                                        if outer_resolved.as_ref().starts_with(prefix) {
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 if let Some(func) = node.child_by_field_name("function") {

@@ -333,7 +333,7 @@ pub struct PqVulnerableCrypto;
 impl_rule! {
     PqVulnerableCrypto,
     id = "go/pq-vulnerable-crypto",
-    severity = Severity::Medium,
+    severity = Severity::High,
     cwe = Some("CWE-327"),
     description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519)",
     language = Language::Go,

@@ -251,14 +251,13 @@ pub struct PqVulnerableCrypto;
 impl_rule! {
     PqVulnerableCrypto,
     id = "rs/pq-vulnerable-crypto",
-    severity = Severity::Medium,
+    severity = Severity::High,
     cwe = Some("CWE-327"),
     description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/Ed25519/X25519)",
     language = Language::Rust,
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let pq_crate = Regex::new(r"\b(rsa|p256|p384|p521|k256|ecdsa|ed25519_dalek|x25519_dalek|dsa)\b").unwrap();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
@@ -270,39 +269,33 @@ impl_rule! {
                     }
                     let func_text = &src[func.byte_range()];
                     let func_lower = func_text.to_lowercase();
-                    if pq_crate.is_match(&func_lower) {
-                        let algo = if func_lower.contains("rsa") {
-                            "RSA"
-                        } else if func_lower.contains("ed25519") {
-                            "Ed25519"
-                        } else if func_lower.contains("x25519") {
-                            "X25519"
-                        } else if func_lower.contains("ecdsa") {
-                            "ECDSA"
-                        } else if func_lower.contains("dsa") {
-                            "DSA"
-                        } else {
-                            "ECDH/ECDSA (elliptic curve)"
-                        };
-                        let replacement = if func_lower.contains("rsa") {
-                            "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"
-                        } else if func_lower.contains("x25519") || func_lower.contains("p256") || func_lower.contains("p384") || func_lower.contains("p521") || func_lower.contains("k256") {
-                            "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"
-                        } else {
-                            "ML-DSA (FIPS 204)"
-                        };
-                        findings.push(make_finding(
-                            _self.id(),
-                            _self.severity(),
-                            _self.cwe(),
-                            &format!(
-                                "{} is quantum-vulnerable — migrate to {}",
-                                algo, replacement
-                            ),
-                            node,
-                            src,
-                        ));
-                    }
+                    // No regex needed — check func_lower directly
+                    let (algo, replacement) = if func_lower.contains("ed25519") {
+                        ("Ed25519", "ML-DSA (FIPS 204)")
+                    } else if func_lower.contains("x25519") {
+                        ("X25519", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)")
+                    } else if func_lower.contains("rsa") {
+                        ("RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures")
+                    } else if func_lower.contains("ecdsa") {
+                        ("ECDSA", "ML-DSA (FIPS 204)")
+                    } else if func_lower.contains("p256") || func_lower.contains("p384") || func_lower.contains("p521") || func_lower.contains("k256") {
+                        ("ECDH/ECDSA (elliptic curve)", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)")
+                    } else if func_lower.contains("dsa") {
+                        ("DSA", "ML-DSA (FIPS 204)")
+                    } else {
+                        return;
+                    };
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        &format!(
+                            "{} is quantum-vulnerable — migrate to {}",
+                            algo, replacement
+                        ),
+                        node,
+                        src,
+                    ));
                 }
             }
         });
