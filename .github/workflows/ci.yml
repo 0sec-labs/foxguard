@@ -161,6 +161,27 @@ jobs:
       - run: bash -n benchmarks/run.sh
       - run: bash -n scripts/release.sh
 
+  readme-version-refs:
+    name: README Version Refs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check README install refs match Cargo.toml
+        run: |
+          cargo_v=$(grep '^version' Cargo.toml | head -1 | sed -E 's/version = "(.+)"/\1/')
+          action_v=$(grep -oE 'PwnKit-Labs/foxguard/action@v[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed -E 's/.*v(.+)/\1/')
+          rev_v=$(grep -oE 'rev:\s+v[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed -E 's/.*v(.+)/\1/')
+          fail=0
+          if [ "$action_v" != "$cargo_v" ]; then
+            echo "::error::action ref v$action_v != Cargo v$cargo_v"
+            fail=1
+          fi
+          if [ "$rev_v" != "$cargo_v" ]; then
+            echo "::error::pre-commit rev v$rev_v != Cargo v$cargo_v"
+            fail=1
+          fi
+          exit $fail
+
   build:
     name: Build Release
     runs-on: ${{ matrix.os }}

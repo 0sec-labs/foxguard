@@ -48,6 +48,11 @@ for pkg in packages/npm/package.json vscode-extension/package.json; do
   "
 done
 
+# Rewrite README install-ref examples so copy-pasteable snippets stay pinned
+# to the version users are about to receive.
+perl -i -pe 's{(PwnKit-Labs/foxguard/action)\@v[0-9]+\.[0-9]+\.[0-9]+}{$1\@v'"${VERSION}"'}g' README.md
+perl -i -pe 's{(\s+rev:\s+)v[0-9]+\.[0-9]+\.[0-9]+}{${1}v'"${VERSION}"'}g' README.md
+
 (
   cd vscode-extension
   npm install --package-lock-only
@@ -73,7 +78,7 @@ cargo test
 )
 
 echo "Committing release metadata..."
-git add Cargo.toml Cargo.lock packages/npm/package.json vscode-extension/package.json vscode-extension/package-lock.json
+git add Cargo.toml Cargo.lock packages/npm/package.json vscode-extension/package.json vscode-extension/package-lock.json README.md
 git commit -m "Prepare ${TAG} release metadata" -m "Bump crate, npm, and VS Code extension versions to ${VERSION} so the
 tag-driven release workflow can publish a coherent release.
 
