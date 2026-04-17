@@ -48,6 +48,10 @@ pub struct ScanConfig {
     /// `confidence` is strictly below this value are suppressed.
     /// `None` means "no filter" (equivalent to 0.0). See issue #207.
     pub min_confidence: Option<f32>,
+    /// Per-rule option map passed to `Rule::configure` at registry build
+    /// time. Keys are rule IDs, values are opaque YAML that each rule
+    /// parses itself. Unknown rule IDs surface as stderr warnings.
+    pub rule_options: HashMap<String, serde_yaml::Value>,
 }
 
 /// Tunable thresholds for pattern/heuristic rules.
@@ -132,6 +136,8 @@ struct RawScanConfig {
     thresholds: RawScanThresholds,
     #[serde(default)]
     min_confidence: Option<f32>,
+    #[serde(default)]
+    rule_options: HashMap<String, serde_yaml::Value>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -336,6 +342,7 @@ impl FoxguardConfig {
                 disable_rules: raw.scan.disable_rules,
                 thresholds,
                 min_confidence: raw.scan.min_confidence,
+                rule_options: raw.scan.rule_options,
             },
             secrets: SecretsConfig {
                 baseline: secrets_baseline,

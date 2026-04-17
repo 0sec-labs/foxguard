@@ -101,6 +101,14 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
     apply_scan_thresholds(config.as_ref());
 
     let mut registry = build_registry(scan.no_builtins, scan.rules.as_deref())?;
+    if let Some(ref config) = config {
+        if !config.scan.rule_options.is_empty() {
+            let warnings = registry.configure_rules(&config.scan.rule_options)?;
+            for w in &warnings {
+                eprintln!("warning: {}", w);
+            }
+        }
+    }
     let excludes = PathExcludeMatcher::new(&scan.exclude)?;
     let targets = collect_changed_targets(&scan.path, scan.changed)?;
 
