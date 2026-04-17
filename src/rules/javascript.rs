@@ -505,7 +505,7 @@ impl_rule! {
                     }
 
                     // crypto.createDiffieHellman, crypto.createDiffieHellmanGroup
-                    if func_name == "createDiffieHellman" || func_name == "createDiffieHellmanGroup" {
+                    if (func_name == "createDiffieHellman" || func_name == "createDiffieHellmanGroup") && func_text.starts_with("crypto.") {
                         findings.push(make_finding(
                             _self.id(),
                             _self.severity(),
@@ -517,7 +517,7 @@ impl_rule! {
                     }
 
                     // crypto.createECDH
-                    if func_name == "createECDH" {
+                    if func_name == "createECDH" && func_text.starts_with("crypto.") {
                         findings.push(make_finding(
                             _self.id(),
                             _self.severity(),

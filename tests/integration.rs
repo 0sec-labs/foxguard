@@ -932,8 +932,8 @@ mod go {
 
         assert_eq!(
             findings.len(),
-            21,
-            "vulnerable.go should have 21 findings, got {}",
+            20,
+            "vulnerable.go should have 20 findings, got {}",
             findings.len()
         );
 

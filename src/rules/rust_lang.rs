@@ -269,6 +269,10 @@ impl_rule! {
                     }
                     let func_text = &src[func.byte_range()];
                     let func_lower = func_text.to_lowercase();
+                    // Skip PQ-safe algorithms
+                    if func_lower.contains("ml_dsa") || func_lower.contains("ml_kem") || func_lower.contains("slh_dsa") {
+                        return;
+                    }
                     // No regex needed — check func_lower directly
                     let (algo, replacement) = if func_lower.contains("ed25519") {
                         ("Ed25519", "ML-DSA (FIPS 204)")
