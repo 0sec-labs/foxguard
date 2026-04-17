@@ -1,11 +1,11 @@
 ---
 title: "Making foxguard taint tracking 2× faster in v0.7.1"
 date: "2026-04-17"
-description: "foxguard v0.7.1 closes a 3× performance regression in the Go and Python taint engines. Here is how we diagnosed it and what the fix looks like."
-readTime: "5 min read"
+description: "foxguard v0.7.1 closes a 3× performance regression across the Go, Python, and JavaScript taint engines. Here is how we diagnosed it and what the fix looks like."
+readTime: "6 min read"
 ---
 
-We shipped [foxguard v0.7.0](https://foxguard.dev/blog/foxguard-0-7-0-tui-launch/) with a full interactive TUI yesterday. Today we are shipping **v0.7.1** — a performance release that makes Go taint scanning **2.2× faster** and Python taint scanning **1.3× faster**, without dropping a single rule or changing a single finding.
+We shipped [foxguard v0.7.0](https://foxguard.dev/blog/foxguard-0-7-0-tui-launch/) with a full interactive TUI a few hours ago. Now we are shipping **v0.7.1** — a performance release that makes **Go taint scanning 2.2× faster** and **Python and JavaScript taint scanning ~1.25× faster**, without dropping a single rule or changing a single finding.
 
 This post is about how we found the regression, what the fix looks like, and why we are comfortable calling it shipped.
 
@@ -17,9 +17,9 @@ Issue [#174](https://github.com/PwnKit-Labs/foxguard/issues/174) flagged this. T
 
 | Repo | v0.4.0 | v0.7.0 | Slowdown |
 |------|-------:|-------:|---------:|
-| express | 119ms | 180ms | +51% |
-| flask | 133ms | 233ms | +75% |
-| **gin** | **112ms** | **358ms** | **+220%** |
+| express | 128ms | 183ms | +43% |
+| flask | 127ms | 233ms | +83% |
+| **gin** | **111ms** | **364ms** | **+229%** |
 
 If the slowdown were purely "we added features", we would expect roughly uniform percentages. Gin being **~3× worse than express** is a signal that something specific to the Go taint engine was burning cycles, not the engine design in general.
 
@@ -60,7 +60,7 @@ For the nine Go taint rules in v0.7.0, exactly one — `path-traversal` — decl
 
 Findings get attributed back to the correct rule via a new `rule_id_hint: Option<String>` field on `TaintFinding`, populated when a sink matches.
 
-The refactor lives in [PR #199](https://github.com/PwnKit-Labs/foxguard/pull/199) for Go and [PR #202](https://github.com/PwnKit-Labs/foxguard/pull/202) for Python. Same pattern for both.
+The refactor lives in [PR #199](https://github.com/PwnKit-Labs/foxguard/pull/199) for Go, [PR #202](https://github.com/PwnKit-Labs/foxguard/pull/202) for Python, and [PR #203](https://github.com/PwnKit-Labs/foxguard/pull/203) for JavaScript. Same pattern across all three engines — 11 JavaScript taint rules collapse from 22 walks per file to 4, with the same `rule_id_hint` attribution mechanism.
 
 ## Results
 
@@ -68,11 +68,11 @@ Final benchmark, 15 iterations, 3 warmup, avg ms:
 
 | Repo | v0.4.0 | v0.7.0 | **v0.7.1** | v0.7.1 vs v0.7.0 | v0.7.1 vs v0.4.0 |
 |------|-------:|-------:|-----------:|-----------------:|-----------------:|
-| express | 119 | 180 | **177** | -2% | +49% |
-| flask | 133 | 233 | **178** | **-24%** | +34% |
-| **gin** | **112** | **358** | **163** | **-55%** | +45% |
+| express | 128 | 183 | **145** | **-21%** | +13% |
+| flask | 127 | 233 | **187** | **-20%** | +47% |
+| **gin** | **111** | **364** | **166** | **-55%** | +50% |
 
-Gin is now **2.2× faster** than v0.7.0 and back within 1.5× of v0.4.0 — which predates cross-file taint tracking entirely. Flask is **1.3× faster** with the same Python port. Express moved within noise because JavaScript has fewer taint rules and `collect_summary_targets` already skipped nested scopes, so the waste was smaller.
+Gin is now **2.2× faster** than v0.7.0 and back within 1.5× of v0.4.0 — which predates cross-file taint tracking entirely. Flask is **1.25× faster** with the same Python port. Express is **1.26× faster** with the matching JavaScript port and lands **within 13%** of the v0.4.0 baseline — essentially back to pre-taint speed while doing strictly more work.
 
 ## Correctness
 
@@ -86,7 +86,7 @@ No correctness regressions. The refactor is purely orchestration.
 
 ## Why not match v0.4.0 exactly?
 
-We probably will not. The remaining +34% to +49% vs v0.4.0 is the actual cost of the features we added: intraprocedural taint tracking (v0.5), cross-file taint tracking (v0.6), multi-hop propagation (v0.6.x). Those catch real vulnerabilities — SQL injection across file boundaries, user input flowing from Flask routes through helper modules into `eval`, command injection via Express controllers calling into utility files.
+We probably will not, and express now shows why we do not have to. The remaining +13% to +50% vs v0.4.0 is the actual cost of the features we added: intraprocedural taint tracking (v0.5), cross-file taint tracking (v0.6), multi-hop propagation (v0.6.x). Those catch real vulnerabilities — SQL injection across file boundaries, user input flowing from Flask routes through helper modules into `eval`, command injection via Express controllers calling into utility files.
 
 Matching v0.4.0 would mean dropping those features. We would rather ship a fast engine that does useful work than a faster one that misses the bugs.
 
