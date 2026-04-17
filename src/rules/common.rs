@@ -173,6 +173,7 @@ pub fn make_finding(
         fix_suggestion: None,
         sink_start_byte: None,
         sink_end_byte: None,
+        confidence: crate::default_confidence(),
     }
 }
 
@@ -216,6 +217,25 @@ pub fn make_finding_from_offsets(
         fix_suggestion: None,
         sink_start_byte: None,
         sink_end_byte: None,
+        confidence: crate::default_confidence(),
+    }
+}
+
+/// Map a taint hop count to a confidence score.
+///
+/// The curve is intentionally coarse:
+/// - 1 hop (direct source→sink in the same function) → 1.0
+/// - 2 hops (one level of interprocedural propagation, typically a
+///   cross-file summary hit) → 0.8
+/// - 3+ hops → 0.6
+///
+/// Tuned for the v1 taint engine which only tracks a small number of
+/// hops in practice. Update this when deeper analysis lands.
+pub fn confidence_for_hops(hops: u8) -> f32 {
+    match hops {
+        0 | 1 => 1.0,
+        2 => 0.8,
+        _ => 0.6,
     }
 }
 
@@ -239,5 +259,18 @@ mod tests {
     #[test]
     fn get_source_line_out_of_bounds() {
         assert_eq!(get_source_line("hello", 100), "");
+    }
+
+    #[test]
+    fn confidence_for_hops_curve_matches_documented_values() {
+        // Documented curve from issue #207: 1 hop → 1.0, 2 hops → 0.8,
+        // 3+ hops → 0.6. A zero hop value is treated as "no info" and
+        // maps to 1.0 so a TaintFinding built without an explicit hops
+        // value doesn't accidentally get downgraded.
+        assert_eq!(confidence_for_hops(0), 1.0);
+        assert_eq!(confidence_for_hops(1), 1.0);
+        assert_eq!(confidence_for_hops(2), 0.8);
+        assert_eq!(confidence_for_hops(3), 0.6);
+        assert_eq!(confidence_for_hops(10), 0.6);
     }
 }

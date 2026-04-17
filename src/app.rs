@@ -146,6 +146,10 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
         apply_severity_overrides(&mut findings, config.as_ref(), &known_rule_ids);
     notices.extend(override_warnings);
 
+    if let Some(min_conf) = scan.min_confidence {
+        findings.retain(|f| f.confidence >= min_conf);
+    }
+
     if let Some(ref min_severity) = scan.severity {
         let min = min_severity.to_severity();
         findings.retain(|f| f.severity >= min);
@@ -368,6 +372,8 @@ fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
         quiet: false,
         max_file_size: args.max_file_size,
         fix: false,
+        show_confidence: false,
+        min_confidence: None,
     }
 }
 

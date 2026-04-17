@@ -42,6 +42,10 @@ pub struct ScanConfig {
     pub disable_rules: Vec<String>,
     /// Threshold knobs for built-in pattern rules (refs #210).
     pub thresholds: ScanThresholds,
+    /// Minimum confidence (0.0–1.0) to report. Findings whose
+    /// `confidence` is strictly below this value are suppressed.
+    /// `None` means "no filter" (equivalent to 0.0). See issue #207.
+    pub min_confidence: Option<f32>,
 }
 
 /// Tunable thresholds for pattern/heuristic rules.
@@ -129,6 +133,8 @@ struct RawScanConfig {
     /// at load time rather than silently falling back to defaults.
     #[serde(default)]
     thresholds: RawScanThresholds,
+    #[serde(default)]
+    min_confidence: Option<f32>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -207,6 +213,9 @@ pub fn apply_scan_defaults(scan: &mut ScanArgs, config: Option<&FoxguardConfig>)
     }
     if scan.baseline.is_none() {
         scan.baseline = config.scan.baseline.clone();
+    }
+    if scan.min_confidence.is_none() {
+        scan.min_confidence = config.scan.min_confidence;
     }
 }
 
@@ -329,6 +338,7 @@ impl FoxguardConfig {
                 enable_rules: raw.scan.enable_rules,
                 disable_rules: raw.scan.disable_rules,
                 thresholds,
+                min_confidence: raw.scan.min_confidence,
             },
             secrets: SecretsConfig {
                 baseline: secrets_baseline,
@@ -901,6 +911,37 @@ mod tests {
     }
 
     #[test]
+    fn load_for_scan_parses_min_confidence() {
+        // `scan.min_confidence` is optional. When supplied, it's stored
+        // as a raw f32 in [0.0, 1.0] that the scan pipeline uses to drop
+        // low-confidence findings before they reach reporting.
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  min_confidence: 0.8\n",
+        );
+
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        assert_eq!(loaded.scan.min_confidence, Some(0.8));
+    }
+
+    #[test]
+    fn load_for_scan_defaults_min_confidence_to_none() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(repo.path(), ".foxguard.yml", "scan:\n  severity: high\n");
+
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        assert!(loaded.scan.min_confidence.is_none());
+    }
+
+    #[test]
     fn load_for_scan_parses_scan_ignore_rules() {
         let repo = TempDir::new().expect("failed to create temp dir");
         write_config(
@@ -941,6 +982,7 @@ mod tests {
             fix_suggestion: None,
             sink_start_byte: None,
             sink_end_byte: None,
+            confidence: crate::default_confidence(),
         };
 
         let (config_path, added) =
@@ -1001,6 +1043,7 @@ mod tests {
             fix_suggestion: None,
             sink_start_byte: None,
             sink_end_byte: None,
+            confidence: crate::default_confidence(),
         }
     }
 

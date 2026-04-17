@@ -204,6 +204,9 @@ impl Rule for SemgrepRule {
                 fix_suggestion: None,
                 sink_start_byte: None,
                 sink_end_byte: None,
+                // External Semgrep rules are inherently fuzzier than
+                // curated built-in AST-walked rules. See issue #207.
+                confidence: 0.7,
             });
         }
 
@@ -1146,6 +1149,29 @@ rules:
         let findings = rules[0].check(source, &tree);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].line, 1);
+    }
+
+    #[test]
+    fn semgrep_compat_findings_are_emitted_at_confidence_zero_point_seven() {
+        // External Semgrep-compat rules default to confidence=0.7
+        // because pattern rules are inherently fuzzier than curated
+        // built-in AST-walked rules. See issue #207.
+        let yaml = r#"
+rules:
+  - id: test-eval
+    pattern: eval(...)
+    message: No eval
+    severity: ERROR
+    languages: [python]
+"#;
+        let f = make_yaml(yaml);
+        let rules = parse_semgrep_file(f.path()).unwrap();
+
+        let source = "x = eval(user_input)\n";
+        let tree = parse_file(source, Language::Python).unwrap();
+        let findings = rules[0].check(source, &tree);
+        assert_eq!(findings.len(), 1);
+        assert!((findings[0].confidence - 0.7).abs() < f32::EPSILON);
     }
 
     #[test]

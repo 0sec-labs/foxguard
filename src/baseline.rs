@@ -171,6 +171,7 @@ mod tests {
             fix_suggestion: None,
             sink_start_byte: None,
             sink_end_byte: None,
+            confidence: crate::default_confidence(),
         }
     }
 
@@ -189,5 +190,28 @@ mod tests {
             .expect("load should succeed")
             .expect("baseline should exist");
         assert_eq!(baseline.entries.len(), 1);
+    }
+
+    #[test]
+    fn legacy_finding_json_without_confidence_field_deserializes_with_default() {
+        // JSON written before `confidence` was added omits the field.
+        // Serde should fill in the default (1.0). Regression guard for
+        // issue #207 — callers that persist Finding JSON (e.g. the
+        // `foxguard scan -f json` output piped to disk) should keep
+        // deserializing after upgrading.
+        let legacy_json = r#"{
+            "rule_id": "py/no-eval",
+            "severity": "high",
+            "cwe": null,
+            "description": "eval used",
+            "file": "src/app.py",
+            "line": 5,
+            "column": 1,
+            "end_line": 5,
+            "end_column": 10,
+            "snippet": "eval(x)"
+        }"#;
+        let finding: Finding = serde_json::from_str(legacy_json).expect("should deserialize");
+        assert_eq!(finding.confidence, 1.0);
     }
 }

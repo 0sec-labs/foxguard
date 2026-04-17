@@ -771,6 +771,7 @@ fn map_go_taint_findings(
             fix_suggestion: meta.fix_suggestion.map(|s| s.to_string()),
             sink_start_byte: Some(t.sink_start_byte),
             sink_end_byte: Some(t.sink_end_byte),
+            confidence: crate::rules::common::confidence_for_hops(t.hops),
         })
         .collect()
 }
@@ -1492,6 +1493,7 @@ pub fn run_go_taint_batched(
                 fix_suggestion: d.meta.fix_suggestion.map(|s| s.to_string()),
                 sink_start_byte: Some(t.sink_start_byte),
                 sink_end_byte: Some(t.sink_end_byte),
+                confidence: crate::rules::common::confidence_for_hops(t.hops),
             })
         })
         .collect()

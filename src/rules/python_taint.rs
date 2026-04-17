@@ -179,6 +179,11 @@ pub struct TaintFinding {
     /// dispatch a finding back to the correct rule. `None` for
     /// single-rule callers of [`analyze_tree`] / [`analyze_tree_with_cross_file`].
     pub rule_id_hint: Option<String>,
+    /// Approximate number of hops along the source→sink flow. 1 for a
+    /// direct in-function flow, 2 for a flow that crosses a file
+    /// boundary via cross-file summaries. Used by the reporting layer
+    /// to derive a confidence score.
+    pub hops: u8,
 }
 
 /// Return-taint summary for a single function. Keyed by the function's
@@ -1145,6 +1150,7 @@ fn handle_call(
                     sink_description: sink_desc.clone(),
                     source_line: src_line,
                     rule_id_hint: sink_rule_id.clone(),
+                    hops: 1,
                 });
                 // One finding per sink call is enough — don't double-report
                 // when multiple args are tainted.
@@ -1227,6 +1233,7 @@ fn handle_cross_file_call(
                 ),
                 source_line: src_line,
                 rule_id_hint: Some(flow.sink_rule_id.clone()),
+                hops: 2,
             });
             // One finding per cross-file call is enough.
             return;
@@ -1964,6 +1971,23 @@ def handler():
         assert_eq!(f.len(), 1);
         assert!(f[0].source_description.contains("request.data"));
         assert_eq!(f[0].sink_description, "pickle.loads");
+    }
+
+    #[test]
+    fn direct_in_function_flow_is_tagged_one_hop() {
+        // Direct source→sink flows should come back with hops=1 so the
+        // reporting layer maps them to confidence=1.0 (no downgrade for
+        // interprocedural uncertainty). Regression guard for #207.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    return pickle.loads(request.data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].hops, 1);
     }
 
     #[test]

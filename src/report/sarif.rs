@@ -30,6 +30,14 @@ pub fn print_sarif(findings: &[Finding]) {
             if let Some(cwe) = &f.cwe {
                 props.insert("tags".to_string(), json!([cwe]));
             }
+            // Expose confidence in properties so downstream tooling that
+            // ignores the native `rank` field can still consume it.
+            let clamped_conf = f.confidence.clamp(0.0, 1.0);
+            props.insert("confidence".to_string(), json!(clamped_conf));
+
+            // SARIF `rank` is a native 0.0..=100.0 ordering hint. Map
+            // confidence linearly so 1.0 → 100 and 0.0 → 0.
+            let rank = clamped_conf as f64 * 100.0;
 
             let mut result = json!({
                 "ruleId": f.rule_id,
@@ -38,6 +46,7 @@ pub fn print_sarif(findings: &[Finding]) {
                     crate::Severity::Medium => "warning",
                     crate::Severity::Low => "note",
                 },
+                "rank": rank,
                 "message": {
                     "text": f.description
                 },

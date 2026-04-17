@@ -79,6 +79,15 @@ pub struct ScanArgs {
     /// Maximum file size in bytes to scan (default: 1 MB)
     #[arg(long, default_value_t = 1_048_576)]
     pub max_file_size: u64,
+
+    /// Show per-finding confidence scores in terminal output
+    #[arg(long, default_value_t = false)]
+    pub show_confidence: bool,
+
+    /// Minimum confidence (0.0–1.0) to report. Findings below this
+    /// threshold are suppressed. Defaults to 0.0 (report all).
+    #[arg(long)]
+    pub min_confidence: Option<f32>,
 }
 
 #[derive(Args, Debug, Clone)]
