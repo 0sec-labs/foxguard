@@ -457,6 +457,72 @@ impl_rule! {
     }
 }
 
+// ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "java/pq-vulnerable-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable cryptographic algorithm (RSA/EC/DSA/DH/Ed25519/X25519)",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let pq_algo = Regex::new(r#"(?i)"(RSA[^"]*|EC|DSA|DH|ECDH|ECDSA|Ed25519|Ed448|X25519|X448|[^"]*with(RSA|ECDSA|DSA)[^"]*)"#).unwrap();
+        let pqc_safe = Regex::new(r"(?i)(ML-DSA|ML-KEM|SLH-DSA)").unwrap();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "method_invocation" {
+                if let Some(name) = node.child_by_field_name("name") {
+                    let name_text = &src[name.byte_range()];
+                    if name_text == "getInstance" {
+                        if let Some(obj) = node.child_by_field_name("object") {
+                            let obj_text = &src[obj.byte_range()];
+                            if obj_text == "KeyPairGenerator"
+                                || obj_text == "KeyAgreement"
+                                || obj_text == "Signature"
+                                || obj_text == "Cipher"
+                                || obj_text == "KeyFactory"
+                            {
+                                if let Some(args) = node.child_by_field_name("arguments") {
+                                    if let Some(first_arg) = args.named_child(0) {
+                                        let arg_text = &src[first_arg.byte_range()];
+                                        if pq_algo.is_match(arg_text) && !pqc_safe.is_match(arg_text) {
+                                            let replacement = if obj_text == "KeyAgreement" {
+                                                "ML-KEM (FIPS 203)"
+                                            } else if obj_text == "Signature" {
+                                                "ML-DSA (FIPS 204)"
+                                            } else {
+                                                "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"
+                                            };
+                                            findings.push(make_finding(
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
+                                                &format!(
+                                                    "{}.getInstance({}) is quantum-vulnerable — migrate to {}",
+                                                    obj_text, arg_text, replacement
+                                                ),
+                                                node,
+                                                src,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── Rule 7: no-hardcoded-secret ────────────────────────────────────────────
 
 pub struct NoHardcodedSecret;

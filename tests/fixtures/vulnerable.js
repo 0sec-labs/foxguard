@@ -95,3 +95,8 @@ const obj = serialize.unserialize(userInput);
 
 // 28. js/no-unsafe-deserialization — yaml.load without safe schema (Critical)
 const data = yaml.load(userInput);
+
+// js/pq-vulnerable-crypto
+const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+const ecdh = crypto.createECDH('secp256k1');
+const dh = crypto.createDiffieHellman(2048);
