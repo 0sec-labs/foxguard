@@ -26,6 +26,11 @@
   <img src="assets/demo.gif" alt="foxguard vs semgrep side-by-side" width="640" />
 </p>
 
+<p align="center">
+  <img src="assets/tui-findings.png" alt="foxguard TUI findings list with source/sink dataflow" width="640" />
+  <br/><em>v0.7.0 adds <code>foxguard tui .</code> for interactive triage — scan, diff, and secrets modes with in-app review, baseline, and ignore actions. <a href="https://foxguard.dev/blog/foxguard-0-7-0-tui-launch">Read the launch post</a>.</em>
+</p>
+
 Security scanners are slow. 10 seconds, 30 seconds, sometimes a minute. So developers don't run them locally — they get pushed to CI, findings pile up in PRs, and nobody looks at them.
 
 foxguard fixes this by being fast enough that you never notice it's there. Same scan, 0.03 seconds instead of 10. You can run it on every save, every commit, every push. Security feedback becomes instant.
@@ -70,25 +75,6 @@ npx foxguard secrets .                # leaked credentials and private keys
 npx foxguard tui --secrets .          # interactive secrets triage
 npx foxguard init                     # install a local pre-commit hook
 ```
-
-## Interactive triage (v0.7.0)
-
-`foxguard tui` opens a full terminal UI for local triage: pick a mode, walk findings, and mark/baseline/ignore without leaving the terminal.
-
-<p align="center">
-  <img src="assets/tui-launch.png" alt="foxguard TUI launch picker" width="640" />
-  <br/><em>Launch picker: Scan, Diff, or Secrets</em>
-</p>
-
-<p align="center">
-  <img src="assets/tui-findings.png" alt="foxguard TUI findings list with detail pane" width="640" />
-  <br/><em>Findings list with source/sink dataflow and open-target controls</em>
-</p>
-
-<p align="center">
-  <img src="assets/tui-triage.png" alt="foxguard TUI triage action popup" width="640" />
-  <br/><em>Triage popup: review state, baseline, and ignore-rule actions</em>
-</p>
 
 ## What it is
 
