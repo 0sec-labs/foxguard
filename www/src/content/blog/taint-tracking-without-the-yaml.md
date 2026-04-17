@@ -159,4 +159,4 @@ The YAML is optional. That is how it should be.
 
 ---
 
-*foxguard is an open-source security scanner written in Rust. 174 built-in rules, 10 languages, cross-file taint tracking for Python, JavaScript, Go, and Kotlin. Semgrep/OpenGrep-compatible YAML bridge. [Try it](https://github.com/PwnKit-Labs/foxguard): `npx foxguard .`*
+*foxguard is an open-source security scanner written in Rust. 170+ built-in rules, 10 languages, cross-file taint tracking for Python, JavaScript, Go, and Kotlin. Semgrep/OpenGrep-compatible YAML bridge. [Try it](https://github.com/PwnKit-Labs/foxguard): `npx foxguard .`*

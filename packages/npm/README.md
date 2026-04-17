@@ -1,6 +1,6 @@
 # foxguard
 
-Sub-second local security scanning for real codebases.
+A security scanner as fast as a linter, written in Rust.
 
 ```sh
 npx foxguard .

@@ -98,4 +98,4 @@ Both are on the roadmap. Neither changes the architecture — the two-pass desig
 
 ---
 
-*foxguard is an open-source security scanner written in Rust. 174 built-in rules, 10 languages, cross-file taint tracking for Python, JavaScript, and Go. [Try it](https://github.com/PwnKit-Labs/foxguard): `npx foxguard .`*
+*foxguard is an open-source security scanner written in Rust. 170+ built-in rules, 10 languages, cross-file taint tracking for Python, JavaScript, and Go. [Try it](https://github.com/PwnKit-Labs/foxguard): `npx foxguard .`*

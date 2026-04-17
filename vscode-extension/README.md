@@ -1,6 +1,6 @@
 # foxguard for VS Code
 
-Security scanner as fast as a linter. Scans your code on every save and shows findings as underlines.
+A security scanner as fast as a linter, written in Rust. Scans your code on every save and shows findings as underlines.
 
 ## Features
 

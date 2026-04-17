@@ -1,7 +1,7 @@
 {
   "name": "foxguard",
   "displayName": "foxguard",
-  "description": "Security scanner as fast as a linter",
+  "description": "A security scanner as fast as a linter, written in Rust.",
   "version": "0.7.0",
   "publisher": "peaktwilight",
   "license": "MIT",

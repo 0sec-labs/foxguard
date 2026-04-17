@@ -5,7 +5,7 @@
 <h1 align="center">foxguard</h1>
 
 <p align="center">
-  <strong>Sub-second local security scanning for real codebases.</strong>
+  <strong>A security scanner as fast as a linter, written in Rust.</strong>
   <br/>
   170+ built-in rules &middot; 10 languages &middot; cross-file taint tracking for Python, JavaScript, Go, Kotlin &middot; single Rust binary &middot; Semgrep-compatible YAML bridge
   <br/><br/>
