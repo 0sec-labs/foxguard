@@ -396,4 +396,130 @@ impl RuleRegistry {
     pub fn all_rules(&self) -> &[Box<dyn Rule>] {
         &self.rules
     }
+
+    /// Apply `scan.enable_rules` (allowlist) and `scan.disable_rules`
+    /// (denylist) from the loaded config to the active rule set.
+    ///
+    /// Semantics:
+    /// - If `enable` is non-empty, only rules whose id is in `enable` are
+    ///   retained (intersection with the full registry).
+    /// - If `disable` is non-empty, rules whose id is in `disable` are
+    ///   removed. Applied after `enable`, so IDs appearing in both lists
+    ///   are disabled.
+    /// - Both empty → no change.
+    ///
+    /// Returns the set of IDs from `enable` or `disable` that do not
+    /// correspond to any registered rule. Callers should surface these
+    /// as a single warning so users catch typos without failing the scan.
+    pub fn apply_rule_filter(&mut self, enable: &[String], disable: &[String]) -> Vec<String> {
+        if enable.is_empty() && disable.is_empty() {
+            return Vec::new();
+        }
+
+        let known: std::collections::HashSet<&str> = self.rules.iter().map(|r| r.id()).collect();
+
+        let mut unknown: Vec<String> = Vec::new();
+        let mut seen_unknown: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for id in enable.iter().chain(disable.iter()) {
+            if !known.contains(id.as_str()) && seen_unknown.insert(id.as_str()) {
+                unknown.push(id.clone());
+            }
+        }
+
+        if !enable.is_empty() {
+            let enable_set: std::collections::HashSet<&str> =
+                enable.iter().map(|s| s.as_str()).collect();
+            self.rules.retain(|r| enable_set.contains(r.id()));
+        }
+
+        if !disable.is_empty() {
+            let disable_set: std::collections::HashSet<&str> =
+                disable.iter().map(|s| s.as_str()).collect();
+            self.rules.retain(|r| !disable_set.contains(r.id()));
+        }
+
+        unknown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rule_ids(registry: &RuleRegistry) -> Vec<String> {
+        registry.rules.iter().map(|r| r.id().to_string()).collect()
+    }
+
+    fn has_rule(registry: &RuleRegistry, id: &str) -> bool {
+        registry.rules.iter().any(|r| r.id() == id)
+    }
+
+    #[test]
+    fn apply_rule_filter_no_op_when_both_lists_empty() {
+        let mut registry = RuleRegistry::new();
+        let before = rule_ids(&registry);
+        let unknown = registry.apply_rule_filter(&[], &[]);
+        assert!(unknown.is_empty());
+        assert_eq!(rule_ids(&registry), before);
+    }
+
+    #[test]
+    fn apply_rule_filter_allowlist_keeps_only_listed_ids() {
+        let mut registry = RuleRegistry::new();
+        let unknown =
+            registry.apply_rule_filter(&["py/no-eval".to_string(), "js/no-eval".to_string()], &[]);
+        assert!(unknown.is_empty());
+        assert_eq!(registry.rules.len(), 2);
+        assert!(has_rule(&registry, "py/no-eval"));
+        assert!(has_rule(&registry, "js/no-eval"));
+    }
+
+    #[test]
+    fn apply_rule_filter_denylist_removes_listed_ids() {
+        let mut registry = RuleRegistry::new();
+        let before_count = registry.rules.len();
+        let unknown = registry.apply_rule_filter(&[], &["py/no-eval".to_string()]);
+        assert!(unknown.is_empty());
+        assert_eq!(registry.rules.len(), before_count - 1);
+        assert!(!has_rule(&registry, "py/no-eval"));
+    }
+
+    #[test]
+    fn apply_rule_filter_both_intersects_then_subtracts() {
+        // enable = {py/no-eval, py/no-sql-injection}; disable = {py/no-eval}
+        // Expected: only py/no-sql-injection remains.
+        let mut registry = RuleRegistry::new();
+        let unknown = registry.apply_rule_filter(
+            &["py/no-eval".to_string(), "py/no-sql-injection".to_string()],
+            &["py/no-eval".to_string()],
+        );
+        assert!(unknown.is_empty());
+        assert_eq!(registry.rules.len(), 1);
+        assert!(has_rule(&registry, "py/no-sql-injection"));
+        assert!(!has_rule(&registry, "py/no-eval"));
+    }
+
+    #[test]
+    fn apply_rule_filter_reports_unknown_rule_ids() {
+        let mut registry = RuleRegistry::new();
+        let unknown = registry.apply_rule_filter(
+            &["py/no-eval".to_string(), "py/does-not-exist".to_string()],
+            &["another/typo".to_string()],
+        );
+        assert_eq!(unknown.len(), 2);
+        assert!(unknown.contains(&"py/does-not-exist".to_string()));
+        assert!(unknown.contains(&"another/typo".to_string()));
+        // Real rule still applies (allowlist kept py/no-eval, denylist had no matches).
+        assert!(has_rule(&registry, "py/no-eval"));
+    }
+
+    #[test]
+    fn apply_rule_filter_deduplicates_unknown_ids() {
+        let mut registry = RuleRegistry::new();
+        let unknown = registry.apply_rule_filter(
+            &["py/typo".to_string(), "py/typo".to_string()],
+            &["py/typo".to_string()],
+        );
+        assert_eq!(unknown, vec!["py/typo".to_string()]);
+    }
 }

@@ -232,6 +232,15 @@ scan:
   baseline: .foxguard/baseline.json
   rules: ./semgrep-rules
 
+  # Optional allowlist: when non-empty, ONLY these rule IDs run.
+  # enable_rules:
+  #   - py/no-sql-injection
+  #   - py/no-xss
+  # Denylist: these rule IDs never run (applied after enable_rules).
+  # disable_rules:
+  #   - py/no-eval
+  #   - js/no-function-constructor
+
 secrets:
   baseline: .foxguard/secrets-baseline.json
   exclude_paths:
@@ -240,6 +249,21 @@ secrets:
   ignore_rules:
     - secret/github-token
 ```
+
+### Per-rule enable / disable
+
+`scan.enable_rules` and `scan.disable_rules` filter the active rule set globally.
+
+- If `enable_rules` is present, only those rule IDs run (allowlist).
+- `disable_rules` always applies — listed IDs are removed.
+- If both are present, `enable_rules` is applied first (intersection with
+  the registry), then `disable_rules` subtracts any IDs you want
+  explicitly off. So a rule listed in both lists is disabled.
+- Unknown rule IDs are reported on stderr once at scan start and the scan
+  continues.
+
+For path-scoped suppression of a specific rule on a specific file, use
+`scan.ignore_rules` instead.
 
 ## Suppressing Deliberate Findings
 

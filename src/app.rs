@@ -95,9 +95,15 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
     validate_root_path(&scan.path)?;
     validate_rules_path(scan.rules.as_deref())?;
 
-    let registry = build_registry(scan.no_builtins, scan.rules.as_deref())?;
+    let mut registry = build_registry(scan.no_builtins, scan.rules.as_deref())?;
     let excludes = PathExcludeMatcher::new(&scan.exclude)?;
     let targets = collect_changed_targets(&scan.path, scan.changed)?;
+
+    let rule_filter_unknown = if let Some(config) = config.as_ref() {
+        registry.apply_rule_filter(&config.scan.enable_rules, &config.scan.disable_rules)
+    } else {
+        Vec::new()
+    };
 
     let (result, mut notices) = if let Some(files) = targets {
         scan_paths_with_root_with_notices(
@@ -110,6 +116,21 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
     } else {
         scan_directory_with_notices(&scan.path, &registry, scan.max_file_size, Some(&excludes))
     };
+
+    if !rule_filter_unknown.is_empty() {
+        notices.insert(
+            0,
+            format!(
+                "Warning: unknown rule id{} in config (enable_rules/disable_rules): {}",
+                if rule_filter_unknown.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                rule_filter_unknown.join(", ")
+            ),
+        );
+    }
 
     let files_scanned = result.files_scanned;
     let duration = result.duration;
@@ -212,9 +233,29 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
 pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     validate_root_path(&args.path)?;
     let config = load_for_scan(Path::new(&args.path), None)?;
-    let registry = build_registry(args.no_builtins, args.rules.as_deref())?;
+    let mut registry = build_registry(args.no_builtins, args.rules.as_deref())?;
+    let rule_filter_unknown = if let Some(config) = config.as_ref() {
+        registry.apply_rule_filter(&config.scan.enable_rules, &config.scan.disable_rules)
+    } else {
+        Vec::new()
+    };
     let ((scan_result, mut diff_result), mut notices) =
         run_diff_with_warnings(&args.path, &args.target, &registry, args.max_file_size)?;
+
+    if !rule_filter_unknown.is_empty() {
+        notices.insert(
+            0,
+            format!(
+                "Warning: unknown rule id{} in config (enable_rules/disable_rules): {}",
+                if rule_filter_unknown.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                rule_filter_unknown.join(", ")
+            ),
+        );
+    }
 
     let known_rule_ids = collect_rule_ids(&registry);
     let override_warnings = apply_severity_overrides(
