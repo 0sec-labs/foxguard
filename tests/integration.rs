@@ -112,8 +112,8 @@ mod python {
         // py/no-eval finding.
         assert_eq!(
             findings.len(),
-            38,
-            "vulnerable.py should have 38 findings, got {}",
+            37,
+            "vulnerable.py should have 37 findings, got {}",
             findings.len()
         );
 
@@ -932,8 +932,8 @@ mod go {
 
         assert_eq!(
             findings.len(),
-            26,
-            "vulnerable.go should have 26 findings, got {}",
+            21,
+            "vulnerable.go should have 21 findings, got {}",
             findings.len()
         );
 

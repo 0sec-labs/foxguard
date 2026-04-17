@@ -300,15 +300,21 @@ impl_rule! {
 
             if node.kind() == "call_expression" {
                 if let Some(func) = node.child_by_field_name("function") {
+                    // Only match direct calls (scoped_identifier like rsa::Foo::new),
+                    // not chained method calls (field_expression like .unwrap())
+                    if func.kind() != "scoped_identifier" && func.kind() != "identifier" {
+                        return;
+                    }
                     let func_text = &src[func.byte_range()];
-                    if pq_crate.is_match(func_text) {
-                        let algo = if func_text.contains("rsa") || func_text.contains("Rsa") {
+                    let func_lower = func_text.to_lowercase();
+                    if pq_crate.is_match(&func_lower) {
+                        let algo = if func_lower.contains("rsa") {
                             "RSA"
-                        } else if func_text.contains("ed25519") {
+                        } else if func_lower.contains("ed25519") {
                             "Ed25519"
-                        } else if func_text.contains("x25519") {
+                        } else if func_lower.contains("x25519") {
                             "X25519"
-                        } else if func_text.contains("ecdsa") {
+                        } else if func_lower.contains("ecdsa") {
                             "ECDSA"
                         } else {
                             "ECDH/ECDSA (elliptic curve)"
