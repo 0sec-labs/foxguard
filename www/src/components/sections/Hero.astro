@@ -18,13 +18,14 @@ import { totalRules } from '../../data/rules';
         {totalRules} built-in rules across 10 languages. Cross-file taint tracking for Python, JavaScript, and Go. Single Rust binary, sub-second scans.
       </p>
       <!-- Tabbed install -->
-      <div data-install-box class="rounded-xl border border-noir-800 overflow-hidden mb-8 mx-auto transition-all duration-300" style="width: 300px; max-width: 100%;">
+      <div data-install-box class="rounded-xl border border-noir-800 overflow-hidden mb-8 mx-auto transition-all duration-300" style="width: 440px; max-width: 100%;">
         <div class="flex border-b border-noir-800">
           <button data-tab="npx" class="install-tab active flex-1 px-4 py-2 text-sm text-noir-100 border-b-2 border-fox cursor-pointer">npx</button>
+          <button data-tab="curl" class="install-tab flex-1 px-4 py-2 text-sm text-noir-600 border-b-2 border-transparent hover:text-noir-400 transition-colors cursor-pointer">curl</button>
           <button data-tab="cargo" class="install-tab flex-1 px-4 py-2 text-sm text-noir-600 border-b-2 border-transparent hover:text-noir-400 transition-colors cursor-pointer">cargo</button>
         </div>
         <button id="install-area" class="w-full px-5 py-3 font-mono text-sm flex items-center justify-center cursor-pointer hover:bg-noir-900/30 active:scale-95 transition-all">
-          <code id="install-cmd" class="text-fox-light">npx foxguard .</code>
+          <code id="install-cmd" class="text-fox-light whitespace-nowrap overflow-hidden text-ellipsis">npx foxguard .</code>
         </button>
       </div>
     </div>
@@ -33,6 +34,7 @@ import { totalRules } from '../../data/rules';
       // Install tabs + copy
       const cmds: Record<string, string> = {
         npx: 'npx foxguard .',
+        curl: 'curl -fsSL https://foxguard.dev/install.sh | sh',
         cargo: 'cargo install foxguard',
       };
 
