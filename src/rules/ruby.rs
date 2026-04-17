@@ -1,5 +1,5 @@
 use crate::impl_rule;
-use crate::rules::common::{make_finding, walk_tree};
+use crate::rules::common::{is_secret_value_long_enough, make_finding, walk_tree};
 use crate::{Language, Severity};
 use regex::Regex;
 
@@ -501,7 +501,7 @@ impl_rule! {
                         let inner = val
                             .trim_start_matches(['"', '\''])
                             .trim_end_matches(['"', '\'']);
-                        if inner.len() >= 4 {
+                        if is_secret_value_long_enough(inner) {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),

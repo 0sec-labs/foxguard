@@ -1,8 +1,8 @@
 use crate::baseline::{load_baseline, suppress_with_baseline, write_baseline};
 use crate::cli::{DiffArgs, OutputFormat, ScanArgs, SecretsArgs, TuiArgs};
 use crate::config::{
-    apply_scan_defaults, apply_secrets_defaults, apply_severity_overrides, load_for_scan,
-    suppress_with_scan_ignores,
+    apply_scan_defaults, apply_scan_thresholds, apply_secrets_defaults, apply_severity_overrides,
+    load_for_scan, suppress_with_scan_ignores,
 };
 use crate::diff::run_diff_with_warnings;
 use crate::engine::{
@@ -94,6 +94,11 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
     let config = load_for_scan(Path::new(&scan.path), scan.config.as_deref())?;
     validate_root_path(&scan.path)?;
     validate_rules_path(scan.rules.as_deref())?;
+
+    // Install any `scan.thresholds.*` overrides into process-wide state
+    // before the rules run. Must happen after config load and before
+    // `scan_directory_with_notices` dispatches parallel rule execution.
+    apply_scan_thresholds(config.as_ref());
 
     let mut registry = build_registry(scan.no_builtins, scan.rules.as_deref())?;
     let excludes = PathExcludeMatcher::new(&scan.exclude)?;
@@ -233,6 +238,7 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
 pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     validate_root_path(&args.path)?;
     let config = load_for_scan(Path::new(&args.path), None)?;
+    apply_scan_thresholds(config.as_ref());
     let mut registry = build_registry(args.no_builtins, args.rules.as_deref())?;
     let rule_filter_unknown = if let Some(config) = config.as_ref() {
         registry.apply_rule_filter(&config.scan.enable_rules, &config.scan.disable_rules)

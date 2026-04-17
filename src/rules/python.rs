@@ -1,5 +1,5 @@
 use crate::impl_rule;
-use crate::rules::common::{get_source_line, make_finding, walk_tree};
+use crate::rules::common::{get_source_line, is_secret_value_long_enough, make_finding, walk_tree};
 use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
 use regex::Regex;
@@ -93,7 +93,7 @@ impl_rule! {
                             .trim_start_matches("f\"")
                             .trim_start_matches("f'")
                             .trim_matches(|c| c == '"' || c == '\'');
-                        if inner.len() >= 4 {
+                        if is_secret_value_long_enough(inner) {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
@@ -747,7 +747,7 @@ impl_rule! {
                     if left_text == "SECRET_KEY" && right.kind() == "string" {
                         let val = &src[right.byte_range()];
                         let inner = val.trim_matches(|c| c == '"' || c == '\'');
-                        if inner.len() >= 4 {
+                        if is_secret_value_long_enough(inner) {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
@@ -954,7 +954,7 @@ impl_rule! {
 
             let val = &src[right.byte_range()];
             let inner = val.trim_matches(|c| c == '"' || c == '\'');
-            if inner.len() < 4 {
+            if !is_secret_value_long_enough(inner) {
                 return;
             }
 
@@ -1597,7 +1597,7 @@ impl_rule! {
             if secret_arg.kind() == "string" || secret_arg.kind() == "concatenated_string" {
                 let secret_text = &src[secret_arg.byte_range()];
                 let inner = secret_text.trim_matches(|c| c == '"' || c == '\'');
-                if inner.len() >= 4 {
+                if is_secret_value_long_enough(inner) {
                     findings.push(make_finding(
                         _self.id(),
                         _self.severity(),

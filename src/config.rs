@@ -1,4 +1,5 @@
 use crate::cli::{ScanArgs, SecretsArgs, SeverityFilter};
+use crate::rules::common::set_hardcoded_secret_min_length_override;
 use crate::{Finding, Severity};
 use serde::Deserialize;
 use serde_yaml::{Mapping, Sequence, Value};
@@ -39,6 +40,48 @@ pub struct ScanConfig {
     /// removed from the active registry and never execute. Applied after
     /// `enable_rules`, so a rule listed in both lists is disabled.
     pub disable_rules: Vec<String>,
+    /// Threshold knobs for built-in pattern rules (refs #210).
+    pub thresholds: ScanThresholds,
+}
+
+/// Tunable thresholds for pattern/heuristic rules.
+///
+/// See issue #210. Each field is `Option<_>` and `None` means "use the
+/// default hardcoded in the rule today" so an empty threshold block is a
+/// pure no-op (zero behavior change). Only thresholds that correspond to
+/// an *existing* hardcoded constant in the scanner are wired up today;
+/// the rest are parsed and validated so users can set them without a
+/// schema break when follow-up PRs hook them into the engine.
+#[derive(Debug, Clone, Default)]
+pub struct ScanThresholds {
+    pub secrets: SecretsThresholds,
+    pub taint: TaintThresholds,
+}
+
+/// Thresholds for `*-hardcoded-secret` rules.
+///
+/// `min_length` is live: it replaces the previously hardcoded `inner.len()
+/// check (`>= 4`) used across every language's secret rule. `min_entropy`
+/// is reserved — no rule in the codebase computes Shannon entropy today,
+/// so enabling it would require inventing new behavior rather than
+/// exposing an existing threshold. It is parsed and validated so a future
+/// PR can wire it without a config schema change.
+#[derive(Debug, Clone, Default)]
+pub struct SecretsThresholds {
+    pub min_length: Option<usize>,
+    pub min_entropy: Option<f32>,
+}
+
+/// Thresholds for taint-propagation rules.
+///
+/// `max_hops` is reserved — the taint engine runs a fixed two-pass
+/// pipeline with no iteration counter to clamp, so there is no
+/// "hardcoded cap" to expose today. Parsed and validated so users can set
+/// it now without a schema break when the engine grows a convergence
+/// loop.
+#[derive(Debug, Clone, Default)]
+pub struct TaintThresholds {
+    pub max_hops: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -81,6 +124,30 @@ struct RawScanConfig {
     enable_rules: Vec<String>,
     #[serde(default)]
     disable_rules: Vec<String>,
+    /// Threshold knobs. Invalid scalar shapes (e.g. a string in a
+    /// numeric field) surface as yaml parse errors so typos fail loudly
+    /// at load time rather than silently falling back to defaults.
+    #[serde(default)]
+    thresholds: RawScanThresholds,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawScanThresholds {
+    #[serde(default)]
+    secrets: RawSecretsThresholds,
+    #[serde(default)]
+    taint: RawTaintThresholds,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawSecretsThresholds {
+    min_length: Option<usize>,
+    min_entropy: Option<f32>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawTaintThresholds {
+    max_hops: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -213,6 +280,44 @@ impl FoxguardConfig {
             })
             .transpose()?;
 
+        let raw_thresholds = raw.scan.thresholds;
+        let min_length = raw_thresholds.secrets.min_length;
+        if let Some(value) = min_length {
+            if value == 0 {
+                return Err(
+                    "scan.thresholds.secrets.min_length must be >= 1 (0 disables the \
+                     rule entirely; use scan.ignore_rules instead)"
+                        .to_string(),
+                );
+            }
+        }
+        if let Some(value) = raw_thresholds.secrets.min_entropy {
+            if !(0.0..=8.0).contains(&value) || value.is_nan() {
+                return Err(format!(
+                    "scan.thresholds.secrets.min_entropy must be a finite number in \
+                     [0.0, 8.0] (got {value})"
+                ));
+            }
+        }
+        if let Some(value) = raw_thresholds.taint.max_hops {
+            if value == 0 {
+                return Err(
+                    "scan.thresholds.taint.max_hops must be >= 1 (0 would disable taint \
+                     analysis; set scan.no_builtins or use scan.ignore_rules instead)"
+                        .to_string(),
+                );
+            }
+        }
+        let thresholds = ScanThresholds {
+            secrets: SecretsThresholds {
+                min_length,
+                min_entropy: raw_thresholds.secrets.min_entropy,
+            },
+            taint: TaintThresholds {
+                max_hops: raw_thresholds.taint.max_hops,
+            },
+        };
+
         Ok(Self {
             scan: ScanConfig {
                 rules: scan_rules,
@@ -223,6 +328,7 @@ impl FoxguardConfig {
                 severity_overrides: raw.scan.severity_overrides,
                 enable_rules: raw.scan.enable_rules,
                 disable_rules: raw.scan.disable_rules,
+                thresholds,
             },
             secrets: SecretsConfig {
                 baseline: secrets_baseline,
@@ -305,6 +411,21 @@ pub fn suppress_with_scan_ignores(
             })
         })
         .collect()
+}
+
+/// Install any [`ScanThresholds`] overrides from the loaded config into the
+/// scanner's process-wide state. Idempotent: calling with a fresh config
+/// overwrites any previous override, so repeated scans in the same
+/// process (e.g. the TUI) cannot leak a stale value.
+///
+/// Currently only `secrets.min_length` has an active hook (it feeds the
+/// `is_secret_value_long_enough` helper used by every
+/// `*-hardcoded-secret` rule). The other threshold fields are parsed and
+/// validated but have no behavioral effect yet; they are reserved for
+/// follow-up PRs (see issue #210).
+pub fn apply_scan_thresholds(config: Option<&FoxguardConfig>) {
+    let min_length = config.and_then(|cfg| cfg.scan.thresholds.secrets.min_length);
+    set_hardcoded_secret_min_length_override(min_length);
 }
 
 pub fn editable_config_path(
@@ -1024,5 +1145,150 @@ mod tests {
             .expect("failed to load config")
             .expect("expected config");
         assert!(loaded.scan.severity_overrides.is_empty());
+    }
+
+    // ── scan.thresholds.* (issue #210) ────────────────────────────────────
+
+    #[test]
+    fn thresholds_default_empty_when_absent() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(repo.path(), ".foxguard.yml", "scan:\n  no_builtins: true\n");
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        assert!(loaded.scan.thresholds.secrets.min_length.is_none());
+        assert!(loaded.scan.thresholds.secrets.min_entropy.is_none());
+        assert!(loaded.scan.thresholds.taint.max_hops.is_none());
+    }
+
+    #[test]
+    fn thresholds_parse_secrets_min_length() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  thresholds:\n    secrets:\n      min_length: 12\n",
+        );
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        assert_eq!(loaded.scan.thresholds.secrets.min_length, Some(12));
+    }
+
+    #[test]
+    fn thresholds_parse_secrets_min_entropy() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  thresholds:\n    secrets:\n      min_entropy: 3.5\n",
+        );
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        assert_eq!(loaded.scan.thresholds.secrets.min_entropy, Some(3.5));
+    }
+
+    #[test]
+    fn thresholds_parse_taint_max_hops() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  thresholds:\n    taint:\n      max_hops: 8\n",
+        );
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        assert_eq!(loaded.scan.thresholds.taint.max_hops, Some(8));
+    }
+
+    #[test]
+    fn thresholds_reject_zero_secrets_min_length() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  thresholds:\n    secrets:\n      min_length: 0\n",
+        );
+        let err = load_for_scan(repo.path(), None).expect_err("expected validation error");
+        assert!(err.contains("min_length"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn thresholds_reject_zero_taint_max_hops() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  thresholds:\n    taint:\n      max_hops: 0\n",
+        );
+        let err = load_for_scan(repo.path(), None).expect_err("expected validation error");
+        assert!(err.contains("max_hops"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn thresholds_reject_out_of_range_min_entropy() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  thresholds:\n    secrets:\n      min_entropy: 20.0\n",
+        );
+        let err = load_for_scan(repo.path(), None).expect_err("expected validation error");
+        assert!(err.contains("min_entropy"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn thresholds_reject_invalid_types() {
+        // `min_length` is a `usize`; yaml string fails to parse at deserialize
+        // time, which is exactly the "loud on invalid" behavior we want.
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  thresholds:\n    secrets:\n      min_length: not-a-number\n",
+        );
+        let err = load_for_scan(repo.path(), None).expect_err("expected parse error");
+        assert!(
+            err.contains("Failed to parse config"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn apply_scan_thresholds_installs_and_resets_min_length_override() {
+        use crate::rules::common::hardcoded_secret_min_length;
+
+        // Baseline: default value when no config present.
+        apply_scan_thresholds(None);
+        assert_eq!(hardcoded_secret_min_length(), 4);
+
+        // Override via loaded config.
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  thresholds:\n    secrets:\n      min_length: 9\n",
+        );
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        apply_scan_thresholds(Some(&loaded));
+        assert_eq!(hardcoded_secret_min_length(), 9);
+
+        // Re-applying a config without the override resets to the default,
+        // so repeated scans in the same process (TUI) cannot leak state.
+        let repo2 = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo2.path(),
+            ".foxguard.yml",
+            "scan:\n  no_builtins: true\n",
+        );
+        let fresh = load_for_scan(repo2.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        apply_scan_thresholds(Some(&fresh));
+        assert_eq!(hardcoded_secret_min_length(), 4);
     }
 }

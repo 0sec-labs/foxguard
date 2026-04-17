@@ -1,6 +1,9 @@
 use crate::impl_rule;
 use crate::rules::common::AliasTable;
-use crate::rules::common::{get_source_line, make_finding, make_finding_from_offsets, walk_tree};
+use crate::rules::common::{
+    get_source_line, is_secret_value_long_enough, make_finding, make_finding_from_offsets,
+    walk_tree,
+};
 use crate::rules::go_taint::{
     self, go_aliases_from_tree, go_taint_sources, NodeMatcher as GoNodeMatcher,
     TaintSpec as GoTaintSpec,
@@ -166,7 +169,7 @@ impl_rule! {
                         {
                             let val = &src[value_node.byte_range()];
                             let inner = val.trim_matches(|c| c == '"' || c == '`');
-                            if inner.len() >= 4 {
+                            if is_secret_value_long_enough(inner) {
                                 findings.push(make_finding(
                                     _self.id(),
                                     _self.severity(),
@@ -196,7 +199,7 @@ impl_rule! {
                             {
                                 let val = &src[value_node.byte_range()];
                                 let inner = val.trim_matches(|c| c == '"' || c == '`');
-                                if inner.len() >= 4 {
+                                if is_secret_value_long_enough(inner) {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),
@@ -227,7 +230,7 @@ impl_rule! {
                             {
                                 let val = &src[value_node.byte_range()];
                                 let inner = val.trim_matches(|c| c == '"' || c == '`');
-                                if inner.len() >= 4 {
+                                if is_secret_value_long_enough(inner) {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),
