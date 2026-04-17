@@ -1985,6 +1985,167 @@ rules:
     }
 
     #[test]
+    fn test_enable_rules_allowlist_runs_only_listed_ids() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        copy_fixture_to(repo.path(), "vulnerable.py", "vulnerable.py");
+        write_config_file(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  enable_rules:\n    - py/no-eval\n",
+        );
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args(["vulnerable.py", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        assert!(
+            !findings.is_empty(),
+            "expected at least one py/no-eval finding"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|f| f["rule_id"].as_str() == Some("py/no-eval")),
+            "expected only py/no-eval findings when allowlisted, got: {:?}",
+            findings
+                .iter()
+                .map(|f| f["rule_id"].as_str().unwrap_or("?"))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_disable_rules_denylist_removes_listed_ids() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        copy_fixture_to(repo.path(), "vulnerable.py", "vulnerable.py");
+
+        // First scan without disable_rules to confirm py/no-eval fires.
+        let baseline = foxguard_cmd()
+            .current_dir(repo.path())
+            .args(["vulnerable.py", "-f", "json"])
+            .output()
+            .expect("failed to execute baseline foxguard scan");
+        let baseline_findings: Vec<serde_json::Value> =
+            serde_json::from_slice(&baseline.stdout).expect("invalid JSON");
+        assert!(
+            baseline_findings
+                .iter()
+                .any(|f| f["rule_id"].as_str() == Some("py/no-eval")),
+            "baseline scan should include py/no-eval"
+        );
+
+        write_config_file(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  disable_rules:\n    - py/no-eval\n",
+        );
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args(["vulnerable.py", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        assert!(
+            !findings.is_empty(),
+            "other rules should still fire when only py/no-eval is disabled"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|f| f["rule_id"].as_str() != Some("py/no-eval")),
+            "expected py/no-eval to be suppressed by disable_rules"
+        );
+    }
+
+    #[test]
+    fn test_enable_and_disable_rules_intersection_then_subtraction() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        copy_fixture_to(repo.path(), "vulnerable.py", "vulnerable.py");
+        // Allowlist two rules, then disable one of them. Only the other
+        // should remain.
+        write_config_file(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  enable_rules:\n    - py/no-eval\n    - py/no-hardcoded-secret\n  disable_rules:\n    - py/no-eval\n",
+        );
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args(["vulnerable.py", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        assert!(
+            findings
+                .iter()
+                .any(|f| f["rule_id"].as_str() == Some("py/no-hardcoded-secret")),
+            "expected py/no-hardcoded-secret to remain after intersection"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|f| f["rule_id"].as_str() != Some("py/no-eval")),
+            "py/no-eval should be removed by disable_rules even when allowlisted"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|f| matches!(f["rule_id"].as_str(), Some("py/no-hardcoded-secret"))),
+            "only intersection(enable) minus disable should fire"
+        );
+    }
+
+    #[test]
+    fn test_unknown_rule_ids_warn_on_stderr_and_continue() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        copy_fixture_to(repo.path(), "vulnerable.py", "vulnerable.py");
+        write_config_file(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  disable_rules:\n    - py/does-not-exist\n    - py/no-eval\n",
+        );
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args(["vulnerable.py", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        // Unknown IDs should never fail the scan.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("py/does-not-exist"),
+            "expected unknown rule id in stderr warning, got: {}",
+            stderr
+        );
+        assert!(
+            stderr.contains("unknown rule"),
+            "expected 'unknown rule' phrase in warning, got: {}",
+            stderr
+        );
+
+        // Scan should still proceed and the known disable (py/no-eval)
+        // should apply.
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        assert!(
+            findings
+                .iter()
+                .all(|f| f["rule_id"].as_str() != Some("py/no-eval")),
+            "known disable should still apply even with unknown ids present"
+        );
+    }
+
+    #[test]
     fn test_scan_rejects_config_path_traversal() {
         let repo = TempDir::new().expect("failed to create temp dir");
         let outside = TempDir::new().expect("failed to create outside temp dir");

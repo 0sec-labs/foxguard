@@ -32,6 +32,13 @@ pub struct ScanConfig {
     /// `severity` min-filter, so demoting a rule to Low with a
     /// `severity: medium` filter will suppress the finding.
     pub severity_overrides: HashMap<String, Severity>,
+    /// Optional allowlist of rule IDs. When non-empty, only rules whose
+    /// `id()` appears in the list are kept in the active registry.
+    pub enable_rules: Vec<String>,
+    /// Denylist of rule IDs. Rules whose `id()` appears in this list are
+    /// removed from the active registry and never execute. Applied after
+    /// `enable_rules`, so a rule listed in both lists is disabled.
+    pub disable_rules: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -70,6 +77,10 @@ struct RawScanConfig {
     /// validation.
     #[serde(default)]
     severity_overrides: HashMap<String, Severity>,
+    #[serde(default)]
+    enable_rules: Vec<String>,
+    #[serde(default)]
+    disable_rules: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -210,6 +221,8 @@ impl FoxguardConfig {
                 baseline: scan_baseline,
                 ignore_rules: scan_ignore_rules,
                 severity_overrides: raw.scan.severity_overrides,
+                enable_rules: raw.scan.enable_rules,
+                disable_rules: raw.scan.disable_rules,
             },
             secrets: SecretsConfig {
                 baseline: secrets_baseline,
@@ -731,6 +744,39 @@ mod tests {
             loaded.secrets.exclude_paths,
             vec![expected.display().to_string()]
         );
+    }
+
+    #[test]
+    fn load_for_scan_parses_enable_and_disable_rules() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  enable_rules:\n    - py/no-eval\n    - js/no-xss\n  disable_rules:\n    - go/no-ssrf\n",
+        );
+
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        assert_eq!(
+            loaded.scan.enable_rules,
+            vec!["py/no-eval".to_string(), "js/no-xss".to_string()]
+        );
+        assert_eq!(loaded.scan.disable_rules, vec!["go/no-ssrf".to_string()]);
+    }
+
+    #[test]
+    fn load_for_scan_defaults_enable_and_disable_rules_to_empty() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(repo.path(), ".foxguard.yml", "scan:\n  severity: high\n");
+
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        assert!(loaded.scan.enable_rules.is_empty());
+        assert!(loaded.scan.disable_rules.is_empty());
     }
 
     #[test]
