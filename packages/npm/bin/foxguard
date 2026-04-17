@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { execFileSync, execSync } = require("child_process");
+const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -46,35 +46,6 @@ function getCacheDir() {
 
 function getBinaryName() {
   return os.platform() === "win32" ? "foxguard.exe" : "foxguard";
-}
-
-// Check if cargo-installed foxguard exists
-function findCargoInstall() {
-  try {
-    const cargoHome = process.env.CARGO_HOME || path.join(os.homedir(), ".cargo");
-    const cargoBin = path.join(cargoHome, "bin", getBinaryName());
-    if (fs.existsSync(cargoBin)) {
-      return cargoBin;
-    }
-  } catch {}
-
-  // Try PATH
-  try {
-    const which = os.platform() === "win32" ? "where" : "which";
-    const result = execSync(`${which} foxguard 2>/dev/null`, {
-      encoding: "utf8",
-    }).trim();
-    if (result && !result.includes("node_modules")) {
-      // Resolve symlinks to avoid finding ourselves (the npm wrapper)
-      const resolved = fs.realpathSync(result);
-      const thisScript = fs.realpathSync(__filename);
-      if (resolved !== thisScript) {
-        return result;
-      }
-    }
-  } catch {}
-
-  return null;
 }
 
 function download(url) {
@@ -151,18 +122,11 @@ async function downloadBinary() {
 }
 
 async function main() {
-  // 1. Check for cargo-installed binary
-  const cargoBin = findCargoInstall();
-  if (cargoBin) {
-    try {
-      execFileSync(cargoBin, process.argv.slice(2), { stdio: "inherit" });
-      return;
-    } catch (e) {
-      process.exit(e.status || 1);
-    }
-  }
-
-  // 2. Download or use cached binary
+  // Always resolve to the binary matching the npm package version. A
+  // previously-installed foxguard on PATH (cargo, Homebrew, etc.) may be
+  // an older version that does not understand newer subcommands, so we
+  // ignore it. Users who want their own foxguard can invoke it directly
+  // instead of via `npx`.
   const bin = await downloadBinary();
   try {
     execFileSync(bin, process.argv.slice(2), { stdio: "inherit" });
