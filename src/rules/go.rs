@@ -352,9 +352,15 @@ impl_rule! {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
-            // Detect calls: rsa.GenerateKey, ecdsa.GenerateKey, ecdh.P256, ed25519.GenerateKey, etc.
+            // Only flag calls, not imports, to avoid double-counting.
+            // Require func child to be a selector_expression (pkg.Func) to
+            // skip nested calls like ecdh.P256().GenerateKey() — the outer
+            // call's function is a call_expression, not a selector.
             if node.kind() == "call_expression" {
                 if let Some(func) = node.child_by_field_name("function") {
+                    if func.kind() != "selector_expression" {
+                        return;
+                    }
                     let raw = &src[func.byte_range()];
                     let func_text = if let Some(al) = aliases {
                         al.resolve(raw)
@@ -376,34 +382,6 @@ impl_rule! {
                         _self.cwe(),
                         &format!(
                             "{} is quantum-vulnerable — migrate to {}",
-                            algo, replacement
-                        ),
-                        node,
-                        src,
-                    ));
-                }
-            }
-
-            // Detect imports
-            if node.kind() == "import_spec" {
-                if let Some(path) = node.child_by_field_name("path") {
-                    let path_text = &src[path.byte_range()];
-                    let (algo, replacement) = match path_text {
-                        "\"crypto/rsa\"" => ("RSA", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
-                        "\"crypto/ecdsa\"" => ("ECDSA", "ML-DSA (FIPS 204)"),
-                        "\"crypto/ecdh\"" => ("ECDH", "ML-KEM (FIPS 203)"),
-                        "\"crypto/dsa\"" => ("DSA", "ML-DSA (FIPS 204)"),
-                        "\"crypto/elliptic\"" => ("elliptic", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
-                        "\"crypto/ed25519\"" => ("Ed25519", "ML-DSA (FIPS 204)"),
-                        s if s.contains("x/crypto/ed25519") => ("Ed25519", "ML-DSA (FIPS 204)"),
-                        _ => return,
-                    };
-                    findings.push(make_finding(
-                        _self.id(),
-                        _self.severity(),
-                        _self.cwe(),
-                        &format!(
-                            "Import of quantum-vulnerable {} package — migrate to {}",
                             algo, replacement
                         ),
                         node,
