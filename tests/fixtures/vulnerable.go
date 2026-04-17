@@ -1,8 +1,14 @@
 package main
 
 import (
-	"crypto/tls"
+	"crypto/ecdh"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/md5"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -68,18 +74,12 @@ func getUserInput() string {
 }
 
 // go/pq-vulnerable-crypto
-import (
-	"crypto/rsa"
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/elliptic"
-	"crypto/rand"
-)
-
 func pqVulnerable() {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	_ = key
 	ecKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	_ = ecKey
 	_, _, _ = ed25519.GenerateKey(rand.Reader)
+	p256key, _ := ecdh.P256().GenerateKey(rand.Reader)
+	_ = p256key
 }
