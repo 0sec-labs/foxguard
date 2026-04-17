@@ -167,7 +167,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      - uses: PwnKit-Labs/foxguard/action@v0.7.0
+      - uses: PwnKit-Labs/foxguard/action@v0.7.1
         with:
           path: .
           severity: medium
@@ -196,7 +196,7 @@ npx foxguard@latest secrets .                      # secrets
 ```yaml
 repos:
   - repo: https://github.com/PwnKit-Labs/foxguard
-    rev: v0.7.0
+    rev: v0.7.1
     hooks:
       - id: foxguard
       - id: foxguard-secrets
