@@ -452,6 +452,117 @@ impl_rule! {
     }
 }
 
+// ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "js/pq-vulnerable-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DH/Ed25519)",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let pq_key_types = Regex::new(r"(?i)^['\x22`](rsa|ec|dsa|ed25519|ed448)['\x22`]$").unwrap();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
+
+                    // crypto.generateKeyPair('rsa'|'ec'|'dsa'|'ed25519'|'ed448')
+                    // crypto.generateKeyPairSync(...)
+                    if func_name == "generateKeyPair" || func_name == "generateKeyPairSync" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                if first_arg.kind() == "string" {
+                                    let val = &src[first_arg.byte_range()];
+                                    if pq_key_types.is_match(val) {
+                                        let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                                        let (algo, replacement) = match inner.to_lowercase().as_str() {
+                                            "rsa" => ("RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
+                                            "ec" => ("EC", "ML-KEM (FIPS 203) for key exchange or ML-DSA (FIPS 204) for signatures"),
+                                            "dsa" => ("DSA", "ML-DSA (FIPS 204)"),
+                                            "ed25519" | "ed448" => ("Ed25519/Ed448", "ML-DSA (FIPS 204)"),
+                                            _ => return,
+                                        };
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            &format!(
+                                                "generateKeyPair('{}') uses quantum-vulnerable {} — migrate to {}",
+                                                inner, algo, replacement
+                                            ),
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // crypto.createDiffieHellman, crypto.createDiffieHellmanGroup
+                    if func_name == "createDiffieHellman" || func_name == "createDiffieHellmanGroup" {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "Diffie-Hellman is quantum-vulnerable — migrate to ML-KEM (FIPS 203)",
+                            node,
+                            src,
+                        ));
+                    }
+
+                    // crypto.createECDH
+                    if func_name == "createECDH" {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "ECDH is quantum-vulnerable — migrate to ML-KEM (FIPS 203)",
+                            node,
+                            src,
+                        ));
+                    }
+
+                    // crypto.sign / crypto.verify with ed25519/ed448 algorithm string
+                    if func_name == "sign" || func_name == "verify" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                if first_arg.kind() == "string" {
+                                    let val = &src[first_arg.byte_range()];
+                                    let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_lowercase();
+                                    if inner == "ed25519" || inner == "ed448" {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            &format!(
+                                                "{}('{}') uses a quantum-vulnerable signature algorithm — migrate to ML-DSA (FIPS 204)",
+                                                func_name, inner
+                                            ),
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── Rule 9: no-path-traversal ─────────────────────────────────────────────
 
 pub struct NoPathTraversal;

@@ -72,5 +72,11 @@ public class Vulnerable {
         PrintWriter pw = response.getWriter();
         pw.write("<h1>" + userInput);
         pw.println("<div>" + userInput);
+
+        // java/pq-vulnerable-crypto
+        KeyPairGenerator rsaGen = KeyPairGenerator.getInstance("RSA");
+        KeyPairGenerator ecGen = KeyPairGenerator.getInstance("EC");
+        KeyAgreement ecdhAg = KeyAgreement.getInstance("ECDH");
+        Signature rsaSig = Signature.getInstance("SHA256withRSA");
     }
 }

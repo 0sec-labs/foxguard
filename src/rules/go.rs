@@ -326,6 +326,94 @@ impl_rule! {
     }
 }
 
+// ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "go/pq-vulnerable-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519)",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+            Some(go_aliases_from_tree(source, tree))
+        } else {
+            None
+        };
+        let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect calls: rsa.GenerateKey, ecdsa.GenerateKey, ecdh.P256, ed25519.GenerateKey, etc.
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let raw = &src[func.byte_range()];
+                    let func_text = if let Some(al) = aliases {
+                        al.resolve(raw)
+                    } else {
+                        std::borrow::Cow::Borrowed(raw)
+                    };
+                    let (algo, replacement) = match func_text.as_ref() {
+                        s if s.starts_with("rsa.") => ("RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
+                        s if s.starts_with("ecdsa.") => ("ECDSA", "ML-DSA (FIPS 204)"),
+                        s if s.starts_with("ecdh.") => ("ECDH", "ML-KEM (FIPS 203)"),
+                        s if s.starts_with("dsa.") => ("DSA", "ML-DSA (FIPS 204)"),
+                        s if s.starts_with("elliptic.") => ("ECDH/ECDSA (elliptic)", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
+                        s if s.starts_with("ed25519.") => ("Ed25519", "ML-DSA (FIPS 204)"),
+                        _ => return,
+                    };
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        &format!(
+                            "{} is quantum-vulnerable — migrate to {}",
+                            algo, replacement
+                        ),
+                        node,
+                        src,
+                    ));
+                }
+            }
+
+            // Detect imports
+            if node.kind() == "import_spec" {
+                if let Some(path) = node.child_by_field_name("path") {
+                    let path_text = &src[path.byte_range()];
+                    let (algo, replacement) = match path_text {
+                        "\"crypto/rsa\"" => ("RSA", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
+                        "\"crypto/ecdsa\"" => ("ECDSA", "ML-DSA (FIPS 204)"),
+                        "\"crypto/ecdh\"" => ("ECDH", "ML-KEM (FIPS 203)"),
+                        "\"crypto/dsa\"" => ("DSA", "ML-DSA (FIPS 204)"),
+                        "\"crypto/elliptic\"" => ("elliptic", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
+                        "\"crypto/ed25519\"" => ("Ed25519", "ML-DSA (FIPS 204)"),
+                        s if s.contains("x/crypto/ed25519") => ("Ed25519", "ML-DSA (FIPS 204)"),
+                        _ => return,
+                    };
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        &format!(
+                            "Import of quantum-vulnerable {} package — migrate to {}",
+                            algo, replacement
+                        ),
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── Rule 5: gin-no-trusted-proxies ────────────────────────────────────────
 
 pub struct GinNoTrustedProxies;

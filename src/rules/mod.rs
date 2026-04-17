@@ -192,6 +192,7 @@ impl RuleRegistry {
         registry.register(Box::new(javascript::NoDocumentWrite));
         registry.register(Box::new(javascript::NoOpenRedirect));
         registry.register(Box::new(javascript::NoWeakCrypto));
+        registry.register(Box::new(javascript::PqVulnerableCrypto));
         registry.register(Box::new(javascript::NoPathTraversal));
         registry.register(Box::new(javascript::NoSsrf));
         registry.register(Box::new(javascript::NoPrototypePollution));
@@ -231,6 +232,7 @@ impl RuleRegistry {
         registry.register(Box::new(python::NoPathTraversal));
         registry.register(Box::new(python::NoSsrf));
         registry.register(Box::new(python::NoWeakCrypto));
+        registry.register(Box::new(python::PqVulnerableCrypto));
         registry.register(Box::new(python::NoPickle));
         registry.register(Box::new(python::NoYamlLoad));
         registry.register(Box::new(python::NoDebugTrue));
@@ -270,6 +272,7 @@ impl RuleRegistry {
         registry.register(Box::new(go::NoCommandInjection));
         registry.register(Box::new(go::NoHardcodedSecret));
         registry.register(Box::new(go::NoWeakCrypto));
+        registry.register(Box::new(go::PqVulnerableCrypto));
         registry.register(Box::new(go::NoSsrf));
         registry.register(Box::new(go::InsecureTlsSkipVerify));
         registry.register(Box::new(go::GinNoTrustedProxies));
@@ -294,6 +297,7 @@ impl RuleRegistry {
         registry.register(Box::new(java::NoSsrf));
         registry.register(Box::new(java::NoPathTraversal));
         registry.register(Box::new(java::NoWeakCrypto));
+        registry.register(Box::new(java::PqVulnerableCrypto));
         registry.register(Box::new(java::NoHardcodedSecret));
         registry.register(Box::new(java::NoXxe));
         registry.register(Box::new(java::SpringCsrfDisabled));
@@ -371,6 +375,7 @@ impl RuleRegistry {
         registry.register(Box::new(rust_lang::NoCommandInjection));
         registry.register(Box::new(rust_lang::NoSqlInjection));
         registry.register(Box::new(rust_lang::NoWeakHash));
+        registry.register(Box::new(rust_lang::PqVulnerableCrypto));
         registry.register(Box::new(rust_lang::NoHardcodedSecret));
         registry.register(Box::new(rust_lang::TlsVerifyDisabled));
         registry.register(Box::new(rust_lang::NoSsrf));

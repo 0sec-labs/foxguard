@@ -110,3 +110,12 @@ decoded = jwt.decode(token, "secret", options={"verify_signature": False})
 
 # py/jwt-hardcoded-secret
 token = jwt.encode(payload, "my-hardcoded-jwt-secret", algorithm="HS256")
+
+# py/pq-vulnerable-crypto
+from cryptography.hazmat.primitives.asymmetric import rsa as crypto_rsa
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ed25519
+
+private_key = crypto_rsa.generate_private_key(public_exponent=65537, key_size=2048)
+ec_key = ec.generate_private_key(ec.SECP256R1())
+ed_key = ed25519.Ed25519PrivateKey.generate()
