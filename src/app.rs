@@ -1,7 +1,8 @@
 use crate::baseline::{load_baseline, suppress_with_baseline, write_baseline};
 use crate::cli::{DiffArgs, OutputFormat, ScanArgs, SecretsArgs, TuiArgs};
 use crate::config::{
-    apply_scan_defaults, apply_secrets_defaults, load_for_scan, suppress_with_scan_ignores,
+    apply_scan_defaults, apply_secrets_defaults, apply_severity_overrides, load_for_scan,
+    suppress_with_scan_ignores,
 };
 use crate::diff::run_diff_with_warnings;
 use crate::engine::{
@@ -114,6 +115,11 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
     let duration = result.duration;
     let mut findings = result.findings;
 
+    let known_rule_ids = collect_rule_ids(&registry);
+    let override_warnings =
+        apply_severity_overrides(&mut findings, config.as_ref(), &known_rule_ids);
+    notices.extend(override_warnings);
+
     if let Some(ref min_severity) = scan.severity {
         let min = min_severity.to_severity();
         findings.retain(|f| f.severity >= min);
@@ -209,6 +215,14 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     let registry = build_registry(args.no_builtins, args.rules.as_deref())?;
     let ((scan_result, mut diff_result), mut notices) =
         run_diff_with_warnings(&args.path, &args.target, &registry, args.max_file_size)?;
+
+    let known_rule_ids = collect_rule_ids(&registry);
+    let override_warnings = apply_severity_overrides(
+        &mut diff_result.new_findings,
+        config.as_ref(),
+        &known_rule_ids,
+    );
+    notices.extend(override_warnings);
 
     if let Some(ref min_severity) = args.severity {
         let min = min_severity.to_severity();
@@ -335,6 +349,14 @@ fn tui_secrets_args(args: &TuiArgs) -> SecretsArgs {
         ignored_rules: Vec::new(),
         max_file_size: args.max_file_size,
     }
+}
+
+fn collect_rule_ids(registry: &RuleRegistry) -> std::collections::HashSet<String> {
+    registry
+        .all_rules()
+        .iter()
+        .map(|rule| rule.id().to_string())
+        .collect()
 }
 
 fn build_registry(no_builtins: bool, rules: Option<&str>) -> Result<RuleRegistry, String> {

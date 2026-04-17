@@ -1,7 +1,8 @@
 use crate::cli::{ScanArgs, SecretsArgs, SeverityFilter};
-use crate::Finding;
+use crate::{Finding, Severity};
 use serde::Deserialize;
 use serde_yaml::{Mapping, Sequence, Value};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -25,6 +26,12 @@ pub struct ScanConfig {
     pub severity: Option<SeverityFilter>,
     pub baseline: Option<String>,
     pub ignore_rules: Vec<ScanIgnoreRule>,
+    /// Per-rule severity overrides applied at finding emit time.
+    ///
+    /// Keyed by rule id (e.g. `py/no-eval`). Applied before the
+    /// `severity` min-filter, so demoting a rule to Low with a
+    /// `severity: medium` filter will suppress the finding.
+    pub severity_overrides: HashMap<String, Severity>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -57,6 +64,12 @@ struct RawScanConfig {
     baseline: Option<String>,
     #[serde(default)]
     ignore_rules: Vec<RawScanIgnoreRule>,
+    /// Invalid severity values surface as yaml parse errors via
+    /// `Severity`'s serde derive (rename_all = lowercase), which
+    /// satisfies the "loud on invalid" requirement without custom
+    /// validation.
+    #[serde(default)]
+    severity_overrides: HashMap<String, Severity>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -196,6 +209,7 @@ impl FoxguardConfig {
                 severity: raw.scan.severity,
                 baseline: scan_baseline,
                 ignore_rules: scan_ignore_rules,
+                severity_overrides: raw.scan.severity_overrides,
             },
             secrets: SecretsConfig {
                 baseline: secrets_baseline,
@@ -205,6 +219,54 @@ impl FoxguardConfig {
             },
         })
     }
+}
+
+/// Apply per-rule severity overrides from config to findings.
+///
+/// Mutates each finding's severity in place if its rule_id is present in
+/// the override map. Returns a list of human-readable notices for
+/// override rule IDs that do not match any known rule in `known_rule_ids`
+/// — callers typically push these onto a warning channel (stderr) so
+/// typos surface quickly without a hard failure.
+///
+/// Applied before the severity min-filter so the filter sees the
+/// overridden value. See issue #209.
+pub fn apply_severity_overrides(
+    findings: &mut [Finding],
+    config: Option<&FoxguardConfig>,
+    known_rule_ids: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let Some(config) = config else {
+        return Vec::new();
+    };
+    let overrides = &config.scan.severity_overrides;
+    if overrides.is_empty() {
+        return Vec::new();
+    }
+
+    for finding in findings.iter_mut() {
+        if let Some(new_severity) = overrides.get(&finding.rule_id) {
+            finding.severity = *new_severity;
+        }
+    }
+
+    let mut unknown: Vec<&String> = overrides
+        .keys()
+        .filter(|id| !known_rule_ids.contains(id.as_str()))
+        .collect();
+    if unknown.is_empty() {
+        return Vec::new();
+    }
+    unknown.sort();
+    vec![format!(
+        "warning: severity_overrides references unknown rule id{}: {}",
+        if unknown.len() == 1 { "" } else { "s" },
+        unknown
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )]
 }
 
 pub fn suppress_with_scan_ignores(
@@ -751,5 +813,170 @@ mod tests {
         let (_, added_again) = add_secrets_ignored_rule(repo.path(), None, "secret/github-token")
             .expect("should preserve duplicate");
         assert!(!added_again);
+    }
+
+    fn finding_with_rule(rule_id: &str, severity: Severity) -> Finding {
+        Finding {
+            rule_id: rule_id.to_string(),
+            severity,
+            cwe: None,
+            description: "test".to_string(),
+            file: "src/app.py".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 1,
+            snippet: "x".to_string(),
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+        }
+    }
+
+    #[test]
+    fn severity_overrides_single_rule() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  severity_overrides:\n    py/no-eval: low\n",
+        );
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        assert_eq!(
+            loaded.scan.severity_overrides.get("py/no-eval"),
+            Some(&Severity::Low)
+        );
+
+        let mut findings = vec![
+            finding_with_rule("py/no-eval", Severity::Critical),
+            finding_with_rule("py/no-pickle-loads", Severity::High),
+        ];
+        let known: std::collections::HashSet<String> = ["py/no-eval", "py/no-pickle-loads"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let warnings = apply_severity_overrides(&mut findings, Some(&loaded), &known);
+
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert_eq!(findings[0].severity, Severity::Low);
+        assert_eq!(findings[1].severity, Severity::High);
+    }
+
+    #[test]
+    fn severity_overrides_multiple_rules() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  severity_overrides:\n    py/no-eval: low\n    py/no-cors-star: critical\n    js/no-hardcoded-secret: high\n",
+        );
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        let mut findings = vec![
+            finding_with_rule("py/no-eval", Severity::Critical),
+            finding_with_rule("py/no-cors-star", Severity::Medium),
+            finding_with_rule("js/no-hardcoded-secret", Severity::Low),
+        ];
+        let known: std::collections::HashSet<String> =
+            findings.iter().map(|f| f.rule_id.clone()).collect();
+        let warnings = apply_severity_overrides(&mut findings, Some(&loaded), &known);
+
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert_eq!(findings[0].severity, Severity::Low);
+        assert_eq!(findings[1].severity, Severity::Critical);
+        assert_eq!(findings[2].severity, Severity::High);
+    }
+
+    #[test]
+    fn severity_overrides_interact_with_min_filter() {
+        // Verify the override value is the one the min-filter sees:
+        // override to Low + min-filter Medium → finding suppressed.
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  severity_overrides:\n    py/no-eval: low\n",
+        );
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        let mut findings = vec![finding_with_rule("py/no-eval", Severity::Critical)];
+        let known: std::collections::HashSet<String> =
+            std::iter::once("py/no-eval".to_string()).collect();
+        let _ = apply_severity_overrides(&mut findings, Some(&loaded), &known);
+
+        // After override the finding is Low; a Medium min-filter should drop it.
+        let min = Severity::Medium;
+        findings.retain(|f| f.severity >= min);
+        assert!(
+            findings.is_empty(),
+            "override should place finding below min-filter"
+        );
+    }
+
+    #[test]
+    fn severity_overrides_warn_on_unknown_rule_ids() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  severity_overrides:\n    py/no-eval: low\n    py/typo-here: critical\n",
+        );
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        let mut findings = vec![finding_with_rule("py/no-eval", Severity::Critical)];
+        // Only py/no-eval is a "known" rule; the typo should warn.
+        let known: std::collections::HashSet<String> =
+            std::iter::once("py/no-eval".to_string()).collect();
+        let warnings = apply_severity_overrides(&mut findings, Some(&loaded), &known);
+
+        assert_eq!(warnings.len(), 1, "expected one warning: {warnings:?}");
+        assert!(
+            warnings[0].contains("py/typo-here"),
+            "warning should name the unknown rule: {}",
+            warnings[0]
+        );
+        assert!(
+            !warnings[0].contains("py/no-eval"),
+            "known rule should not appear in warning: {}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn severity_overrides_reject_invalid_value() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  severity_overrides:\n    py/no-eval: banana\n",
+        );
+        let err = load_for_scan(repo.path(), None).expect_err("expected invalid severity to fail");
+        assert!(
+            err.contains("Failed to parse config"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn severity_overrides_empty_when_absent() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(repo.path(), ".foxguard.yml", "scan:\n  no_builtins: true\n");
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        assert!(loaded.scan.severity_overrides.is_empty());
     }
 }
