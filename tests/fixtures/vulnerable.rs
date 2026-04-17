@@ -69,5 +69,5 @@ use p256::ecdsa::SigningKey;
 use ed25519_dalek::SigningKey as Ed25519Key;
 
 fn pq_vulnerable() {
-    let key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+    let key = rsa::RsaPrivateKey::new(&mut rng, 2048);
 }

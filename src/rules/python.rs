@@ -544,31 +544,15 @@ impl_rule! {
         ];
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
-            // Detect import statements: from X import Y, import X
-            if node.kind() == "import_from_statement" {
-                if let Some(module_node) = node.child_by_field_name("module_name") {
-                    let module = &src[module_node.byte_range()];
-                    for &(prefix, algo, replacement) in pq_vulnerable {
-                        if module == prefix || module.starts_with(&format!("{}.", prefix)) {
-                            findings.push(make_finding(
-                                _self.id(),
-                                _self.severity(),
-                                _self.cwe(),
-                                &format!(
-                                    "Import of quantum-vulnerable {} — migrate to {}",
-                                    algo, replacement
-                                ),
-                                node,
-                                src,
-                            ));
-                            return;
-                        }
+            // Only flag calls, not imports, to avoid double-counting.
+            // Skip calls nested as arguments to another call (e.g.
+            // ec.generate_private_key(ec.SECP256R1()) — only flag the outer).
+            if node.kind() == "call" {
+                if let Some(parent) = node.parent() {
+                    if parent.kind() == "argument_list" {
+                        return;
                     }
                 }
-            }
-
-            // Detect calls via alias resolution
-            if node.kind() == "call" {
                 if let Some(func) = node.child_by_field_name("function") {
                     let func_text = &src[func.byte_range()];
                     let resolved = resolve_callee(func_text, ctx);
