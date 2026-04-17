@@ -1666,7 +1666,7 @@ fn map_taint_findings(
         (Some(summaries), Some(import_paths)) => Some(python_taint::CrossFileInfo {
             import_to_path: import_paths,
             summaries,
-            current_rule_id: meta.rule_id,
+            rule_filter: python_taint::RuleFilter::Single(meta.rule_id),
         }),
         _ => None,
     };
@@ -2373,4 +2373,270 @@ pub fn python_taint_rule_specs() -> Vec<(&'static str, TaintSpec)> {
         ("py/taint-xxe", TaintXxe::spec()),
         ("py/taint-nosql-injection", TaintNosqlInjection::spec()),
     ]
+}
+
+// ─── Batched Python taint runner ────────────────────────────────────────
+//
+// Mirrors the Go taint batched runner in `rules::go::run_go_taint_batched`.
+// Historically every Python taint rule called
+// `python_taint::analyze_tree_with_cross_file` on its own, which
+// re-walked the file's AST and recomputed Pass 1 summaries once per
+// rule. The shared Pass 1 output depends only on sources and
+// sanitizers (not on sinks) and every built-in rule uses
+// `python_taint_sources()`, so rules with matching sanitizer
+// fingerprints can collapse into a single AST walk whose findings are
+// dispatched back per-rule by `rule_id_hint`.
+
+/// Per-rule metadata used by the batched Python taint runner to shape
+/// findings (severity, CWE, fix hint, description formatter).
+struct PyTaintRuleDispatch {
+    meta: TaintRuleMeta<'static>,
+    format_description: fn(&str, &str) -> String,
+}
+
+fn py_taint_pickle_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can execute arbitrary code via pickle")
+}
+fn py_taint_eval_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can execute arbitrary Python code")
+}
+fn py_taint_command_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject OS commands")
+}
+fn py_taint_ssrf_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can drive server-side request forgery")
+}
+fn py_taint_yaml_load_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can execute arbitrary code via YAML deserialization")
+}
+fn py_taint_sql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject SQL")
+}
+fn py_taint_ssti_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject server-side templates")
+}
+fn py_taint_xpath_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject XPath expressions")
+}
+fn py_taint_ldap_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject LDAP filters")
+}
+fn py_taint_log_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can forge log entries")
+}
+fn py_taint_xxe_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can trigger XML External Entity processing")
+}
+fn py_taint_nosql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject NoSQL operators")
+}
+
+fn py_taint_rule_dispatch_table() -> Vec<PyTaintRuleDispatch> {
+    vec![
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-pickle-deserialization",
+                severity: Severity::Critical,
+                cwe: Some("CWE-502"),
+                fix_suggestion: Some(
+                    "Use `json` or `msgpack` instead of pickle for untrusted data: `json.loads(data)`",
+                ),
+            },
+            format_description: py_taint_pickle_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-eval",
+                severity: Severity::Critical,
+                cwe: Some("CWE-95"),
+                fix_suggestion: Some(
+                    "Use `ast.literal_eval()` for safe evaluation, or remove eval/exec entirely",
+                ),
+            },
+            format_description: py_taint_eval_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-command-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-78"),
+                fix_suggestion: Some("Use `shlex.quote()` to escape arguments, or pass a list to `subprocess.run([...])` instead of a shell string"),
+            },
+            format_description: py_taint_command_injection_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-ssrf",
+                severity: Severity::High,
+                cwe: Some("CWE-918"),
+                fix_suggestion: Some(
+                    "Validate URLs against an allowlist of permitted hosts before making requests",
+                ),
+            },
+            format_description: py_taint_ssrf_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-yaml-load",
+                severity: Severity::Critical,
+                cwe: Some("CWE-502"),
+                fix_suggestion: Some(
+                    "Use `yaml.safe_load()` instead of `yaml.load()` for untrusted input",
+                ),
+            },
+            format_description: py_taint_yaml_load_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-sql-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-89"),
+                fix_suggestion: Some("Use parameterized queries: `cur.execute(\"SELECT * FROM users WHERE name = ?\", (name,))`"),
+            },
+            format_description: py_taint_sql_injection_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-ssti",
+                severity: Severity::Critical,
+                cwe: Some("CWE-1336"),
+                fix_suggestion: Some(
+                    "Use render_template() with separate template files instead of render_template_string() with user input",
+                ),
+            },
+            format_description: py_taint_ssti_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-xpath-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-643"),
+                fix_suggestion: Some(
+                    "Use parameterized XPath queries or validate/sanitize input before building XPath expressions",
+                ),
+            },
+            format_description: py_taint_xpath_injection_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-ldap-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-90"),
+                fix_suggestion: Some(
+                    "Use ldap.filter.escape_filter_chars() to sanitize user input before building LDAP filters",
+                ),
+            },
+            format_description: py_taint_ldap_injection_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-log-injection",
+                severity: Severity::Medium,
+                cwe: Some("CWE-117"),
+                fix_suggestion: Some(
+                    "Sanitize user input before logging — strip newlines and control characters (no standard sanitizer; use str.replace() or a regex to remove \\n, \\r, and ANSI escape sequences)",
+                ),
+            },
+            format_description: py_taint_log_injection_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-xxe",
+                severity: Severity::High,
+                cwe: Some("CWE-611"),
+                fix_suggestion: Some(
+                    "Use defusedxml instead of xml.etree.ElementTree for untrusted XML input",
+                ),
+            },
+            format_description: py_taint_xxe_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-nosql-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-943"),
+                fix_suggestion: Some("Validate and sanitize user input before using in MongoDB queries. Avoid passing raw user input as query filters."),
+            },
+            format_description: py_taint_nosql_injection_desc,
+        },
+    ]
+}
+
+/// Returns `true` if `rule_id` is one of the built-in Python taint
+/// rules handled by [`run_py_taint_batched`]. The scanner uses this to
+/// avoid running those rules individually in the per-rule loop.
+pub fn is_py_taint_rule_id(rule_id: &str) -> bool {
+    rule_id.starts_with("py/taint-")
+}
+
+/// Run every built-in Python taint rule over `tree` in a single
+/// batched pass, returning per-rule [`Finding`]s.
+///
+/// This replaces the historical code path where each Python taint rule
+/// called [`python_taint::analyze_tree_with_cross_file`] individually —
+/// which recomputed rule-agnostic Pass 1 summaries and re-walked every
+/// function body once per rule.
+///
+/// Rules are grouped by their sanitizer profile so rules sharing the
+/// same sanitizers collapse into a single AST walk.
+pub fn run_py_taint_batched(
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &FileContext<'_>,
+    enabled_rule_ids: &std::collections::HashSet<&str>,
+) -> Vec<Finding> {
+    let dispatch = py_taint_rule_dispatch_table();
+    let rule_specs = python_taint_rule_specs();
+
+    // Only include rules the caller actually registered.
+    let rules: Vec<python_taint::BatchedRule<'_>> = rule_specs
+        .iter()
+        .filter(|(id, _)| enabled_rule_ids.contains(id))
+        .map(|(id, spec)| python_taint::BatchedRule { rule_id: id, spec })
+        .collect();
+
+    if rules.is_empty() {
+        return Vec::new();
+    }
+
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.python_import_paths) {
+        (Some(summaries), Some(import_paths)) => Some(python_taint::CrossFileInfoBatched {
+            import_to_path: import_paths,
+            summaries,
+        }),
+        _ => None,
+    };
+
+    let raw = python_taint::analyze_tree_batched(
+        tree.root_node(),
+        source,
+        &rules,
+        ctx.python_aliases,
+        cross_file_info.as_ref(),
+    );
+
+    raw.into_iter()
+        .filter_map(|(rule_id, t)| {
+            let d = dispatch.iter().find(|d| d.meta.rule_id == rule_id)?;
+            Some(Finding {
+                rule_id: d.meta.rule_id.to_string(),
+                severity: d.meta.severity,
+                cwe: d.meta.cwe.map(|s| s.to_string()),
+                description: (d.format_description)(&t.source_description, &t.sink_description),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
+                fix_suggestion: d.meta.fix_suggestion.map(|s| s.to_string()),
+                sink_start_byte: Some(t.sink_start_byte),
+                sink_end_byte: Some(t.sink_end_byte),
+            })
+        })
+        .collect()
 }

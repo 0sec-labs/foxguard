@@ -876,6 +876,31 @@ fn scan_files(
                 ));
             }
 
+            // Python taint rules share identical Pass 1 summaries across
+            // all rules in the same sanitizer-group. Same rationale as
+            // the Go block above — see `crate::rules::python::run_py_taint_batched`.
+            let enabled_py_taint_ids: std::collections::HashSet<&str> =
+                if matches!(language, Language::Python) {
+                    rules
+                        .iter()
+                        .filter(|r| {
+                            crate::rules::python::is_py_taint_rule_id(r.id())
+                                && r.applies_to_path(&relative_path)
+                        })
+                        .map(|r| r.id())
+                        .collect()
+                } else {
+                    std::collections::HashSet::new()
+                };
+            if !enabled_py_taint_ids.is_empty() {
+                file_findings.extend(crate::rules::python::run_py_taint_batched(
+                    source,
+                    tree,
+                    &ctx,
+                    &enabled_py_taint_ids,
+                ));
+            }
+
             for rule in rules {
                 if !rule.applies_to_path(&relative_path) {
                     continue;
@@ -883,6 +908,11 @@ fn scan_files(
                 // Skip rules already handled by the batched Go taint
                 // runner above.
                 if enabled_go_taint_ids.contains(rule.id()) {
+                    continue;
+                }
+                // Skip rules already handled by the batched Python taint
+                // runner above.
+                if enabled_py_taint_ids.contains(rule.id()) {
                     continue;
                 }
                 file_findings.extend(rule.check_with_context(source, tree, &ctx));
