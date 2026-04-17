@@ -261,43 +261,6 @@ impl_rule! {
         let pq_crate = Regex::new(r"\b(rsa|p256|p384|p521|k256|ecdsa|ed25519_dalek|x25519_dalek|dsa)\b").unwrap();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
-            if node.kind() == "use_declaration" {
-                let text = &src[node.byte_range()];
-                if pq_crate.is_match(text) {
-                    let algo = if text.contains("rsa") {
-                        "RSA"
-                    } else if text.contains("ed25519") {
-                        "Ed25519"
-                    } else if text.contains("x25519") {
-                        "X25519"
-                    } else if text.contains("ecdsa") {
-                        "ECDSA"
-                    } else if text.contains("dsa") {
-                        "DSA"
-                    } else {
-                        "ECDH/ECDSA (elliptic curve)"
-                    };
-                    let replacement = if text.contains("x25519") || text.contains("p256") || text.contains("p384") || text.contains("p521") || text.contains("k256") {
-                        "ML-KEM (FIPS 203)"
-                    } else if text.contains("rsa") {
-                        "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"
-                    } else {
-                        "ML-DSA (FIPS 204)"
-                    };
-                    findings.push(make_finding(
-                        _self.id(),
-                        _self.severity(),
-                        _self.cwe(),
-                        &format!(
-                            "Import of quantum-vulnerable {} crate — migrate to {}",
-                            algo, replacement
-                        ),
-                        node,
-                        src,
-                    ));
-                }
-            }
-
             if node.kind() == "call_expression" {
                 if let Some(func) = node.child_by_field_name("function") {
                     // Only match direct calls (scoped_identifier like rsa::Foo::new),
@@ -316,16 +279,25 @@ impl_rule! {
                             "X25519"
                         } else if func_lower.contains("ecdsa") {
                             "ECDSA"
+                        } else if func_lower.contains("dsa") {
+                            "DSA"
                         } else {
                             "ECDH/ECDSA (elliptic curve)"
+                        };
+                        let replacement = if func_lower.contains("rsa") {
+                            "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"
+                        } else if func_lower.contains("x25519") || func_lower.contains("p256") || func_lower.contains("p384") || func_lower.contains("p521") || func_lower.contains("k256") {
+                            "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"
+                        } else {
+                            "ML-DSA (FIPS 204)"
                         };
                         findings.push(make_finding(
                             _self.id(),
                             _self.severity(),
                             _self.cwe(),
                             &format!(
-                                "{} is quantum-vulnerable — migrate to ML-KEM (FIPS 203) or ML-DSA (FIPS 204)",
-                                algo
+                                "{} is quantum-vulnerable — migrate to {}",
+                                algo, replacement
                             ),
                             node,
                             src,

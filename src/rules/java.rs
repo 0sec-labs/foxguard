@@ -457,6 +457,37 @@ impl_rule! {
 
 // ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
 
+/// Classify a Java algorithm string as quantum-vulnerable.
+/// Returns (algo_label, default_replacement) or None if not PQ-vulnerable.
+fn classify_java_pq_algo(algo: &str) -> Option<(&'static str, &'static str)> {
+    let upper = algo.to_uppercase();
+    // Exact matches for KeyPairGenerator / KeyAgreement / KeyFactory
+    match algo {
+        "RSA" => return Some(("RSA", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)")),
+        "EC" | "ECDSA" => return Some(("ECDSA/EC", "ML-DSA (FIPS 204)")),
+        "DSA" => return Some(("DSA", "ML-DSA (FIPS 204)")),
+        "DH" | "ECDH" | "DiffieHellman" => return Some(("DH/ECDH", "ML-KEM (FIPS 203)")),
+        "Ed25519" | "Ed448" | "EdDSA" => return Some(("EdDSA", "ML-DSA (FIPS 204)")),
+        "X25519" | "X448" | "XDH" => return Some(("XDH", "ML-KEM (FIPS 203)")),
+        _ => {}
+    }
+    // RSA cipher modes: "RSA/ECB/PKCS1Padding", "RSA/ECB/OAEPWithSHA-256..."
+    if upper.starts_with("RSA/") || upper.starts_with("RSA_") {
+        return Some(("RSA", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"));
+    }
+    // Signature combos: "SHA256withRSA", "SHA384withECDSA", "SHA256withDSA"
+    if upper.contains("WITHRSA") {
+        return Some(("RSA", "ML-DSA (FIPS 204)"));
+    }
+    if upper.contains("WITHECDSA") {
+        return Some(("ECDSA", "ML-DSA (FIPS 204)"));
+    }
+    if upper.contains("WITHDSA") && !upper.contains("ML-DSA") {
+        return Some(("DSA", "ML-DSA (FIPS 204)"));
+    }
+    None
+}
+
 pub struct PqVulnerableCrypto;
 
 impl_rule! {
@@ -469,8 +500,6 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let pq_algo = Regex::new(r#"(?i)"(RSA[^"]*|EC|DSA|DH|ECDH|ECDSA|Ed25519|Ed448|X25519|X448|[^"]*with(RSA|ECDSA|DSA)[^"]*)"#).unwrap();
-        let pqc_safe = Regex::new(r"(?i)(ML-DSA|ML-KEM|SLH-DSA)").unwrap();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "method_invocation" {
@@ -488,26 +517,29 @@ impl_rule! {
                                 if let Some(args) = node.child_by_field_name("arguments") {
                                     if let Some(first_arg) = args.named_child(0) {
                                         let arg_text = &src[first_arg.byte_range()];
-                                        if pq_algo.is_match(arg_text) && !pqc_safe.is_match(arg_text) {
-                                            let replacement = if obj_text == "KeyAgreement" {
-                                                "ML-KEM (FIPS 203)"
-                                            } else if obj_text == "Signature" {
-                                                "ML-DSA (FIPS 204)"
-                                            } else {
-                                                "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"
-                                            };
-                                            findings.push(make_finding(
-                                                _self.id(),
-                                                _self.severity(),
-                                                _self.cwe(),
-                                                &format!(
-                                                    "{}.getInstance({}) is quantum-vulnerable — migrate to {}",
-                                                    obj_text, arg_text, replacement
-                                                ),
-                                                node,
-                                                src,
-                                            ));
-                                        }
+                                        let inner = arg_text.trim_matches('"');
+                                        let (algo, replacement) = match classify_java_pq_algo(inner) {
+                                            Some(v) => v,
+                                            None => return,
+                                        };
+                                        let replacement = if obj_text == "KeyAgreement" {
+                                            "ML-KEM (FIPS 203)"
+                                        } else if obj_text == "Signature" {
+                                            "ML-DSA (FIPS 204)"
+                                        } else {
+                                            replacement
+                                        };
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            &format!(
+                                                "{}.getInstance({}) uses quantum-vulnerable {} — migrate to {}",
+                                                obj_text, arg_text, algo, replacement
+                                            ),
+                                            node,
+                                            src,
+                                        ));
                                     }
                                 }
                             }

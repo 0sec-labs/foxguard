@@ -1371,8 +1371,8 @@ mod rust_lang {
 
         assert_eq!(
             findings.len(),
-            22,
-            "vulnerable.rs should have 22 findings, got {}",
+            21,
+            "vulnerable.rs should have 21 findings, got {}",
             findings.len()
         );
 
