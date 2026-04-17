@@ -1080,6 +1080,9 @@ impl TuiApp {
         if let Some(cwe) = finding.cwe.as_ref() {
             lines.push(metadata_line("CWE", cwe));
         }
+        if !finding.tags.is_empty() {
+            lines.push(metadata_line("Tags", &finding.tags.join(", ")));
+        }
         if let Some(review) = self.review_summary_for_finding(&finding) {
             lines.push(metadata_line("Review", &review));
         }
@@ -2188,6 +2191,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            tags: vec![],
         };
         let medium = Finding {
             severity: Severity::Medium,
@@ -2227,6 +2231,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            tags: vec![],
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -2268,6 +2273,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            tags: vec![],
         };
 
         assert_eq!(
@@ -2300,6 +2306,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            tags: vec![],
         };
 
         let rendered = open_target_lines(&finding, OpenFocus::Finding)
@@ -2336,6 +2343,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            tags: vec![],
         };
 
         let rendered = render_source_context(
@@ -2405,6 +2413,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            tags: vec![],
         };
 
         assert_eq!(
@@ -2451,6 +2460,7 @@ mod tests {
                 sink_start_byte: None,
                 sink_end_byte: None,
                 confidence: crate::default_confidence(),
+                tags: vec![],
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -2526,6 +2536,7 @@ mod tests {
                 sink_start_byte: None,
                 sink_end_byte: None,
                 confidence: crate::default_confidence(),
+                tags: vec![],
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -2582,6 +2593,7 @@ mod tests {
                 sink_start_byte: None,
                 sink_end_byte: None,
                 confidence: crate::default_confidence(),
+                tags: vec![],
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -2663,6 +2675,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            tags: vec![],
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -2703,6 +2716,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            tags: vec![],
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Source)
@@ -2742,6 +2756,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            tags: vec![],
         };
 
         let rendered = render_source_context(
@@ -2792,6 +2807,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            tags: vec![],
         };
 
         let rendered = render_source_context(
@@ -2833,6 +2849,16 @@ fn list_item(finding: &Finding, review_state: Option<ReviewState>) -> ListItem<'
             Style::default().add_modifier(Modifier::BOLD),
         ),
     ];
+    for tag in &finding.tags {
+        title_spans.push(Span::raw(" "));
+        title_spans.push(Span::styled(
+            format!(" {} ", tag),
+            Style::default()
+                .bg(Color::Cyan)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
     if let Some(state) = review_state {
         title_spans.push(Span::raw(" "));
         title_spans.push(review_badge_span(state));

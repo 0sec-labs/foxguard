@@ -488,7 +488,7 @@ impl_rule! {
                                             "ed25519" | "ed448" => ("Ed25519/Ed448", "ML-DSA (FIPS 204)"),
                                             _ => return,
                                         };
-                                    findings.push(make_finding(
+                                    let mut f = make_finding(
                                         _self.id(),
                                         _self.severity(),
                                         _self.cwe(),
@@ -498,7 +498,9 @@ impl_rule! {
                                         ),
                                         node,
                                         src,
-                                    ));
+                                    );
+                                    f.tags = vec!["PQ".into()];
+                                    findings.push(f);
                                 }
                             }
                         }
@@ -506,26 +508,30 @@ impl_rule! {
 
                     // crypto.createDiffieHellman, crypto.createDiffieHellmanGroup
                     if (func_name == "createDiffieHellman" || func_name == "createDiffieHellmanGroup") && func_text.starts_with("crypto.") {
-                        findings.push(make_finding(
+                        let mut f = make_finding(
                             _self.id(),
                             _self.severity(),
                             _self.cwe(),
                             "Diffie-Hellman is quantum-vulnerable — migrate to ML-KEM (FIPS 203)",
                             node,
                             src,
-                        ));
+                        );
+                        f.tags = vec!["PQ".into()];
+                        findings.push(f);
                     }
 
                     // crypto.createECDH
                     if func_name == "createECDH" && func_text.starts_with("crypto.") {
-                        findings.push(make_finding(
+                        let mut f = make_finding(
                             _self.id(),
                             _self.severity(),
                             _self.cwe(),
                             "ECDH is quantum-vulnerable — migrate to ML-KEM (FIPS 203)",
                             node,
                             src,
-                        ));
+                        );
+                        f.tags = vec!["PQ".into()];
+                        findings.push(f);
                     }
 
                     // crypto.sign / crypto.verify with ed25519/ed448 algorithm string
@@ -537,7 +543,7 @@ impl_rule! {
                                     let val = &src[first_arg.byte_range()];
                                     let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_lowercase();
                                     if inner == "ed25519" || inner == "ed448" {
-                                        findings.push(make_finding(
+                                        let mut f = make_finding(
                                             _self.id(),
                                             _self.severity(),
                                             _self.cwe(),
@@ -547,7 +553,9 @@ impl_rule! {
                                             ),
                                             node,
                                             src,
-                                        ));
+                                        );
+                                        f.tags = vec!["PQ".into()];
+                                        findings.push(f);
                                     }
                                 }
                             }
@@ -1816,6 +1824,7 @@ fn map_js_taint_findings(
             sink_start_byte: Some(t.sink_start_byte),
             sink_end_byte: Some(t.sink_end_byte),
             confidence: crate::rules::common::confidence_for_hops(t.hops),
+            tags: vec![],
         })
         .collect()
 }
@@ -2819,6 +2828,7 @@ pub fn run_js_taint_batched(
                 sink_start_byte: Some(t.sink_start_byte),
                 sink_end_byte: Some(t.sink_end_byte),
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
+                tags: vec![],
             })
         })
         .collect()

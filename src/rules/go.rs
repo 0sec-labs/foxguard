@@ -405,7 +405,7 @@ impl_rule! {
                         s if s.starts_with("ed25519.") => ("Ed25519", "ML-DSA (FIPS 204)"),
                         _ => return,
                     };
-                    findings.push(make_finding(
+                    let mut f = make_finding(
                         _self.id(),
                         _self.severity(),
                         _self.cwe(),
@@ -415,7 +415,9 @@ impl_rule! {
                         ),
                         node,
                         src,
-                    ));
+                    );
+                    f.tags = vec!["PQ".into()];
+                    findings.push(f);
                 }
             }
         });
@@ -867,6 +869,7 @@ fn map_go_taint_findings(
             sink_start_byte: Some(t.sink_start_byte),
             sink_end_byte: Some(t.sink_end_byte),
             confidence: crate::rules::common::confidence_for_hops(t.hops),
+            tags: vec![],
         })
         .collect()
 }
@@ -1589,6 +1592,7 @@ pub fn run_go_taint_batched(
                 sink_start_byte: Some(t.sink_start_byte),
                 sink_end_byte: Some(t.sink_end_byte),
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
+                tags: vec![],
             })
         })
         .collect()

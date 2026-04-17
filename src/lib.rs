@@ -106,4 +106,6 @@ pub struct Finding {
     /// inherently fuzzier than curated built-in AST-walked rules.
     #[serde(default = "default_confidence")]
     pub confidence: f32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }

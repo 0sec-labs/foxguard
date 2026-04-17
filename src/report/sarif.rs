@@ -27,8 +27,12 @@ pub fn print_sarif(findings: &[Finding]) {
         .iter()
         .map(|f| {
             let mut props = serde_json::Map::new();
+            let mut tags: Vec<String> = f.tags.clone();
             if let Some(cwe) = &f.cwe {
-                props.insert("tags".to_string(), json!([cwe]));
+                tags.push(cwe.clone());
+            }
+            if !tags.is_empty() {
+                props.insert("tags".to_string(), json!(tags));
             }
             // Expose confidence in properties so downstream tooling that
             // ignores the native `rank` field can still consume it.

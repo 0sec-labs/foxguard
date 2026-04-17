@@ -289,7 +289,7 @@ impl_rule! {
                     } else {
                         return;
                     };
-                    findings.push(make_finding(
+                    let mut f = make_finding(
                         _self.id(),
                         _self.severity(),
                         _self.cwe(),
@@ -299,7 +299,9 @@ impl_rule! {
                         ),
                         node,
                         src,
-                    ));
+                    );
+                    f.tags = vec!["PQ".into()];
+                    findings.push(f);
                 }
             }
         });

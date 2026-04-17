@@ -174,6 +174,7 @@ pub fn make_finding(
         sink_start_byte: None,
         sink_end_byte: None,
         confidence: crate::default_confidence(),
+        tags: vec![],
     }
 }
 
@@ -218,6 +219,7 @@ pub fn make_finding_from_offsets(
         sink_start_byte: None,
         sink_end_byte: None,
         confidence: crate::default_confidence(),
+        tags: vec![],
     }
 }
 
