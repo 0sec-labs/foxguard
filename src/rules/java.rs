@@ -466,10 +466,14 @@ pub struct PqVulnerableCrypto;
 fn classify_java_pq_algo(algo: &str) -> Option<&'static str> {
     let upper = algo.to_uppercase();
     // PQ-safe algorithms — do not flag
-    if upper.contains("MLDSA") || upper.contains("ML-DSA")
-        || upper.contains("MLKEM") || upper.contains("ML-KEM")
-        || upper.contains("SLHDSA") || upper.contains("SLH-DSA")
-        || upper.contains("FNDSA") || upper.contains("FN-DSA")
+    if upper.contains("MLDSA")
+        || upper.contains("ML-DSA")
+        || upper.contains("MLKEM")
+        || upper.contains("ML-KEM")
+        || upper.contains("SLHDSA")
+        || upper.contains("SLH-DSA")
+        || upper.contains("FNDSA")
+        || upper.contains("FN-DSA")
         || upper.contains("HQC")
     {
         return None;
@@ -480,11 +484,17 @@ fn classify_java_pq_algo(algo: &str) -> Option<&'static str> {
     if upper.contains("EC") || upper.contains("ECDSA") || upper.contains("ECDH") {
         return Some("EC/ECDSA/ECDH is quantum-vulnerable — migrate to ML-DSA (FIPS 204); or FN-DSA (FIPS 206) for smaller signatures, ML-KEM (FIPS 203); or HQC for lattice-diversity");
     }
-    if upper.contains("DSA") && !upper.contains("ML") && !upper.contains("SLH") && !upper.contains("FN") {
+    if upper.contains("DSA")
+        && !upper.contains("ML")
+        && !upper.contains("SLH")
+        && !upper.contains("FN")
+    {
         return Some("DSA is quantum-vulnerable — migrate to ML-DSA (FIPS 204); or FN-DSA (FIPS 206) for smaller signatures");
     }
     if upper.contains("DH") && !upper.contains("EC") {
-        return Some("DH is quantum-vulnerable — migrate to ML-KEM (FIPS 203); or HQC for lattice-diversity");
+        return Some(
+            "DH is quantum-vulnerable — migrate to ML-KEM (FIPS 203); or HQC for lattice-diversity",
+        );
     }
     None
 }
