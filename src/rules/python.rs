@@ -533,14 +533,14 @@ impl_rule! {
 
         // Canonical prefixes for quantum-vulnerable asymmetric crypto
         let pq_vulnerable: &[(&str, &str, &str)] = &[
-            ("cryptography.hazmat.primitives.asymmetric.rsa", "RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
-            ("cryptography.hazmat.primitives.asymmetric.ec", "ECDSA/ECDH", "ML-KEM (FIPS 203) for key exchange or ML-DSA (FIPS 204) for signatures"),
-            ("cryptography.hazmat.primitives.asymmetric.dsa", "DSA", "ML-DSA (FIPS 204)"),
-            ("cryptography.hazmat.primitives.asymmetric.ed25519", "Ed25519", "ML-DSA (FIPS 204)"),
-            ("cryptography.hazmat.primitives.asymmetric.x25519", "X25519", "ML-KEM (FIPS 203)"),
-            ("Crypto.PublicKey.RSA", "RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
-            ("Crypto.PublicKey.DSA", "DSA", "ML-DSA (FIPS 204)"),
-            ("Crypto.PublicKey.ECC", "ECC", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
+            ("cryptography.hazmat.primitives.asymmetric.rsa", "RSA", "X25519MLKEM768 hybrid KEM for encryption, or ML-KEM-768 (FIPS 203) standalone"),
+            ("cryptography.hazmat.primitives.asymmetric.ec", "ECDSA/ECDH", "X25519MLKEM768 hybrid KEM for key exchange, or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures"),
+            ("cryptography.hazmat.primitives.asymmetric.dsa", "DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
+            ("cryptography.hazmat.primitives.asymmetric.ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
+            ("cryptography.hazmat.primitives.asymmetric.x25519", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203)"),
+            ("Crypto.PublicKey.RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption, or ML-KEM-768 (FIPS 203) standalone"),
+            ("Crypto.PublicKey.DSA", "DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
+            ("Crypto.PublicKey.ECC", "ECC", "X25519MLKEM768 hybrid KEM or ML-DSA-65 (FIPS 204) with hybrid cert chains"),
         ];
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
