@@ -516,7 +516,77 @@ impl_rule! {
     }
 }
 
-// ─── Rule 7: no-pickle ─────────────────────────────────────────────────────
+// ─── Rule 7: pq-vulnerable-crypto ─────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "py/pq-vulnerable-crypto",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable asymmetric cryptography",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        // Detect imports of quantum-vulnerable crypto modules
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "import_from_statement" || node.kind() == "import_statement" {
+                let text = &src[node.byte_range()];
+                let text_lower = text.to_lowercase();
+
+                // Skip PQ-safe imports
+                if text_lower.contains("ml_dsa") || text_lower.contains("ml_kem")
+                    || text_lower.contains("slh_dsa") || text_lower.contains("fn_dsa")
+                    || text_lower.contains("hqc")
+                {
+                    return;
+                }
+
+                if text_lower.contains("cryptography.hazmat.primitives.asymmetric.rsa")
+                    || text_lower.contains("rsa.generate") || text_lower.contains("rsa.newkeys")
+                {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "RSA is quantum-vulnerable — migrate to ML-DSA (FIPS 204) for signatures; or FN-DSA (FIPS 206) for smaller signatures, ML-KEM (FIPS 203) for key exchange; or HQC for lattice-diversity",
+                        node,
+                        src,
+                    ));
+                } else if text_lower.contains("cryptography.hazmat.primitives.asymmetric.ec")
+                    || text_lower.contains("cryptography.hazmat.primitives.asymmetric.ed25519")
+                {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "EC/Ed25519 is quantum-vulnerable — migrate to ML-DSA (FIPS 204); or FN-DSA (FIPS 206) for smaller signatures",
+                        node,
+                        src,
+                    ));
+                } else if text_lower.contains("cryptography.hazmat.primitives.asymmetric.dh")
+                    || text_lower.contains("cryptography.hazmat.primitives.asymmetric.x25519")
+                {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "DH/X25519 is quantum-vulnerable — migrate to ML-KEM (FIPS 203); or HQC for lattice-diversity",
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 8: no-pickle ─────────────────────────────────────────────────────
 
 pub struct NoPickle;
 

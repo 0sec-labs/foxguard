@@ -452,7 +452,82 @@ impl_rule! {
     }
 }
 
-// ─── Rule 9: no-path-traversal ─────────────────────────────────────────────
+// ─── Rule 9: pq-vulnerable-crypto ─────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "js/pq-vulnerable-crypto",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable asymmetric cryptography",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: generateKeyPairSync('rsa', ...) or generateKeyPair('rsa', ...)
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
+                    if func_name == "generateKeyPairSync" || func_name == "generateKeyPair" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                if first_arg.kind() == "string" {
+                                    let val = &src[first_arg.byte_range()];
+                                    let inner = val.trim_matches(|c| c == '"' || c == '\'');
+                                    if inner == "rsa" {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            "RSA key generation is quantum-vulnerable — migrate to ML-DSA (FIPS 204) for signatures; or FN-DSA (FIPS 206) for smaller signatures, ML-KEM (FIPS 203) for key exchange; or HQC for lattice-diversity",
+                                            node,
+                                            src,
+                                        ));
+                                    } else if inner == "ec" || inner == "ed25519" || inner == "ed448" {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            "EC/Ed25519 key generation is quantum-vulnerable — migrate to ML-DSA (FIPS 204); or FN-DSA (FIPS 206) for smaller signatures",
+                                            node,
+                                            src,
+                                        ));
+                                    } else if inner == "dh" || inner == "x25519" || inner == "x448" {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            "DH/X25519 key generation is quantum-vulnerable — migrate to ML-KEM (FIPS 203); or HQC for lattice-diversity",
+                                            node,
+                                            src,
+                                        ));
+                                    } else if inner == "dsa" {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            "DSA key generation is quantum-vulnerable — migrate to ML-DSA (FIPS 204); or FN-DSA (FIPS 206) for smaller signatures",
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 10: no-path-traversal ─────────────────────────────────────────────
 
 pub struct NoPathTraversal;
 

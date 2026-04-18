@@ -439,7 +439,70 @@ impl_rule! {
     }
 }
 
-// ─── Rule 10: no-unwrap-in-lib ────────────────────────────────────────────────
+// ─── Rule 10: pq-vulnerable-crypto ───────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "rs/pq-vulnerable-crypto",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable asymmetric cryptography",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "use_declaration" || node.kind() == "call_expression" {
+                let text = &src[node.byte_range()];
+                let text_lower = text.to_lowercase();
+
+                // Skip PQ-safe algorithms
+                if text_lower.contains("ml_dsa") || text_lower.contains("ml_kem")
+                    || text_lower.contains("slh_dsa") || text_lower.contains("fn_dsa")
+                    || text_lower.contains("hqc")
+                {
+                    return;
+                }
+
+                if text_lower.contains("rsa") && !text_lower.contains("parse") {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "RSA is quantum-vulnerable — migrate to ML-DSA (FIPS 204) for signatures; or FN-DSA (FIPS 206) for smaller signatures, ML-KEM (FIPS 203) for key exchange; or HQC for lattice-diversity",
+                        node,
+                        src,
+                    ));
+                } else if text_lower.contains("ecdsa") || text_lower.contains("ed25519") {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "ECDSA/Ed25519 is quantum-vulnerable — migrate to ML-DSA (FIPS 204); or FN-DSA (FIPS 206) for smaller signatures",
+                        node,
+                        src,
+                    ));
+                } else if text_lower.contains("x25519") || text_lower.contains("ecdh") {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "ECDH/X25519 is quantum-vulnerable — migrate to ML-KEM (FIPS 203); or HQC for lattice-diversity",
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 11: no-unwrap-in-lib ────────────────────────────────────────────────
 
 pub struct NoUnwrapInLib;
 

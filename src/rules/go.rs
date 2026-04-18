@@ -329,7 +329,56 @@ impl_rule! {
     }
 }
 
-// ─── Rule 5: gin-no-trusted-proxies ────────────────────────────────────────
+// ─── Rule 5: pq-vulnerable-crypto ─────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "go/pq-vulnerable-crypto",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable asymmetric cryptography",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect import of quantum-vulnerable crypto packages
+            if node.kind() == "import_spec" {
+                if let Some(path) = node.child_by_field_name("path") {
+                    let path_text = &src[path.byte_range()];
+                    let (pkg, msg) = if path_text == "\"crypto/rsa\"" {
+                        ("crypto/rsa", "RSA is quantum-vulnerable — migrate to ML-DSA (FIPS 204) for signatures; or FN-DSA (FIPS 206) for smaller signatures, ML-KEM (FIPS 203) for key exchange; or HQC for lattice-diversity")
+                    } else if path_text == "\"crypto/ecdsa\"" {
+                        ("crypto/ecdsa", "ECDSA is quantum-vulnerable — migrate to ML-DSA (FIPS 204); or FN-DSA (FIPS 206) for smaller signatures")
+                    } else if path_text == "\"crypto/dsa\"" {
+                        ("crypto/dsa", "DSA is quantum-vulnerable — migrate to ML-DSA (FIPS 204); or FN-DSA (FIPS 206) for smaller signatures")
+                    } else if path_text == "\"crypto/ed25519\"" {
+                        ("crypto/ed25519", "Ed25519 is quantum-vulnerable — migrate to ML-DSA (FIPS 204); or FN-DSA (FIPS 206) for smaller signatures")
+                    } else if path_text == "\"crypto/ecdh\"" {
+                        ("crypto/ecdh", "ECDH is quantum-vulnerable — migrate to ML-KEM (FIPS 203); or HQC for lattice-diversity")
+                    } else {
+                        return;
+                    };
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        &format!("Import of {} — {}", pkg, msg),
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 6: gin-no-trusted-proxies ────────────────────────────────────────
 
 pub struct GinNoTrustedProxies;
 

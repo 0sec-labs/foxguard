@@ -457,7 +457,92 @@ impl_rule! {
     }
 }
 
-// ─── Rule 7: no-hardcoded-secret ────────────────────────────────────────────
+// ─── Rule 7: pq-vulnerable-crypto ─────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+/// Classify a Java algorithm string for PQ vulnerability.
+/// Returns Some(message) if vulnerable, None if safe (PQ algorithm or unknown).
+fn classify_java_pq_algo(algo: &str) -> Option<&'static str> {
+    let upper = algo.to_uppercase();
+    // PQ-safe algorithms — do not flag
+    if upper.contains("MLDSA") || upper.contains("ML-DSA")
+        || upper.contains("MLKEM") || upper.contains("ML-KEM")
+        || upper.contains("SLHDSA") || upper.contains("SLH-DSA")
+        || upper.contains("FNDSA") || upper.contains("FN-DSA")
+        || upper.contains("HQC")
+    {
+        return None;
+    }
+    if upper.contains("RSA") {
+        return Some("RSA is quantum-vulnerable — migrate to ML-DSA (FIPS 204) for signatures; or FN-DSA (FIPS 206) for smaller signatures, ML-KEM (FIPS 203) for key exchange; or HQC for lattice-diversity");
+    }
+    if upper.contains("EC") || upper.contains("ECDSA") || upper.contains("ECDH") {
+        return Some("EC/ECDSA/ECDH is quantum-vulnerable — migrate to ML-DSA (FIPS 204); or FN-DSA (FIPS 206) for smaller signatures, ML-KEM (FIPS 203); or HQC for lattice-diversity");
+    }
+    if upper.contains("DSA") && !upper.contains("ML") && !upper.contains("SLH") && !upper.contains("FN") {
+        return Some("DSA is quantum-vulnerable — migrate to ML-DSA (FIPS 204); or FN-DSA (FIPS 206) for smaller signatures");
+    }
+    if upper.contains("DH") && !upper.contains("EC") {
+        return Some("DH is quantum-vulnerable — migrate to ML-KEM (FIPS 203); or HQC for lattice-diversity");
+    }
+    None
+}
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "java/pq-vulnerable-crypto",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable asymmetric cryptography",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "method_invocation" {
+                if let Some(name) = node.child_by_field_name("name") {
+                    let name_text = &src[name.byte_range()];
+                    if name_text == "getInstance" {
+                        if let Some(obj) = node.child_by_field_name("object") {
+                            let obj_text = &src[obj.byte_range()];
+                            if obj_text == "KeyPairGenerator"
+                                || obj_text == "KeyAgreement"
+                                || obj_text == "Signature"
+                                || obj_text == "KeyFactory"
+                            {
+                                if let Some(args) = node.child_by_field_name("arguments") {
+                                    if let Some(first_arg) = args.named_child(0) {
+                                        let arg_text = &src[first_arg.byte_range()];
+                                        let inner = arg_text.trim_matches('"');
+                                        if let Some(msg) = classify_java_pq_algo(inner) {
+                                            findings.push(make_finding(
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
+                                                &format!(
+                                                    "{}.getInstance({}) — {}",
+                                                    obj_text, arg_text, msg
+                                                ),
+                                                node,
+                                                src,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 8: no-hardcoded-secret ────────────────────────────────────────────
 
 pub struct NoHardcodedSecret;
 
