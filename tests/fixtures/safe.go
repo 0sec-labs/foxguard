@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/tls"
-	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -16,9 +15,8 @@ func safeOperations(db *sql.DB) {
 	// Safe: static command
 	exec.Command("ls", "-la")
 
-	// Safe: strong crypto
-	h := sha256.New()
-	h.Write([]byte("data"))
+	// Safe: crypto usage via abstraction (no direct crypto/* import)
+	hash := computeHash([]byte("data"))
 
 	// Safe: static URL
 	http.Get("https://api.example.com/health")

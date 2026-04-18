@@ -229,6 +229,7 @@ impl RuleRegistry {
         registry.register(Box::new(javascript::TaintLogInjection));
         registry.register(Box::new(javascript::TaintXxe));
         registry.register(Box::new(javascript::NoUnsafeDeserialization));
+        registry.register(Box::new(javascript::HardcodedCryptoAlgorithm));
         registry.register(Box::new(javascript::TaintNosqlInjection));
 
         // Register Python rules
@@ -272,6 +273,7 @@ impl RuleRegistry {
         registry.register(Box::new(python::TaintXxe));
         registry.register(Box::new(python::JwtNoVerify));
         registry.register(Box::new(python::JwtHardcodedSecret));
+        registry.register(Box::new(python::HardcodedCryptoAlgorithm));
         registry.register(Box::new(python::TaintNosqlInjection));
 
         // Register Go rules
@@ -295,6 +297,7 @@ impl RuleRegistry {
         registry.register(Box::new(go::JwtNoVerify));
         registry.register(Box::new(go::JwtHardcodedSecret));
         registry.register(Box::new(go::TaintNosqlInjection));
+        registry.register(Box::new(go::HardcodedCryptoAlgorithm));
         registry.register(Box::new(go::TaintPathTraversal));
 
         // Register Java rules
@@ -310,6 +313,7 @@ impl RuleRegistry {
         registry.register(Box::new(java::SpringCsrfDisabled));
         registry.register(Box::new(java::SpringCorsPermissive));
         registry.register(Box::new(java::NoXss));
+        registry.register(Box::new(java::HardcodedCryptoAlgorithm));
 
         // Register PHP rules
         registry.register(Box::new(php::NoEval));

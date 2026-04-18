@@ -34,6 +34,9 @@ window.location.href = userInput;
 // 9. js/no-weak-crypto (Medium)
 const hash = crypto.createHash("md5");
 
+// js/hardcoded-crypto-algorithm (Low) — strong algo, but hardcoded
+const hmac = crypto.createHmac("sha256", key);
+
 // 10. js/no-path-traversal (High)
 fs.readFileSync(`/data/${userInput}`);
 

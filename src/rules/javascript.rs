@@ -1767,6 +1767,65 @@ impl_rule! {
     }
 }
 
+// ─── Rule: hardcoded-crypto-algorithm ──────────────────────────────────────
+
+pub struct HardcodedCryptoAlgorithm;
+
+impl_rule! {
+    HardcodedCryptoAlgorithm,
+    id = "js/hardcoded-crypto-algorithm",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Hardcoded algorithm string in crypto API call hinders crypto agility",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let crypto_methods = [
+            "createHash",
+            "createCipher",
+            "createCipheriv",
+            "createDecipher",
+            "createDecipheriv",
+            "createHmac",
+            "createSign",
+            "createVerify",
+        ];
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
+                    if crypto_methods.contains(&func_name) {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                if first_arg.kind() == "string" || first_arg.kind() == "template_string" {
+                                    let val = &src[first_arg.byte_range()];
+                                    let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "{}(\"{}\") uses a hardcoded algorithm — externalize to configuration for crypto agility",
+                                            func_name, inner
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── js/taint-xss-innerhtml ───────────────────────────────────────────────
 //
 // Intraprocedural taint rule: fires when untrusted Express-style input

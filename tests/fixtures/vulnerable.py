@@ -83,6 +83,10 @@ def read_file(user_path):
 def weak_hash(data):
     return hashlib.md5(data)
 
+# py/hardcoded-crypto-algorithm
+def hardcoded_algo(data):
+    return hashlib.new("sha256", data)
+
 # py/no-pickle
 def deserialize(data):
     return pickle.loads(data)

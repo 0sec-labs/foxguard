@@ -23,6 +23,7 @@ const jsRules: Rule[] = [
   { id: 'js/express-no-hardcoded-session-secret', cwe: 'CWE-798', desc: 'Hardcoded session secret in express-session configuration', severity: 'high' },
   { id: 'js/express-session-resave-true', cwe: 'CWE-384', desc: 'express-session configured with resave: true', severity: 'medium' },
   { id: 'js/express-session-saveuninitialized-true', cwe: 'CWE-359', desc: 'express-session configured with saveUninitialized: true', severity: 'medium' },
+  { id: 'js/hardcoded-crypto-algorithm', cwe: 'CWE-327', desc: 'Hardcoded algorithm string in crypto API call hinders crypto agility', severity: 'low' },
   { id: 'js/jwt-decode-without-verify', cwe: 'CWE-347', desc: 'JWT decoded without signature verification', severity: 'high' },
   { id: 'js/jwt-hardcoded-secret', cwe: 'CWE-798', desc: 'JWT signing or verification with a hardcoded secret', severity: 'high' },
   { id: 'js/jwt-ignore-expiration', cwe: 'CWE-613', desc: 'JWT verification configured to ignore token expiration', severity: 'high' },
@@ -66,6 +67,7 @@ const pyRules: Rule[] = [
   { id: 'py/django-secret-key-hardcoded', cwe: 'CWE-798', desc: 'Django SECRET_KEY hardcoded in source code', severity: 'high' },
   { id: 'py/flask-debug-mode', cwe: 'CWE-489', desc: 'Flask app.run(debug=True) exposes debugger and reloader in production', severity: 'high' },
   { id: 'py/flask-secret-key-hardcoded', cwe: 'CWE-798', desc: 'Flask SECRET_KEY hardcoded in source code', severity: 'high' },
+  { id: 'py/hardcoded-crypto-algorithm', cwe: 'CWE-327', desc: 'Hardcoded algorithm string in hashlib.new() hinders crypto agility', severity: 'low' },
   { id: 'py/jwt-hardcoded-secret', cwe: 'CWE-798', desc: 'JWT signing or verification with a hardcoded secret', severity: 'high' },
   { id: 'py/jwt-no-verify', cwe: 'CWE-347', desc: 'JWT decoded without signature verification', severity: 'critical' },
   { id: 'py/no-command-injection', cwe: 'CWE-78', desc: 'Potential command injection via os.system/subprocess with user input', severity: 'critical' },
@@ -103,6 +105,7 @@ const pyRules: Rule[] = [
 
 const goRules: Rule[] = [
   { id: 'go/gin-no-trusted-proxies', cwe: 'CWE-346', desc: 'Gin engine created without SetTrustedProxies configuration', severity: 'medium' },
+  { id: 'go/hardcoded-crypto-algorithm', cwe: 'CWE-327', desc: 'Direct import of crypto primitive package hinders crypto agility', severity: 'low' },
   { id: 'go/insecure-tls-skip-verify', cwe: 'CWE-295', desc: 'TLS certificate verification disabled with InsecureSkipVerify', severity: 'high' },
   { id: 'go/jwt-hardcoded-secret', cwe: 'CWE-798', desc: 'JWT key function uses a hardcoded secret', severity: 'high' },
   { id: 'go/jwt-no-verify', cwe: 'CWE-347', desc: 'JWT parsed without signature verification', severity: 'critical' },
@@ -141,6 +144,7 @@ const rubyRules: Rule[] = [
 ];
 
 const javaRules: Rule[] = [
+  { id: 'java/hardcoded-crypto-algorithm', cwe: 'CWE-327', desc: 'Hardcoded algorithm string in crypto API call hinders crypto agility', severity: 'low' },
   { id: 'java/no-command-injection', cwe: 'CWE-78', desc: 'Potential command injection via Runtime.exec or ProcessBuilder with dynamic input', severity: 'critical' },
   { id: 'java/no-hardcoded-secret', cwe: 'CWE-798', desc: 'Hardcoded secret or credential detected', severity: 'high' },
   { id: 'java/no-path-traversal', cwe: 'CWE-22', desc: 'Potential path traversal via dynamic file path', severity: 'high' },

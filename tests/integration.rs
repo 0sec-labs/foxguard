@@ -112,8 +112,8 @@ mod python {
         // py/no-eval finding.
         assert_eq!(
             findings.len(),
-            37,
-            "vulnerable.py should have 37 findings, got {}",
+            38,
+            "vulnerable.py should have 38 findings, got {}",
             findings.len()
         );
 
@@ -152,6 +152,7 @@ mod python {
             "py/jwt-no-verify",
             "py/jwt-hardcoded-secret",
             "py/pq-vulnerable-crypto",
+            "py/hardcoded-crypto-algorithm",
         ];
 
         for rule in &expected_rules {
@@ -620,8 +621,8 @@ mod javascript {
 
         assert_eq!(
             findings.len(),
-            35,
-            "vulnerable.js should have 35 findings, got {}",
+            37,
+            "vulnerable.js should have 37 findings, got {}",
             findings.len()
         );
 
@@ -658,6 +659,7 @@ mod javascript {
             "js/jwt-verify-missing-algorithms",
             "js/no-unsafe-deserialization",
             "js/pq-vulnerable-crypto",
+            "js/hardcoded-crypto-algorithm",
         ];
 
         for rule in &expected_rules {
@@ -932,8 +934,8 @@ mod go {
 
         assert_eq!(
             findings.len(),
-            20,
-            "vulnerable.go should have 20 findings, got {}",
+            25,
+            "vulnerable.go should have 25 findings, got {}",
             findings.len()
         );
 
@@ -954,6 +956,7 @@ mod go {
             "go/jwt-no-verify",
             "go/jwt-hardcoded-secret",
             "go/pq-vulnerable-crypto",
+            "go/hardcoded-crypto-algorithm",
         ];
 
         for rule in &expected_rules {
@@ -1105,8 +1108,8 @@ mod java {
 
         assert_eq!(
             findings.len(),
-            26,
-            "vulnerable.java should have 26 findings, got {}",
+            34,
+            "vulnerable.java should have 34 findings, got {}",
             findings.len()
         );
 
@@ -1128,6 +1131,7 @@ mod java {
             "java/spring-cors-permissive",
             "java/no-xss",
             "java/pq-vulnerable-crypto",
+            "java/hardcoded-crypto-algorithm",
         ];
 
         for rule in &expected_rules {

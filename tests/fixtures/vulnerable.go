@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/md5"
+	"crypto/aes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"

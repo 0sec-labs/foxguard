@@ -788,6 +788,62 @@ impl_rule! {
     }
 }
 
+// ─── Rule: hardcoded-crypto-algorithm ──────────────────────────────────────
+
+pub struct HardcodedCryptoAlgorithm;
+
+impl_rule! {
+    HardcodedCryptoAlgorithm,
+    id = "go/hardcoded-crypto-algorithm",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Direct import of crypto primitive package hinders crypto agility",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let primitive_packages = [
+            "crypto/aes",
+            "crypto/des",
+            "crypto/rsa",
+            "crypto/ecdsa",
+            "crypto/ed25519",
+            "crypto/rc4",
+            "crypto/dsa",
+            "crypto/cipher",
+            "crypto/hmac",
+            "crypto/sha256",
+            "crypto/sha512",
+            "crypto/md5",
+            "crypto/sha1",
+        ];
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "import_spec" {
+                if let Some(path) = node.child_by_field_name("path") {
+                    let path_text = &src[path.byte_range()];
+                    let inner = path_text.trim_matches('"');
+                    if primitive_packages.contains(&inner) {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            &format!(
+                                "direct import of \"{}\" — wrap crypto operations behind an abstraction layer for crypto agility",
+                                inner
+                            ),
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── Taint rules ───────────────────────────────────────────────────────────
 //
 // These rules consume the intraprocedural taint engine in
