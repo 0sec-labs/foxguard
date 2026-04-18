@@ -1,4 +1,5 @@
 pub mod common;
+pub mod config;
 pub mod cross_file;
 pub mod csharp;
 pub mod go;
@@ -388,6 +389,12 @@ impl RuleRegistry {
         registry.register(Box::new(rust_lang::NoSsrf));
         registry.register(Box::new(rust_lang::NoPathTraversal));
         registry.register(Box::new(rust_lang::NoUnwrapInLib));
+
+        // Register config file rules
+        registry.register(Box::new(config::NginxPqVulnerableTls));
+        registry.register(Box::new(config::ApachePqVulnerableTls));
+        registry.register(Box::new(config::HAProxyPqVulnerableTls));
+        registry.register(Box::new(config::DockerfileInsecureTlsEnv));
 
         registry
     }

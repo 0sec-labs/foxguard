@@ -25,6 +25,10 @@ const LANGUAGE_ORDER: &[Language] = &[
     Language::CSharp,
     Language::Swift,
     Language::Kotlin,
+    Language::NginxConf,
+    Language::ApacheConf,
+    Language::HAProxyConf,
+    Language::Dockerfile,
 ];
 
 fn language_slug(language: Language) -> &'static str {
@@ -39,6 +43,10 @@ fn language_slug(language: Language) -> &'static str {
         Language::CSharp => "cs",
         Language::Swift => "swift",
         Language::Kotlin => "kt",
+        Language::NginxConf => "nginxconf",
+        Language::ApacheConf => "apacheconf",
+        Language::HAProxyConf => "haproxyconf",
+        Language::Dockerfile => "dockerfile",
     }
 }
 
@@ -54,6 +62,10 @@ fn language_display_name(language: Language) -> &'static str {
         Language::CSharp => "C#",
         Language::Swift => "Swift",
         Language::Kotlin => "Kotlin",
+        Language::NginxConf => "Nginx",
+        Language::ApacheConf => "Apache",
+        Language::HAProxyConf => "HAProxy",
+        Language::Dockerfile => "Dockerfile",
     }
 }
 
@@ -69,6 +81,10 @@ fn language_array_name(language: Language) -> &'static str {
         Language::CSharp => "csharpRules",
         Language::Swift => "swiftRules",
         Language::Kotlin => "kotlinRules",
+        Language::NginxConf => "nginxconfRules",
+        Language::ApacheConf => "apacheconfRules",
+        Language::HAProxyConf => "haproxyconfRules",
+        Language::Dockerfile => "dockerfileRules",
     }
 }
 

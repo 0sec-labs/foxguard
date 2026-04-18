@@ -106,8 +106,22 @@ impl InlineIgnoreSpec {
     }
 }
 
-/// Detect language from file extension.
+/// Detect language from filename or file extension.
 pub fn detect_language(path: &Path) -> Option<Language> {
+    // Check full filename first for config files
+    if let Some(filename) = path.file_name().and_then(|f| f.to_str()) {
+        match filename {
+            "nginx.conf" => return Some(Language::NginxConf),
+            "httpd.conf" | "apache2.conf" => return Some(Language::ApacheConf),
+            "haproxy.cfg" => return Some(Language::HAProxyConf),
+            "Dockerfile" => return Some(Language::Dockerfile),
+            _ => {}
+        }
+        if filename.starts_with("Dockerfile.") {
+            return Some(Language::Dockerfile);
+        }
+    }
+
     match path.extension()?.to_str()? {
         "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => Some(Language::JavaScript),
         "py" | "pyw" => Some(Language::Python),
@@ -439,6 +453,10 @@ fn comment_markers(language: Language) -> &'static [&'static str] {
         | Language::CSharp
         | Language::Swift
         | Language::Kotlin => &["//"],
+        Language::NginxConf
+        | Language::ApacheConf
+        | Language::HAProxyConf
+        | Language::Dockerfile => &["#"],
     }
 }
 

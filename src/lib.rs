@@ -46,6 +46,10 @@ pub enum Language {
     CSharp,
     Swift,
     Kotlin,
+    NginxConf,
+    ApacheConf,
+    HAProxyConf,
+    Dockerfile,
 }
 
 impl std::fmt::Display for Language {
@@ -61,6 +65,10 @@ impl std::fmt::Display for Language {
             Language::CSharp => write!(f, "csharp"),
             Language::Swift => write!(f, "swift"),
             Language::Kotlin => write!(f, "kotlin"),
+            Language::NginxConf => write!(f, "nginxconf"),
+            Language::ApacheConf => write!(f, "apacheconf"),
+            Language::HAProxyConf => write!(f, "haproxyconf"),
+            Language::Dockerfile => write!(f, "dockerfile"),
         }
     }
 }
