@@ -327,6 +327,7 @@ impl Rule for SemgrepTaintRule {
                 sink_start_byte: None,
                 sink_end_byte: None,
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
+                taint_hops: Some(t.hops),
             })
             .collect()
     }

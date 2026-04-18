@@ -207,6 +207,7 @@ impl Rule for SemgrepRule {
                 // External Semgrep rules are inherently fuzzier than
                 // curated built-in AST-walked rules. See issue #207.
                 confidence: 0.7,
+                taint_hops: None,
             });
         }
 

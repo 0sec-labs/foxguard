@@ -4,6 +4,52 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{Finding, Severity};
 
+// ─── Min-entropy threshold (atomic global, same pattern as min_length) ────
+
+/// Process-wide override for the hardcoded-secret minimum entropy threshold.
+/// `0` bits (stored as `u32` via `f32::to_bits()`) means "no override".
+static HARDCODED_SECRET_MIN_ENTROPY_OVERRIDE: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+/// Install a process-wide `scan.thresholds.secrets.min_entropy` override.
+pub fn set_hardcoded_secret_min_entropy_override(value: Option<f32>) {
+    let bits = match value {
+        Some(v) => v.to_bits(),
+        None => 0,
+    };
+    HARDCODED_SECRET_MIN_ENTROPY_OVERRIDE.store(bits, Ordering::Relaxed);
+}
+
+/// Returns the configured min-entropy threshold, or `None` if unset.
+fn hardcoded_secret_min_entropy() -> Option<f32> {
+    let bits = HARDCODED_SECRET_MIN_ENTROPY_OVERRIDE.load(Ordering::Relaxed);
+    if bits == 0 {
+        None
+    } else {
+        Some(f32::from_bits(bits))
+    }
+}
+
+/// Compute Shannon entropy (bits per character) for a byte string.
+pub fn shannon_entropy(s: &str) -> f32 {
+    if s.is_empty() {
+        return 0.0;
+    }
+    let mut counts = [0u32; 256];
+    for &b in s.as_bytes() {
+        counts[b as usize] += 1;
+    }
+    let len = s.len() as f32;
+    let mut entropy: f32 = 0.0;
+    for &c in &counts {
+        if c > 0 {
+            let p = c as f32 / len;
+            entropy -= p * p.log2();
+        }
+    }
+    entropy
+}
+
 /// Default minimum length for strings flagged as a hardcoded secret.
 ///
 /// Historically this was hardcoded as `>= 4` across every language-specific
@@ -43,11 +89,20 @@ pub fn hardcoded_secret_min_length() -> usize {
     }
 }
 
-/// True when `inner` (the unquoted content of a string literal) is long
-/// enough to be reported by a `*-hardcoded-secret` rule, per the
-/// `scan.secrets.min_length` threshold.
+/// True when `inner` (the unquoted content of a string literal) passes
+/// the configured thresholds for a `*-hardcoded-secret` rule:
+/// - `scan.thresholds.secrets.min_length` (default 4)
+/// - `scan.thresholds.secrets.min_entropy` (optional, disabled by default)
 pub fn is_secret_value_long_enough(inner: &str) -> bool {
-    inner.len() >= hardcoded_secret_min_length()
+    if inner.len() < hardcoded_secret_min_length() {
+        return false;
+    }
+    if let Some(min_ent) = hardcoded_secret_min_entropy() {
+        if shannon_entropy(inner) < min_ent {
+            return false;
+        }
+    }
+    true
 }
 
 /// Shared per-file import alias table.
@@ -174,6 +229,7 @@ pub fn make_finding(
         sink_start_byte: None,
         sink_end_byte: None,
         confidence: crate::default_confidence(),
+        taint_hops: None,
     }
 }
 
@@ -218,6 +274,7 @@ pub fn make_finding_from_offsets(
         sink_start_byte: None,
         sink_end_byte: None,
         confidence: crate::default_confidence(),
+        taint_hops: None,
     }
 }
 

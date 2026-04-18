@@ -2188,6 +2188,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
         let medium = Finding {
             severity: Severity::Medium,
@@ -2227,6 +2228,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -2268,6 +2270,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
 
         assert_eq!(
@@ -2300,6 +2303,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
 
         let rendered = open_target_lines(&finding, OpenFocus::Finding)
@@ -2336,6 +2340,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
 
         let rendered = render_source_context(
@@ -2405,6 +2410,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
 
         assert_eq!(
@@ -2451,6 +2457,7 @@ mod tests {
                 sink_start_byte: None,
                 sink_end_byte: None,
                 confidence: crate::default_confidence(),
+                taint_hops: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -2526,6 +2533,7 @@ mod tests {
                 sink_start_byte: None,
                 sink_end_byte: None,
                 confidence: crate::default_confidence(),
+                taint_hops: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -2582,6 +2590,7 @@ mod tests {
                 sink_start_byte: None,
                 sink_end_byte: None,
                 confidence: crate::default_confidence(),
+                taint_hops: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -2663,6 +2672,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -2703,6 +2713,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Source)
@@ -2742,6 +2753,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
 
         let rendered = render_source_context(
@@ -2792,6 +2804,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
 
         let rendered = render_source_context(

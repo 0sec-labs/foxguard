@@ -106,4 +106,8 @@ pub struct Finding {
     /// inherently fuzzier than curated built-in AST-walked rules.
     #[serde(default = "default_confidence")]
     pub confidence: f32,
+    /// Number of taint propagation hops (1 = direct, 2 = cross-file).
+    /// `None` for non-taint rules. Used by `scan.thresholds.taint.max_hops`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub taint_hops: Option<u8>,
 }
