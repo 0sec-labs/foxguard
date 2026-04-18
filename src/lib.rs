@@ -1,6 +1,7 @@
 pub mod app;
 pub mod baseline;
 pub mod cli;
+pub mod compliance;
 pub mod config;
 pub mod diff;
 pub mod engine;
@@ -106,4 +107,8 @@ pub struct Finding {
     /// inherently fuzzier than curated built-in AST-walked rules.
     #[serde(default = "default_confidence")]
     pub confidence: f32,
+    /// CNSA 2.0 compliance deadline, if this finding relates to
+    /// quantum-vulnerable cryptography. Format: "2027-01", "2030-12", "2035".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cnsa2_deadline: Option<String>,
 }

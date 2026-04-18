@@ -35,6 +35,10 @@ pub fn print_sarif(findings: &[Finding]) {
             let clamped_conf = f.confidence.clamp(0.0, 1.0);
             props.insert("confidence".to_string(), json!(clamped_conf));
 
+            if let Some(deadline) = &f.cnsa2_deadline {
+                props.insert("cnsa2_deadline".to_string(), json!(deadline));
+            }
+
             // SARIF `rank` is a native 0.0..=100.0 ordering hint. Map
             // confidence linearly so 1.0 → 100 and 0.0 → 0.
             let rank = clamped_conf as f64 * 100.0;

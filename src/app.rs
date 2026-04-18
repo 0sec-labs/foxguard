@@ -23,6 +23,7 @@ pub struct ScanExecution {
     pub files_scanned: usize,
     pub duration: std::time::Duration,
     pub notices: Vec<String>,
+    pub pq_migration_level: Option<crate::compliance::PqMigrationLevel>,
 }
 
 pub struct SecretsExecution {
@@ -169,6 +170,10 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
 
     findings = suppress_with_baseline(findings, baseline.as_ref());
 
+    // Annotate PQ-related findings with CNSA 2.0 compliance deadlines
+    crate::compliance::annotate_cnsa2_deadlines(&mut findings);
+    let pq_migration_level = crate::compliance::compute_pq_migration_level(&findings);
+
     if files_scanned == 0 {
         notices.push(
             "Warning: no files with supported extensions found. Supported: .js, .ts, .py, .go, .rb, .java, .php, .rs, .cs, .swift, .kt"
@@ -182,6 +187,7 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
         files_scanned,
         duration,
         notices,
+        pq_migration_level,
     })
 }
 

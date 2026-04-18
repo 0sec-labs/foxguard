@@ -46,7 +46,14 @@ pub fn print_findings_with_options(
     duration: std::time::Duration,
     explain: bool,
 ) {
-    print_findings_with_options_and_confidence(findings, files_scanned, duration, explain, false);
+    print_findings_with_options_and_confidence(
+        findings,
+        files_scanned,
+        duration,
+        explain,
+        false,
+        None,
+    );
 }
 
 /// Variant of [`print_findings_with_options`] that also controls whether
@@ -60,6 +67,7 @@ pub fn print_findings_with_options_and_confidence(
     duration: std::time::Duration,
     explain: bool,
     show_confidence: bool,
+    pq_migration_level: Option<&crate::compliance::PqMigrationLevel>,
 ) {
     if findings.is_empty() {
         if files_scanned > 0 {
@@ -107,6 +115,7 @@ pub fn print_findings_with_options_and_confidence(
     }
 
     print_summary(findings, files_scanned, duration);
+    print_pq_summary(findings, pq_migration_level);
 }
 
 fn severity_badge(severity: Severity) -> colored::ColoredString {
@@ -199,6 +208,17 @@ fn print_finding(f: &Finding, explain: bool, show_confidence: bool) {
         }
     }
 
+    // CNSA 2.0 deadline
+    if let Some(deadline) = f.cnsa2_deadline.as_ref() {
+        let label = match deadline.as_str() {
+            "2027-01" => "CNSA 2.0: migrate by Jan 2027",
+            "2030-12" => "CNSA 2.0: migrate by Dec 2030",
+            "2035" => "CNSA 2.0: migrate by 2035",
+            _ => deadline.as_str(),
+        };
+        println!("    {accent}   {}", label.yellow().dimmed());
+    }
+
     // Fix suggestion
     if let Some(fix) = f.fix_suggestion.as_ref() {
         println!("    {accent} {} {}", "Fix:".green().bold(), fix);
@@ -269,4 +289,57 @@ fn print_summary(findings: &[Finding], files_scanned: usize, duration: std::time
     println!();
     println!("  {}", badges.join("  "));
     println!();
+}
+
+fn print_pq_summary(
+    findings: &[Finding],
+    pq_migration_level: Option<&crate::compliance::PqMigrationLevel>,
+) {
+    // CNSA 2.0 deadline breakdown
+    let by_2027 = findings
+        .iter()
+        .filter(|f| f.cnsa2_deadline.as_deref() == Some("2027-01"))
+        .count();
+    let by_2030 = findings
+        .iter()
+        .filter(|f| f.cnsa2_deadline.as_deref() == Some("2030-12"))
+        .count();
+    let by_2035 = findings
+        .iter()
+        .filter(|f| f.cnsa2_deadline.as_deref() == Some("2035"))
+        .count();
+
+    if by_2027 > 0 || by_2030 > 0 || by_2035 > 0 {
+        let mut parts = Vec::new();
+        if by_2027 > 0 {
+            parts.push(format!("{by_2027} by Jan 2027"));
+        }
+        if by_2030 > 0 {
+            parts.push(format!("{by_2030} by Dec 2030"));
+        }
+        if by_2035 > 0 {
+            parts.push(format!("{by_2035} by 2035"));
+        }
+        println!(
+            "  {} {}",
+            "CNSA 2.0:".yellow().bold(),
+            parts.join(" \u{00b7} ").dimmed(),
+        );
+    }
+
+    // PQ migration level
+    if let Some(level) = pq_migration_level {
+        println!(
+            "  {} Level {}/5 \u{2014} {} ({} PQ findings, {} agility findings)",
+            "PQ migration:".cyan().bold(),
+            level.level,
+            level.label,
+            level.pq_finding_count,
+            level.agility_finding_count,
+        );
+    }
+
+    if by_2027 > 0 || by_2030 > 0 || by_2035 > 0 || pq_migration_level.is_some() {
+        println!();
+    }
 }

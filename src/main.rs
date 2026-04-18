@@ -61,6 +61,7 @@ fn run_scan(scan: &ScanArgs) -> i32 {
                     result.duration,
                     result.args.explain,
                     result.args.show_confidence,
+                    result.pq_migration_level.as_ref(),
                 );
             }
         }
