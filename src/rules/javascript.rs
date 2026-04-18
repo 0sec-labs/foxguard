@@ -482,10 +482,10 @@ impl_rule! {
                                     let val = &src[first_arg.byte_range()];
                                     let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
                                     let (algo, replacement) = match inner.to_lowercase().as_str() {
-                                            "rsa" => ("RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
-                                            "ec" => ("EC", "ML-KEM (FIPS 203) for key exchange or ML-DSA (FIPS 204) for signatures"),
-                                            "dsa" => ("DSA", "ML-DSA (FIPS 204)"),
-                                            "ed25519" | "ed448" => ("Ed25519/Ed448", "ML-DSA (FIPS 204)"),
+                                            "rsa" => ("RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures"),
+                                            "ec" => ("EC", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures"),
+                                            "dsa" => ("DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
+                                            "ed25519" | "ed448" => ("Ed25519/Ed448", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
                                             _ => return,
                                         };
                                     let mut f = make_finding(
@@ -512,7 +512,7 @@ impl_rule! {
                             _self.id(),
                             _self.severity(),
                             _self.cwe(),
-                            "Diffie-Hellman is quantum-vulnerable — migrate to ML-KEM (FIPS 203)",
+                            "Diffie-Hellman is quantum-vulnerable — migrate to X25519MLKEM768 hybrid KEM (FIPS 203)",
                             node,
                             src,
                         );
@@ -526,7 +526,7 @@ impl_rule! {
                             _self.id(),
                             _self.severity(),
                             _self.cwe(),
-                            "ECDH is quantum-vulnerable — migrate to ML-KEM (FIPS 203)",
+                            "ECDH is quantum-vulnerable — migrate to X25519MLKEM768 hybrid KEM (FIPS 203)",
                             node,
                             src,
                         );
@@ -548,7 +548,7 @@ impl_rule! {
                                             _self.severity(),
                                             _self.cwe(),
                                             &format!(
-                                                "{}('{}') uses a quantum-vulnerable signature algorithm — migrate to ML-DSA (FIPS 204)",
+                                                "{}('{}') uses a quantum-vulnerable signature algorithm — migrate to ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition",
                                                 func_name, inner
                                             ),
                                             node,
