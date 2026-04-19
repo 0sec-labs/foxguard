@@ -150,6 +150,13 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
         findings.retain(|f| f.confidence >= min_conf);
     }
 
+    // Filter taint findings exceeding max_hops threshold
+    if let Some(ref cfg) = config {
+        if let Some(max) = cfg.scan.thresholds.taint.max_hops {
+            findings.retain(|f| f.taint_hops.is_none_or(|h| (h as usize) <= max));
+        }
+    }
+
     if let Some(ref min_severity) = scan.severity {
         let min = min_severity.to_severity();
         findings.retain(|f| f.severity >= min);

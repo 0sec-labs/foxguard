@@ -772,6 +772,7 @@ fn map_go_taint_findings(
             sink_start_byte: Some(t.sink_start_byte),
             sink_end_byte: Some(t.sink_end_byte),
             confidence: crate::rules::common::confidence_for_hops(t.hops),
+            taint_hops: Some(t.hops),
         })
         .collect()
 }
@@ -1494,6 +1495,7 @@ pub fn run_go_taint_batched(
                 sink_start_byte: Some(t.sink_start_byte),
                 sink_end_byte: Some(t.sink_end_byte),
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
+                taint_hops: Some(t.hops),
             })
         })
         .collect()

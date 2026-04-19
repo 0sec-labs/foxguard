@@ -1,5 +1,7 @@
 use crate::cli::{ScanArgs, SecretsArgs, SeverityFilter};
-use crate::rules::common::set_hardcoded_secret_min_length_override;
+use crate::rules::common::{
+    set_hardcoded_secret_min_entropy_override, set_hardcoded_secret_min_length_override,
+};
 use crate::{Finding, Severity};
 use serde::Deserialize;
 use serde_yaml::{Mapping, Sequence, Value};
@@ -64,12 +66,9 @@ pub struct ScanThresholds {
 
 /// Thresholds for `*-hardcoded-secret` rules.
 ///
-/// `min_length` is live: it replaces the previously hardcoded `inner.len()
-/// check (`>= 4`) used across every language's secret rule. `min_entropy`
-/// is reserved — no rule in the codebase computes Shannon entropy today,
-/// so enabling it would require inventing new behavior rather than
-/// exposing an existing threshold. It is parsed and validated so a future
-/// PR can wire it without a config schema change.
+/// Both fields are live: `min_length` replaces the previously hardcoded
+/// `inner.len() >= 4` check, and `min_entropy` adds a Shannon entropy
+/// gate so low-entropy strings like `"test"` or `"changeme"` are skipped.
 #[derive(Debug, Clone, Default)]
 pub struct SecretsThresholds {
     pub min_length: Option<usize>,
@@ -78,11 +77,9 @@ pub struct SecretsThresholds {
 
 /// Thresholds for taint-propagation rules.
 ///
-/// `max_hops` is reserved — the taint engine runs a fixed two-pass
-/// pipeline with no iteration counter to clamp, so there is no
-/// "hardcoded cap" to expose today. Parsed and validated so users can set
-/// it now without a schema break when the engine grows a convergence
-/// loop.
+/// `max_hops` filters taint findings by propagation depth. Findings with
+/// more hops than `max_hops` are suppressed after scanning. Currently
+/// hops are 1 (intra-file direct) or 2 (cross-file).
 #[derive(Debug, Clone, Default)]
 pub struct TaintThresholds {
     pub max_hops: Option<usize>,
@@ -427,15 +424,12 @@ pub fn suppress_with_scan_ignores(
 /// scanner's process-wide state. Idempotent: calling with a fresh config
 /// overwrites any previous override, so repeated scans in the same
 /// process (e.g. the TUI) cannot leak a stale value.
-///
-/// Currently only `secrets.min_length` has an active hook (it feeds the
-/// `is_secret_value_long_enough` helper used by every
-/// `*-hardcoded-secret` rule). The other threshold fields are parsed and
-/// validated but have no behavioral effect yet; they are reserved for
-/// follow-up PRs (see issue #210).
 pub fn apply_scan_thresholds(config: Option<&FoxguardConfig>) {
     let min_length = config.and_then(|cfg| cfg.scan.thresholds.secrets.min_length);
     set_hardcoded_secret_min_length_override(min_length);
+
+    let min_entropy = config.and_then(|cfg| cfg.scan.thresholds.secrets.min_entropy);
+    set_hardcoded_secret_min_entropy_override(min_entropy);
 }
 
 pub fn editable_config_path(
@@ -1223,6 +1217,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
 
         let (config_path, added) =
@@ -1284,6 +1279,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         }
     }
 
