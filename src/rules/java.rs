@@ -480,13 +480,22 @@ fn classify_java_pq_algo(algo: &str) -> Option<(&'static str, &'static str)> {
     }
     // Signature combos: "SHA256withRSA", "SHA384withECDSA", "SHA256withDSA"
     if upper.contains("WITHRSA") {
-        return Some(("RSA", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)"));
+        return Some((
+            "RSA",
+            "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)",
+        ));
     }
     if upper.contains("WITHECDSA") {
-        return Some(("ECDSA", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)"));
+        return Some((
+            "ECDSA",
+            "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)",
+        ));
     }
     if upper.contains("WITHDSA") && !upper.contains("ML-DSA") {
-        return Some(("DSA", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)"));
+        return Some((
+            "DSA",
+            "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)",
+        ));
     }
     None
 }
