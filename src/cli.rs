@@ -88,6 +88,10 @@ pub struct ScanArgs {
     /// threshold are suppressed. Defaults to 0.0 (report all).
     #[arg(long)]
     pub min_confidence: Option<f32>,
+
+    /// Internal: set by the `pqc` subcommand to filter to PQ rules only.
+    #[arg(hide = true, long, default_value_t = false)]
+    pub pq_mode: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -256,6 +260,83 @@ pub struct TuiArgs {
     pub max_file_size: u64,
 }
 
+#[derive(Args, Debug, Clone)]
+pub struct PqcArgs {
+    /// Path to scan
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Path to foxguard config file
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: OutputFormat,
+
+    /// Minimum severity to report
+    #[arg(short, long, value_enum)]
+    pub severity: Option<SeverityFilter>,
+
+    /// Scan changed files only (staged first, then unstaged)
+    #[arg(long, default_value_t = false)]
+    pub changed: bool,
+
+    /// Exclude scan-relative paths by glob or prefix (repeatable)
+    #[arg(long)]
+    pub exclude: Vec<String>,
+
+    /// Show source-to-sink dataflow traces on taint findings
+    #[arg(long, default_value_t = false)]
+    pub explain: bool,
+
+    /// Suppress terminal output (exit code still reflects findings)
+    #[arg(short, long)]
+    pub quiet: bool,
+
+    /// Maximum file size in bytes to scan (default: 1 MB)
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_file_size: u64,
+
+    /// Post findings as inline review comments on a GitHub PR
+    #[arg(long)]
+    pub github_pr: Option<u64>,
+
+    /// Apply a baseline file to suppress known findings
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    /// Show per-finding confidence scores in terminal output
+    #[arg(long, default_value_t = false)]
+    pub show_confidence: bool,
+}
+
+impl PqcArgs {
+    /// Convert to `ScanArgs` with `pq_mode` enabled.
+    pub fn to_scan_args(&self) -> ScanArgs {
+        ScanArgs {
+            path: self.path.clone(),
+            config: self.config.clone(),
+            format: self.format,
+            severity: self.severity,
+            rules: None,
+            no_builtins: false,
+            changed: self.changed,
+            exclude: self.exclude.clone(),
+            baseline: self.baseline.clone(),
+            write_baseline: None,
+            explain: self.explain,
+            fix: false,
+            github_pr: self.github_pr,
+            quiet: self.quiet,
+            max_file_size: self.max_file_size,
+            show_confidence: self.show_confidence,
+            min_confidence: None,
+            pq_mode: true,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug, Clone)]
 pub enum Command {
     /// Install a pre-commit hook for local foxguard runs
@@ -268,6 +349,8 @@ pub enum Command {
     Diff(DiffArgs),
     /// Explore scan findings in the interactive terminal TUI
     Tui(TuiArgs),
+    /// Post-quantum cryptography audit — scan for quantum-vulnerable algorithms
+    Pqc(PqcArgs),
 }
 
 #[derive(Parser, Debug)]

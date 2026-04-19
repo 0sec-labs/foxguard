@@ -5,7 +5,8 @@ use foxguard::app::{
 };
 use foxguard::baseline::write_baseline;
 use foxguard::cli::{
-    BaselineArgs, Cli, Command, DiffArgs, InitArgs, OutputFormat, ScanArgs, SecretsArgs, TuiArgs,
+    BaselineArgs, Cli, Command, DiffArgs, InitArgs, OutputFormat, PqcArgs, ScanArgs, SecretsArgs,
+    TuiArgs,
 };
 use foxguard::config::load_for_scan;
 use foxguard::tui::run_scan_tui;
@@ -24,10 +25,16 @@ fn main() {
         Some(Command::Secrets(args)) => run_secrets(&args),
         Some(Command::Diff(args)) => run_diff_cmd(&args),
         Some(Command::Tui(args)) => run_tui(&args),
+        Some(Command::Pqc(args)) => run_pqc(&args),
         None => run_scan(&cli.scan),
     };
 
     std::process::exit(exit_code);
+}
+
+fn run_pqc(args: &PqcArgs) -> i32 {
+    let scan = args.to_scan_args();
+    run_scan(&scan)
 }
 
 fn run_scan(scan: &ScanArgs) -> i32 {
@@ -294,6 +301,7 @@ fn run_init(args: &InitArgs) -> i32 {
                 max_file_size: 1_048_576,
                 show_confidence: false,
                 min_confidence: None,
+                pq_mode: false,
             },
             output: repo_root.join(&args.baseline).display().to_string(),
         };

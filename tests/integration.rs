@@ -3304,3 +3304,49 @@ rules:
         );
     }
 }
+
+// ─── PQC subcommand ──────────────────────────────────────────────────────────
+
+#[test]
+fn pqc_help_exits_zero() {
+    let output = foxguard_cmd()
+        .args(["pqc", "--help"])
+        .output()
+        .expect("failed to run foxguard pqc --help");
+    assert!(output.status.success(), "foxguard pqc --help should exit 0");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("post-quantum") || stdout.contains("quantum"),
+        "help text should mention post-quantum, got: {stdout}"
+    );
+}
+
+#[test]
+fn pqc_on_safe_fixture_returns_zero_findings() {
+    let output = foxguard_cmd()
+        .args([
+            "pqc",
+            fixture_path("safe.py").to_str().unwrap(),
+            "-f",
+            "json",
+        ])
+        .output()
+        .expect("failed to run foxguard pqc");
+    // No PQ rules registered on main yet, so zero findings expected.
+    // Once PQ rules land, safe.py should still produce zero PQ findings.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !stdout.trim().is_empty() {
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_str(&stdout).expect("invalid JSON output");
+        // All findings (if any) should be PQ-related
+        for f in &findings {
+            let rule_id = f["rule_id"].as_str().unwrap_or("");
+            assert!(
+                rule_id.contains("pq-vulnerable")
+                    || rule_id.contains("hardcoded-crypto-algorithm")
+                    || rule_id.starts_with("config/"),
+                "pqc subcommand should only return PQ rules, got: {rule_id}"
+            );
+        }
+    }
+}

@@ -104,7 +104,23 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
     let excludes = PathExcludeMatcher::new(&scan.exclude)?;
     let targets = collect_changed_targets(&scan.path, scan.changed)?;
 
-    let rule_filter_unknown = if let Some(config) = config.as_ref() {
+    // In PQ mode, filter to only PQ-related rules
+    let pq_enable: Vec<String>;
+    let rule_filter_unknown = if scan.pq_mode {
+        pq_enable = registry
+            .all_rules()
+            .iter()
+            .map(|r| r.id().to_string())
+            .filter(|id| is_pq_rule_id(id))
+            .collect();
+        if pq_enable.is_empty() {
+            eprintln!(
+                "Warning: no PQ rules registered in this build. \
+                 Install a version with post-quantum crypto rules to use 'foxguard pqc'."
+            );
+        }
+        registry.apply_rule_filter(&pq_enable, &[])
+    } else if let Some(config) = config.as_ref() {
         registry.apply_rule_filter(&config.scan.enable_rules, &config.scan.disable_rules)
     } else {
         Vec::new()
@@ -381,6 +397,7 @@ fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
         fix: false,
         show_confidence: false,
         min_confidence: None,
+        pq_mode: false,
     }
 }
 
@@ -454,6 +471,13 @@ fn validate_rules_path(rules: Option<&str>) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Returns `true` if the rule ID belongs to the PQ audit rule set.
+fn is_pq_rule_id(id: &str) -> bool {
+    id.contains("pq-vulnerable")
+        || id.contains("hardcoded-crypto-algorithm")
+        || (id.starts_with("config/") && (id.contains("tls") || id.contains("dockerfile")))
 }
 
 fn collect_changed_targets(path: &str, changed: bool) -> Result<Option<Vec<PathBuf>>, String> {
