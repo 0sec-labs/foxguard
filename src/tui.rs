@@ -3366,6 +3366,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: 0.95,
+            taint_hops: None,
         };
         let low_conf_high_sev = Finding {
             severity: Severity::Critical,
@@ -3429,6 +3430,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: 1.0,
+            taint_hops: None,
         };
         let low_conf = Finding {
             confidence: 0.5,
@@ -3497,6 +3499,7 @@ mod tests {
                 sink_start_byte: None,
                 sink_end_byte: None,
                 confidence: crate::default_confidence(),
+                taint_hops: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3548,6 +3551,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3606,6 +3610,7 @@ mod tests {
             sink_start_byte: None,
             sink_end_byte: None,
             confidence: crate::default_confidence(),
+            taint_hops: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
