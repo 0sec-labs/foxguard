@@ -7,6 +7,7 @@ pub enum OutputFormat {
     Terminal,
     Json,
     Sarif,
+    Cbom,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Deserialize)]

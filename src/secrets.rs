@@ -282,6 +282,7 @@ pub fn scan_paths_with_config_and_notices(
                         confidence: crate::default_confidence(),
                         taint_hops: None,
                         tags: vec![],
+                        crypto_algorithm: None,
                     });
                 }
             }

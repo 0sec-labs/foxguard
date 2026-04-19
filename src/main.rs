@@ -73,6 +73,7 @@ fn run_scan(scan: &ScanArgs) -> i32 {
         }
         OutputFormat::Json => foxguard::report::json::print_json(&result.findings),
         OutputFormat::Sarif => foxguard::report::sarif::print_sarif(&result.findings),
+        OutputFormat::Cbom => foxguard::report::cbom::print_cbom(&result.findings),
     }
 
     if let Some(pr_number) = result.args.github_pr {
@@ -158,6 +159,7 @@ fn run_secrets(args: &SecretsArgs) -> i32 {
         }
         OutputFormat::Json => foxguard::report::json::print_json(&result.findings),
         OutputFormat::Sarif => foxguard::report::sarif::print_sarif(&result.findings),
+        OutputFormat::Cbom => foxguard::report::cbom::print_cbom(&result.findings),
     }
 
     if !result.findings.is_empty() {
@@ -192,6 +194,7 @@ fn run_diff_cmd(args: &DiffArgs) -> i32 {
         }
         OutputFormat::Json => foxguard::report::json::print_json(&result.findings),
         OutputFormat::Sarif => foxguard::report::sarif::print_sarif(&result.findings),
+        OutputFormat::Cbom => foxguard::report::cbom::print_cbom(&result.findings),
     }
 
     if new_count > 0 {

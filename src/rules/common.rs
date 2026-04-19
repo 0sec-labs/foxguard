@@ -231,6 +231,7 @@ pub fn make_finding(
         confidence: crate::default_confidence(),
         taint_hops: None,
         tags: vec![],
+        crypto_algorithm: None,
     }
 }
 
@@ -277,6 +278,7 @@ pub fn make_finding_from_offsets(
         confidence: crate::default_confidence(),
         taint_hops: None,
         tags: vec![],
+        crypto_algorithm: None,
     }
 }
 

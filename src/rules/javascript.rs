@@ -1826,6 +1826,7 @@ fn map_js_taint_findings(
             confidence: crate::rules::common::confidence_for_hops(t.hops),
             taint_hops: Some(t.hops),
             tags: vec![],
+            crypto_algorithm: None,
         })
         .collect()
 }
@@ -2831,6 +2832,7 @@ pub fn run_js_taint_batched(
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
                 taint_hops: Some(t.hops),
                 tags: vec![],
+                crypto_algorithm: None,
             })
         })
         .collect()

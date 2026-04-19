@@ -2666,6 +2666,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
         let medium = Finding {
             severity: Severity::Medium,
@@ -2707,6 +2708,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -2750,6 +2752,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
 
         assert_eq!(
@@ -2784,6 +2787,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
 
         let rendered = open_target_lines(&finding, OpenFocus::Finding)
@@ -2822,6 +2826,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
 
         let rendered = render_source_context(
@@ -2893,6 +2898,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
 
         assert_eq!(
@@ -2941,6 +2947,7 @@ mod tests {
                 confidence: crate::default_confidence(),
                 taint_hops: None,
                 tags: vec![],
+                crypto_algorithm: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3018,6 +3025,7 @@ mod tests {
                 confidence: crate::default_confidence(),
                 taint_hops: None,
                 tags: vec![],
+                crypto_algorithm: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3076,6 +3084,7 @@ mod tests {
                 confidence: crate::default_confidence(),
                 taint_hops: None,
                 tags: vec![],
+                crypto_algorithm: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3159,6 +3168,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3201,6 +3211,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Source)
@@ -3242,6 +3253,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
 
         let rendered = render_source_context(
@@ -3383,6 +3395,7 @@ mod tests {
             confidence: 0.95,
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
         let low_conf_high_sev = Finding {
             severity: Severity::Critical,
@@ -3448,6 +3461,7 @@ mod tests {
             confidence: 1.0,
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
         let low_conf = Finding {
             confidence: 0.5,
@@ -3518,6 +3532,7 @@ mod tests {
                 confidence: crate::default_confidence(),
                 taint_hops: None,
                 tags: vec![],
+                crypto_algorithm: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3571,6 +3586,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3631,6 +3647,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3680,6 +3697,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         };
 
         let rendered = render_source_context(
