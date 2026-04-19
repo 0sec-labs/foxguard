@@ -127,6 +127,20 @@ fn severity_accent(severity: Severity) -> colored::ColoredString {
     }
 }
 
+fn tag_badges(tags: &[String]) -> String {
+    if tags.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for tag in tags {
+        out.push_str(&format!(
+            " {}",
+            format!(" {} ", tag).on_cyan().black().bold()
+        ));
+    }
+    out
+}
+
 fn truncate_snippet(line: &str) -> String {
     let trimmed = line.trim();
     if trimmed.len() <= MAX_SNIPPET_WIDTH {
@@ -148,8 +162,9 @@ fn print_finding(f: &Finding, explain: bool, show_confidence: bool) {
         .map(|c| format!(" ({c})"))
         .unwrap_or_default();
 
-    // Line 1: badge + description (the main thing you read)
-    println!("    {accent} {badge} {}", f.description,);
+    // Line 1: badge + tags + description (the main thing you read)
+    let tag_str = tag_badges(&f.tags);
+    println!("    {accent} {badge}{tag_str} {}", f.description);
 
     // Line 2: rule ID + CWE + location (secondary info, dimmed)
     // Confidence is intentionally off by default — it's noisy for most

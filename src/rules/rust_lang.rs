@@ -244,6 +244,72 @@ impl_rule! {
     }
 }
 
+// ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "rs/pq-vulnerable-crypto",
+    severity = Severity::High,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/Ed25519/X25519)",
+    language = Language::Rust,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    // Only match direct calls (scoped_identifier like rsa::Foo::new),
+                    // not chained method calls (field_expression like .unwrap())
+                    if func.kind() != "scoped_identifier" && func.kind() != "identifier" {
+                        return;
+                    }
+                    let func_text = &src[func.byte_range()];
+                    let func_lower = func_text.to_lowercase();
+                    // Skip PQ-safe algorithms
+                    if func_lower.contains("ml_dsa") || func_lower.contains("ml_kem") || func_lower.contains("slh_dsa") {
+                        return;
+                    }
+                    // No regex needed — check func_lower directly
+                    let (algo, replacement) = if func_lower.contains("ed25519") {
+                        ("Ed25519", "ML-DSA (FIPS 204)")
+                    } else if func_lower.contains("x25519") {
+                        ("X25519", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)")
+                    } else if func_lower.contains("rsa") {
+                        ("RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures")
+                    } else if func_lower.contains("ecdsa") {
+                        ("ECDSA", "ML-DSA (FIPS 204)")
+                    } else if func_lower.contains("p256") || func_lower.contains("p384") || func_lower.contains("p521") || func_lower.contains("k256") {
+                        ("ECDH/ECDSA (elliptic curve)", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)")
+                    } else if func_lower.contains("dsa") {
+                        ("DSA", "ML-DSA (FIPS 204)")
+                    } else {
+                        return;
+                    };
+                    let mut f = make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        &format!(
+                            "{} is quantum-vulnerable — migrate to {}",
+                            algo, replacement
+                        ),
+                        node,
+                        src,
+                    );
+                    f.tags = vec!["PQ".into()];
+                    findings.push(f);
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── Rule 6: no-hardcoded-secret ──────────────────────────────────────────────
 
 pub struct NoHardcodedSecret;

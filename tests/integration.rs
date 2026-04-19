@@ -112,8 +112,8 @@ mod python {
         // py/no-eval finding.
         assert_eq!(
             findings.len(),
-            34,
-            "vulnerable.py should have 34 findings, got {}",
+            37,
+            "vulnerable.py should have 37 findings, got {}",
             findings.len()
         );
 
@@ -151,6 +151,7 @@ mod python {
             "py/secure-ssl-redirect-disabled",
             "py/jwt-no-verify",
             "py/jwt-hardcoded-secret",
+            "py/pq-vulnerable-crypto",
         ];
 
         for rule in &expected_rules {
@@ -619,8 +620,8 @@ mod javascript {
 
         assert_eq!(
             findings.len(),
-            32,
-            "vulnerable.js should have 32 findings, got {}",
+            35,
+            "vulnerable.js should have 35 findings, got {}",
             findings.len()
         );
 
@@ -656,6 +657,7 @@ mod javascript {
             "js/jwt-decode-without-verify",
             "js/jwt-verify-missing-algorithms",
             "js/no-unsafe-deserialization",
+            "js/pq-vulnerable-crypto",
         ];
 
         for rule in &expected_rules {
@@ -930,8 +932,8 @@ mod go {
 
         assert_eq!(
             findings.len(),
-            15,
-            "vulnerable.go should have 15 findings, got {}",
+            20,
+            "vulnerable.go should have 20 findings, got {}",
             findings.len()
         );
 
@@ -951,6 +953,7 @@ mod go {
             "go/no-unsafe-deserialization",
             "go/jwt-no-verify",
             "go/jwt-hardcoded-secret",
+            "go/pq-vulnerable-crypto",
         ];
 
         for rule in &expected_rules {
@@ -1102,8 +1105,8 @@ mod java {
 
         assert_eq!(
             findings.len(),
-            22,
-            "vulnerable.java should have 22 findings, got {}",
+            26,
+            "vulnerable.java should have 26 findings, got {}",
             findings.len()
         );
 
@@ -1124,6 +1127,7 @@ mod java {
             "java/spring-csrf-disabled",
             "java/spring-cors-permissive",
             "java/no-xss",
+            "java/pq-vulnerable-crypto",
         ];
 
         for rule in &expected_rules {
@@ -1367,8 +1371,8 @@ mod rust_lang {
 
         assert_eq!(
             findings.len(),
-            18,
-            "vulnerable.rs should have 18 findings, got {}",
+            21,
+            "vulnerable.rs should have 21 findings, got {}",
             findings.len()
         );
 
@@ -1388,6 +1392,7 @@ mod rust_lang {
             "rs/no-ssrf",
             "rs/no-path-traversal",
             "rs/no-unwrap-in-lib",
+            "rs/pq-vulnerable-crypto",
         ];
 
         for rule in &expected_rules {
@@ -2582,8 +2587,8 @@ rules:
         // High and Critical only
         assert_eq!(
             findings.len(),
-            21,
-            "high severity filter on vulnerable.js should yield 21 findings, got {}",
+            24,
+            "high severity filter on vulnerable.js should yield 24 findings, got {}",
             findings.len()
         );
 

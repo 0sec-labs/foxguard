@@ -110,4 +110,6 @@ pub struct Finding {
     /// `None` for non-taint rules. Used by `scan.thresholds.taint.max_hops`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub taint_hops: Option<u8>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }

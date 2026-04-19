@@ -457,6 +457,107 @@ impl_rule! {
     }
 }
 
+// ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
+
+/// Classify a Java algorithm string as quantum-vulnerable.
+/// Returns (algo_label, default_replacement) or None if not PQ-vulnerable.
+fn classify_java_pq_algo(algo: &str) -> Option<(&'static str, &'static str)> {
+    // Exact matches for KeyPairGenerator / KeyAgreement / KeyFactory
+    match algo {
+        "RSA" => return Some(("RSA", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)")),
+        "EC" | "ECDSA" => return Some(("ECDSA/EC", "ML-DSA (FIPS 204)")),
+        "DSA" => return Some(("DSA", "ML-DSA (FIPS 204)")),
+        "DH" | "ECDH" | "DiffieHellman" => return Some(("DH/ECDH", "ML-KEM (FIPS 203)")),
+        "Ed25519" | "Ed448" | "EdDSA" => return Some(("EdDSA", "ML-DSA (FIPS 204)")),
+        "X25519" | "X448" | "XDH" => return Some(("XDH", "ML-KEM (FIPS 203)")),
+        _ => {}
+    }
+    // Non-exact matches need case-insensitive comparison
+    let upper = algo.to_uppercase();
+    // RSA cipher modes: "RSA/ECB/PKCS1Padding", "RSA/ECB/OAEPWithSHA-256..."
+    if upper.starts_with("RSA/") || upper.starts_with("RSA_") {
+        return Some(("RSA", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"));
+    }
+    // Signature combos: "SHA256withRSA", "SHA384withECDSA", "SHA256withDSA"
+    if upper.contains("WITHRSA") {
+        return Some(("RSA", "ML-DSA (FIPS 204)"));
+    }
+    if upper.contains("WITHECDSA") {
+        return Some(("ECDSA", "ML-DSA (FIPS 204)"));
+    }
+    if upper.contains("WITHDSA") && !upper.contains("ML-DSA") {
+        return Some(("DSA", "ML-DSA (FIPS 204)"));
+    }
+    None
+}
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "java/pq-vulnerable-crypto",
+    severity = Severity::High,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable cryptographic algorithm (RSA/EC/DSA/DH/Ed25519/X25519)",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "method_invocation" {
+                if let Some(name) = node.child_by_field_name("name") {
+                    let name_text = &src[name.byte_range()];
+                    if name_text == "getInstance" {
+                        if let Some(obj) = node.child_by_field_name("object") {
+                            let obj_text = &src[obj.byte_range()];
+                            if obj_text == "KeyPairGenerator"
+                                || obj_text == "KeyAgreement"
+                                || obj_text == "Signature"
+                                || obj_text == "Cipher"
+                                || obj_text == "KeyFactory"
+                            {
+                                if let Some(args) = node.child_by_field_name("arguments") {
+                                    if let Some(first_arg) = args.named_child(0) {
+                                        let arg_text = &src[first_arg.byte_range()];
+                                        let inner = arg_text.trim_matches('"');
+                                        let (algo, replacement) = match classify_java_pq_algo(inner) {
+                                            Some(v) => v,
+                                            None => return,
+                                        };
+                                        let replacement = if obj_text == "KeyAgreement" {
+                                            "ML-KEM (FIPS 203)"
+                                        } else if obj_text == "Signature" {
+                                            "ML-DSA (FIPS 204)"
+                                        } else {
+                                            replacement
+                                        };
+                                        let mut f = make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            &format!(
+                                                "{}.getInstance({}) uses quantum-vulnerable {} — migrate to {}",
+                                                obj_text, arg_text, algo, replacement
+                                            ),
+                                            node,
+                                            src,
+                                        );
+                                        f.tags = vec!["PQ".into()];
+                                        findings.push(f);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── Rule 7: no-hardcoded-secret ────────────────────────────────────────────
 
 pub struct NoHardcodedSecret;

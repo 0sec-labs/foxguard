@@ -329,6 +329,103 @@ impl_rule! {
     }
 }
 
+// ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "go/pq-vulnerable-crypto",
+    severity = Severity::High,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519)",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+            Some(go_aliases_from_tree(source, tree))
+        } else {
+            None
+        };
+        let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Only flag calls, not imports, to avoid double-counting.
+            // Require func child to be a selector_expression (pkg.Func) to
+            // skip nested calls like ecdh.P256().GenerateKey() — the outer
+            // call's function is a call_expression, not a selector.
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    if func.kind() != "selector_expression" {
+                        return;
+                    }
+                    // Skip calls nested as arguments to another PQ-vulnerable call
+                    // (e.g. elliptic.P256() inside ecdsa.GenerateKey(elliptic.P256(), ...))
+                    if let Some(parent) = node.parent() {
+                        if parent.kind() == "argument_list" {
+                            if let Some(grandparent) = parent.parent() {
+                                if grandparent.kind() == "call_expression" {
+                                    if let Some(outer_func) = grandparent.child_by_field_name("function") {
+                                        if outer_func.kind() == "selector_expression" {
+                                            let outer_raw = &src[outer_func.byte_range()];
+                                            let outer_text = if let Some(al) = aliases {
+                                                al.resolve(outer_raw)
+                                            } else {
+                                                std::borrow::Cow::Borrowed(outer_raw)
+                                            };
+                                            if outer_text.as_ref().starts_with("rsa.")
+                                                || outer_text.as_ref().starts_with("ecdsa.")
+                                                || outer_text.as_ref().starts_with("ecdh.")
+                                                || outer_text.as_ref().starts_with("dsa.")
+                                                || outer_text.as_ref().starts_with("elliptic.")
+                                                || outer_text.as_ref().starts_with("ed25519.")
+                                            {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let raw = &src[func.byte_range()];
+                    let func_text = if let Some(al) = aliases {
+                        al.resolve(raw)
+                    } else {
+                        std::borrow::Cow::Borrowed(raw)
+                    };
+                    let (algo, replacement) = match func_text.as_ref() {
+                        s if s.starts_with("rsa.") => ("RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
+                        s if s.starts_with("ecdsa.") => ("ECDSA", "ML-DSA (FIPS 204)"),
+                        s if s.starts_with("ecdh.") => ("ECDH", "ML-KEM (FIPS 203)"),
+                        s if s.starts_with("dsa.") => ("DSA", "ML-DSA (FIPS 204)"),
+                        s if s.starts_with("elliptic.") => ("ECDH/ECDSA (elliptic)", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
+                        s if s.starts_with("ed25519.") => ("Ed25519", "ML-DSA (FIPS 204)"),
+                        _ => return,
+                    };
+                    let mut f = make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        &format!(
+                            "{} is quantum-vulnerable — migrate to {}",
+                            algo, replacement
+                        ),
+                        node,
+                        src,
+                    );
+                    f.tags = vec!["PQ".into()];
+                    findings.push(f);
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── Rule 5: gin-no-trusted-proxies ────────────────────────────────────────
 
 pub struct GinNoTrustedProxies;
@@ -773,6 +870,7 @@ fn map_go_taint_findings(
             sink_end_byte: Some(t.sink_end_byte),
             confidence: crate::rules::common::confidence_for_hops(t.hops),
             taint_hops: Some(t.hops),
+            tags: vec![],
         })
         .collect()
 }
@@ -1496,6 +1594,7 @@ pub fn run_go_taint_batched(
                 sink_end_byte: Some(t.sink_end_byte),
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
                 taint_hops: Some(t.hops),
+                tags: vec![],
             })
         })
         .collect()

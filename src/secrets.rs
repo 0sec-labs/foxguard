@@ -281,6 +281,7 @@ pub fn scan_paths_with_config_and_notices(
                         sink_end_byte: None,
                         confidence: crate::default_confidence(),
                         taint_hops: None,
+                        tags: vec![],
                     });
                 }
             }

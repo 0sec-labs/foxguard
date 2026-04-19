@@ -516,6 +516,86 @@ impl_rule! {
     }
 }
 
+// ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "py/pq-vulnerable-crypto",
+    severity = Severity::High,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519/X25519)",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        // Canonical prefixes for quantum-vulnerable asymmetric crypto
+        let pq_vulnerable: &[(&str, &str, &str)] = &[
+            ("cryptography.hazmat.primitives.asymmetric.rsa", "RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
+            ("cryptography.hazmat.primitives.asymmetric.ec", "ECDSA/ECDH", "ML-KEM (FIPS 203) for key exchange or ML-DSA (FIPS 204) for signatures"),
+            ("cryptography.hazmat.primitives.asymmetric.dsa", "DSA", "ML-DSA (FIPS 204)"),
+            ("cryptography.hazmat.primitives.asymmetric.ed25519", "Ed25519", "ML-DSA (FIPS 204)"),
+            ("cryptography.hazmat.primitives.asymmetric.x25519", "X25519", "ML-KEM (FIPS 203)"),
+            ("Crypto.PublicKey.RSA", "RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
+            ("Crypto.PublicKey.DSA", "DSA", "ML-DSA (FIPS 204)"),
+            ("Crypto.PublicKey.ECC", "ECC", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
+        ];
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Only flag calls, not imports, to avoid double-counting.
+            // Skip calls nested as arguments to another call (e.g.
+            // ec.generate_private_key(ec.SECP256R1()) — only flag the outer).
+            if node.kind() == "call" {
+                if let Some(parent) = node.parent() {
+                    if parent.kind() == "argument_list" {
+                        // Only skip if the outer call is also PQ-vulnerable
+                        // (e.g. ec.generate_private_key(ec.SECP256R1()))
+                        if let Some(grandparent) = parent.parent() {
+                            if grandparent.kind() == "call" {
+                                if let Some(outer_func) = grandparent.child_by_field_name("function") {
+                                    let outer_text = &src[outer_func.byte_range()];
+                                    let outer_resolved = resolve_callee(outer_text, ctx);
+                                    for &(prefix, _, _) in pq_vulnerable {
+                                        if outer_resolved.as_ref().starts_with(prefix) {
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
+                    for &(prefix, algo, replacement) in pq_vulnerable {
+                        if resolved.as_ref().starts_with(prefix) {
+                            let mut f = make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "{} is quantum-vulnerable — migrate to {}",
+                                    algo, replacement
+                                ),
+                                node,
+                                src,
+                            );
+                            f.tags = vec!["PQ".into()];
+                            findings.push(f);
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── Rule 7: no-pickle ─────────────────────────────────────────────────────
 
 pub struct NoPickle;
@@ -1698,6 +1778,7 @@ fn map_taint_findings(
             sink_end_byte: Some(t.sink_end_byte),
             confidence: crate::rules::common::confidence_for_hops(t.hops),
             taint_hops: Some(t.hops),
+            tags: vec![],
         })
         .collect()
 }
@@ -2640,6 +2721,7 @@ pub fn run_py_taint_batched(
                 sink_end_byte: Some(t.sink_end_byte),
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
                 taint_hops: Some(t.hops),
+                tags: vec![],
             })
         })
         .collect()
