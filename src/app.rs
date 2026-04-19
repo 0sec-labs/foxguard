@@ -113,6 +113,12 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
             .map(|r| r.id().to_string())
             .filter(|id| is_pq_rule_id(id))
             .collect();
+        if pq_enable.is_empty() {
+            eprintln!(
+                "Warning: no PQ rules registered in this build. \
+                 Install a version with post-quantum crypto rules to use 'foxguard pqc'."
+            );
+        }
         registry.apply_rule_filter(&pq_enable, &[])
     } else if let Some(config) = config.as_ref() {
         registry.apply_rule_filter(&config.scan.enable_rules, &config.scan.disable_rules)

@@ -301,6 +301,14 @@ pub struct PqcArgs {
     /// Post findings as inline review comments on a GitHub PR
     #[arg(long)]
     pub github_pr: Option<u64>,
+
+    /// Apply a baseline file to suppress known findings
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    /// Show per-finding confidence scores in terminal output
+    #[arg(long, default_value_t = false)]
+    pub show_confidence: bool,
 }
 
 impl PqcArgs {
@@ -315,14 +323,14 @@ impl PqcArgs {
             no_builtins: false,
             changed: self.changed,
             exclude: self.exclude.clone(),
-            baseline: None,
+            baseline: self.baseline.clone(),
             write_baseline: None,
             explain: self.explain,
             fix: false,
             github_pr: self.github_pr,
             quiet: self.quiet,
             max_file_size: self.max_file_size,
-            show_confidence: false,
+            show_confidence: self.show_confidence,
             min_confidence: None,
             pq_mode: true,
         }
