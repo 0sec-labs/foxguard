@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
-use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
 use crate::Finding;
 
@@ -218,27 +218,20 @@ fn iso8601_now() -> String {
     )
 }
 
-fn deterministic_uuid(components_json: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(components_json.as_bytes());
-    let hash = hasher.finalize();
-    format!(
-        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
-        u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]),
-        u16::from_be_bytes([hash[4], hash[5]]),
-        u16::from_be_bytes([hash[6], hash[7]]),
-        u16::from_be_bytes([hash[8], hash[9]]),
-        // Take 6 bytes for the last segment
-        u64::from_be_bytes([0, 0, hash[10], hash[11], hash[12], hash[13], hash[14], hash[15]])
-    )
+/// Build a deterministic RFC 4122 UUIDv5 from the given data.
+///
+/// Uses the OID namespace so two invocations with identical component data
+/// always produce the same serial number, while keeping the correct UUID
+/// version (0x5) and variant (RFC 4122) bits.
+fn deterministic_uuid(data: &str) -> String {
+    Uuid::new_v5(&Uuid::NAMESPACE_OID, data.as_bytes()).to_string()
 }
 
-/// Print findings as a CycloneDX 1.6 Cryptographic Bill of Materials (CBOM).
+/// Build the CBOM JSON value from the supplied findings.
 ///
-/// Only findings with `crypto_algorithm` set are included. Findings are
-/// grouped by algorithm name into components, with linked vulnerability
-/// entries.
-pub fn print_cbom(findings: &[Finding]) {
+/// Pure function: returns a `serde_json::Value`. Separated from [`print_cbom`]
+/// so tests can inspect the structured output without capturing stdout.
+fn build_cbom(findings: &[Finding]) -> (serde_json::Value, bool) {
     // Group findings by crypto_algorithm
     let mut groups: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
     for f in findings {
@@ -247,12 +240,7 @@ pub fn print_cbom(findings: &[Finding]) {
         }
     }
 
-    if groups.is_empty() && !findings.is_empty() {
-        eprintln!(
-            "Warning: no cryptographic findings detected; CBOM is empty. \
-             Use 'foxguard pqc' to scan for quantum-vulnerable cryptography."
-        );
-    }
+    let empty_but_findings_present = groups.is_empty() && !findings.is_empty();
 
     let mut components = Vec::new();
     let mut vulnerabilities = Vec::new();
@@ -287,6 +275,31 @@ pub fn print_cbom(findings: &[Finding]) {
         "vulnerabilities": vulnerabilities
     });
 
+    (cbom, empty_but_findings_present)
+}
+
+/// Serialize findings to a pretty-printed CycloneDX 1.6 CBOM JSON string.
+#[cfg(test)]
+fn serialize_cbom(findings: &[Finding]) -> String {
+    let (cbom, _) = build_cbom(findings);
+    serde_json::to_string_pretty(&cbom).expect("Failed to serialize CBOM")
+}
+
+/// Print findings as a CycloneDX 1.6 Cryptographic Bill of Materials (CBOM).
+///
+/// Only findings with `crypto_algorithm` set are included. Findings are
+/// grouped by algorithm name into components, with linked vulnerability
+/// entries.
+pub fn print_cbom(findings: &[Finding]) {
+    let (cbom, empty_but_findings_present) = build_cbom(findings);
+
+    if empty_but_findings_present {
+        eprintln!(
+            "Warning: no cryptographic findings detected; CBOM is empty. \
+             Use 'foxguard pqc' to scan for quantum-vulnerable cryptography."
+        );
+    }
+
     println!(
         "{}",
         serde_json::to_string_pretty(&cbom).expect("Failed to serialize CBOM")
@@ -318,6 +331,7 @@ mod tests {
             sink_end_byte: None,
             confidence: 1.0,
             taint_hops: None,
+            tags: vec!["PQ".to_string()],
             crypto_algorithm: Some(algo.to_string()),
         }
     }
@@ -344,7 +358,7 @@ mod tests {
 
     #[test]
     fn cbom_empty_without_crypto_findings() {
-        let findings = vec![Finding {
+        let findings = [Finding {
             rule_id: "py/no-eval".to_string(),
             severity: crate::Severity::High,
             cwe: Some("CWE-95".to_string()),
@@ -364,6 +378,7 @@ mod tests {
             sink_end_byte: None,
             confidence: 1.0,
             taint_hops: None,
+            tags: vec![],
             crypto_algorithm: None,
         }];
 
@@ -395,5 +410,112 @@ mod tests {
         let u2 = deterministic_uuid(input);
         assert_eq!(u1, u2);
         assert_eq!(u1.len(), 36); // UUID format: 8-4-4-4-12
+
+        // Parse as RFC 4122 UUID and check version/variant bits.
+        let parsed = Uuid::parse_str(&u1).expect("deterministic_uuid emits valid RFC 4122 UUID");
+        assert_eq!(parsed.get_version_num(), 5);
+        assert_eq!(parsed.get_variant(), uuid::Variant::RFC4122);
+    }
+
+    #[test]
+    fn deterministic_uuid_changes_with_input() {
+        let a = deterministic_uuid(r#"[{"name":"RSA"}]"#);
+        let b = deterministic_uuid(r#"[{"name":"ECDSA"}]"#);
+        assert_ne!(a, b);
+    }
+
+    /// Golden-fixture test: construct findings, serialize to CBOM, parse the
+    /// resulting JSON, and assert the structural shape (serial number,
+    /// components[].cryptoProperties, vulnerabilities[]).
+    #[test]
+    fn cbom_serialization_shape_is_valid() {
+        let findings = vec![
+            make_crypto_finding("RSA", "src/auth.py", 10),
+            make_crypto_finding("RSA", "src/crypto.py", 42),
+            make_crypto_finding("ECDSA", "src/sign.py", 5),
+        ];
+
+        let json_str = serialize_cbom(&findings);
+        let v: serde_json::Value =
+            serde_json::from_str(&json_str).expect("CBOM output is valid JSON");
+
+        // Top-level CycloneDX shape
+        assert_eq!(v["bomFormat"], "CycloneDX");
+        assert_eq!(v["specVersion"], "1.6");
+        assert_eq!(v["version"], 1);
+
+        // Serial number: urn:uuid:<valid RFC 4122 UUID>
+        let serial = v["serialNumber"]
+            .as_str()
+            .expect("serialNumber is a string");
+        let uuid_part = serial
+            .strip_prefix("urn:uuid:")
+            .expect("serialNumber starts with urn:uuid:");
+        let parsed = Uuid::parse_str(uuid_part).expect("serial number is a valid RFC 4122 UUID");
+        assert_eq!(parsed.get_version_num(), 5);
+        assert_eq!(parsed.get_variant(), uuid::Variant::RFC4122);
+
+        // Metadata presence
+        assert!(v["metadata"]["timestamp"].is_string());
+        assert!(v["metadata"]["tools"]["components"][0]["name"]
+            .as_str()
+            .unwrap()
+            .contains("foxguard"));
+
+        // Components: grouped by algorithm (RSA + ECDSA = 2 components)
+        let components = v["components"].as_array().expect("components is an array");
+        assert_eq!(components.len(), 2);
+        let names: std::collections::BTreeSet<&str> = components
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains("RSA"));
+        assert!(names.contains("ECDSA"));
+
+        for component in components {
+            assert_eq!(component["type"], "cryptographic-asset");
+            assert!(component["bom-ref"].is_string());
+            let crypto_props = &component["cryptoProperties"];
+            assert_eq!(crypto_props["assetType"], "algorithm");
+            // RSA and ECDSA both have algorithmProperties with primitive + functions
+            let algo_props = &crypto_props["algorithmProperties"];
+            assert!(algo_props["primitive"].is_string());
+            assert!(algo_props["cryptoFunctions"].is_array());
+            // Evidence.occurrences carries at least one file/line/column.
+            let occurrences = component["evidence"]["occurrences"]
+                .as_array()
+                .expect("occurrences is an array");
+            assert!(!occurrences.is_empty());
+            for occ in occurrences {
+                assert!(occ["location"].as_str().unwrap().contains(':'));
+            }
+        }
+
+        // RSA should have two occurrences (grouped from two findings)
+        let rsa_component = components
+            .iter()
+            .find(|c| c["name"] == "RSA")
+            .expect("RSA component present");
+        assert_eq!(
+            rsa_component["evidence"]["occurrences"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+
+        // Vulnerabilities: one per algorithm group
+        let vulns = v["vulnerabilities"]
+            .as_array()
+            .expect("vulnerabilities is an array");
+        assert_eq!(vulns.len(), 2);
+        for vuln in vulns {
+            assert!(vuln["id"].as_str().unwrap().starts_with("foxguard-"));
+            assert_eq!(vuln["source"]["name"], "foxguard");
+            let ratings = vuln["ratings"].as_array().unwrap();
+            assert_eq!(ratings[0]["severity"], "high");
+            assert!(vuln["affects"][0]["ref"].is_string());
+            assert!(vuln["cwes"].is_array());
+        }
     }
 }

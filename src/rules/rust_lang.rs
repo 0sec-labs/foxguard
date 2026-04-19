@@ -274,18 +274,18 @@ impl_rule! {
                         return;
                     }
                     // No regex needed — check func_lower directly
-                    let (algo, replacement) = if func_lower.contains("ed25519") {
-                        ("Ed25519", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition")
+                    let (algo, canonical_algo, replacement) = if func_lower.contains("ed25519") {
+                        ("Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition")
                     } else if func_lower.contains("x25519") {
-                        ("X25519", "X25519MLKEM768 hybrid KEM (FIPS 203)")
+                        ("X25519", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203)")
                     } else if func_lower.contains("rsa") {
-                        ("RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures")
+                        ("RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures")
                     } else if func_lower.contains("ecdsa") {
-                        ("ECDSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition")
+                        ("ECDSA", "ECDSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition")
                     } else if func_lower.contains("p256") || func_lower.contains("p384") || func_lower.contains("p521") || func_lower.contains("k256") {
-                        ("ECDH/ECDSA (elliptic curve)", "X25519MLKEM768 hybrid KEM or ML-DSA-65 (FIPS 204) with hybrid cert chains")
+                        ("ECDH/ECDSA (elliptic curve)", "ECDSA", "X25519MLKEM768 hybrid KEM or ML-DSA-65 (FIPS 204) with hybrid cert chains")
                     } else if func_lower.contains("dsa") {
-                        ("DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition")
+                        ("DSA", "DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition")
                     } else {
                         return;
                     };
@@ -301,6 +301,7 @@ impl_rule! {
                         src,
                     );
                     f.tags = vec!["PQ".into()];
+                    f.crypto_algorithm = Some(canonical_algo.to_string());
                     findings.push(f);
                 }
             }
