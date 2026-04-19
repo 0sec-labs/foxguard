@@ -153,7 +153,7 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
     // Filter taint findings exceeding max_hops threshold
     if let Some(ref cfg) = config {
         if let Some(max) = cfg.scan.thresholds.taint.max_hops {
-            findings.retain(|f| f.taint_hops.map_or(true, |h| (h as usize) <= max));
+            findings.retain(|f| f.taint_hops.is_none_or(|h| (h as usize) <= max));
         }
     }
 
