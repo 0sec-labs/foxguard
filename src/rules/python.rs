@@ -1698,6 +1698,7 @@ fn map_taint_findings(
             sink_end_byte: Some(t.sink_end_byte),
             confidence: crate::rules::common::confidence_for_hops(t.hops),
             taint_hops: Some(t.hops),
+            crypto_algorithm: None,
         })
         .collect()
 }
@@ -2640,6 +2641,7 @@ pub fn run_py_taint_batched(
                 sink_end_byte: Some(t.sink_end_byte),
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
                 taint_hops: Some(t.hops),
+                crypto_algorithm: None,
             })
         })
         .collect()

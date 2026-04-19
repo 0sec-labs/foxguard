@@ -2662,6 +2662,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
         let medium = Finding {
             severity: Severity::Medium,
@@ -2702,6 +2703,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -2744,6 +2746,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
 
         assert_eq!(
@@ -2777,6 +2780,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
 
         let rendered = open_target_lines(&finding, OpenFocus::Finding)
@@ -2814,6 +2818,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
 
         let rendered = render_source_context(
@@ -2884,6 +2889,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
 
         assert_eq!(
@@ -2931,6 +2937,7 @@ mod tests {
                 sink_end_byte: None,
                 confidence: crate::default_confidence(),
                 taint_hops: None,
+                crypto_algorithm: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3007,6 +3014,7 @@ mod tests {
                 sink_end_byte: None,
                 confidence: crate::default_confidence(),
                 taint_hops: None,
+                crypto_algorithm: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3064,6 +3072,7 @@ mod tests {
                 sink_end_byte: None,
                 confidence: crate::default_confidence(),
                 taint_hops: None,
+                crypto_algorithm: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3146,6 +3155,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3187,6 +3197,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Source)
@@ -3227,6 +3238,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
 
         let rendered = render_source_context(
@@ -3367,6 +3379,7 @@ mod tests {
             sink_end_byte: None,
             confidence: 0.95,
             taint_hops: None,
+            crypto_algorithm: None,
         };
         let low_conf_high_sev = Finding {
             severity: Severity::Critical,
@@ -3431,6 +3444,7 @@ mod tests {
             sink_end_byte: None,
             confidence: 1.0,
             taint_hops: None,
+            crypto_algorithm: None,
         };
         let low_conf = Finding {
             confidence: 0.5,
@@ -3500,6 +3514,7 @@ mod tests {
                 sink_end_byte: None,
                 confidence: crate::default_confidence(),
                 taint_hops: None,
+                crypto_algorithm: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3552,6 +3567,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3611,6 +3627,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3659,6 +3676,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         };
 
         let rendered = render_source_context(

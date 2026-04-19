@@ -286,6 +286,7 @@ mod tests {
             sink_end_byte: None,
             confidence: crate::default_confidence(),
             taint_hops: None,
+            crypto_algorithm: None,
         }
     }
 

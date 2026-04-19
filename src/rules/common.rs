@@ -230,6 +230,7 @@ pub fn make_finding(
         sink_end_byte: None,
         confidence: crate::default_confidence(),
         taint_hops: None,
+        crypto_algorithm: None,
     }
 }
 
@@ -275,6 +276,7 @@ pub fn make_finding_from_offsets(
         sink_end_byte: None,
         confidence: crate::default_confidence(),
         taint_hops: None,
+        crypto_algorithm: None,
     }
 }
 

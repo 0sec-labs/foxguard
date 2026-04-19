@@ -1708,6 +1708,7 @@ fn map_js_taint_findings(
             sink_end_byte: Some(t.sink_end_byte),
             confidence: crate::rules::common::confidence_for_hops(t.hops),
             taint_hops: Some(t.hops),
+            crypto_algorithm: None,
         })
         .collect()
 }
@@ -2712,6 +2713,7 @@ pub fn run_js_taint_batched(
                 sink_end_byte: Some(t.sink_end_byte),
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
                 taint_hops: Some(t.hops),
+                crypto_algorithm: None,
             })
         })
         .collect()

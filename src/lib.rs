@@ -110,4 +110,8 @@ pub struct Finding {
     /// `None` for non-taint rules. Used by `scan.thresholds.taint.max_hops`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub taint_hops: Option<u8>,
+    /// Cryptographic algorithm name (e.g. "RSA", "ECDSA", "TLS").
+    /// Set by crypto-related rules at emission time. Used by the CBOM formatter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crypto_algorithm: Option<String>,
 }
