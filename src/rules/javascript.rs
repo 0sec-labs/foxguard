@@ -1778,7 +1778,7 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "Hardcoded algorithm string in crypto API call hinders crypto agility",
     language = Language::JavaScript,
-    fn check(_self, source, tree) {
+    fn check_with_context(_self, source, tree, ctx) {
 
         let mut findings = Vec::new();
         let crypto_methods = [
@@ -1796,22 +1796,39 @@ impl_rule! {
             if node.kind() == "call_expression" {
                 if let Some(func) = node.child_by_field_name("function") {
                     let func_text = &src[func.byte_range()];
-                    // Require the receiver to be `crypto` (e.g. `crypto.createHash`).
-                    // Bare calls from destructured imports also match.
-                    let (receiver, func_name) = match func_text.rsplit_once('.') {
+                    // Resolve the callee through the alias table so that
+                    // `const c = require('crypto'); c.createHash(...)` is
+                    // recognised as `crypto.createHash`.
+                    let resolved = match ctx.javascript_aliases {
+                        Some(aliases) => aliases.resolve(func_text),
+                        None => std::borrow::Cow::Borrowed(func_text),
+                    };
+                    let (receiver, func_name) = match resolved.rsplit_once('.') {
                         Some((recv, name)) => (Some(recv), name),
-                        None => (None, func_text),
+                        None => (None, resolved.as_ref()),
                     };
-                    let is_crypto_receiver = match receiver {
-                        Some(r) => r == "crypto" || r.ends_with(".crypto"),
-                        None => true, // bare call from destructured import
+                    let is_crypto = match receiver {
+                        Some(r) => r == "crypto",
+                        None => false, // bare call without receiver — skip
                     };
-                    if is_crypto_receiver && crypto_methods.contains(&func_name) {
+                    if is_crypto && crypto_methods.contains(&func_name) {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
-                                if first_arg.kind() == "string" || first_arg.kind() == "template_string" {
+                                let is_hardcoded = if first_arg.kind() == "string" {
+                                    true
+                                } else if first_arg.kind() == "template_string" {
+                                    // Only treat as hardcoded if no interpolation.
+                                    first_arg.named_child_count() == 0
+                                } else {
+                                    false
+                                };
+                                if is_hardcoded {
                                     let val = &src[first_arg.byte_range()];
                                     let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                                    // Skip weak algorithms — js/no-weak-crypto owns those.
+                                    if inner == "md5" || inner == "sha1" {
+                                        return;
+                                    }
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),

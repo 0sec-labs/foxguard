@@ -1720,20 +1720,25 @@ impl_rule! {
                     if resolved.as_ref() == "hashlib.new" {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
+                                // Only match plain string literals — skip f-strings
+                                // and other dynamic expressions.
                                 if first_arg.kind() == "string" {
                                     let val = &src[first_arg.byte_range()];
                                     let inner = val.trim_matches(|c| c == '"' || c == '\'');
-                                    findings.push(make_finding(
-                                        _self.id(),
-                                        _self.severity(),
-                                        _self.cwe(),
-                                        &format!(
-                                            "hashlib.new(\"{}\") uses a hardcoded algorithm — externalize to configuration for crypto agility",
-                                            inner
-                                        ),
-                                        node,
-                                        src,
-                                    ));
+                                    // Skip weak algorithms — py/no-weak-crypto owns those.
+                                    if inner != "md5" && inner != "sha1" {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            &format!(
+                                                "hashlib.new(\"{}\") uses a hardcoded algorithm — externalize to configuration for crypto agility",
+                                                inner
+                                            ),
+                                            node,
+                                            src,
+                                        ));
+                                    }
                                 }
                             }
                         }
