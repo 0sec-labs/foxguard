@@ -175,6 +175,8 @@ pub trait Rule: Send + Sync {
 /// Registry holding all available rules.
 pub struct RuleRegistry {
     rules: Vec<Box<dyn Rule>>,
+    /// Rule IDs that are opt-in only (not active unless explicitly enabled).
+    opt_in_ids: std::collections::HashSet<String>,
 }
 
 impl Default for RuleRegistry {
@@ -185,11 +187,14 @@ impl Default for RuleRegistry {
 
 impl RuleRegistry {
     pub fn empty() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: Vec::new(),
+            opt_in_ids: std::collections::HashSet::new(),
+        }
     }
 
     pub fn new() -> Self {
-        let mut registry = Self { rules: Vec::new() };
+        let mut registry = Self::empty();
 
         // Register JavaScript rules
         registry.register(Box::new(javascript::NoEval));
@@ -230,6 +235,7 @@ impl RuleRegistry {
         registry.register(Box::new(javascript::TaintLogInjection));
         registry.register(Box::new(javascript::TaintXxe));
         registry.register(Box::new(javascript::NoUnsafeDeserialization));
+        registry.register_opt_in(Box::new(javascript::HardcodedCryptoAlgorithm));
         registry.register(Box::new(javascript::TaintNosqlInjection));
 
         // Register Python rules
@@ -273,6 +279,7 @@ impl RuleRegistry {
         registry.register(Box::new(python::TaintXxe));
         registry.register(Box::new(python::JwtNoVerify));
         registry.register(Box::new(python::JwtHardcodedSecret));
+        registry.register_opt_in(Box::new(python::HardcodedCryptoAlgorithm));
         registry.register(Box::new(python::TaintNosqlInjection));
 
         // Register Go rules
@@ -311,6 +318,7 @@ impl RuleRegistry {
         registry.register(Box::new(java::SpringCsrfDisabled));
         registry.register(Box::new(java::SpringCorsPermissive));
         registry.register(Box::new(java::NoXss));
+        registry.register_opt_in(Box::new(java::HardcodedCryptoAlgorithm));
 
         // Register PHP rules
         registry.register(Box::new(php::NoEval));
@@ -403,6 +411,13 @@ impl RuleRegistry {
         self.rules.push(rule);
     }
 
+    /// Register a rule that is opt-in only (not active by default).
+    /// Users enable it via `scan.enable_rules` in config.
+    pub fn register_opt_in(&mut self, rule: Box<dyn Rule>) {
+        self.opt_in_ids.insert(rule.id().to_string());
+        self.rules.push(rule);
+    }
+
     pub fn rules_for_language(&self, language: Language) -> Vec<&dyn Rule> {
         self.rules
             .iter()
@@ -449,10 +464,6 @@ impl RuleRegistry {
     /// correspond to any registered rule. Callers should surface these
     /// as a single warning so users catch typos without failing the scan.
     pub fn apply_rule_filter(&mut self, enable: &[String], disable: &[String]) -> Vec<String> {
-        if enable.is_empty() && disable.is_empty() {
-            return Vec::new();
-        }
-
         let known: std::collections::HashSet<&str> = self.rules.iter().map(|r| r.id()).collect();
 
         let mut unknown: Vec<String> = Vec::new();
@@ -464,9 +475,13 @@ impl RuleRegistry {
         }
 
         if !enable.is_empty() {
+            // Explicit allowlist: keep only these rules (overrides opt-in).
             let enable_set: std::collections::HashSet<&str> =
                 enable.iter().map(|s| s.as_str()).collect();
             self.rules.retain(|r| enable_set.contains(r.id()));
+        } else {
+            // No explicit allowlist: strip opt-in-only rules.
+            self.rules.retain(|r| !self.opt_in_ids.contains(r.id()));
         }
 
         if !disable.is_empty() {
@@ -492,12 +507,16 @@ mod tests {
     }
 
     #[test]
-    fn apply_rule_filter_no_op_when_both_lists_empty() {
+    fn apply_rule_filter_strips_opt_in_when_both_lists_empty() {
         let mut registry = RuleRegistry::new();
-        let before = rule_ids(&registry);
+        let before_count = registry.rules.len();
         let unknown = registry.apply_rule_filter(&[], &[]);
         assert!(unknown.is_empty());
-        assert_eq!(rule_ids(&registry), before);
+        // Opt-in rules are stripped when no explicit enable list is given.
+        assert!(registry.rules.len() < before_count);
+        assert!(!has_rule(&registry, "js/hardcoded-crypto-algorithm"));
+        assert!(!has_rule(&registry, "py/hardcoded-crypto-algorithm"));
+        assert!(!has_rule(&registry, "java/hardcoded-crypto-algorithm"));
     }
 
     #[test]
@@ -514,10 +533,12 @@ mod tests {
     #[test]
     fn apply_rule_filter_denylist_removes_listed_ids() {
         let mut registry = RuleRegistry::new();
+        let opt_in_count = registry.opt_in_ids.len();
         let before_count = registry.rules.len();
         let unknown = registry.apply_rule_filter(&[], &["py/no-eval".to_string()]);
         assert!(unknown.is_empty());
-        assert_eq!(registry.rules.len(), before_count - 1);
+        // Denylist removes py/no-eval, and opt-in rules are also stripped.
+        assert_eq!(registry.rules.len(), before_count - 1 - opt_in_count);
         assert!(!has_rule(&registry, "py/no-eval"));
     }
 

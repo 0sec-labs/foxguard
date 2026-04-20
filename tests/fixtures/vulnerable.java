@@ -44,6 +44,11 @@ public class Vulnerable {
         Cipher.getInstance("AES/ECB/PKCS5Padding");
     }
 
+    // java/hardcoded-crypto-algorithm — strong algo, but hardcoded
+    void hardcodedCryptoAlgo() throws Exception {
+        Cipher.getInstance("AES/GCM/NoPadding");
+    }
+
     // java/no-hardcoded-secret
     String password = "supersecret123";
     String apiKey = "sk-live-abcdef123456";

@@ -1134,6 +1134,100 @@ mod java {
             assert!(rule_ids.contains(rule), "missing expected rule: {}", rule);
         }
     }
+
+    #[test]
+    fn test_safe_java_no_findings() {
+        let output = foxguard_cmd()
+            .args(["tests/fixtures/safe.java", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+        assert!(
+            output.status.success(),
+            "safe.java should produce zero findings; stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+// ─── Crypto agility negative fixtures ──────────────────────────────────────
+//
+// These test the opt-in hardcoded-crypto-algorithm rules against safe patterns.
+// The rules must be explicitly enabled since they are opt-in.
+
+mod crypto_agility {
+    use super::*;
+
+    fn scan_with_rule_enabled(fixture: &str, rule_id: &str) -> Vec<serde_json::Value> {
+        // Write a temp config that enables only this rule.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let config_path = dir.path().join(".foxguard.yml");
+        std::fs::write(
+            &config_path,
+            format!("scan:\n  enable_rules:\n    - {rule_id}\n"),
+        )
+        .expect("write config");
+        // Copy fixture into the temp dir so the config is discovered.
+        let fixture_src = std::path::Path::new(fixture);
+        let fixture_dest = dir.path().join(fixture_src.file_name().unwrap());
+        std::fs::copy(fixture_src, &fixture_dest).expect("copy fixture");
+
+        let output = foxguard_cmd()
+            .args([fixture_dest.to_str().unwrap(), "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+        if output.stdout.is_empty() {
+            return vec![];
+        }
+        serde_json::from_slice(&output.stdout).unwrap_or_default()
+    }
+
+    #[test]
+    fn js_safe_crypto_agility_no_findings() {
+        let findings = scan_with_rule_enabled(
+            "tests/fixtures/safe_crypto_agility.js",
+            "js/hardcoded-crypto-algorithm",
+        );
+        let matches: Vec<_> = findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some("js/hardcoded-crypto-algorithm"))
+            .collect();
+        assert!(
+            matches.is_empty(),
+            "js/hardcoded-crypto-algorithm should not fire on safe_crypto_agility.js; findings: {matches:?}"
+        );
+    }
+
+    #[test]
+    fn py_safe_crypto_agility_no_findings() {
+        let findings = scan_with_rule_enabled(
+            "tests/fixtures/safe_crypto_agility.py",
+            "py/hardcoded-crypto-algorithm",
+        );
+        let matches: Vec<_> = findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some("py/hardcoded-crypto-algorithm"))
+            .collect();
+        assert!(
+            matches.is_empty(),
+            "py/hardcoded-crypto-algorithm should not fire on safe_crypto_agility.py; findings: {matches:?}"
+        );
+    }
+
+    #[test]
+    fn java_safe_crypto_agility_no_findings() {
+        let findings = scan_with_rule_enabled(
+            "tests/fixtures/safe_crypto_agility.java",
+            "java/hardcoded-crypto-algorithm",
+        );
+        let matches: Vec<_> = findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some("java/hardcoded-crypto-algorithm"))
+            .collect();
+        assert!(
+            matches.is_empty(),
+            "java/hardcoded-crypto-algorithm should not fire on safe_crypto_agility.java; findings: {matches:?}"
+        );
+    }
 }
 
 // ─── PHP ────────────────────────────────────────────────────────────────────

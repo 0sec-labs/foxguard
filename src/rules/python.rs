@@ -1697,6 +1697,68 @@ impl_rule! {
     }
 }
 
+// ─── Rule: hardcoded-crypto-algorithm ──────────────────────────────────────
+
+pub struct HardcodedCryptoAlgorithm;
+
+impl_rule! {
+    HardcodedCryptoAlgorithm,
+    id = "py/hardcoded-crypto-algorithm",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Hardcoded algorithm string in hashlib.new() hinders crypto agility",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
+                    if resolved.as_ref() == "hashlib.new" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                // Only match plain string literals — skip f-strings
+                                // and other dynamic expressions.
+                                if first_arg.kind() == "string" {
+                                    let val = &src[first_arg.byte_range()];
+                                    let prefix = val.split(['"', '\'']).next().unwrap_or("");
+                                    // Skip f-strings (f"...", rf"...", fr"...") — they're dynamic.
+                                    let prefix_lower = prefix.to_ascii_lowercase();
+                                    if prefix_lower.contains('f') {
+                                        return;
+                                    }
+                                    // Strip optional prefix (b, r, u, ...) then quotes.
+                                    let stripped = val.trim_start_matches(|c: char| c.is_ascii_alphabetic());
+                                    let inner = stripped.trim_matches(|c| c == '"' || c == '\'');
+                                    // Skip weak algorithms — py/no-weak-crypto owns those.
+                                    if inner != "md5" && inner != "sha1" {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            &format!(
+                                                "hashlib.new(\"{}\") uses a hardcoded algorithm — externalize to configuration for crypto agility",
+                                                inner
+                                            ),
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── Rule: taint-pickle-deserialization ────────────────────────────────────
 //
 // Proof-of-concept rule exercising the new per-function taint engine.

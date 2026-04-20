@@ -131,7 +131,7 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
     } else if let Some(config) = config.as_ref() {
         registry.apply_rule_filter(&config.scan.enable_rules, &config.scan.disable_rules)
     } else {
-        Vec::new()
+        registry.apply_rule_filter(&[], &[])
     };
 
     let (result, mut notices) = if let Some(files) = targets {
@@ -278,7 +278,7 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     let rule_filter_unknown = if let Some(config) = config.as_ref() {
         registry.apply_rule_filter(&config.scan.enable_rules, &config.scan.disable_rules)
     } else {
-        Vec::new()
+        registry.apply_rule_filter(&[], &[])
     };
     let ((scan_result, mut diff_result), mut notices) =
         run_diff_with_warnings(&args.path, &args.target, &registry, args.max_file_size)?;

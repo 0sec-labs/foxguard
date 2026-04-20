@@ -1767,6 +1767,91 @@ impl_rule! {
     }
 }
 
+// ─── Rule: hardcoded-crypto-algorithm ──────────────────────────────────────
+
+pub struct HardcodedCryptoAlgorithm;
+
+impl_rule! {
+    HardcodedCryptoAlgorithm,
+    id = "js/hardcoded-crypto-algorithm",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Hardcoded algorithm string in crypto API call hinders crypto agility",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+        let crypto_methods = [
+            "createHash",
+            "createCipher",
+            "createCipheriv",
+            "createDecipher",
+            "createDecipheriv",
+            "createHmac",
+            "createSign",
+            "createVerify",
+        ];
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    // Resolve the callee through the alias table so that
+                    // `const c = require('crypto'); c.createHash(...)` is
+                    // recognised as `crypto.createHash`.
+                    let resolved = match ctx.javascript_aliases {
+                        Some(aliases) => aliases.resolve(func_text),
+                        None => std::borrow::Cow::Borrowed(func_text),
+                    };
+                    let (receiver, func_name) = match resolved.rsplit_once('.') {
+                        Some((recv, name)) => (Some(recv), name),
+                        None => (None, resolved.as_ref()),
+                    };
+                    let is_crypto = match receiver {
+                        Some(r) => r == "crypto",
+                        None => false, // bare call without receiver — skip
+                    };
+                    if is_crypto && crypto_methods.contains(&func_name) {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                let is_hardcoded = if first_arg.kind() == "string" {
+                                    true
+                                } else if first_arg.kind() == "template_string" {
+                                    // Only treat as hardcoded if no interpolation.
+                                    first_arg.named_child_count() == 0
+                                } else {
+                                    false
+                                };
+                                if is_hardcoded {
+                                    let val = &src[first_arg.byte_range()];
+                                    let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                                    // Skip weak algorithms — js/no-weak-crypto owns those.
+                                    if inner == "md5" || inner == "sha1" {
+                                        return;
+                                    }
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "{}(\"{}\") uses a hardcoded algorithm — externalize to configuration for crypto agility",
+                                            func_name, inner
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── js/taint-xss-innerhtml ───────────────────────────────────────────────
 //
 // Intraprocedural taint rule: fires when untrusted Express-style input

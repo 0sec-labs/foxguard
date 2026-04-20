@@ -795,6 +795,85 @@ impl_rule! {
     }
 }
 
+// ─── Rule 12: hardcoded-crypto-algorithm ───────────────────────────────────
+
+pub struct HardcodedCryptoAlgorithm;
+
+impl_rule! {
+    HardcodedCryptoAlgorithm,
+    id = "java/hardcoded-crypto-algorithm",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Hardcoded algorithm string in crypto API call hinders crypto agility",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let crypto_classes = [
+            "Cipher",
+            "MessageDigest",
+            "Signature",
+            "KeyPairGenerator",
+            "KeyAgreement",
+            "KeyFactory",
+            "SecretKeyFactory",
+            "KeyGenerator",
+            "Mac",
+            "AlgorithmParameters",
+        ];
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "method_invocation" {
+                if let Some(name) = node.child_by_field_name("name") {
+                    let name_text = &src[name.byte_range()];
+                    if name_text == "getInstance" {
+                        if let Some(obj) = node.child_by_field_name("object") {
+                            let obj_text = &src[obj.byte_range()];
+                            if crypto_classes.contains(&obj_text) {
+                                if let Some(args) = node.child_by_field_name("arguments") {
+                                    if let Some(first_arg) = args.named_child(0) {
+                                        if first_arg.kind() == "string_literal" {
+                                            let arg_text = &src[first_arg.byte_range()];
+                                            let inner = arg_text.trim_matches('"');
+                                            // Skip weak algorithms — java/no-weak-crypto owns those.
+                                            let upper = inner.to_uppercase();
+                                            if upper == "MD5"
+                                                || upper == "SHA-1"
+                                                || upper.starts_with("SHA1")
+                                                || upper == "DES"
+                                                || upper == "DESEDE"
+                                                || upper == "RC2"
+                                                || upper == "RC4"
+                                                || upper == "BLOWFISH"
+                                                || upper.contains("ECB")
+                                            {
+                                                return;
+                                            }
+                                            findings.push(make_finding(
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
+                                                &format!(
+                                                    "{}.getInstance(\"{}\") uses a hardcoded algorithm — externalize to configuration for crypto agility",
+                                                    obj_text, inner
+                                                ),
+                                                node,
+                                                src,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
 // ─── Rule 11: spring-cors-permissive ────────────────────────────────────────
 
 pub struct SpringCorsPermissive;

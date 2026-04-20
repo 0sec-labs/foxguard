@@ -1,8 +1,8 @@
 package main
 
 import (
-	"crypto/tls"
 	"crypto/sha256"
+	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"net/http"
