@@ -481,11 +481,12 @@ impl_rule! {
                                 if first_arg.kind() == "string" {
                                     let val = &src[first_arg.byte_range()];
                                     let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
-                                    let (algo, replacement) = match inner.to_lowercase().as_str() {
-                                            "rsa" => ("RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures"),
-                                            "ec" => ("EC", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures"),
-                                            "dsa" => ("DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
-                                            "ed25519" | "ed448" => ("Ed25519/Ed448", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
+                                    let (algo, canonical_algo, replacement) = match inner.to_lowercase().as_str() {
+                                            "rsa" => ("RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures"),
+                                            "ec" => ("EC", "ECDSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures"),
+                                            "dsa" => ("DSA", "DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
+                                            "ed25519" => ("Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
+                                            "ed448" => ("Ed448", "Ed448", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
                                             _ => return,
                                         };
                                     let mut f = make_finding(
@@ -500,6 +501,7 @@ impl_rule! {
                                         src,
                                     );
                                     f.tags = vec!["PQ".into()];
+                                    f.crypto_algorithm = Some(canonical_algo.to_string());
                                     findings.push(f);
                                 }
                             }
@@ -517,6 +519,7 @@ impl_rule! {
                             src,
                         );
                         f.tags = vec!["PQ".into()];
+                        f.crypto_algorithm = Some("DH".to_string());
                         findings.push(f);
                     }
 
@@ -531,6 +534,7 @@ impl_rule! {
                             src,
                         );
                         f.tags = vec!["PQ".into()];
+                        f.crypto_algorithm = Some("ECDH".to_string());
                         findings.push(f);
                     }
 
@@ -543,6 +547,7 @@ impl_rule! {
                                     let val = &src[first_arg.byte_range()];
                                     let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_lowercase();
                                     if inner == "ed25519" || inner == "ed448" {
+                                        let canonical_algo = if inner == "ed25519" { "Ed25519" } else { "Ed448" };
                                         let mut f = make_finding(
                                             _self.id(),
                                             _self.severity(),
@@ -555,6 +560,7 @@ impl_rule! {
                                             src,
                                         );
                                         f.tags = vec!["PQ".into()];
+                                        f.crypto_algorithm = Some(canonical_algo.to_string());
                                         findings.push(f);
                                     }
                                 }
@@ -1826,6 +1832,7 @@ fn map_js_taint_findings(
             confidence: crate::rules::common::confidence_for_hops(t.hops),
             taint_hops: Some(t.hops),
             tags: vec![],
+            crypto_algorithm: None,
         })
         .collect()
 }
@@ -2831,6 +2838,7 @@ pub fn run_js_taint_batched(
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
                 taint_hops: Some(t.hops),
                 tags: vec![],
+                crypto_algorithm: None,
             })
         })
         .collect()

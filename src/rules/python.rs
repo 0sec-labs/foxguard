@@ -531,16 +531,17 @@ impl_rule! {
 
         let mut findings = Vec::new();
 
-        // Canonical prefixes for quantum-vulnerable asymmetric crypto
-        let pq_vulnerable: &[(&str, &str, &str)] = &[
-            ("cryptography.hazmat.primitives.asymmetric.rsa", "RSA", "X25519MLKEM768 hybrid KEM for encryption, or ML-KEM-768 (FIPS 203) standalone"),
-            ("cryptography.hazmat.primitives.asymmetric.ec", "ECDSA/ECDH", "X25519MLKEM768 hybrid KEM for key exchange, or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures"),
-            ("cryptography.hazmat.primitives.asymmetric.dsa", "DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
-            ("cryptography.hazmat.primitives.asymmetric.ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
-            ("cryptography.hazmat.primitives.asymmetric.x25519", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203)"),
-            ("Crypto.PublicKey.RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption, or ML-KEM-768 (FIPS 203) standalone"),
-            ("Crypto.PublicKey.DSA", "DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
-            ("Crypto.PublicKey.ECC", "ECC", "X25519MLKEM768 hybrid KEM or ML-DSA-65 (FIPS 204) with hybrid cert chains"),
+        // Canonical prefixes for quantum-vulnerable asymmetric crypto.
+        // Tuple: (module prefix, display algo, canonical CBOM algo, replacement)
+        let pq_vulnerable: &[(&str, &str, &str, &str)] = &[
+            ("cryptography.hazmat.primitives.asymmetric.rsa", "RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption, or ML-KEM-768 (FIPS 203) standalone"),
+            ("cryptography.hazmat.primitives.asymmetric.ec", "ECDSA/ECDH", "ECDSA", "X25519MLKEM768 hybrid KEM for key exchange, or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures"),
+            ("cryptography.hazmat.primitives.asymmetric.dsa", "DSA", "DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
+            ("cryptography.hazmat.primitives.asymmetric.ed25519", "Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
+            ("cryptography.hazmat.primitives.asymmetric.x25519", "X25519", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203)"),
+            ("Crypto.PublicKey.RSA", "RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption, or ML-KEM-768 (FIPS 203) standalone"),
+            ("Crypto.PublicKey.DSA", "DSA", "DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
+            ("Crypto.PublicKey.ECC", "ECC", "ECDSA", "X25519MLKEM768 hybrid KEM or ML-DSA-65 (FIPS 204) with hybrid cert chains"),
         ];
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -557,7 +558,7 @@ impl_rule! {
                                 if let Some(outer_func) = grandparent.child_by_field_name("function") {
                                     let outer_text = &src[outer_func.byte_range()];
                                     let outer_resolved = resolve_callee(outer_text, ctx);
-                                    for &(prefix, _, _) in pq_vulnerable {
+                                    for &(prefix, _, _, _) in pq_vulnerable {
                                         if outer_resolved.as_ref().starts_with(prefix) {
                                             return;
                                         }
@@ -570,7 +571,7 @@ impl_rule! {
                 if let Some(func) = node.child_by_field_name("function") {
                     let func_text = &src[func.byte_range()];
                     let resolved = resolve_callee(func_text, ctx);
-                    for &(prefix, algo, replacement) in pq_vulnerable {
+                    for &(prefix, algo, canonical_algo, replacement) in pq_vulnerable {
                         if resolved.as_ref().starts_with(prefix) {
                             let mut f = make_finding(
                                 _self.id(),
@@ -584,6 +585,7 @@ impl_rule! {
                                 src,
                             );
                             f.tags = vec!["PQ".into()];
+                            f.crypto_algorithm = Some(canonical_algo.to_string());
                             findings.push(f);
                             return;
                         }
@@ -1779,6 +1781,7 @@ fn map_taint_findings(
             confidence: crate::rules::common::confidence_for_hops(t.hops),
             taint_hops: Some(t.hops),
             tags: vec![],
+            crypto_algorithm: None,
         })
         .collect()
 }
@@ -2722,6 +2725,7 @@ pub fn run_py_taint_batched(
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
                 taint_hops: Some(t.hops),
                 tags: vec![],
+                crypto_algorithm: None,
             })
         })
         .collect()

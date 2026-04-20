@@ -396,13 +396,13 @@ impl_rule! {
                     } else {
                         std::borrow::Cow::Borrowed(raw)
                     };
-                    let (algo, replacement) = match func_text.as_ref() {
-                        s if s.starts_with("rsa.") => ("RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
-                        s if s.starts_with("ecdsa.") => ("ECDSA", "ML-DSA (FIPS 204)"),
-                        s if s.starts_with("ecdh.") => ("ECDH", "ML-KEM (FIPS 203)"),
-                        s if s.starts_with("dsa.") => ("DSA", "ML-DSA (FIPS 204)"),
-                        s if s.starts_with("elliptic.") => ("ECDH/ECDSA (elliptic)", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
-                        s if s.starts_with("ed25519.") => ("Ed25519", "ML-DSA (FIPS 204)"),
+                    let (algo, canonical_algo, replacement) = match func_text.as_ref() {
+                        s if s.starts_with("rsa.") => ("RSA", "RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
+                        s if s.starts_with("ecdsa.") => ("ECDSA", "ECDSA", "ML-DSA (FIPS 204)"),
+                        s if s.starts_with("ecdh.") => ("ECDH", "ECDH", "ML-KEM (FIPS 203)"),
+                        s if s.starts_with("dsa.") => ("DSA", "DSA", "ML-DSA (FIPS 204)"),
+                        s if s.starts_with("elliptic.") => ("ECDH/ECDSA (elliptic)", "ECDH", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
+                        s if s.starts_with("ed25519.") => ("Ed25519", "Ed25519", "ML-DSA (FIPS 204)"),
                         _ => return,
                     };
                     let mut f = make_finding(
@@ -417,6 +417,7 @@ impl_rule! {
                         src,
                     );
                     f.tags = vec!["PQ".into()];
+                    f.crypto_algorithm = Some(canonical_algo.to_string());
                     findings.push(f);
                 }
             }
@@ -871,6 +872,7 @@ fn map_go_taint_findings(
             confidence: crate::rules::common::confidence_for_hops(t.hops),
             taint_hops: Some(t.hops),
             tags: vec![],
+            crypto_algorithm: None,
         })
         .collect()
 }
@@ -1595,6 +1597,7 @@ pub fn run_go_taint_batched(
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
                 taint_hops: Some(t.hops),
                 tags: vec![],
+                crypto_algorithm: None,
             })
         })
         .collect()

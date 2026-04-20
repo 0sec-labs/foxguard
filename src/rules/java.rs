@@ -460,27 +460,34 @@ impl_rule! {
 // ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
 
 /// Classify a Java algorithm string as quantum-vulnerable.
-/// Returns (algo_label, default_replacement) or None if not PQ-vulnerable.
-fn classify_java_pq_algo(algo: &str) -> Option<(&'static str, &'static str)> {
+/// Returns (algo_label, canonical_algo, default_replacement) or None if not PQ-vulnerable.
+/// `canonical_algo` is the normalized CBOM algorithm name (e.g. "RSA", "ECDSA", "DH").
+fn classify_java_pq_algo(algo: &str) -> Option<(&'static str, &'static str, &'static str)> {
     // Exact matches for KeyPairGenerator / KeyAgreement / KeyFactory
     match algo {
-        "RSA" => return Some(("RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures (Java JEP 527)")),
-        "EC" | "ECDSA" => return Some(("ECDSA/EC", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
-        "DSA" => return Some(("DSA", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
-        "DH" | "ECDH" | "DiffieHellman" => return Some(("DH/ECDH", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
-        "Ed25519" | "Ed448" | "EdDSA" => return Some(("EdDSA", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
-        "X25519" | "X448" | "XDH" => return Some(("XDH", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
+        "RSA" => return Some(("RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures (Java JEP 527)")),
+        "EC" | "ECDSA" => return Some(("ECDSA/EC", "ECDSA", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
+        "DSA" => return Some(("DSA", "DSA", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
+        "DH" | "DiffieHellman" => return Some(("DH", "DH", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
+        "ECDH" => return Some(("ECDH", "ECDH", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
+        "Ed25519" => return Some(("Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
+        "Ed448" => return Some(("Ed448", "Ed448", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
+        "EdDSA" => return Some(("EdDSA", "Ed25519", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
+        "X25519" => return Some(("X25519", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
+        "X448" => return Some(("X448", "X448", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
+        "XDH" => return Some(("XDH", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
         _ => {}
     }
     // Non-exact matches need case-insensitive comparison
     let upper = algo.to_uppercase();
     // RSA cipher modes: "RSA/ECB/PKCS1Padding", "RSA/ECB/OAEPWithSHA-256..."
     if upper.starts_with("RSA/") || upper.starts_with("RSA_") {
-        return Some(("RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures (Java JEP 527)"));
+        return Some(("RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures (Java JEP 527)"));
     }
     // Signature combos: "SHA256withRSA", "SHA384withECDSA", "SHA256withDSA"
     if upper.contains("WITHRSA") {
         return Some((
+            "RSA",
             "RSA",
             "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)",
         ));
@@ -488,11 +495,13 @@ fn classify_java_pq_algo(algo: &str) -> Option<(&'static str, &'static str)> {
     if upper.contains("WITHECDSA") {
         return Some((
             "ECDSA",
+            "ECDSA",
             "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)",
         ));
     }
     if upper.contains("WITHDSA") && !upper.contains("ML-DSA") {
         return Some((
+            "DSA",
             "DSA",
             "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)",
         ));
@@ -530,7 +539,7 @@ impl_rule! {
                                     if let Some(first_arg) = args.named_child(0) {
                                         let arg_text = &src[first_arg.byte_range()];
                                         let inner = arg_text.trim_matches('"');
-                                        let (algo, replacement) = match classify_java_pq_algo(inner) {
+                                        let (algo, canonical_algo, replacement) = match classify_java_pq_algo(inner) {
                                             Some(v) => v,
                                             None => return,
                                         };
@@ -553,6 +562,7 @@ impl_rule! {
                                             src,
                                         );
                                         f.tags = vec!["PQ".into()];
+                                        f.crypto_algorithm = Some(canonical_algo.to_string());
                                         findings.push(f);
                                     }
                                 }

@@ -287,6 +287,7 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
+            crypto_algorithm: None,
         }
     }
 

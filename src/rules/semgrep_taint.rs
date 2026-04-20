@@ -329,6 +329,7 @@ impl Rule for SemgrepTaintRule {
                 confidence: crate::rules::common::confidence_for_hops(t.hops),
                 taint_hops: Some(t.hops),
                 tags: vec![],
+                crypto_algorithm: None,
             })
             .collect()
     }

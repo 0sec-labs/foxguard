@@ -209,6 +209,7 @@ impl Rule for SemgrepRule {
                 confidence: 0.7,
                 taint_hops: None,
                 tags: vec![],
+                crypto_algorithm: None,
             });
         }
 

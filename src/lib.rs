@@ -112,4 +112,8 @@ pub struct Finding {
     pub taint_hops: Option<u8>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Cryptographic algorithm name (e.g. "RSA", "ECDSA", "TLS").
+    /// Set by crypto-related rules at emission time. Used by the CBOM formatter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crypto_algorithm: Option<String>,
 }
