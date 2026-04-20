@@ -1796,8 +1796,17 @@ impl_rule! {
             if node.kind() == "call_expression" {
                 if let Some(func) = node.child_by_field_name("function") {
                     let func_text = &src[func.byte_range()];
-                    let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
-                    if crypto_methods.contains(&func_name) {
+                    // Require the receiver to be `crypto` (e.g. `crypto.createHash`).
+                    // Bare calls from destructured imports also match.
+                    let (receiver, func_name) = match func_text.rsplit_once('.') {
+                        Some((recv, name)) => (Some(recv), name),
+                        None => (None, func_text),
+                    };
+                    let is_crypto_receiver = match receiver {
+                        Some(r) => r == "crypto" || r.ends_with(".crypto"),
+                        None => true, // bare call from destructured import
+                    };
+                    if is_crypto_receiver && crypto_methods.contains(&func_name) {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
                                 if first_arg.kind() == "string" || first_arg.kind() == "template_string" {

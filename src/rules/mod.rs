@@ -229,7 +229,8 @@ impl RuleRegistry {
         registry.register(Box::new(javascript::TaintLogInjection));
         registry.register(Box::new(javascript::TaintXxe));
         registry.register(Box::new(javascript::NoUnsafeDeserialization));
-        registry.register(Box::new(javascript::HardcodedCryptoAlgorithm));
+        // js/hardcoded-crypto-algorithm is opt-in (Low severity, high noise).
+        // Enable via scan.enable_rules in .foxguard.yml.
         registry.register(Box::new(javascript::TaintNosqlInjection));
 
         // Register Python rules
@@ -273,7 +274,7 @@ impl RuleRegistry {
         registry.register(Box::new(python::TaintXxe));
         registry.register(Box::new(python::JwtNoVerify));
         registry.register(Box::new(python::JwtHardcodedSecret));
-        registry.register(Box::new(python::HardcodedCryptoAlgorithm));
+        // py/hardcoded-crypto-algorithm is opt-in (Low severity, high noise).
         registry.register(Box::new(python::TaintNosqlInjection));
 
         // Register Go rules
@@ -312,7 +313,7 @@ impl RuleRegistry {
         registry.register(Box::new(java::SpringCsrfDisabled));
         registry.register(Box::new(java::SpringCorsPermissive));
         registry.register(Box::new(java::NoXss));
-        registry.register(Box::new(java::HardcodedCryptoAlgorithm));
+        // java/hardcoded-crypto-algorithm is opt-in (Low severity, high noise).
 
         // Register PHP rules
         registry.register(Box::new(php::NoEval));

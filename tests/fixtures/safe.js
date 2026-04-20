@@ -13,10 +13,9 @@ function setContent(el, text) {
     el.textContent = text;
 }
 
-// Safe: strong hash with configurable algorithm
+// Safe: strong hash
 function hashData(data) {
-    const algorithm = getConfig("hash_algorithm");
-    return crypto.createHash(algorithm).update(data).digest("hex");
+    return crypto.createHash("sha256").update(data).digest("hex");
 }
 
 // Safe: static file path
