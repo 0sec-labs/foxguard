@@ -70,6 +70,15 @@ fn dockerfile_insecure_env_re() -> &'static Regex {
     })
 }
 
+fn dockerfile_run_insecure_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?im)^RUN\s+.*(?:NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*0|PYTHONHTTPSVERIFY\s*=\s*0|GIT_SSL_NO_VERIFY\s*=\s*(?:true|1)|curl\s+.*--insecure|curl\s+.*-k[\s|&;]|wget\s+.*--no-check-certificate)"#
+        ).unwrap()
+    })
+}
+
 // ─── Rule 1: nginx PQ-vulnerable TLS ─────────────────────────────────────────
 
 pub struct NginxPqVulnerableTls;
@@ -255,18 +264,32 @@ impl_rule! {
     id = "config/dockerfile-insecure-tls-env",
     severity = Severity::High,
     cwe = Some("CWE-295"),
-    description = "Dockerfile disables TLS certificate verification via environment variable",
+    description = "Dockerfile disables TLS certificate verification via environment variable or insecure command",
     language = Language::Dockerfile,
     fn check(_self, source, _tree) {
         let mut findings = Vec::new();
         let cleaned = strip_comments(source);
 
+        // ENV/ARG lines that disable TLS verification
         for m in dockerfile_insecure_env_re().find_iter(&cleaned) {
             findings.push(make_finding_from_offsets(
                 _self.id(),
                 _self.severity(),
                 _self.cwe(),
                 "Dockerfile disables TLS verification — containers will accept any certificate, enabling MITM attacks",
+                source,
+                m.start(),
+                m.end(),
+            ));
+        }
+
+        // RUN lines that disable TLS verification
+        for m in dockerfile_run_insecure_re().find_iter(&cleaned) {
+            findings.push(make_finding_from_offsets(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "Dockerfile RUN command disables TLS verification — containers will accept any certificate, enabling MITM attacks",
                 source,
                 m.start(),
                 m.end(),

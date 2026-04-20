@@ -3494,11 +3494,10 @@ mod config_files {
             "config/dockerfile-insecure-tls-env should fire on dockerfile_insecure/Dockerfile; \
              all findings: {findings:?}"
         );
-        // Fixture has four insecure env/arg lines — assert we catch them all
-        // so a regression that collapses the regex to only one form is loud.
+        // Fixture has four insecure ENV/ARG lines + one insecure RUN line.
         assert!(
-            matches.len() >= 4,
-            "expected at least four Dockerfile insecure-TLS findings, got {}",
+            matches.len() >= 5,
+            "expected at least five Dockerfile insecure-TLS findings (4 ENV/ARG + 1 RUN), got {}",
             matches.len()
         );
     }

