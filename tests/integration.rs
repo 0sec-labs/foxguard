@@ -3350,3 +3350,249 @@ fn pqc_on_safe_fixture_returns_zero_findings() {
         }
     }
 }
+
+// ─── Config file PQ-scanning (PR #230) ──────────────────────────────────────
+//
+// These tests cover the four TLS/config-file rules added by PR #230:
+//   - config/nginx-pq-vulnerable-tls
+//   - config/apache-pq-vulnerable-tls
+//   - config/haproxy-pq-vulnerable-tls
+//   - config/dockerfile-insecure-tls-env
+//
+// Fixtures live under `tests/fixtures/config/<kind>_<vuln|safe>/`. Each
+// vulnerable/safe pair uses the exact filename that `detect_language`
+// recognises (`nginx.conf`, `httpd.conf`, `haproxy.cfg`, `Dockerfile`), so
+// running the scanner against the parent directory is sufficient to exercise
+// the rule. Separate subdirectories keep the positive and negative fixtures
+// from colliding on the same filename.
+mod config_files {
+    use super::*;
+    use foxguard::engine::scanner::detect_language;
+    use foxguard::Language;
+
+    fn scan_fixture_dir(relative: &str) -> Vec<serde_json::Value> {
+        let output = foxguard_cmd()
+            .args([&format!("tests/fixtures/config/{relative}"), "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+            panic!(
+                "invalid JSON output for {relative}: {e}; stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })
+    }
+
+    fn findings_for_rule<'a>(
+        findings: &'a [serde_json::Value],
+        rule_id: &str,
+    ) -> Vec<&'a serde_json::Value> {
+        findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some(rule_id))
+            .collect()
+    }
+
+    // ── nginx ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn nginx_rule_fires_on_vulnerable_fixture() {
+        let findings = scan_fixture_dir("nginx_vulnerable");
+        let matches = findings_for_rule(&findings, "config/nginx-pq-vulnerable-tls");
+        assert!(
+            !matches.is_empty(),
+            "config/nginx-pq-vulnerable-tls should fire on nginx_vulnerable/nginx.conf; \
+             all findings: {findings:?}"
+        );
+        // Classical-only config trips both the ssl_protocols and ssl_ciphers
+        // branches — assert both fire so the rule isn't secretly wrapped in
+        // an early-return.
+        assert!(
+            matches.len() >= 2,
+            "expected at least two nginx PQ findings (protocols + ciphers), got {}",
+            matches.len()
+        );
+    }
+
+    #[test]
+    fn nginx_rule_silent_on_safe_fixture() {
+        let findings = scan_fixture_dir("nginx_safe");
+        let matches = findings_for_rule(&findings, "config/nginx-pq-vulnerable-tls");
+        assert!(
+            matches.is_empty(),
+            "nginx PQ rule must not fire when TLSv1.3 + X25519MLKEM768 are present; \
+             findings: {matches:?}"
+        );
+    }
+
+    // ── Apache ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn apache_rule_fires_on_vulnerable_fixture() {
+        let findings = scan_fixture_dir("apache_vulnerable");
+        let matches = findings_for_rule(&findings, "config/apache-pq-vulnerable-tls");
+        assert!(
+            !matches.is_empty(),
+            "config/apache-pq-vulnerable-tls should fire on apache_vulnerable/httpd.conf; \
+             all findings: {findings:?}"
+        );
+        assert!(
+            matches.len() >= 2,
+            "expected at least two apache PQ findings (SSLProtocol + SSLCipherSuite), got {}",
+            matches.len()
+        );
+    }
+
+    #[test]
+    fn apache_rule_silent_on_safe_fixture() {
+        let findings = scan_fixture_dir("apache_safe");
+        let matches = findings_for_rule(&findings, "config/apache-pq-vulnerable-tls");
+        assert!(
+            matches.is_empty(),
+            "apache PQ rule must not fire on a TLSv1.3 + PQ-aware config; findings: {matches:?}"
+        );
+    }
+
+    // ── HAProxy ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn haproxy_rule_fires_on_vulnerable_fixture() {
+        let findings = scan_fixture_dir("haproxy_vulnerable");
+        let matches = findings_for_rule(&findings, "config/haproxy-pq-vulnerable-tls");
+        assert!(
+            !matches.is_empty(),
+            "config/haproxy-pq-vulnerable-tls should fire on haproxy_vulnerable/haproxy.cfg; \
+             all findings: {findings:?}"
+        );
+        assert!(
+            matches.len() >= 2,
+            "expected at least two HAProxy PQ findings (bind-options + bind-ciphers), got {}",
+            matches.len()
+        );
+    }
+
+    #[test]
+    fn haproxy_rule_silent_on_safe_fixture() {
+        let findings = scan_fixture_dir("haproxy_safe");
+        let matches = findings_for_rule(&findings, "config/haproxy-pq-vulnerable-tls");
+        assert!(
+            matches.is_empty(),
+            "HAProxy PQ rule must not fire when ssl-min-ver TLSv1.3 + X25519MLKEM768 are set; \
+             findings: {matches:?}"
+        );
+    }
+
+    // ── Dockerfile ──────────────────────────────────────────────────────
+
+    #[test]
+    fn dockerfile_rule_fires_on_insecure_fixture() {
+        let findings = scan_fixture_dir("dockerfile_insecure");
+        let matches = findings_for_rule(&findings, "config/dockerfile-insecure-tls-env");
+        assert!(
+            !matches.is_empty(),
+            "config/dockerfile-insecure-tls-env should fire on dockerfile_insecure/Dockerfile; \
+             all findings: {findings:?}"
+        );
+        // Fixture has four insecure ENV/ARG lines + one insecure RUN line.
+        assert!(
+            matches.len() >= 5,
+            "expected at least five Dockerfile insecure-TLS findings (4 ENV/ARG + 1 RUN), got {}",
+            matches.len()
+        );
+    }
+
+    #[test]
+    fn dockerfile_rule_silent_on_safe_fixture() {
+        let findings = scan_fixture_dir("dockerfile_safe");
+        let matches = findings_for_rule(&findings, "config/dockerfile-insecure-tls-env");
+        assert!(
+            matches.is_empty(),
+            "Dockerfile rule must not fire on a Dockerfile without TLS-disabling env vars; \
+             findings: {matches:?}"
+        );
+    }
+
+    // ── detect_language wiring ──────────────────────────────────────────
+    //
+    // These assertions pin down the filename → Language mapping for the four
+    // new variants. If any rename lands (e.g. we start matching
+    // `conf.d/*.conf`), this test forces the author to update both sides.
+
+    #[test]
+    fn detect_language_recognises_nginx_conf() {
+        assert_eq!(
+            detect_language(Path::new("nginx.conf")),
+            Some(Language::NginxConf)
+        );
+        assert_eq!(
+            detect_language(Path::new("/etc/nginx/nginx.conf")),
+            Some(Language::NginxConf)
+        );
+    }
+
+    #[test]
+    fn detect_language_recognises_apache_filenames() {
+        assert_eq!(
+            detect_language(Path::new("httpd.conf")),
+            Some(Language::ApacheConf)
+        );
+        assert_eq!(
+            detect_language(Path::new("apache2.conf")),
+            Some(Language::ApacheConf)
+        );
+        assert_eq!(
+            detect_language(Path::new("/etc/apache2/apache2.conf")),
+            Some(Language::ApacheConf)
+        );
+    }
+
+    #[test]
+    fn detect_language_recognises_haproxy_cfg() {
+        assert_eq!(
+            detect_language(Path::new("haproxy.cfg")),
+            Some(Language::HAProxyConf)
+        );
+        assert_eq!(
+            detect_language(Path::new("/etc/haproxy/haproxy.cfg")),
+            Some(Language::HAProxyConf)
+        );
+    }
+
+    #[test]
+    fn detect_language_recognises_dockerfiles() {
+        assert_eq!(
+            detect_language(Path::new("Dockerfile")),
+            Some(Language::Dockerfile)
+        );
+        // `Dockerfile.<suffix>` variants (e.g. Dockerfile.prod) are treated
+        // as Dockerfiles too.
+        assert_eq!(
+            detect_language(Path::new("Dockerfile.insecure-tls")),
+            Some(Language::Dockerfile)
+        );
+        assert_eq!(
+            detect_language(Path::new("Dockerfile.prod")),
+            Some(Language::Dockerfile)
+        );
+        // Case-insensitive
+        assert_eq!(
+            detect_language(Path::new("dockerfile")),
+            Some(Language::Dockerfile)
+        );
+    }
+
+    #[test]
+    fn detect_language_recognises_config_include_dirs() {
+        // conf.d/ fragments are detected as nginx config
+        assert_eq!(
+            detect_language(Path::new("conf.d/ssl.conf")),
+            Some(Language::NginxConf)
+        );
+        // sites-enabled/ fragments are detected as Apache config
+        assert_eq!(
+            detect_language(Path::new("sites-enabled/default.conf")),
+            Some(Language::ApacheConf)
+        );
+    }
+}

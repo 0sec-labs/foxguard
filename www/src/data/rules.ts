@@ -224,6 +224,22 @@ const kotlinRules: Rule[] = [
   { id: 'kt/taint-ssrf', cwe: 'CWE-918', desc: 'Untrusted input from Ktor/Spring handler reaches HTTP/URL sink', severity: 'high' },
 ];
 
+const nginxconfRules: Rule[] = [
+  { id: 'config/nginx-pq-vulnerable-tls', cwe: 'CWE-327', desc: 'Nginx TLS configuration uses quantum-vulnerable protocols or ciphers', severity: 'medium' },
+];
+
+const apacheconfRules: Rule[] = [
+  { id: 'config/apache-pq-vulnerable-tls', cwe: 'CWE-327', desc: 'Apache TLS configuration uses quantum-vulnerable protocols or ciphers', severity: 'medium' },
+];
+
+const haproxyconfRules: Rule[] = [
+  { id: 'config/haproxy-pq-vulnerable-tls', cwe: 'CWE-327', desc: 'HAProxy TLS configuration uses quantum-vulnerable protocols or ciphers', severity: 'medium' },
+];
+
+const dockerfileRules: Rule[] = [
+  { id: 'config/dockerfile-insecure-tls-env', cwe: 'CWE-295', desc: 'Dockerfile disables TLS certificate verification via environment variable or insecure command', severity: 'high' },
+];
+
 export const ruleGroups: RuleGroup[] = [
   { name: 'JavaScript / TypeScript', slug: 'js', rules: jsRules },
   { name: 'Python', slug: 'py', rules: pyRules },
@@ -235,7 +251,11 @@ export const ruleGroups: RuleGroup[] = [
   { name: 'C#', slug: 'cs', rules: csharpRules },
   { name: 'Swift', slug: 'swift', rules: swiftRules },
   { name: 'Kotlin', slug: 'kt', rules: kotlinRules },
+  { name: 'Nginx', slug: 'nginxconf', rules: nginxconfRules },
+  { name: 'Apache', slug: 'apacheconf', rules: apacheconfRules },
+  { name: 'HAProxy', slug: 'haproxyconf', rules: haproxyconfRules },
+  { name: 'Dockerfile', slug: 'dockerfile', rules: dockerfileRules },
 ];
 
 export const totalRules = ruleGroups.reduce((sum, g) => sum + g.rules.length, 0);
-export const productLanguageCount = 10;
+export const productLanguageCount = 14;
