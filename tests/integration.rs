@@ -3575,19 +3575,24 @@ mod config_files {
             detect_language(Path::new("Dockerfile.prod")),
             Some(Language::Dockerfile)
         );
+        // Case-insensitive
+        assert_eq!(
+            detect_language(Path::new("dockerfile")),
+            Some(Language::Dockerfile)
+        );
     }
 
     #[test]
-    fn detect_language_rejects_unrelated_conf_files() {
-        // Regression guard: detect_language matches exact filenames only.
-        // Fragments under `conf.d/` (e.g. ssl.conf, default.conf) are NOT
-        // mapped to NginxConf today — this is a known limitation of the
-        // initial PR #230 landing. If the author later widens the filename
-        // match, flip this assertion to `Some(Language::NginxConf)`.
-        assert_eq!(detect_language(Path::new("conf.d/ssl.conf")), None);
+    fn detect_language_recognises_config_include_dirs() {
+        // conf.d/ fragments are detected as nginx config
+        assert_eq!(
+            detect_language(Path::new("conf.d/ssl.conf")),
+            Some(Language::NginxConf)
+        );
+        // sites-enabled/ fragments are detected as Apache config
         assert_eq!(
             detect_language(Path::new("sites-enabled/default.conf")),
-            None
+            Some(Language::ApacheConf)
         );
     }
 }

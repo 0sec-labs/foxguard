@@ -106,20 +106,56 @@ impl InlineIgnoreSpec {
     }
 }
 
+/// Detect config file language from filename and parent directory heuristics.
+fn detect_config_language(path: &Path) -> Option<Language> {
+    let filename = path.file_name().and_then(|f| f.to_str())?;
+    let filename_lower = filename.to_ascii_lowercase();
+
+    // Exact filename matches
+    match filename {
+        "nginx.conf" => return Some(Language::NginxConf),
+        "httpd.conf" | "apache2.conf" => return Some(Language::ApacheConf),
+        "haproxy.cfg" => return Some(Language::HAProxyConf),
+        _ => {}
+    }
+
+    // Dockerfile variants: Dockerfile, Dockerfile.prod, dockerfile, etc.
+    if filename_lower == "dockerfile" || filename_lower.starts_with("dockerfile.") {
+        return Some(Language::Dockerfile);
+    }
+
+    // .conf files under nginx-related or Apache-related directories
+    if filename_lower.ends_with(".conf") {
+        let path_str = path.to_string_lossy();
+        let path_lower = path_str.to_ascii_lowercase();
+        if path_lower.contains("nginx") || path_lower.contains("conf.d/") {
+            return Some(Language::NginxConf);
+        }
+        if path_lower.contains("apache")
+            || path_lower.contains("httpd")
+            || path_lower.contains("sites-available/")
+            || path_lower.contains("sites-enabled/")
+            || path_lower.contains("mods-enabled/")
+        {
+            return Some(Language::ApacheConf);
+        }
+    }
+
+    // .cfg files under haproxy directories
+    if filename_lower.ends_with(".cfg") {
+        let path_str = path.to_string_lossy();
+        if path_str.to_ascii_lowercase().contains("haproxy") {
+            return Some(Language::HAProxyConf);
+        }
+    }
+
+    None
+}
+
 /// Detect language from filename or file extension.
 pub fn detect_language(path: &Path) -> Option<Language> {
-    // Check full filename first for config files
-    if let Some(filename) = path.file_name().and_then(|f| f.to_str()) {
-        match filename {
-            "nginx.conf" => return Some(Language::NginxConf),
-            "httpd.conf" | "apache2.conf" => return Some(Language::ApacheConf),
-            "haproxy.cfg" => return Some(Language::HAProxyConf),
-            "Dockerfile" => return Some(Language::Dockerfile),
-            _ => {}
-        }
-        if filename.starts_with("Dockerfile.") {
-            return Some(Language::Dockerfile);
-        }
+    if let Some(lang) = detect_config_language(path) {
+        return Some(lang);
     }
 
     match path.extension()?.to_str()? {
