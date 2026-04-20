@@ -552,4 +552,34 @@ mod tests {
         );
         assert_eq!(unknown, vec!["py/typo".to_string()]);
     }
+
+    #[test]
+    fn configure_rules_warns_on_unknown_rule_id() {
+        let mut registry = RuleRegistry::new();
+        let mut opts = std::collections::HashMap::new();
+        opts.insert(
+            "py/does-not-exist".to_string(),
+            serde_yaml::Value::Null,
+        );
+        let warnings = registry.configure_rules(&opts).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("py/does-not-exist"));
+    }
+
+    #[test]
+    fn configure_rules_no_warning_for_known_rule() {
+        let mut registry = RuleRegistry::new();
+        let mut opts = std::collections::HashMap::new();
+        opts.insert("py/no-eval".to_string(), serde_yaml::Value::Null);
+        let warnings = registry.configure_rules(&opts).unwrap();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn configure_rules_empty_options_is_no_op() {
+        let mut registry = RuleRegistry::new();
+        let opts = std::collections::HashMap::new();
+        let warnings = registry.configure_rules(&opts).unwrap();
+        assert!(warnings.is_empty());
+    }
 }

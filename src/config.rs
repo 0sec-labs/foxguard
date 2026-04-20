@@ -1694,4 +1694,36 @@ mod tests {
         assert!(!is_rule_disabled_in_config(repo.path(), None, "py/no-eval")
             .expect("should probe missing config"));
     }
+
+    // ── scan.rule_options ────────────────────────────────────────────────
+
+    #[test]
+    fn rule_options_round_trip() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  rule_options:\n    py/no-eval:\n      max_depth: 5\n    js/no-eval:\n      enabled: true\n",
+        );
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        assert_eq!(loaded.scan.rule_options.len(), 2);
+        assert!(loaded.scan.rule_options.contains_key("py/no-eval"));
+        assert!(loaded.scan.rule_options.contains_key("js/no-eval"));
+        // Values are opaque YAML — verify they survived the round-trip.
+        let py_opts = &loaded.scan.rule_options["py/no-eval"];
+        assert_eq!(py_opts["max_depth"], serde_yaml::Value::from(5));
+    }
+
+    #[test]
+    fn rule_options_defaults_to_empty() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(repo.path(), ".foxguard.yml", "scan:\n  severity: high\n");
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        assert!(loaded.scan.rule_options.is_empty());
+    }
 }
