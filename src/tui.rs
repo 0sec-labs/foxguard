@@ -2667,6 +2667,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
         let medium = Finding {
             severity: Severity::Medium,
@@ -2709,6 +2710,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -2753,6 +2755,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
 
         assert_eq!(
@@ -2788,6 +2791,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
 
         let rendered = open_target_lines(&finding, OpenFocus::Finding)
@@ -2827,6 +2831,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
 
         let rendered = render_source_context(
@@ -2899,6 +2904,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
 
         assert_eq!(
@@ -2948,6 +2954,7 @@ mod tests {
                 taint_hops: None,
                 tags: vec![],
                 crypto_algorithm: None,
+                cnsa2_deadline: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3026,6 +3033,7 @@ mod tests {
                 taint_hops: None,
                 tags: vec![],
                 crypto_algorithm: None,
+                cnsa2_deadline: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3085,6 +3093,7 @@ mod tests {
                 taint_hops: None,
                 tags: vec![],
                 crypto_algorithm: None,
+                cnsa2_deadline: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3169,6 +3178,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3212,6 +3222,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Source)
@@ -3254,6 +3265,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
 
         let rendered = render_source_context(
@@ -3396,6 +3408,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
         let low_conf_high_sev = Finding {
             severity: Severity::Critical,
@@ -3462,6 +3475,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
         let low_conf = Finding {
             confidence: 0.5,
@@ -3533,6 +3547,7 @@ mod tests {
                 taint_hops: None,
                 tags: vec![],
                 crypto_algorithm: None,
+                cnsa2_deadline: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3587,6 +3602,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3648,6 +3664,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3698,6 +3715,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         };
 
         let rendered = render_source_context(

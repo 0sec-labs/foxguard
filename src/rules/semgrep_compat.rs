@@ -210,6 +210,7 @@ impl Rule for SemgrepRule {
                 taint_hops: None,
                 tags: vec![],
                 crypto_algorithm: None,
+                cnsa2_deadline: None,
             });
         }
 

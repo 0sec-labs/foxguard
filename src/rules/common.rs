@@ -232,6 +232,7 @@ pub fn make_finding(
         taint_hops: None,
         tags: vec![],
         crypto_algorithm: None,
+        cnsa2_deadline: None,
     }
 }
 
@@ -279,6 +280,7 @@ pub fn make_finding_from_offsets(
         taint_hops: None,
         tags: vec![],
         crypto_algorithm: None,
+        cnsa2_deadline: None,
     }
 }
 

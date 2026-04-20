@@ -333,6 +333,7 @@ mod tests {
             taint_hops: None,
             tags: vec!["PQ".to_string()],
             crypto_algorithm: Some(algo.to_string()),
+            cnsa2_deadline: None,
         }
     }
 
@@ -380,6 +381,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         }];
 
         let groups: BTreeMap<String, Vec<&Finding>> = findings

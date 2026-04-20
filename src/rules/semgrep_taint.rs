@@ -330,6 +330,7 @@ impl Rule for SemgrepTaintRule {
                 taint_hops: Some(t.hops),
                 tags: vec![],
                 crypto_algorithm: None,
+                cnsa2_deadline: None,
             })
             .collect()
     }

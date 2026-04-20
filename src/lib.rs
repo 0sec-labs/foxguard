@@ -124,4 +124,8 @@ pub struct Finding {
     /// Set by crypto-related rules at emission time. Used by the CBOM formatter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crypto_algorithm: Option<String>,
+    /// CNSA 2.0 compliance deadline (e.g. "2030"). Populated by the
+    /// compliance module after scanning. `None` for non-crypto findings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cnsa2_deadline: Option<String>,
 }

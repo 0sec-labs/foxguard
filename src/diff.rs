@@ -288,6 +288,7 @@ mod tests {
             taint_hops: None,
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         }
     }
 
