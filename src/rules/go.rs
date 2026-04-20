@@ -873,6 +873,7 @@ fn map_go_taint_findings(
             taint_hops: Some(t.hops),
             tags: vec![],
             crypto_algorithm: None,
+            cnsa2_deadline: None,
         })
         .collect()
 }
@@ -1598,6 +1599,7 @@ pub fn run_go_taint_batched(
                 taint_hops: Some(t.hops),
                 tags: vec![],
                 crypto_algorithm: None,
+                cnsa2_deadline: None,
             })
         })
         .collect()
