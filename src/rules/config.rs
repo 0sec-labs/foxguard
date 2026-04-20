@@ -56,6 +56,11 @@ fn haproxy_ciphers_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"(?i)ssl-default-bind-ciphers\s+.+").unwrap())
 }
 
+fn haproxy_ciphersuites_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)ssl-default-bind-ciphersuites\s+.+").unwrap())
+}
+
 fn dockerfile_insecure_env_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -214,6 +219,22 @@ impl_rule! {
                     _self.severity(),
                     _self.cwe(),
                     "ssl-default-bind-ciphers uses only classical key exchange — consider enabling PQ-safe cipher suites",
+                    source,
+                    m.start(),
+                    m.end(),
+                ));
+            }
+        }
+
+        // Also check ssl-default-bind-ciphersuites (TLS 1.3 cipher config)
+        for m in haproxy_ciphersuites_re().find_iter(&cleaned) {
+            let directive = m.as_str().to_uppercase();
+            if !directive.contains("MLKEM") && !directive.contains("X25519MLKEM") {
+                findings.push(make_finding_from_offsets(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "ssl-default-bind-ciphersuites uses only classical key exchange — consider enabling PQ-safe cipher suites",
                     source,
                     m.start(),
                     m.end(),
