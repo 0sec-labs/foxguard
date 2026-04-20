@@ -557,10 +557,7 @@ mod tests {
     fn configure_rules_warns_on_unknown_rule_id() {
         let mut registry = RuleRegistry::new();
         let mut opts = std::collections::HashMap::new();
-        opts.insert(
-            "py/does-not-exist".to_string(),
-            serde_yaml::Value::Null,
-        );
+        opts.insert("py/does-not-exist".to_string(), serde_yaml::Value::Null);
         let warnings = registry.configure_rules(&opts).unwrap();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("py/does-not-exist"));
