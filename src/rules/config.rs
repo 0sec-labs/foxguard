@@ -1,8 +1,69 @@
+use std::sync::OnceLock;
+
 use regex::Regex;
 
 use crate::impl_rule;
 use crate::rules::common::make_finding_from_offsets;
 use crate::{Language, Severity};
+
+/// Strip `#`-comment lines from config source, preserving byte offsets by
+/// replacing comment content with spaces. This lets regex matches still
+/// report correct positions.
+fn strip_comments(source: &str) -> String {
+    let mut out: Vec<u8> = source.as_bytes().to_vec();
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            let offset = line.as_ptr() as usize - source.as_ptr() as usize;
+            for b in &mut out[offset..offset + line.len()] {
+                *b = b' ';
+            }
+        }
+    }
+    // SAFETY: we only replaced ASCII bytes with ASCII spaces.
+    String::from_utf8(out).expect("strip_comments produced invalid UTF-8")
+}
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+fn nginx_protocols_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)ssl_protocols\s+[^;]+;").unwrap())
+}
+
+fn nginx_ciphers_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)ssl_ciphers\s+[^;]+;").unwrap())
+}
+
+fn apache_protocol_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)SSLProtocol\s+.+").unwrap())
+}
+
+fn apache_cipher_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)SSLCipherSuite\s+.+").unwrap())
+}
+
+fn haproxy_options_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)ssl-default-bind-options\s+.+").unwrap())
+}
+
+fn haproxy_ciphers_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)ssl-default-bind-ciphers\s+.+").unwrap())
+}
+
+fn dockerfile_insecure_env_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?im)^(?:ENV|ARG)\s+.*(?:NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*0|PYTHONHTTPSVERIFY\s*=\s*0|GIT_SSL_NO_VERIFY\s*=\s*(?:true|1)|CURL_CA_BUNDLE\s*=\s*(?:''|""|$)|REQUESTS_CA_BUNDLE\s*=\s*(?:''|""|$)|SSL_CERT_FILE\s*=\s*/dev/null)"#
+        ).unwrap()
+    })
+}
 
 // ─── Rule 1: nginx PQ-vulnerable TLS ─────────────────────────────────────────
 
@@ -17,10 +78,10 @@ impl_rule! {
     language = Language::NginxConf,
     fn check(_self, source, _tree) {
         let mut findings = Vec::new();
+        let cleaned = strip_comments(source);
 
         // Detect ssl_protocols without TLSv1.3
-        let protocols_re = Regex::new(r"(?i)ssl_protocols\s+[^;]+;").unwrap();
-        for m in protocols_re.find_iter(source) {
+        for m in nginx_protocols_re().find_iter(&cleaned) {
             let directive = m.as_str();
             if !directive.contains("TLSv1.3") {
                 findings.push(make_finding_from_offsets(
@@ -36,8 +97,7 @@ impl_rule! {
         }
 
         // Detect ssl_ciphers without PQ-safe suites
-        let ciphers_re = Regex::new(r"(?i)ssl_ciphers\s+[^;]+;").unwrap();
-        for m in ciphers_re.find_iter(source) {
+        for m in nginx_ciphers_re().find_iter(&cleaned) {
             let directive = m.as_str().to_uppercase();
             if !directive.contains("MLKEM") && !directive.contains("X25519MLKEM") {
                 findings.push(make_finding_from_offsets(
@@ -69,10 +129,10 @@ impl_rule! {
     language = Language::ApacheConf,
     fn check(_self, source, _tree) {
         let mut findings = Vec::new();
+        let cleaned = strip_comments(source);
 
         // Detect SSLProtocol without TLSv1.3
-        let protocol_re = Regex::new(r"(?i)SSLProtocol\s+.+").unwrap();
-        for m in protocol_re.find_iter(source) {
+        for m in apache_protocol_re().find_iter(&cleaned) {
             let directive = m.as_str();
             if !directive.contains("TLSv1.3") {
                 findings.push(make_finding_from_offsets(
@@ -88,8 +148,7 @@ impl_rule! {
         }
 
         // Detect SSLCipherSuite without PQ-safe suites
-        let cipher_re = Regex::new(r"(?i)SSLCipherSuite\s+.+").unwrap();
-        for m in cipher_re.find_iter(source) {
+        for m in apache_cipher_re().find_iter(&cleaned) {
             let directive = m.as_str().to_uppercase();
             if !directive.contains("MLKEM") && !directive.contains("X25519MLKEM") {
                 findings.push(make_finding_from_offsets(
@@ -121,10 +180,10 @@ impl_rule! {
     language = Language::HAProxyConf,
     fn check(_self, source, _tree) {
         let mut findings = Vec::new();
+        let cleaned = strip_comments(source);
 
         // Detect ssl-default-bind-options without TLSv1.3
-        let options_re = Regex::new(r"(?i)ssl-default-bind-options\s+.+").unwrap();
-        for m in options_re.find_iter(source) {
+        for m in haproxy_options_re().find_iter(&cleaned) {
             let directive = m.as_str();
             if !directive.contains("ssl-min-ver TLSv1.3")
                 && !directive.contains("min-ver TLSv1.3")
@@ -142,8 +201,7 @@ impl_rule! {
         }
 
         // Detect ssl-default-bind-ciphers without PQ suites
-        let ciphers_re = Regex::new(r"(?i)ssl-default-bind-ciphers\s+.+").unwrap();
-        for m in ciphers_re.find_iter(source) {
+        for m in haproxy_ciphers_re().find_iter(&cleaned) {
             let directive = m.as_str().to_uppercase();
             if !directive.contains("MLKEM") && !directive.contains("X25519MLKEM") {
                 findings.push(make_finding_from_offsets(
@@ -175,12 +233,9 @@ impl_rule! {
     language = Language::Dockerfile,
     fn check(_self, source, _tree) {
         let mut findings = Vec::new();
+        let cleaned = strip_comments(source);
 
-        let insecure_env_re = Regex::new(
-            r#"(?im)^(?:ENV|ARG)\s+.*(?:NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*0|PYTHONHTTPSVERIFY\s*=\s*0|GIT_SSL_NO_VERIFY\s*=\s*(?:true|1)|CURL_CA_BUNDLE\s*=\s*(?:''|""|$)|REQUESTS_CA_BUNDLE\s*=\s*(?:''|""|$)|SSL_CERT_FILE\s*=\s*/dev/null)"#
-        ).unwrap();
-
-        for m in insecure_env_re.find_iter(source) {
+        for m in dockerfile_insecure_env_re().find_iter(&cleaned) {
             findings.push(make_finding_from_offsets(
                 _self.id(),
                 _self.severity(),
