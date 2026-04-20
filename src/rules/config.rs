@@ -131,10 +131,15 @@ impl_rule! {
         let mut findings = Vec::new();
         let cleaned = strip_comments(source);
 
-        // Detect SSLProtocol without TLSv1.3
+        // Detect SSLProtocol without TLSv1.3.
+        // `SSLProtocol all` on modern Apache (2.4.30+) includes TLSv1.3,
+        // so only flag when standalone `all` is absent AND TLSv1.3 isn't explicit.
         for m in apache_protocol_re().find_iter(&cleaned) {
             let directive = m.as_str();
-            if !directive.contains("TLSv1.3") {
+            let upper = directive.to_uppercase();
+            let has_all = upper.split_whitespace().any(|t| t == "ALL");
+            let has_tls13 = directive.contains("TLSv1.3");
+            if !has_all && !has_tls13 {
                 findings.push(make_finding_from_offsets(
                     _self.id(),
                     _self.severity(),
