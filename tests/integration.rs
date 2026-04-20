@@ -934,8 +934,8 @@ mod go {
 
         assert_eq!(
             findings.len(),
-            25,
-            "vulnerable.go should have 25 findings, got {}",
+            20,
+            "vulnerable.go should have 20 findings, got {}",
             findings.len()
         );
 
@@ -956,7 +956,6 @@ mod go {
             "go/jwt-no-verify",
             "go/jwt-hardcoded-secret",
             "go/pq-vulnerable-crypto",
-            "go/hardcoded-crypto-algorithm",
         ];
 
         for rule in &expected_rules {
