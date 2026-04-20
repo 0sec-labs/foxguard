@@ -1724,7 +1724,7 @@ impl_rule! {
                                 // and other dynamic expressions.
                                 if first_arg.kind() == "string" {
                                     let val = &src[first_arg.byte_range()];
-                                    let prefix = val.split(|c: char| c == '"' || c == '\'').next().unwrap_or("");
+                                    let prefix = val.split(['"', '\'']).next().unwrap_or("");
                                     // Skip f-strings (f"...", rf"...", fr"...") — they're dynamic.
                                     let prefix_lower = prefix.to_ascii_lowercase();
                                     if prefix_lower.contains('f') {
