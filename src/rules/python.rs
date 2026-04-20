@@ -1724,7 +1724,15 @@ impl_rule! {
                                 // and other dynamic expressions.
                                 if first_arg.kind() == "string" {
                                     let val = &src[first_arg.byte_range()];
-                                    let inner = val.trim_matches(|c| c == '"' || c == '\'');
+                                    let prefix = val.split(|c: char| c == '"' || c == '\'').next().unwrap_or("");
+                                    // Skip f-strings (f"...", rf"...", fr"...") — they're dynamic.
+                                    let prefix_lower = prefix.to_ascii_lowercase();
+                                    if prefix_lower.contains('f') {
+                                        return;
+                                    }
+                                    // Strip optional prefix (b, r, u, ...) then quotes.
+                                    let stripped = val.trim_start_matches(|c: char| c.is_ascii_alphabetic());
+                                    let inner = stripped.trim_matches(|c| c == '"' || c == '\'');
                                     // Skip weak algorithms — py/no-weak-crypto owns those.
                                     if inner != "md5" && inner != "sha1" {
                                         findings.push(make_finding(

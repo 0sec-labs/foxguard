@@ -835,6 +835,20 @@ impl_rule! {
                                         if first_arg.kind() == "string_literal" {
                                             let arg_text = &src[first_arg.byte_range()];
                                             let inner = arg_text.trim_matches('"');
+                                            // Skip weak algorithms — java/no-weak-crypto owns those.
+                                            let upper = inner.to_uppercase();
+                                            if upper == "MD5"
+                                                || upper == "SHA-1"
+                                                || upper.starts_with("SHA1")
+                                                || upper == "DES"
+                                                || upper == "DESEDE"
+                                                || upper == "RC2"
+                                                || upper == "RC4"
+                                                || upper == "BLOWFISH"
+                                                || upper.contains("ECB")
+                                            {
+                                                return;
+                                            }
                                             findings.push(make_finding(
                                                 _self.id(),
                                                 _self.severity(),
