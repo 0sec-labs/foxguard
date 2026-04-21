@@ -131,6 +131,12 @@ struct TuiApp {
     selected: usize,
     show_notices: bool,
     show_help: bool,
+    /// When on, a CNSA 2.0 migration-readiness strip is drawn at the bottom
+    /// of the main scan body. Toggled by `Shift+N` (see `handle_key`). Chose
+    /// `Shift+N` instead of the issue's suggested `Shift+C` because the
+    /// latter is already bound to `cycle_sort_mode` (feature B) — `Shift+N`
+    /// reads as "cNsa" and keeps both toggles available.
+    show_compliance_panel: bool,
     runtime_notices: Vec<String>,
     active_request_id: u64,
     next_request_id: u64,
@@ -165,6 +171,7 @@ impl TuiApp {
             selected: 0,
             show_notices: true,
             show_help: false,
+            show_compliance_panel: false,
             runtime_notices: Vec::new(),
             active_request_id: 0,
             next_request_id: 1,
@@ -314,6 +321,10 @@ impl TuiApp {
             }
             KeyCode::Char('w') => {
                 self.show_notices = !self.show_notices;
+                ControlFlow::Continue
+            }
+            KeyCode::Char('N') => {
+                self.show_compliance_panel = !self.show_compliance_panel;
                 ControlFlow::Continue
             }
             KeyCode::Char('i') => self.open_action_menu(),
@@ -1124,17 +1135,26 @@ impl TuiApp {
     }
 
     fn draw_body(&mut self, frame: &mut ratatui::Frame, area: Rect) {
-        let body_layout = if self.show_notices && self.notice_count() > 0 {
-            Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(8), Constraint::Length(6)])
-                .split(area)
-        } else {
-            Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(8)])
-                .split(area)
-        };
+        // Vertical slot plan for the scan body:
+        //   [0] findings + detail (main content, always present)
+        //   [1] notices panel (optional)
+        //   [2] CNSA 2.0 compliance strip (optional, 4 rows)
+        // The compliance strip sits *below* notices so notices never shrink
+        // when it is toggled on.
+        let show_notices = self.show_notices && self.notice_count() > 0;
+        let show_compliance = self.show_compliance_panel && self.result.is_some();
+
+        let mut body_constraints: Vec<Constraint> = vec![Constraint::Min(8)];
+        if show_notices {
+            body_constraints.push(Constraint::Length(6));
+        }
+        if show_compliance {
+            body_constraints.push(Constraint::Length(4));
+        }
+        let body_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(body_constraints)
+            .split(area);
 
         let direction = if body_layout[0].width < 110 {
             Direction::Vertical
@@ -1202,13 +1222,91 @@ impl TuiApp {
             .wrap(Wrap { trim: false });
         frame.render_widget(detail, layout[1]);
 
-        if body_layout.len() > 1 {
+        let mut next_slot: usize = 1;
+        if show_notices {
             let notices = Paragraph::new(self.notice_text())
                 .block(panel_block(Some("Notices"), NOTICE_BG))
                 .scroll((self.notices_scroll, 0))
                 .wrap(Wrap { trim: false });
-            frame.render_widget(notices, body_layout[1]);
+            frame.render_widget(notices, body_layout[next_slot]);
+            next_slot += 1;
         }
+        if show_compliance {
+            let paragraph = Paragraph::new(self.compliance_panel_text())
+                .block(panel_block(Some("CNSA 2.0"), PANEL_BG))
+                .wrap(Wrap { trim: false });
+            frame.render_widget(paragraph, body_layout[next_slot]);
+        }
+    }
+
+    /// Build the CNSA 2.0 compliance strip content.
+    ///
+    /// Mirrors the terminal reporter's `print_cnsa2_summary` block so both
+    /// surfaces render the same information from the same source — see
+    /// `src/report/terminal.rs`. The function is intentionally pure (takes
+    /// only `&self` and returns a `Text`) so it can be unit-tested without
+    /// spinning up a terminal backend.
+    fn compliance_panel_text(&self) -> Text<'static> {
+        let findings: &[Finding] = self
+            .result
+            .as_ref()
+            .map(|r| r.findings.as_slice())
+            .unwrap_or(&[]);
+        let report = crate::compliance::MigrationReport::from_findings(findings);
+
+        if report.annotated == 0 {
+            return Text::from(vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "no CNSA 2.0 findings in this scan",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
+                )),
+            ]);
+        }
+
+        let (badge_label, badge_bg) = match report.level {
+            crate::compliance::MigrationLevel::Clean => (" clean ", Color::Green),
+            crate::compliance::MigrationLevel::OnTrack => (" on-track ", Color::Yellow),
+            crate::compliance::MigrationLevel::AtRisk => (" at-risk ", Color::Red),
+        };
+        let badge = Span::styled(
+            badge_label,
+            Style::default()
+                .bg(badge_bg)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        );
+
+        let summary = format!(
+            "  {} finding{} with NSA transition deadlines",
+            report.annotated,
+            if report.annotated == 1 { "" } else { "s" }
+        );
+
+        let mut entries: Vec<(&String, &usize)> = report.by_deadline.iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        let bullets = entries
+            .iter()
+            .map(|(year, count)| format!("{} by {}", count, year))
+            .collect::<Vec<_>>()
+            .join("  \u{00b7}  ");
+
+        Text::from(vec![
+            Line::from(vec![
+                badge,
+                Span::raw("  "),
+                Span::styled(
+                    summary,
+                    Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+                ),
+            ]),
+            Line::from(Span::styled(
+                bullets,
+                Style::default().fg(Color::Rgb(201, 172, 114)),
+            )),
+        ])
     }
 
     fn detail_text(&mut self) -> Text<'static> {
@@ -1439,6 +1537,7 @@ impl TuiApp {
             Line::from("i              open triage actions for the selected finding"),
             Line::from("Enter          open the current target in your editor"),
             Line::from("w              show or hide notices panel"),
+            Line::from("Shift+N        toggle CNSA 2.0 compliance panel"),
             Line::from("PageUp/Down    scroll detail pane"),
             Line::from("[/]            scroll notices pane"),
             Line::from("r              rescan"),
@@ -3752,6 +3851,155 @@ mod tests {
         assert!(rendered
             .iter()
             .any(|line| line.contains("dangerous_call(user_input)")));
+    }
+
+    /// Flatten a ratatui `Text` into a plain string, joining lines with `\n`.
+    /// Used by the compliance-panel tests to assert on rendered content
+    /// without depending on a terminal backend.
+    fn text_to_plain(text: &Text<'_>) -> String {
+        text.lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn cnsa_finding(rule_id: &str, deadline: Option<&str>) -> Finding {
+        Finding {
+            rule_id: rule_id.to_string(),
+            severity: Severity::High,
+            file: "src/lib.rs".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 1,
+            description: "pq-relevant finding".to_string(),
+            snippet: "Rsa::new()".to_string(),
+            cwe: None,
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+            confidence: crate::default_confidence(),
+            taint_hops: None,
+            tags: vec![],
+            crypto_algorithm: None,
+            cnsa2_deadline: deadline.map(String::from),
+        }
+    }
+
+    fn tui_app_with_findings(findings: Vec<Finding>) -> TuiApp {
+        let mut app = TuiApp::new(TuiArgs {
+            path: ".".to_string(),
+            config: None,
+            severity: None,
+            rules: None,
+            no_builtins: false,
+            changed: false,
+            exclude: Vec::new(),
+            baseline: None,
+            diff: None,
+            secrets: false,
+            explain: false,
+            max_file_size: 1_048_576,
+        });
+        app.result = Some(TuiExecution {
+            mode: TuiMode::Scan,
+            path: ".".to_string(),
+            findings,
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        });
+        app
+    }
+
+    #[test]
+    fn compliance_panel_defaults_off() {
+        let app = tui_app_with_findings(vec![]);
+        assert!(!app.show_compliance_panel);
+    }
+
+    #[test]
+    fn shift_n_toggles_compliance_panel() {
+        let mut app = tui_app_with_findings(vec![]);
+        // `handle_key` routes to `handle_launch_key` while the launcher is
+        // visible; emulate the post-scan state the user sees when pressing
+        // Shift+N.
+        app.show_launch = false;
+        assert!(!app.show_compliance_panel);
+        let flow = app.handle_key(KeyEvent::from(KeyCode::Char('N')));
+        assert!(matches!(flow, ControlFlow::Continue));
+        assert!(app.show_compliance_panel);
+        app.handle_key(KeyEvent::from(KeyCode::Char('N')));
+        assert!(!app.show_compliance_panel);
+    }
+
+    #[test]
+    fn compliance_panel_shows_badge_and_per_year_tallies() {
+        // Two findings at 2030, twelve at 2033 — report should render the
+        // level badge plus the sorted per-deadline bullets.
+        let mut findings = Vec::new();
+        for _ in 0..3 {
+            findings.push(cnsa_finding("pq/rule-a", Some("2030")));
+        }
+        for _ in 0..12 {
+            findings.push(cnsa_finding("pq/rule-b", Some("2033")));
+        }
+        let app = tui_app_with_findings(findings);
+
+        let rendered = text_to_plain(&app.compliance_panel_text());
+        // Majority of findings have a deadline → at-risk.
+        assert!(
+            rendered.contains("at-risk"),
+            "expected at-risk badge, got: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("15 findings with NSA transition deadlines"),
+            "expected annotated count line, got: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("3 by 2030"),
+            "expected 2030 tally, got: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("12 by 2033"),
+            "expected 2033 tally, got: {}",
+            rendered
+        );
+        // 2030 must render before 2033 (sorted by year ascending).
+        let pos_2030 = rendered.find("2030").expect("2030 bullet present");
+        let pos_2033 = rendered.find("2033").expect("2033 bullet present");
+        assert!(pos_2030 < pos_2033, "deadlines should sort ascending");
+    }
+
+    #[test]
+    fn compliance_panel_empty_state_when_no_cnsa_findings() {
+        // Findings exist but none carry a deadline — panel should display the
+        // dimmed fallback rather than an empty/broken block.
+        let app = tui_app_with_findings(vec![cnsa_finding("js/no-eval", None)]);
+        let rendered = text_to_plain(&app.compliance_panel_text());
+        assert!(
+            rendered.contains("no CNSA 2.0 findings in this scan"),
+            "expected empty-state message, got: {}",
+            rendered
+        );
+        // Must not render a level badge label when empty.
+        assert!(!rendered.contains("at-risk"));
+        assert!(!rendered.contains("on-track"));
     }
 }
 
