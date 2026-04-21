@@ -40,7 +40,7 @@ On PQ rules specifically: GitHub has shipped [advanced-security/cbom-action](htt
 
 The detection is tree-sitter-based. For each supported language, PQ-vulnerable primitives are identified through the same matcher infrastructure that backs the rest of foxguard's rules: syntactic patterns over parsed ASTs, plus language-specific alias resolution so that `crypto/rsa`, an aliased `rsa as r`, and a re-exported `r.GenerateKey` all resolve to the same primitive.
 
-Two pieces are PQ-specific. First, PQ-safe allowlists: calls through the `ml_kem`, `ml_dsa`, `fn_dsa`, and `hqc` crates (and their analogues in other ecosystems) are explicitly marked safe, so a repo that has already migrated doesn't get dinged. FN-DSA (FIPS 206) and HQC were added in [#243](https://github.com/PwnKit-Labs/foxguard/pull/243) as NIST continues to standardize. Second, the CNSA 2.0 deadline is declarative rule metadata — a `cnsa2_deadline` field on the rule itself — consulted through the rule registry at scan time. Renaming a rule cannot silently drop its annotation, and the deadline string is never derived from a rule ID heuristic.
+Two pieces are PQ-specific. First, PQ-safe allowlists: calls through the `ml_kem`, `ml_dsa`, `slh_dsa`, `fn_dsa`, and `hqc` crates (and their analogues in other ecosystems) are explicitly marked safe, so a repo that has already migrated doesn't get dinged. FN-DSA (FIPS 206) and HQC were added in [#243](https://github.com/PwnKit-Labs/foxguard/pull/243) as NIST continues to standardize. Second, the CNSA 2.0 deadline is declarative rule metadata — a `cnsa2_deadline` field on the rule itself — consulted through the rule registry at scan time. Renaming a rule cannot silently drop its annotation, and the deadline string is never derived from a rule ID heuristic.
 
 ## The part we got wrong first
 
@@ -49,14 +49,14 @@ Our first pass at CNSA 2.0 annotations had unsourced dates. A review caught it. 
 ## Try it
 
 ```sh
-npx foxguard pqc .
+npx foxguard@latest pqc .
 curl -fsSL https://foxguard.dev/install.sh | sh
 cargo install foxguard
 ```
 
 ## What's next
 
-Dependency-level PQ scanning — so a `Cargo.lock` or `package-lock.json` with a transitively RSA-locked library shows up alongside the source hits — is next. A GitHub App for one-click install on any repo is in progress. Cloudflare reports over half of human TLS traffic on their edge is already post-quantum ([Cloudflare, 2025](https://blog.cloudflare.com/pq-2025/)); application code is catching up slower. We'd like to make that migration less painful.
+Dependency-level PQ scanning — so a `Cargo.lock` or `package-lock.json` with a transitively RSA-locked library shows up alongside the source hits — is next. A GitHub App for one-click install on any repo is on the roadmap. Cloudflare reports over half of human TLS traffic on their edge is already post-quantum ([Cloudflare, 2025](https://blog.cloudflare.com/pq-2025/)); application code is catching up slower. We'd like to make that migration less painful.
 
 ---
 
