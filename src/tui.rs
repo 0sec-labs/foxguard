@@ -3853,6 +3853,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
