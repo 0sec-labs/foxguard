@@ -1275,6 +1275,28 @@ impl TuiApp {
             lines.push(metadata_line("Review", &review));
         }
 
+        // Crypto-agility metadata (#248). These belong with the header block,
+        // not the snippet, so they sit between the review/tags metadata and
+        // the source-context section. Dimmed to read as advisory context
+        // rather than a primary severity signal. Skipped entirely when both
+        // fields are `None`, so non-crypto findings look unchanged.
+        if let Some(algorithm) = finding.crypto_algorithm.as_ref() {
+            lines.push(Line::from(Span::styled(
+                format!("Algorithm: {}", algorithm),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )));
+        }
+        if let Some(deadline) = finding.cnsa2_deadline.as_ref() {
+            lines.push(Line::from(Span::styled(
+                format!("CNSA 2.0: migrate before end of {}", deadline),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )));
+        }
+
         if let Some(context_lines) = self.source_context_lines(&finding) {
             lines.push(Line::from(""));
             lines.push(section_heading("Context", Color::Yellow));
@@ -2764,8 +2786,12 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
-            crypto_algorithm: None,
-            cnsa2_deadline: None,
+            // Exercise the crypto-metadata fields end-to-end in an existing
+            // fixture: dataflow rendering shouldn't care, but we also pass the
+            // finding through `list_item` below to confirm the deadline chip
+            // picks up `"2030"` without disturbing the unrelated dataflow path.
+            crypto_algorithm: Some("RSA".to_string()),
+            cnsa2_deadline: Some("2030".to_string()),
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -3783,8 +3809,11 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
-            crypto_algorithm: None,
-            cnsa2_deadline: None,
+            // Fields populated to confirm this orthogonal renderer still
+            // ignores crypto metadata — the snippet truncator has no reason
+            // to care whether the finding carries a CNSA 2.0 deadline.
+            crypto_algorithm: Some("RSA".to_string()),
+            cnsa2_deadline: Some("2030".to_string()),
         };
 
         let rendered = render_source_context(
@@ -3800,6 +3829,122 @@ mod tests {
         assert!(rendered
             .iter()
             .any(|line| line.contains("dangerous_call(user_input)")));
+    }
+
+    /// Helper: stand up a `TuiApp` with a single finding whose crypto-metadata
+    /// fields are controlled by the caller, so `detail_text()` and the list
+    /// path can be exercised without duplicating the full `TuiArgs` +
+    /// `TuiExecution` boilerplate. Keeps the two #248 tests focused on
+    /// assertions rather than fixture plumbing.
+    fn app_with_single_finding(
+        crypto_algorithm: Option<String>,
+        cnsa2_deadline: Option<String>,
+    ) -> TuiApp {
+        let mut app = TuiApp::new(TuiArgs {
+            path: ".".to_string(),
+            config: None,
+            severity: None,
+            rules: None,
+            no_builtins: false,
+            changed: false,
+            exclude: Vec::new(),
+            baseline: None,
+            diff: None,
+            secrets: false,
+            explain: false,
+            max_file_size: 1_048_576,
+        });
+        app.result = Some(TuiExecution {
+            mode: TuiMode::Scan,
+            path: ".".to_string(),
+            findings: vec![Finding {
+                rule_id: "crypto/pq-vulnerable".to_string(),
+                severity: Severity::High,
+                file: "src/lib.rs".to_string(),
+                line: 10,
+                column: 1,
+                end_line: 10,
+                end_column: 20,
+                description: "uses RSA key exchange".to_string(),
+                snippet: "Rsa::new(2048)".to_string(),
+                cwe: Some("CWE-327".to_string()),
+                source_line: None,
+                source_description: None,
+                sink_line: None,
+                sink_description: None,
+                fix_suggestion: None,
+                sink_start_byte: None,
+                sink_end_byte: None,
+                confidence: crate::default_confidence(),
+                taint_hops: None,
+                tags: vec![],
+                crypto_algorithm,
+                cnsa2_deadline,
+            }],
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        });
+        app.show_launch = false;
+        app
+    }
+
+    /// Flatten a `Text` to plain per-line strings so assertions can use
+    /// `contains()` without poking at span internals.
+    fn text_to_strings(text: &Text<'static>) -> Vec<String> {
+        text.lines
+            .iter()
+            .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn detail_text_renders_crypto_algorithm_and_cnsa2_deadline_lines() {
+        let mut app = app_with_single_finding(Some("RSA".to_string()), Some("2030".to_string()));
+
+        let rendered = text_to_strings(&app.detail_text());
+
+        assert!(
+            rendered.iter().any(|line| line == "Algorithm: RSA"),
+            "expected Algorithm line, got {:#?}",
+            rendered
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "CNSA 2.0: migrate before end of 2030"),
+            "expected CNSA 2.0 line, got {:#?}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn detail_text_omits_crypto_lines_when_both_fields_absent() {
+        let mut app = app_with_single_finding(None, None);
+
+        let rendered = text_to_strings(&app.detail_text());
+
+        assert!(
+            !rendered.iter().any(|line| line.starts_with("Algorithm:")),
+            "non-crypto findings should not render the Algorithm line"
+        );
+        assert!(
+            !rendered.iter().any(|line| line.starts_with("CNSA 2.0:")),
+            "non-crypto findings should not render the CNSA 2.0 line"
+        );
+    }
+
+    #[test]
+    fn cnsa2_deadline_chip_renders_padded_year_with_amber_background() {
+        let span = cnsa2_deadline_chip_span("2030");
+        assert_eq!(span.content, " 2030 ");
+        assert_eq!(span.style.bg, Some(Color::Yellow));
+        assert_eq!(span.style.fg, Some(Color::Black));
+        // Explicitly check BOLD is not set — deadline is advisory context,
+        // not a severity signal, and should read as muted.
+        assert!(!span.style.add_modifier.contains(Modifier::BOLD));
     }
 }
 
@@ -3845,6 +3990,13 @@ fn list_item(finding: &Finding, review_state: Option<ReviewState>) -> ListItem<'
                 .add_modifier(Modifier::BOLD),
         ));
     }
+    // CNSA 2.0 deadline chip — muted amber to read as advisory, not urgent.
+    // Only rendered when `cnsa2_deadline` is `Some`, so non-crypto findings
+    // keep their existing row layout untouched.
+    if let Some(deadline) = finding.cnsa2_deadline.as_ref() {
+        title_spans.push(Span::raw(" "));
+        title_spans.push(cnsa2_deadline_chip_span(deadline));
+    }
     if let Some(state) = review_state {
         title_spans.push(Span::raw(" "));
         title_spans.push(review_badge_span(state));
@@ -3857,6 +4009,17 @@ fn list_item(finding: &Finding, review_state: Option<ReviewState>) -> ListItem<'
             Style::default().fg(Color::Gray),
         )),
     ])
+}
+
+/// Compact advisory chip rendered in the list row for findings that carry a
+/// `cnsa2_deadline`. Muted amber on black so it reads as context ("migrate
+/// before X"), not urgency — the row's severity badge already carries the
+/// "how bad is this" signal. No bold, single-space padding inside the chip.
+fn cnsa2_deadline_chip_span(deadline: &str) -> Span<'static> {
+    Span::styled(
+        format!(" {} ", deadline),
+        Style::default().bg(Color::Yellow).fg(Color::Black),
+    )
 }
 
 /// Small dimmed confidence indicator shown next to findings with
