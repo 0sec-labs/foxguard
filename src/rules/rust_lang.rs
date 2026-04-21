@@ -269,23 +269,30 @@ impl_rule! {
                     }
                     let func_text = &src[func.byte_range()];
                     let func_lower = func_text.to_lowercase();
-                    // Skip PQ-safe algorithms
-                    if func_lower.contains("ml_dsa") || func_lower.contains("ml_kem") || func_lower.contains("slh_dsa") {
+                    // Skip PQ-safe algorithms. fn_dsa (FIPS 206, draft) and hqc
+                    // (5th NIST selection, code-based KEM, draft std 2026) are
+                    // recognised here so early adopters of those crates aren't flagged.
+                    if func_lower.contains("ml_dsa")
+                        || func_lower.contains("ml_kem")
+                        || func_lower.contains("slh_dsa")
+                        || func_lower.contains("fn_dsa")
+                        || func_lower.contains("hqc")
+                    {
                         return;
                     }
                     // No regex needed — check func_lower directly
                     let (algo, canonical_algo, replacement) = if func_lower.contains("ed25519") {
-                        ("Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition")
+                        ("Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition")
                     } else if func_lower.contains("x25519") {
-                        ("X25519", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203)")
+                        ("X25519", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative")
                     } else if func_lower.contains("rsa") {
-                        ("RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures")
+                        ("RSA", "RSA", "X25519MLKEM768 hybrid KEM (or HQC for code-based diversity) for encryption, or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures")
                     } else if func_lower.contains("ecdsa") {
-                        ("ECDSA", "ECDSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition")
+                        ("ECDSA", "ECDSA", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition")
                     } else if func_lower.contains("p256") || func_lower.contains("p384") || func_lower.contains("p521") || func_lower.contains("k256") {
-                        ("ECDH/ECDSA (elliptic curve)", "ECDSA", "X25519MLKEM768 hybrid KEM or ML-DSA-65 (FIPS 204) with hybrid cert chains")
+                        ("ECDH/ECDSA (elliptic curve)", "ECDSA", "X25519MLKEM768 hybrid KEM (or HQC for code-based diversity) or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains")
                     } else if func_lower.contains("dsa") {
-                        ("DSA", "DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition")
+                        ("DSA", "DSA", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition")
                     } else {
                         return;
                     };

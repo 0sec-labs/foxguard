@@ -397,12 +397,12 @@ impl_rule! {
                         std::borrow::Cow::Borrowed(raw)
                     };
                     let (algo, canonical_algo, replacement) = match func_text.as_ref() {
-                        s if s.starts_with("rsa.") => ("RSA", "RSA", "ML-KEM (FIPS 203) for encryption or ML-DSA (FIPS 204) for signatures"),
-                        s if s.starts_with("ecdsa.") => ("ECDSA", "ECDSA", "ML-DSA (FIPS 204)"),
-                        s if s.starts_with("ecdh.") => ("ECDH", "ECDH", "ML-KEM (FIPS 203)"),
-                        s if s.starts_with("dsa.") => ("DSA", "DSA", "ML-DSA (FIPS 204)"),
-                        s if s.starts_with("elliptic.") => ("ECDH/ECDSA (elliptic)", "ECDH", "ML-KEM (FIPS 203) or ML-DSA (FIPS 204)"),
-                        s if s.starts_with("ed25519.") => ("Ed25519", "Ed25519", "ML-DSA (FIPS 204)"),
+                        s if s.starts_with("rsa.") => ("RSA", "RSA", "ML-KEM (FIPS 203) or HQC (code-based diversity hedge, draft) for encryption, or ML-DSA (FIPS 204) / FN-DSA (FIPS 206, draft) for signatures"),
+                        s if s.starts_with("ecdsa.") => ("ECDSA", "ECDSA", "ML-DSA (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures"),
+                        s if s.starts_with("ecdh.") => ("ECDH", "ECDH", "ML-KEM (FIPS 203) or HQC (code-based diversity hedge, draft)"),
+                        s if s.starts_with("dsa.") => ("DSA", "DSA", "ML-DSA (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures"),
+                        s if s.starts_with("elliptic.") => ("ECDH/ECDSA (elliptic)", "ECDH", "ML-KEM (FIPS 203) / HQC (draft) or ML-DSA (FIPS 204) / FN-DSA (FIPS 206, draft)"),
+                        s if s.starts_with("ed25519.") => ("Ed25519", "Ed25519", "ML-DSA (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures"),
                         _ => return,
                     };
                     let mut f = make_finding(

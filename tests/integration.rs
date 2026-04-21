@@ -3445,6 +3445,40 @@ fn pqc_on_safe_fixture_returns_zero_findings() {
     }
 }
 
+/// Draft-standard awareness: early adopters of FN-DSA (FIPS 206 draft) and
+/// HQC (5th NIST PQC algorithm, selected March 2025) must NOT be flagged by
+/// the per-language `pq-vulnerable-crypto` rules alongside ML-DSA / ML-KEM /
+/// SLH-DSA. See issue #226.
+#[test]
+fn pq_draft_standards_are_not_flagged() {
+    for fixture in [
+        "safe_pq_draft.rs",
+        "safe_pq_draft.go",
+        "safe_pq_draft.py",
+        "safe_pq_draft.js",
+        "safe_pq_draft.java",
+    ] {
+        let output = foxguard_cmd()
+            .args([fixture_path(fixture).to_str().unwrap(), "-f", "json"])
+            .output()
+            .expect("failed to run foxguard");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout.trim().is_empty() {
+            continue;
+        }
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_str(&stdout).expect("invalid JSON output");
+        for f in &findings {
+            let rule_id = f["rule_id"].as_str().unwrap_or("");
+            assert!(
+                !rule_id.ends_with("/pq-vulnerable-crypto"),
+                "{fixture}: pq-vulnerable-crypto must not fire on PQ-safe draft standards (FN-DSA / HQC). \
+                 finding={f:?}"
+            );
+        }
+    }
+}
+
 // ─── Config file PQ-scanning (PR #230) ──────────────────────────────────────
 //
 // These tests cover the four TLS/config-file rules added by PR #230:
