@@ -270,6 +270,12 @@ pub struct TuiArgs {
     /// Maximum file size in bytes to scan (default: 1 MB)
     #[arg(long, default_value_t = 1_048_576)]
     pub max_file_size: u64,
+
+    /// Start the launcher focused on the post-quantum crypto audit mode.
+    /// Not exposed via clap — set programmatically when invoking the TUI
+    /// from the `pqc` subcommand or other PQ-specific entry points.
+    #[arg(skip)]
+    pub pq_mode: bool,
 }
 
 #[derive(Args, Debug, Clone)]

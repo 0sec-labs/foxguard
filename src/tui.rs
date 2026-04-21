@@ -213,14 +213,22 @@ impl TuiApp {
             LaunchMode::Scan => {
                 self.request.secrets = false;
                 self.request.diff = None;
+                self.request.pq_mode = false;
             }
             LaunchMode::Diff => {
                 self.request.secrets = false;
                 self.request.diff = Some(self.launch_diff_target.trim().to_string());
+                self.request.pq_mode = false;
             }
             LaunchMode::Secrets => {
                 self.request.secrets = true;
                 self.request.diff = None;
+                self.request.pq_mode = false;
+            }
+            LaunchMode::Pqc => {
+                self.request.secrets = false;
+                self.request.diff = None;
+                self.request.pq_mode = true;
             }
         }
     }
@@ -405,6 +413,10 @@ impl TuiApp {
             }
             KeyCode::Char('3') => {
                 self.launch_mode = LaunchMode::Secrets;
+                ControlFlow::Continue
+            }
+            KeyCode::Char('4') => {
+                self.launch_mode = LaunchMode::Pqc;
                 ControlFlow::Continue
             }
             KeyCode::Backspace if self.launch_mode == LaunchMode::Diff => {
@@ -948,12 +960,18 @@ impl TuiApp {
                 Constraint::Length(2),
                 Constraint::Length(2),
                 Constraint::Length(2),
+                Constraint::Length(2),
                 Constraint::Min(1),
             ])
             .split(selector_inner);
-        for (index, mode) in [LaunchMode::Scan, LaunchMode::Diff, LaunchMode::Secrets]
-            .into_iter()
-            .enumerate()
+        for (index, mode) in [
+            LaunchMode::Scan,
+            LaunchMode::Diff,
+            LaunchMode::Secrets,
+            LaunchMode::Pqc,
+        ]
+        .into_iter()
+        .enumerate()
         {
             self.draw_launch_card(frame, cards[index], mode);
         }
@@ -1011,6 +1029,12 @@ impl TuiApp {
                 "credentials and token leaks",
                 Color::Rgb(176, 112, 92),
                 "3",
+            ),
+            LaunchMode::Pqc => (
+                "Pqc",
+                "post-quantum crypto audit",
+                Color::Rgb(96, 168, 176),
+                "4",
             ),
         };
         let background = if selected { DETAIL_BG } else { LAUNCH_CARD_BG };
@@ -1349,6 +1373,28 @@ impl TuiApp {
             lines.push(metadata_line("Review", &review));
         }
 
+        // Crypto-agility metadata (#248). These belong with the header block,
+        // not the snippet, so they sit between the review/tags metadata and
+        // the source-context section. Dimmed to read as advisory context
+        // rather than a primary severity signal. Skipped entirely when both
+        // fields are `None`, so non-crypto findings look unchanged.
+        if let Some(algorithm) = finding.crypto_algorithm.as_ref() {
+            lines.push(Line::from(Span::styled(
+                format!("Algorithm: {}", algorithm),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )));
+        }
+        if let Some(deadline) = finding.cnsa2_deadline.as_ref() {
+            lines.push(Line::from(Span::styled(
+                format!("CNSA 2.0: migrate before end of {}", deadline),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            )));
+        }
+
         if let Some(context_lines) = self.source_context_lines(&finding) {
             lines.push(Line::from(""));
             lines.push(section_heading("Context", Color::Yellow));
@@ -1490,7 +1536,7 @@ impl TuiApp {
         let left = Line::from(vec![
             footer_key_span("h/l"),
             Span::raw(" move  "),
-            footer_key_span("1-3"),
+            footer_key_span("1-4"),
             Span::raw(" jump  "),
             footer_key_span("Tab"),
             Span::raw(" cycle  "),
@@ -1508,6 +1554,7 @@ impl TuiApp {
                 LaunchMode::Scan => "scan",
                 LaunchMode::Diff => "diff",
                 LaunchMode::Secrets => "secrets",
+                LaunchMode::Pqc => "pqc",
             }),
             Span::raw("  "),
             footer_label_span("path"),
@@ -2209,11 +2256,14 @@ enum LaunchMode {
     Scan,
     Diff,
     Secrets,
+    Pqc,
 }
 
 impl LaunchMode {
     fn from_args(args: &TuiArgs) -> Self {
-        if args.secrets {
+        if args.pq_mode {
+            LaunchMode::Pqc
+        } else if args.secrets {
             LaunchMode::Secrets
         } else if args.diff.is_some() {
             LaunchMode::Diff
@@ -2226,15 +2276,17 @@ impl LaunchMode {
         match self {
             LaunchMode::Scan => LaunchMode::Diff,
             LaunchMode::Diff => LaunchMode::Secrets,
-            LaunchMode::Secrets => LaunchMode::Scan,
+            LaunchMode::Secrets => LaunchMode::Pqc,
+            LaunchMode::Pqc => LaunchMode::Scan,
         }
     }
 
     fn previous(self) -> Self {
         match self {
-            LaunchMode::Scan => LaunchMode::Secrets,
+            LaunchMode::Scan => LaunchMode::Pqc,
             LaunchMode::Diff => LaunchMode::Scan,
             LaunchMode::Secrets => LaunchMode::Diff,
+            LaunchMode::Pqc => LaunchMode::Secrets,
         }
     }
 }
@@ -2672,6 +2724,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.runtime_notices.push("stale notice".to_string());
 
@@ -2699,6 +2752,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
 
         assert!(app.show_launch);
@@ -2721,6 +2775,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.launch_mode = LaunchMode::Diff;
         app.launch_diff_target = "origin/main".to_string();
@@ -2749,6 +2804,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.launch_mode = LaunchMode::Diff;
 
@@ -2829,8 +2885,12 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
-            crypto_algorithm: None,
-            cnsa2_deadline: None,
+            // Exercise the crypto-metadata fields end-to-end in an existing
+            // fixture: dataflow rendering shouldn't care, but we also pass the
+            // finding through `list_item` below to confirm the deadline chip
+            // picks up `"2030"` without disturbing the unrelated dataflow path.
+            crypto_algorithm: Some("RSA".to_string()),
+            cnsa2_deadline: Some("2030".to_string()),
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -2993,6 +3053,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.show_launch = false;
 
@@ -3048,6 +3109,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3106,6 +3168,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
 
         let flow = app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -3127,6 +3190,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3187,6 +3251,7 @@ mod tests {
             secrets: true,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.result = Some(TuiExecution {
             mode: TuiMode::Secrets,
@@ -3246,6 +3311,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.action_menu = Some(ActionMenu {
             actions: vec![TriageAction::AddToBaseline, TriageAction::IgnoreRuleInFile],
@@ -3275,6 +3341,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         let finding = Finding {
             rule_id: "js/no-command-injection".to_string(),
@@ -3442,6 +3509,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
 
         assert_eq!(app.session_min_confidence, 0.0);
@@ -3470,6 +3538,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
 
         assert_eq!(app.sort_mode, SortMode::SeverityDesc);
@@ -3494,6 +3563,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.show_launch = false;
 
@@ -3572,6 +3642,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         let base = Finding {
             rule_id: "js/rule".to_string(),
@@ -3641,6 +3712,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3699,6 +3771,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         let finding = Finding {
             rule_id: "js/rule".to_string(),
@@ -3761,6 +3834,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         let finding = Finding {
             rule_id: "js/rule".to_string(),
@@ -3834,8 +3908,11 @@ mod tests {
             confidence: crate::default_confidence(),
             taint_hops: None,
             tags: vec![],
-            crypto_algorithm: None,
-            cnsa2_deadline: None,
+            // Fields populated to confirm this orthogonal renderer still
+            // ignores crypto metadata — the snippet truncator has no reason
+            // to care whether the finding carries a CNSA 2.0 deadline.
+            crypto_algorithm: Some("RSA".to_string()),
+            cnsa2_deadline: Some("2030".to_string()),
         };
 
         let rendered = render_source_context(
@@ -3896,6 +3973,43 @@ mod tests {
         }
     }
 
+    /// Helper: stand up a `TuiApp` with a single finding whose crypto-metadata
+    /// fields are controlled by the caller. Delegates to
+    /// `tui_app_with_findings` so both #248 test suites share one copy of
+    /// the `TuiArgs` + `TuiExecution` boilerplate.
+    fn app_with_single_finding(
+        crypto_algorithm: Option<String>,
+        cnsa2_deadline: Option<String>,
+    ) -> TuiApp {
+        let finding = Finding {
+            rule_id: "crypto/pq-vulnerable".to_string(),
+            severity: Severity::High,
+            file: "src/lib.rs".to_string(),
+            line: 10,
+            column: 1,
+            end_line: 10,
+            end_column: 20,
+            description: "uses RSA key exchange".to_string(),
+            snippet: "Rsa::new(2048)".to_string(),
+            cwe: Some("CWE-327".to_string()),
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+            confidence: crate::default_confidence(),
+            taint_hops: None,
+            tags: vec![],
+            crypto_algorithm,
+            cnsa2_deadline,
+        };
+        let mut app = tui_app_with_findings(vec![finding]);
+        app.show_launch = false;
+        app
+    }
+
     fn tui_app_with_findings(findings: Vec<Finding>) -> TuiApp {
         let mut app = TuiApp::new(TuiArgs {
             path: ".".to_string(),
@@ -3910,6 +4024,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -4001,6 +4116,62 @@ mod tests {
         assert!(!rendered.contains("at-risk"));
         assert!(!rendered.contains("on-track"));
     }
+
+    /// Flatten a `Text` to plain per-line strings so assertions can use
+    /// `contains()` without poking at span internals.
+    fn text_to_strings(text: &Text<'static>) -> Vec<String> {
+        text.lines
+            .iter()
+            .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn detail_text_renders_crypto_algorithm_and_cnsa2_deadline_lines() {
+        let mut app = app_with_single_finding(Some("RSA".to_string()), Some("2030".to_string()));
+
+        let rendered = text_to_strings(&app.detail_text());
+
+        assert!(
+            rendered.iter().any(|line| line == "Algorithm: RSA"),
+            "expected Algorithm line, got {:#?}",
+            rendered
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line == "CNSA 2.0: migrate before end of 2030"),
+            "expected CNSA 2.0 line, got {:#?}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn detail_text_omits_crypto_lines_when_both_fields_absent() {
+        let mut app = app_with_single_finding(None, None);
+
+        let rendered = text_to_strings(&app.detail_text());
+
+        assert!(
+            !rendered.iter().any(|line| line.starts_with("Algorithm:")),
+            "non-crypto findings should not render the Algorithm line"
+        );
+        assert!(
+            !rendered.iter().any(|line| line.starts_with("CNSA 2.0:")),
+            "non-crypto findings should not render the CNSA 2.0 line"
+        );
+    }
+
+    #[test]
+    fn cnsa2_deadline_chip_renders_padded_year_with_amber_background() {
+        let span = cnsa2_deadline_chip_span("2030");
+        assert_eq!(span.content, " 2030 ");
+        assert_eq!(span.style.bg, Some(Color::Yellow));
+        assert_eq!(span.style.fg, Some(Color::Black));
+        // Explicitly check BOLD is not set — deadline is advisory context,
+        // not a severity signal, and should read as muted.
+        assert!(!span.style.add_modifier.contains(Modifier::BOLD));
+    }
 }
 
 fn append_diff_summary(spans: &mut Vec<Span<'static>>, summary: &DiffSummary) {
@@ -4045,6 +4216,13 @@ fn list_item(finding: &Finding, review_state: Option<ReviewState>) -> ListItem<'
                 .add_modifier(Modifier::BOLD),
         ));
     }
+    // CNSA 2.0 deadline chip — muted amber to read as advisory, not urgent.
+    // Only rendered when `cnsa2_deadline` is `Some`, so non-crypto findings
+    // keep their existing row layout untouched.
+    if let Some(deadline) = finding.cnsa2_deadline.as_ref() {
+        title_spans.push(Span::raw(" "));
+        title_spans.push(cnsa2_deadline_chip_span(deadline));
+    }
     if let Some(state) = review_state {
         title_spans.push(Span::raw(" "));
         title_spans.push(review_badge_span(state));
@@ -4057,6 +4235,17 @@ fn list_item(finding: &Finding, review_state: Option<ReviewState>) -> ListItem<'
             Style::default().fg(Color::Gray),
         )),
     ])
+}
+
+/// Compact advisory chip rendered in the list row for findings that carry a
+/// `cnsa2_deadline`. Muted amber on black so it reads as context ("migrate
+/// before X"), not urgency — the row's severity badge already carries the
+/// "how bad is this" signal. No bold, single-space padding inside the chip.
+fn cnsa2_deadline_chip_span(deadline: &str) -> Span<'static> {
+    Span::styled(
+        format!(" {} ", deadline),
+        Style::default().bg(Color::Yellow).fg(Color::Black),
+    )
 }
 
 /// Small dimmed confidence indicator shown next to findings with
@@ -4659,6 +4848,13 @@ fn loading_copy(app: &TuiApp) -> (&'static str, String) {
                 short_path(&app.request.path)
             ),
         ),
+        LaunchMode::Pqc => (
+            "Scanning crypto",
+            format!(
+                "{}  post-quantum vulnerable algorithms",
+                short_path(&app.request.path)
+            ),
+        ),
     }
 }
 
@@ -4671,6 +4867,7 @@ fn loading_phase_labels(app: &TuiApp) -> [&'static str; 3] {
             "building diff view",
         ],
         LaunchMode::Secrets => ["walking files", "checking patterns", "redacting snippets"],
+        LaunchMode::Pqc => ["walking files", "filtering PQ rules", "assembling findings"],
     }
 }
 
@@ -4780,6 +4977,8 @@ fn request_mode_label(args: &TuiArgs) -> &'static str {
         "secrets"
     } else if args.diff.is_some() {
         "diff"
+    } else if args.pq_mode {
+        "pqc"
     } else {
         "scan"
     }

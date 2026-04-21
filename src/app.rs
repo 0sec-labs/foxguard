@@ -414,8 +414,8 @@ fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
         fix: false,
         show_confidence: false,
         min_confidence: None,
-        pq_mode: false,
-        cnsa2: false,
+        pq_mode: args.pq_mode,
+        cnsa2: args.pq_mode,
     }
 }
 
