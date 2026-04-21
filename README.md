@@ -123,7 +123,17 @@ jobs:
           upload-sarif: "true"
 ```
 
-Findings land in **Security → Code Scanning**. On any other CI: `npx foxguard@latest --format sarif . > out.sarif`. For pre-commit, Claude Code, and other hooks, see [docs/claude-code-integration.md](docs/claude-code-integration.md).
+Findings land in **Security → Code Scanning**. On any other CI: `npx foxguard@latest --format sarif . > out.sarif`. For Claude Code and other editor hooks, see [docs/claude-code-integration.md](docs/claude-code-integration.md).
+
+**Pre-commit:**
+
+```yaml
+repos:
+  - repo: https://github.com/PwnKit-Labs/foxguard
+    rev: v0.7.1
+    hooks:
+      - id: foxguard
+```
 
 ## Benchmarks
 
