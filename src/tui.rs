@@ -13,7 +13,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
@@ -1494,7 +1494,7 @@ impl TuiApp {
             })
             .collect::<Vec<_>>();
         let list = List::new(items)
-            .block(panel_block(Some("Triage"), PANEL_BG))
+            .block(panel_block(None, PANEL_BG))
             .highlight_style(
                 Style::default()
                     .fg(Color::White)
@@ -1502,6 +1502,10 @@ impl TuiApp {
                     .add_modifier(Modifier::BOLD),
             )
             .highlight_symbol("> ");
+        let inner = area.inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -1510,10 +1514,16 @@ impl TuiApp {
                 Constraint::Length(4),
                 Constraint::Length(1),
             ])
-            .split(area);
+            .split(inner);
 
         frame.render_widget(Clear, area);
-        frame.render_widget(Block::default().style(Style::default().bg(PANEL_BG)), area);
+        frame.render_widget(
+            Block::default()
+                .title("triage")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(PANEL_BG)),
+            area,
+        );
         frame.render_widget(
             Paragraph::new(Text::from(vec![
                 Line::from(Span::styled(
@@ -1573,7 +1583,7 @@ impl TuiApp {
             })
             .collect::<Vec<_>>();
         let list = List::new(items)
-            .block(panel_block(Some("Lower severity"), PANEL_BG))
+            .block(panel_block(None, PANEL_BG))
             .highlight_style(
                 Style::default()
                     .fg(Color::White)
@@ -1582,6 +1592,10 @@ impl TuiApp {
             )
             .highlight_symbol("> ");
 
+        let inner = area.inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -1590,10 +1604,16 @@ impl TuiApp {
                 Constraint::Length(3),
                 Constraint::Length(1),
             ])
-            .split(area);
+            .split(inner);
 
         frame.render_widget(Clear, area);
-        frame.render_widget(Block::default().style(Style::default().bg(PANEL_BG)), area);
+        frame.render_widget(
+            Block::default()
+                .title("lower severity")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(PANEL_BG)),
+            area,
+        );
 
         let subtitle = match picker.current {
             Some(current) => format!("{}  (current: {})", rule_id, current),
