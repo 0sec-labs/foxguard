@@ -80,6 +80,31 @@ macro_rules! impl_rule {
         }
     };
 
+    // ── Variant 1b: check only, with cnsa2_deadline ──────────────────────
+    (
+        $struct:ty,
+        id = $id:expr,
+        severity = $sev:expr,
+        cwe = $cwe:expr,
+        description = $desc:expr,
+        language = $lang:expr,
+        cnsa2_deadline = $deadline:expr,
+        fn check($self_:ident, $src:ident, $tree:ident) { $($check_body:tt)* }
+    ) => {
+        impl $crate::rules::Rule for $struct {
+            fn id(&self) -> &str { $id }
+            fn severity(&self) -> $crate::Severity { $sev }
+            fn cwe(&self) -> Option<&str> { $cwe }
+            fn description(&self) -> &str { $desc }
+            fn language(&self) -> $crate::Language { $lang }
+            fn cnsa2_deadline(&self) -> Option<&'static str> { Some($deadline) }
+            fn check(&self, $src: &str, $tree: &tree_sitter::Tree) -> Vec<$crate::Finding> {
+                let $self_ = self;
+                $($check_body)*
+            }
+        }
+    };
+
     // ── Variant 2: check_with_context (auto-generates delegating check) ──
     (
         $struct:ty,
@@ -96,6 +121,39 @@ macro_rules! impl_rule {
             fn cwe(&self) -> Option<&str> { $cwe }
             fn description(&self) -> &str { $desc }
             fn language(&self) -> $crate::Language { $lang }
+            fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<$crate::Finding> {
+                self.check_with_context(source, tree, &$crate::rules::FileContext::default())
+            }
+            fn check_with_context(
+                &self,
+                $src: &str,
+                $tree: &tree_sitter::Tree,
+                $ctx: &$crate::rules::FileContext<'_>,
+            ) -> Vec<$crate::Finding> {
+                let $self_ = self;
+                $($check_body)*
+            }
+        }
+    };
+
+    // ── Variant 2b: check_with_context, with cnsa2_deadline ──────────────
+    (
+        $struct:ty,
+        id = $id:expr,
+        severity = $sev:expr,
+        cwe = $cwe:expr,
+        description = $desc:expr,
+        language = $lang:expr,
+        cnsa2_deadline = $deadline:expr,
+        fn check_with_context($self_:ident, $src:ident, $tree:ident, $ctx:ident) { $($check_body:tt)* }
+    ) => {
+        impl $crate::rules::Rule for $struct {
+            fn id(&self) -> &str { $id }
+            fn severity(&self) -> $crate::Severity { $sev }
+            fn cwe(&self) -> Option<&str> { $cwe }
+            fn description(&self) -> &str { $desc }
+            fn language(&self) -> $crate::Language { $lang }
+            fn cnsa2_deadline(&self) -> Option<&'static str> { Some($deadline) }
             fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<$crate::Finding> {
                 self.check_with_context(source, tree, &$crate::rules::FileContext::default())
             }
@@ -169,6 +227,19 @@ pub trait Rule: Send + Sync {
     /// message if the options are invalid.
     fn configure(&mut self, _opts: &serde_yaml::Value) -> Result<(), String> {
         Ok(())
+    }
+
+    /// CNSA 2.0 transition deadline for findings from this rule, as a
+    /// `"YYYY"` string (e.g. `"2030"`, `"2033"`), or `None` for rules that
+    /// are not quantum-related. Consumed by [`crate::compliance`] at
+    /// finding emission / post-processing time to populate
+    /// `Finding.cnsa2_deadline`. See that module for the per-class
+    /// mapping and NSA source citations. Rules must declare their own
+    /// deadline via the `cnsa2_deadline = "..."` arm of [`impl_rule!`]
+    /// so this trait stays the single source of truth (no substring
+    /// matching on rule IDs in a central module — see PR #231 review).
+    fn cnsa2_deadline(&self) -> Option<&'static str> {
+        None
     }
 }
 
@@ -498,6 +569,7 @@ impl RuleRegistry {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
     fn rule_ids(registry: &RuleRegistry) -> Vec<String> {
         registry.rules.iter().map(|r| r.id().to_string()).collect()
     }

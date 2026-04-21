@@ -463,6 +463,9 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DH/Ed25519)",
     language = Language::JavaScript,
+    // CNSA 2.0 class: web/cloud (exclusive-use 2033). See
+    // `src/compliance.rs` for the NSA FAQ citation.
+    cnsa2_deadline = "2033",
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
@@ -1778,6 +1781,8 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "Hardcoded algorithm string in crypto API call hinders crypto agility",
     language = Language::JavaScript,
+    // CNSA 2.0 class: web/cloud (exclusive-use 2033).
+    cnsa2_deadline = "2033",
     fn check_with_context(_self, source, tree, ctx) {
 
         let mut findings = Vec::new();

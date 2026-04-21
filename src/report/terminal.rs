@@ -1,3 +1,4 @@
+use crate::compliance::{MigrationLevel, MigrationReport};
 use crate::{Finding, Severity};
 use colored::Colorize;
 use std::path::Path;
@@ -49,6 +50,19 @@ pub fn print_findings_with_options(
     print_findings_with_options_and_confidence(findings, files_scanned, duration, explain, false);
 }
 
+/// All the knobs the scan pipeline needs to control terminal rendering.
+///
+/// Introduced when the `--cnsa2` flag was added (issue #241) to keep
+/// `print_findings_*` callsites readable rather than growing yet another
+/// positional-bool variant. Existing public entry points remain for
+/// back-compat with callers that don't care about CNSA annotations.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ReportOptions {
+    pub explain: bool,
+    pub show_confidence: bool,
+    pub cnsa2: bool,
+}
+
 /// Variant of [`print_findings_with_options`] that also controls whether
 /// per-finding confidence scores are displayed. Terminal output keeps
 /// them hidden by default because they're too noisy; callers that want
@@ -61,6 +75,32 @@ pub fn print_findings_with_options_and_confidence(
     explain: bool,
     show_confidence: bool,
 ) {
+    print_findings_full(
+        findings,
+        files_scanned,
+        duration,
+        ReportOptions {
+            explain,
+            show_confidence,
+            cnsa2: false,
+        },
+    );
+}
+
+/// New preferred entry point. Accepts a [`ReportOptions`] bundle so call
+/// sites can opt into CNSA 2.0 rendering without touching the other
+/// overloads.
+pub fn print_findings_full(
+    findings: &[Finding],
+    files_scanned: usize,
+    duration: std::time::Duration,
+    opts: ReportOptions,
+) {
+    let ReportOptions {
+        explain,
+        show_confidence,
+        cnsa2,
+    } = opts;
     if findings.is_empty() {
         if files_scanned > 0 {
             println!(
@@ -101,12 +141,16 @@ pub fn print_findings_with_options_and_confidence(
         println!();
 
         for f in file_findings {
-            print_finding(f, explain, show_confidence);
+            print_finding(f, explain, show_confidence, cnsa2);
         }
         println!();
     }
 
     print_summary(findings, files_scanned, duration);
+
+    if cnsa2 {
+        print_cnsa2_summary(findings);
+    }
 }
 
 fn severity_badge(severity: Severity) -> colored::ColoredString {
@@ -153,7 +197,7 @@ fn truncate_snippet(line: &str) -> String {
     format!("{}...", &trimmed[..end])
 }
 
-fn print_finding(f: &Finding, explain: bool, show_confidence: bool) {
+fn print_finding(f: &Finding, explain: bool, show_confidence: bool, cnsa2: bool) {
     let accent = severity_accent(f.severity);
     let badge = severity_badge(f.severity);
     let cwe = f
@@ -219,7 +263,58 @@ fn print_finding(f: &Finding, explain: bool, show_confidence: bool) {
         println!("    {accent} {} {}", "Fix:".green().bold(), fix);
     }
 
+    // CNSA 2.0 deadline annotation. Only rendered when `--cnsa2` is on,
+    // so the default terminal view stays unchanged for users who don't
+    // care about NSS compliance. When on, the field is always populated
+    // for any PQ-vulnerable finding; None means the rule is simply not
+    // CNSA-relevant.
+    if cnsa2 {
+        if let Some(deadline) = &f.cnsa2_deadline {
+            println!(
+                "    {accent} {} {}",
+                "CNSA 2.0:".truecolor(245, 158, 11).bold(),
+                format!("migrate before end of {deadline}").dimmed(),
+            );
+        }
+    }
+
     // Blank line between findings
+    println!();
+}
+
+/// CNSA 2.0 migration-readiness block. Appears only when the caller set
+/// `ReportOptions::cnsa2 = true`. Reads each finding's pre-annotated
+/// `cnsa2_deadline` rather than recomputing, so the block matches what
+/// SARIF emits exactly.
+fn print_cnsa2_summary(findings: &[Finding]) {
+    let report = MigrationReport::from_findings(findings);
+    let level_label = match report.level {
+        MigrationLevel::Clean => " clean ".on_green().black().bold(),
+        MigrationLevel::OnTrack => " on-track ".on_blue().white().bold(),
+        MigrationLevel::AtRisk => " at-risk ".on_red().white().bold(),
+    };
+
+    println!(
+        "  {} {}  {}",
+        "CNSA 2.0".truecolor(245, 158, 11).bold(),
+        level_label,
+        format!(
+            "{} finding{} with NSA transition deadlines",
+            report.annotated,
+            if report.annotated == 1 { "" } else { "s" }
+        )
+        .dimmed(),
+    );
+
+    if !report.by_deadline.is_empty() {
+        let mut entries: Vec<(&String, &usize)> = report.by_deadline.iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        let bullets: Vec<String> = entries
+            .iter()
+            .map(|(year, count)| format!("{} by {}", count, year))
+            .collect();
+        println!("  {}", bullets.join("  \u{00b7}  ").dimmed());
+    }
     println!();
 }
 

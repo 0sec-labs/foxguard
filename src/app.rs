@@ -165,6 +165,12 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
     let duration = result.duration;
     let mut findings = result.findings;
 
+    // CNSA 2.0 deadline annotation. Runs regardless of the `--cnsa2`
+    // opt-in flag because SARIF always carries the field in `properties`
+    // — it's metadata. The flag only controls terminal surface (see
+    // `src/main.rs`).
+    crate::compliance::annotate_cnsa2_deadlines(&mut findings, &registry);
+
     let known_rule_ids = collect_rule_ids(&registry);
     let override_warnings =
         apply_severity_overrides(&mut findings, config.as_ref(), &known_rule_ids);
@@ -298,6 +304,9 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
         );
     }
 
+    // Annotate CNSA 2.0 deadlines on the new findings surfaced by this diff.
+    crate::compliance::annotate_cnsa2_deadlines(&mut diff_result.new_findings, &registry);
+
     let known_rule_ids = collect_rule_ids(&registry);
     let override_warnings = apply_severity_overrides(
         &mut diff_result.new_findings,
@@ -406,6 +415,7 @@ fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
         show_confidence: false,
         min_confidence: None,
         pq_mode: false,
+        cnsa2: false,
     }
 }
 

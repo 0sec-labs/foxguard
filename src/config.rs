@@ -52,6 +52,10 @@ pub struct ScanConfig {
     /// time. Keys are rule IDs, values are opaque YAML that each rule
     /// parses itself. Unknown rule IDs surface as stderr warnings.
     pub rule_options: HashMap<String, serde_yaml::Value>,
+    /// Enable CNSA 2.0 compliance annotations and summary in terminal
+    /// output. Mirrors the `--cnsa2` CLI flag. See issue #241 and
+    /// [`crate::compliance`].
+    pub cnsa2: bool,
 }
 
 /// Tunable thresholds for pattern/heuristic rules.
@@ -138,6 +142,8 @@ struct RawScanConfig {
     min_confidence: Option<f32>,
     #[serde(default)]
     rule_options: HashMap<String, serde_yaml::Value>,
+    #[serde(default)]
+    cnsa2: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -219,6 +225,9 @@ pub fn apply_scan_defaults(scan: &mut ScanArgs, config: Option<&FoxguardConfig>)
     }
     if scan.min_confidence.is_none() {
         scan.min_confidence = config.scan.min_confidence;
+    }
+    if !scan.cnsa2 && config.scan.cnsa2 {
+        scan.cnsa2 = true;
     }
 }
 
@@ -343,6 +352,7 @@ impl FoxguardConfig {
                 thresholds,
                 min_confidence: raw.scan.min_confidence,
                 rule_options: raw.scan.rule_options,
+                cnsa2: raw.scan.cnsa2.unwrap_or(false),
             },
             secrets: SecretsConfig {
                 baseline: secrets_baseline,

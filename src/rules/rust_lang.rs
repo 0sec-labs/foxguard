@@ -255,6 +255,8 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/Ed25519/X25519)",
     language = Language::Rust,
+    // CNSA 2.0 class: web/cloud (exclusive-use 2033).
+    cnsa2_deadline = "2033",
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();

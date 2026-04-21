@@ -90,6 +90,9 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "Nginx TLS configuration uses quantum-vulnerable protocols or ciphers",
     language = Language::NginxConf,
+    // CNSA 2.0 class: web browsers/servers/cloud services (exclusive-use 2033)
+    // per NSA CNSA 2.0 FAQ v2.1 (Dec 2024), transition timeline table.
+    cnsa2_deadline = "2033",
     fn check(_self, source, _tree) {
         let mut findings = Vec::new();
         let cleaned = strip_comments(source);
@@ -141,6 +144,9 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "Apache TLS configuration uses quantum-vulnerable protocols or ciphers",
     language = Language::ApacheConf,
+    // CNSA 2.0 class: web browsers/servers/cloud services (exclusive-use 2033)
+    // per NSA CNSA 2.0 FAQ v2.1 (Dec 2024), transition timeline table.
+    cnsa2_deadline = "2033",
     fn check(_self, source, _tree) {
         let mut findings = Vec::new();
         let cleaned = strip_comments(source);
@@ -197,6 +203,11 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "HAProxy TLS configuration uses quantum-vulnerable protocols or ciphers",
     language = Language::HAProxyConf,
+    // CNSA 2.0 class: web browsers/servers/cloud services (exclusive-use 2033)
+    // per NSA CNSA 2.0 FAQ v2.1 (Dec 2024). HAProxy typically fronts web
+    // traffic, so its TLS stack is governed by the web-server milestone
+    // rather than the router/VPN milestone.
+    cnsa2_deadline = "2033",
     fn check(_self, source, _tree) {
         let mut findings = Vec::new();
         let cleaned = strip_comments(source);
@@ -266,6 +277,11 @@ impl_rule! {
     cwe = Some("CWE-295"),
     description = "Dockerfile disables TLS certificate verification via environment variable or insecure command",
     language = Language::Dockerfile,
+    // CNSA 2.0 class: containers are a cloud-services deployment surface;
+    // the TLS configuration this rule flags is the same PKI/TLS stack that
+    // governs browsers and web servers. Per NSA CNSA 2.0 FAQ v2.1
+    // (Dec 2024), cloud services must exclusively use CNSA 2.0 by 2033.
+    cnsa2_deadline = "2033",
     fn check(_self, source, _tree) {
         let mut findings = Vec::new();
         let cleaned = strip_comments(source);
