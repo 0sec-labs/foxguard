@@ -93,6 +93,17 @@ pub struct ScanArgs {
     /// Internal: set by the `pqc` subcommand to filter to PQ rules only.
     #[arg(hide = true, long, default_value_t = false)]
     pub pq_mode: bool,
+
+    /// Emit CNSA 2.0 compliance annotations on crypto-related findings and
+    /// a migration-readiness summary block in terminal output (issue #241).
+    ///
+    /// When disabled (the default), the scan pipeline still exposes the
+    /// `cnsa2Deadline` field on every applicable finding in SARIF
+    /// `properties` for downstream tooling, but the terminal reporter
+    /// stays silent and no summary block is printed. Also settable via
+    /// `scan.cnsa2 = true` in `.foxguard.yml`.
+    #[arg(long, default_value_t = false)]
+    pub cnsa2: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -334,6 +345,9 @@ impl PqcArgs {
             show_confidence: self.show_confidence,
             min_confidence: None,
             pq_mode: true,
+            // `pqc` subcommand always shows CNSA 2.0 context — that's
+            // exactly the audience for that command.
+            cnsa2: true,
         }
     }
 }

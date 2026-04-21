@@ -340,6 +340,8 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519)",
     language = Language::Go,
+    // CNSA 2.0 class: web/cloud (exclusive-use 2033).
+    cnsa2_deadline = "2033",
     fn check_with_context(_self, source, tree, ctx) {
 
         let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {

@@ -62,12 +62,15 @@ fn run_scan(scan: &ScanArgs) -> i32 {
         OutputFormat::Terminal => {
             if !result.args.quiet {
                 foxguard::report::terminal::clear_banner();
-                foxguard::report::terminal::print_findings_with_options_and_confidence(
+                foxguard::report::terminal::print_findings_full(
                     &result.findings,
                     result.files_scanned,
                     result.duration,
-                    result.args.explain,
-                    result.args.show_confidence,
+                    foxguard::report::terminal::ReportOptions {
+                        explain: result.args.explain,
+                        show_confidence: result.args.show_confidence,
+                        cnsa2: result.args.cnsa2,
+                    },
                 );
             }
         }
@@ -305,6 +308,7 @@ fn run_init(args: &InitArgs) -> i32 {
                 show_confidence: false,
                 min_confidence: None,
                 pq_mode: false,
+                cnsa2: false,
             },
             output: repo_root.join(&args.baseline).display().to_string(),
         };

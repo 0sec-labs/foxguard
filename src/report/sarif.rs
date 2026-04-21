@@ -39,6 +39,16 @@ pub fn print_sarif(findings: &[Finding]) {
             let clamped_conf = f.confidence.clamp(0.0, 1.0);
             props.insert("confidence".to_string(), json!(clamped_conf));
 
+            // CNSA 2.0 compliance deadline (issue #241). Always included
+            // when present regardless of the `--cnsa2` flag — SARIF is a
+            // machine-consumed format and the field is metadata that
+            // downstream governance tooling may rely on. Key is
+            // camelCase per SARIF property-bag convention (fixes #231
+            // review: the prior `cnsa2_deadline` used snake_case).
+            if let Some(deadline) = &f.cnsa2_deadline {
+                props.insert("cnsa2Deadline".to_string(), json!(deadline));
+            }
+
             // SARIF `rank` is a native 0.0..=100.0 ordering hint. Map
             // confidence linearly so 1.0 → 100 and 0.0 → 0.
             let rank = clamped_conf as f64 * 100.0;

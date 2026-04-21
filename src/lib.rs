@@ -1,6 +1,7 @@
 pub mod app;
 pub mod baseline;
 pub mod cli;
+pub mod compliance;
 pub mod config;
 pub mod diff;
 pub mod engine;

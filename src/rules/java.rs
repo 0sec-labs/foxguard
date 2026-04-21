@@ -528,6 +528,8 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "Use of quantum-vulnerable cryptographic algorithm (RSA/EC/DSA/DH/Ed25519/X25519)",
     language = Language::Java,
+    // CNSA 2.0 class: web/cloud (exclusive-use 2033).
+    cnsa2_deadline = "2033",
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
@@ -816,6 +818,8 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "Hardcoded algorithm string in crypto API call hinders crypto agility",
     language = Language::Java,
+    // CNSA 2.0 class: web/cloud (exclusive-use 2033).
+    cnsa2_deadline = "2033",
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();

@@ -527,6 +527,11 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519/X25519)",
     language = Language::Python,
+    // CNSA 2.0 class: general-purpose application crypto — falls under
+    // the "web browsers/servers and cloud services" milestone (exclusive
+    // use 2033) per NSA CNSA 2.0 FAQ v2.1 (Dec 2024). Code emitting these
+    // calls is typically deployed as a web/cloud service.
+    cnsa2_deadline = "2033",
     fn check_with_context(_self, source, tree, ctx) {
 
         let mut findings = Vec::new();
@@ -1708,6 +1713,9 @@ impl_rule! {
     cwe = Some("CWE-327"),
     description = "Hardcoded algorithm string in hashlib.new() hinders crypto agility",
     language = Language::Python,
+    // CNSA 2.0 class: web/cloud (exclusive-use 2033). Hardcoded algorithm
+    // names are a crypto-agility hazard during the CNSA 2.0 transition.
+    cnsa2_deadline = "2033",
     fn check_with_context(_self, source, tree, ctx) {
 
         let mut findings = Vec::new();
