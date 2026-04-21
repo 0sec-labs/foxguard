@@ -482,11 +482,11 @@ impl_rule! {
                                     let val = &src[first_arg.byte_range()];
                                     let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
                                     let (algo, canonical_algo, replacement) = match inner.to_lowercase().as_str() {
-                                            "rsa" => ("RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures"),
-                                            "ec" => ("EC", "ECDSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures"),
-                                            "dsa" => ("DSA", "DSA", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
-                                            "ed25519" => ("Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
-                                            "ed448" => ("Ed448", "Ed448", "ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition"),
+                                            "rsa" => ("RSA", "RSA", "X25519MLKEM768 hybrid KEM (or HQC for code-based diversity, draft) for encryption or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures"),
+                                            "ec" => ("EC", "ECDSA", "X25519MLKEM768 hybrid KEM (or HQC, draft) for encryption or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures"),
+                                            "dsa" => ("DSA", "DSA", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition"),
+                                            "ed25519" => ("Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition"),
+                                            "ed448" => ("Ed448", "Ed448", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition"),
                                             _ => return,
                                         };
                                     let mut f = make_finding(
@@ -514,7 +514,7 @@ impl_rule! {
                             _self.id(),
                             _self.severity(),
                             _self.cwe(),
-                            "Diffie-Hellman is quantum-vulnerable — migrate to X25519MLKEM768 hybrid KEM (FIPS 203)",
+                            "Diffie-Hellman is quantum-vulnerable — migrate to X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative",
                             node,
                             src,
                         );
@@ -529,7 +529,7 @@ impl_rule! {
                             _self.id(),
                             _self.severity(),
                             _self.cwe(),
-                            "ECDH is quantum-vulnerable — migrate to X25519MLKEM768 hybrid KEM (FIPS 203)",
+                            "ECDH is quantum-vulnerable — migrate to X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative",
                             node,
                             src,
                         );
@@ -553,7 +553,7 @@ impl_rule! {
                                             _self.severity(),
                                             _self.cwe(),
                                             &format!(
-                                                "{}('{}') uses a quantum-vulnerable signature algorithm — migrate to ML-DSA-65 (FIPS 204) with hybrid certificate chains during transition",
+                                                "{}('{}') uses a quantum-vulnerable signature algorithm — migrate to ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition",
                                                 func_name, inner
                                             ),
                                             node,

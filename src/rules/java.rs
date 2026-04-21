@@ -463,47 +463,57 @@ impl_rule! {
 /// Returns (algo_label, canonical_algo, default_replacement) or None if not PQ-vulnerable.
 /// `canonical_algo` is the normalized CBOM algorithm name (e.g. "RSA", "ECDSA", "DH").
 fn classify_java_pq_algo(algo: &str) -> Option<(&'static str, &'static str, &'static str)> {
-    // Exact matches for KeyPairGenerator / KeyAgreement / KeyFactory
+    // Exact matches for KeyPairGenerator / KeyAgreement / KeyFactory.
+    // PQ-safe algorithms (ML-KEM/ML-DSA/SLH-DSA and the draft FN-DSA / HQC
+    // standards) are intentionally absent from this table and therefore skipped.
     match algo {
-        "RSA" => return Some(("RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures (Java JEP 527)")),
-        "EC" | "ECDSA" => return Some(("ECDSA/EC", "ECDSA", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
-        "DSA" => return Some(("DSA", "DSA", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
-        "DH" | "DiffieHellman" => return Some(("DH", "DH", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
-        "ECDH" => return Some(("ECDH", "ECDH", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
-        "Ed25519" => return Some(("Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
-        "Ed448" => return Some(("Ed448", "Ed448", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
-        "EdDSA" => return Some(("EdDSA", "Ed25519", "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)")),
-        "X25519" => return Some(("X25519", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
-        "X448" => return Some(("X448", "X448", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
-        "XDH" => return Some(("XDH", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)")),
+        "RSA" => return Some(("RSA", "RSA", "X25519MLKEM768 hybrid KEM (or HQC for code-based diversity, draft) for encryption or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures (Java JEP 527)")),
+        "EC" | "ECDSA" => return Some(("ECDSA/EC", "ECDSA", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid cert chains (Java JEP 527)")),
+        "DSA" => return Some(("DSA", "DSA", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid cert chains (Java JEP 527)")),
+        "DH" | "DiffieHellman" => return Some(("DH", "DH", "X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative (Java JEP 527)")),
+        "ECDH" => return Some(("ECDH", "ECDH", "X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative (Java JEP 527)")),
+        "Ed25519" => return Some(("Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid cert chains (Java JEP 527)")),
+        "Ed448" => return Some(("Ed448", "Ed448", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid cert chains (Java JEP 527)")),
+        "EdDSA" => return Some(("EdDSA", "Ed25519", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid cert chains (Java JEP 527)")),
+        "X25519" => return Some(("X25519", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) (Java JEP 527)")),
+        "X448" => return Some(("X448", "X448", "X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) (Java JEP 527)")),
+        "XDH" => return Some(("XDH", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) (Java JEP 527)")),
         _ => {}
     }
     // Non-exact matches need case-insensitive comparison
     let upper = algo.to_uppercase();
     // RSA cipher modes: "RSA/ECB/PKCS1Padding", "RSA/ECB/OAEPWithSHA-256..."
     if upper.starts_with("RSA/") || upper.starts_with("RSA_") {
-        return Some(("RSA", "RSA", "X25519MLKEM768 hybrid KEM for encryption or ML-DSA-65 (FIPS 204) with hybrid cert chains for signatures (Java JEP 527)"));
+        return Some(("RSA", "RSA", "X25519MLKEM768 hybrid KEM (or HQC for code-based diversity, draft) for encryption or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures (Java JEP 527)"));
     }
-    // Signature combos: "SHA256withRSA", "SHA384withECDSA", "SHA256withDSA"
+    // Signature combos: "SHA256withRSA", "SHA384withECDSA", "SHA256withDSA".
+    // The PQ-safe exclusions below ensure future hybrid names containing the
+    // substring "DSA" (e.g. "ML-DSA", "SLH-DSA", "FN-DSA") or the code-based
+    // KEM "HQC" are not misclassified.
     if upper.contains("WITHRSA") {
         return Some((
             "RSA",
             "RSA",
-            "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)",
+            "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid cert chains (Java JEP 527)",
         ));
     }
     if upper.contains("WITHECDSA") {
         return Some((
             "ECDSA",
             "ECDSA",
-            "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)",
+            "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid cert chains (Java JEP 527)",
         ));
     }
-    if upper.contains("WITHDSA") && !upper.contains("ML-DSA") {
+    if upper.contains("WITHDSA")
+        && !upper.contains("ML-DSA")
+        && !upper.contains("SLH-DSA")
+        && !upper.contains("FN-DSA")
+        && !upper.contains("HQC")
+    {
         return Some((
             "DSA",
             "DSA",
-            "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)",
+            "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid cert chains (Java JEP 527)",
         ));
     }
     None
@@ -544,9 +554,9 @@ impl_rule! {
                                             None => return,
                                         };
                                         let replacement = if obj_text == "KeyAgreement" {
-                                            "X25519MLKEM768 hybrid KEM (FIPS 203, Java JEP 527)"
+                                            "X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative (Java JEP 527)"
                                         } else if obj_text == "Signature" {
-                                            "ML-DSA-65 (FIPS 204) with hybrid cert chains (Java JEP 527)"
+                                            "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid cert chains (Java JEP 527)"
                                         } else {
                                             replacement
                                         };
