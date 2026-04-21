@@ -206,14 +206,22 @@ impl TuiApp {
             LaunchMode::Scan => {
                 self.request.secrets = false;
                 self.request.diff = None;
+                self.request.pq_mode = false;
             }
             LaunchMode::Diff => {
                 self.request.secrets = false;
                 self.request.diff = Some(self.launch_diff_target.trim().to_string());
+                self.request.pq_mode = false;
             }
             LaunchMode::Secrets => {
                 self.request.secrets = true;
                 self.request.diff = None;
+                self.request.pq_mode = false;
+            }
+            LaunchMode::Pqc => {
+                self.request.secrets = false;
+                self.request.diff = None;
+                self.request.pq_mode = true;
             }
         }
     }
@@ -394,6 +402,10 @@ impl TuiApp {
             }
             KeyCode::Char('3') => {
                 self.launch_mode = LaunchMode::Secrets;
+                ControlFlow::Continue
+            }
+            KeyCode::Char('4') => {
+                self.launch_mode = LaunchMode::Pqc;
                 ControlFlow::Continue
             }
             KeyCode::Backspace if self.launch_mode == LaunchMode::Diff => {
@@ -937,12 +949,18 @@ impl TuiApp {
                 Constraint::Length(2),
                 Constraint::Length(2),
                 Constraint::Length(2),
+                Constraint::Length(2),
                 Constraint::Min(1),
             ])
             .split(selector_inner);
-        for (index, mode) in [LaunchMode::Scan, LaunchMode::Diff, LaunchMode::Secrets]
-            .into_iter()
-            .enumerate()
+        for (index, mode) in [
+            LaunchMode::Scan,
+            LaunchMode::Diff,
+            LaunchMode::Secrets,
+            LaunchMode::Pqc,
+        ]
+        .into_iter()
+        .enumerate()
         {
             self.draw_launch_card(frame, cards[index], mode);
         }
@@ -1000,6 +1018,12 @@ impl TuiApp {
                 "credentials and token leaks",
                 Color::Rgb(176, 112, 92),
                 "3",
+            ),
+            LaunchMode::Pqc => (
+                "Pqc",
+                "post-quantum crypto audit",
+                Color::Rgb(96, 168, 176),
+                "4",
             ),
         };
         let background = if selected { DETAIL_BG } else { LAUNCH_CARD_BG };
@@ -1392,7 +1416,7 @@ impl TuiApp {
         let left = Line::from(vec![
             footer_key_span("h/l"),
             Span::raw(" move  "),
-            footer_key_span("1-3"),
+            footer_key_span("1-4"),
             Span::raw(" jump  "),
             footer_key_span("Tab"),
             Span::raw(" cycle  "),
@@ -1410,6 +1434,7 @@ impl TuiApp {
                 LaunchMode::Scan => "scan",
                 LaunchMode::Diff => "diff",
                 LaunchMode::Secrets => "secrets",
+                LaunchMode::Pqc => "pqc",
             }),
             Span::raw("  "),
             footer_label_span("path"),
@@ -2110,11 +2135,14 @@ enum LaunchMode {
     Scan,
     Diff,
     Secrets,
+    Pqc,
 }
 
 impl LaunchMode {
     fn from_args(args: &TuiArgs) -> Self {
-        if args.secrets {
+        if args.pq_mode {
+            LaunchMode::Pqc
+        } else if args.secrets {
             LaunchMode::Secrets
         } else if args.diff.is_some() {
             LaunchMode::Diff
@@ -2127,15 +2155,17 @@ impl LaunchMode {
         match self {
             LaunchMode::Scan => LaunchMode::Diff,
             LaunchMode::Diff => LaunchMode::Secrets,
-            LaunchMode::Secrets => LaunchMode::Scan,
+            LaunchMode::Secrets => LaunchMode::Pqc,
+            LaunchMode::Pqc => LaunchMode::Scan,
         }
     }
 
     fn previous(self) -> Self {
         match self {
-            LaunchMode::Scan => LaunchMode::Secrets,
+            LaunchMode::Scan => LaunchMode::Pqc,
             LaunchMode::Diff => LaunchMode::Scan,
             LaunchMode::Secrets => LaunchMode::Diff,
+            LaunchMode::Pqc => LaunchMode::Secrets,
         }
     }
 }
@@ -2573,6 +2603,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.runtime_notices.push("stale notice".to_string());
 
@@ -2600,6 +2631,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
 
         assert!(app.show_launch);
@@ -2622,6 +2654,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.launch_mode = LaunchMode::Diff;
         app.launch_diff_target = "origin/main".to_string();
@@ -2650,6 +2683,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.launch_mode = LaunchMode::Diff;
 
@@ -2894,6 +2928,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.show_launch = false;
 
@@ -2949,6 +2984,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3007,6 +3043,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
 
         let flow = app.handle_key(KeyEvent::from(KeyCode::Tab));
@@ -3028,6 +3065,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3088,6 +3126,7 @@ mod tests {
             secrets: true,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.result = Some(TuiExecution {
             mode: TuiMode::Secrets,
@@ -3147,6 +3186,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.action_menu = Some(ActionMenu {
             actions: vec![TriageAction::AddToBaseline, TriageAction::IgnoreRuleInFile],
@@ -3176,6 +3216,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         let finding = Finding {
             rule_id: "js/no-command-injection".to_string(),
@@ -3343,6 +3384,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
 
         assert_eq!(app.session_min_confidence, 0.0);
@@ -3371,6 +3413,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
 
         assert_eq!(app.sort_mode, SortMode::SeverityDesc);
@@ -3395,6 +3438,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.show_launch = false;
 
@@ -3473,6 +3517,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         let base = Finding {
             rule_id: "js/rule".to_string(),
@@ -3542,6 +3587,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3600,6 +3646,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         let finding = Finding {
             rule_id: "js/rule".to_string(),
@@ -3662,6 +3709,7 @@ mod tests {
             secrets: false,
             explain: false,
             max_file_size: 1_048_576,
+            pq_mode: false,
         });
         let finding = Finding {
             rule_id: "js/rule".to_string(),
@@ -4411,6 +4459,13 @@ fn loading_copy(app: &TuiApp) -> (&'static str, String) {
                 short_path(&app.request.path)
             ),
         ),
+        LaunchMode::Pqc => (
+            "Scanning crypto",
+            format!(
+                "{}  post-quantum vulnerable algorithms",
+                short_path(&app.request.path)
+            ),
+        ),
     }
 }
 
@@ -4423,6 +4478,7 @@ fn loading_phase_labels(app: &TuiApp) -> [&'static str; 3] {
             "building diff view",
         ],
         LaunchMode::Secrets => ["walking files", "checking patterns", "redacting snippets"],
+        LaunchMode::Pqc => ["walking files", "filtering PQ rules", "assembling findings"],
     }
 }
 
@@ -4532,6 +4588,8 @@ fn request_mode_label(args: &TuiArgs) -> &'static str {
         "secrets"
     } else if args.diff.is_some() {
         "diff"
+    } else if args.pq_mode {
+        "pqc"
     } else {
         "scan"
     }
