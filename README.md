@@ -5,9 +5,11 @@
 <h1 align="center">foxguard</h1>
 
 <p align="center">
-  <strong>Post-quantum crypto audit, CBOM export, and fast security scanning in a single Rust binary.</strong>
+  <strong>Fast local security scanning in a single Rust binary.</strong>
   <br/>
-  PQ-vulnerable-crypto rules &middot; CNSA 2.0 deadline annotations &middot; CycloneDX 1.6 CBOM &middot; interactive TUI triage &middot; 170+ built-in rules across 10 languages &middot; cross-file taint tracking
+  scan &middot; diff &middot; secrets &middot; post-quantum crypto audit &middot; interactive TUI triage
+  <br/>
+  170+ built-in rules across 10 languages &middot; cross-file taint tracking &middot; Semgrep-compatible YAML bridge
   <br/><br/>
   <a href="https://foxguard.dev">foxguard.dev</a> &middot; <a href="https://www.npmjs.com/package/foxguard">npm</a> &middot; <a href="https://crates.io/crates/foxguard">crates.io</a>
 </p>
@@ -31,9 +33,9 @@
   <br/><em><code>foxguard tui .</code> — interactive triage with scan, diff, secrets, and PQ modes. <a href="https://foxguard.dev/blog/foxguard-0-7-0-tui-launch">Launch post</a>.</em>
 </p>
 
-NSA's CNSA 2.0 suite gives federal software-signing systems a hard 2030 deadline to stop using RSA and ECC; other categories trail by a few years. Cloudflare reports over half of human TLS traffic is already post-quantum on their edge ([Cloudflare, 2025](https://blog.cloudflare.com/pq-2025/)). Most source-code scanners (Semgrep, Snyk, Bandit, gosec) do not flag PQ-vulnerable crypto out of the box. GitHub's [advanced-security/cbom-action](https://github.com/advanced-security/cbom-action) and experimental CodeQL queries in `github/codeql` cover part of this, but require a separate action and research-grade queries.
+foxguard is a security scanner you can run on every save. A single Rust binary with 170+ built-in rules across 10 languages, cross-file taint tracking, Semgrep-compatible YAML loading, and four top-level modes — general scan, diff-against-branch, secrets, and post-quantum crypto audit — all reachable from the same CLI or interactive TUI.
 
-foxguard bakes PQ-vulnerable-crypto rules into the default scan, annotates findings with their CNSA 2.0 migration deadline, and can emit a CycloneDX 1.6 CBOM where every component ties back to a source location and severity — the scan and the inventory are one artifact. It is a security scanner you can run on every save.
+It is fast enough for pre-commit hooks and the `--changed` path runs in milliseconds on a real repo. Output formats: terminal, JSON, SARIF (for GitHub Code Scanning), and CycloneDX 1.6 CBOM.
 
 ## Quick start
 
@@ -55,18 +57,25 @@ npx foxguard secrets .                # leaked credentials and private keys
 npx foxguard init                     # install local pre-commit hook
 ```
 
-## What's in it
+## The four modes
+
+| Mode | Command | What it does |
+|------|---------|--------------|
+| **Scan** | `foxguard .` | General security scan. 170+ built-in rules across JavaScript/TypeScript, Python, Go, Ruby, Java, PHP, Rust, C#, Swift, Kotlin. Framework-aware checks for Express, Next.js, Django, Flask, FastAPI, Rails, Spring, Laravel, Gin, .NET, and iOS. Intraprocedural taint flow with cross-file summaries for Python, JS, Go, Kotlin. |
+| **Diff** | `foxguard diff main .` | Only findings that are new since a target branch. Pairs with `--changed` for staged/unstaged files only. |
+| **Secrets** | `foxguard secrets .` | AWS keys, GitHub/GitLab/Slack/Stripe tokens, private keys. Redacted output, baseline support. |
+| **PQC** | `foxguard pqc .` | Post-quantum crypto audit. PQ-vulnerable-crypto rules for 5 languages plus TLS/config files. Each finding annotated with its CNSA 2.0 migration deadline. FN-DSA (FIPS 206) and HQC awareness. |
+
+All four are reachable from `foxguard tui .` — interactive triage with review, baseline, ignore, severity overrides, confidence filter, and a CNSA 2.0 compliance panel.
+
+## Also in the box
 
 | Area | What you get |
 |------|--------------|
-| **Core scanner** | 170+ built-in rules across JavaScript/TypeScript, Python, Go, Ruby, Java, PHP, Rust, C#, Swift, Kotlin. Framework-aware checks for Express, Next.js, Django, Flask, FastAPI, Rails, Spring, Laravel, Gin, .NET, and iOS. |
-| **PQ crypto audit** | `pqc` subcommand, PQ-vulnerable-crypto rules for 5 languages plus TLS/config files, CNSA 2.0 deadline annotations, FN-DSA (FIPS 206) and HQC awareness, crypto-agility scoring. |
-| **CBOM export** | `--format cbom` produces CycloneDX 1.6 cryptographic BOM; each entry links to file, line, and severity. |
-| **Taint tracking** | Intraprocedural taint flow from framework sources (Flask, Django, FastAPI, Express, Next.js, Hono, Gin, net/http) into sinks like `eval`, `exec`, SQL execute, SSRF. Cross-file summaries for Python, JavaScript, Go, and Kotlin. |
-| **Secrets** | `foxguard secrets` detects AWS keys, GitHub/GitLab/Slack/Stripe tokens, private keys, with redacted output and baseline support. |
-| **TUI triage** | `foxguard tui` for scan / diff / secrets / pqc modes. Review, baseline, ignore, severity overrides, confidence filter, CNSA 2.0 compliance panel. |
-| **Compatibility** | Loads a Semgrep/OpenGrep YAML subset via `--rules`. Parity-tested in CI against the real `semgrep` CLI. See [`COMPATIBILITY.md`](./COMPATIBILITY.md). |
-| **Outputs** | Terminal, JSON, SARIF (GitHub Code Scanning), CycloneDX CBOM. |
+| **Outputs** | Terminal, JSON, SARIF (GitHub Code Scanning), CycloneDX 1.6 CBOM (`--format cbom`). Each CBOM component links back to a source location and severity. |
+| **Semgrep compatibility** | Loads a Semgrep/OpenGrep YAML subset via `--rules`. Parity-tested in CI against the real `semgrep` CLI. See [`COMPATIBILITY.md`](./COMPATIBILITY.md). |
+| **CI integration** | Native GitHub Action (below), SARIF upload, `--github-pr` for PR review comments, exit code on findings. |
+| **Config** | `.foxguard.yml` for per-rule enable/disable, severity overrides, entropy and taint-hop thresholds, per-rule options. |
 
 ## Post-quantum crypto audit
 
