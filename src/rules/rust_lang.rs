@@ -284,17 +284,17 @@ impl_rule! {
                     }
                     // No regex needed — check func_lower directly
                     let (algo, canonical_algo, replacement) = if func_lower.contains("ed25519") {
-                        ("Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition")
+                        ("Ed25519", "Ed25519", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures.")
                     } else if func_lower.contains("x25519") {
-                        ("X25519", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative")
+                        ("X25519", "X25519", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment.")
                     } else if func_lower.contains("rsa") {
-                        ("RSA", "RSA", "X25519MLKEM768 hybrid KEM (or HQC for code-based diversity) for encryption, or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures")
+                        ("RSA", "RSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC for code-based diversity) for encryption, ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures.")
                     } else if func_lower.contains("ecdsa") {
-                        ("ECDSA", "ECDSA", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition")
+                        ("ECDSA", "ECDSA", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures.")
                     } else if func_lower.contains("p256") || func_lower.contains("p384") || func_lower.contains("p521") || func_lower.contains("k256") {
-                        ("ECDH/ECDSA (elliptic curve)", "ECDSA", "X25519MLKEM768 hybrid KEM (or HQC for code-based diversity) or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains")
+                        ("ECDH/ECDSA (elliptic curve)", "ECDSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC for code-based diversity) or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures.")
                     } else if func_lower.contains("dsa") {
-                        ("DSA", "DSA", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition")
+                        ("DSA", "DSA", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures.")
                     } else {
                         return;
                     };
