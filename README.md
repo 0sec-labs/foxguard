@@ -78,13 +78,13 @@ foxguard pqc .
 
 ```
 src/tls/client.go
-  42:14  HIGH      go/pq-vulnerable-crypto-ecdh (CWE-1240)
+  42:14  HIGH      go/pq-vulnerable-crypto (CWE-327)
          ECDH P-256 is not post-quantum safe. CNSA 2.0 mandates ML-KEM-1024
          for NSS; ML-KEM-768 is the NIST default for commercial use.
          CNSA 2.0 deadline: traditional networking equipment, 2030.
 
 WARNING 1 PQ finding in 18 files (0.04s): 1 high, 0 medium, 0 low
-Migration level: 82% PQ-safe (18/22 crypto sites)
+CNSA 2.0 migration: at-risk (1 finding with an NSA transition deadline)
 ```
 
 As far as we can tell, foxguard is the first OSS source-code scanner that annotates each PQ finding with its CNSA 2.0 migration deadline. Remediation guidance surfaces ML-KEM-1024 / ML-DSA-87 for NSS workloads and ML-KEM-768 / ML-DSA-65 for commercial use, per the CNSA 2.0 algorithm table.
