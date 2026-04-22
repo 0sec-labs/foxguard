@@ -22,7 +22,7 @@ fn path_to_uri(path: &str) -> String {
     format!("file://{encoded}")
 }
 
-pub fn print_sarif(findings: &[Finding]) {
+pub fn build_sarif(findings: &[Finding]) -> serde_json::Value {
     let results: Vec<_> = findings
         .iter()
         .map(|f| {
@@ -107,8 +107,12 @@ pub fn print_sarif(findings: &[Finding]) {
         }]
     });
 
+    sarif
+}
+
+pub fn print_sarif(findings: &[Finding]) {
     println!(
         "{}",
-        serde_json::to_string_pretty(&sarif).expect("Failed to serialize SARIF")
+        serde_json::to_string_pretty(&build_sarif(findings)).expect("Failed to serialize SARIF")
     );
 }

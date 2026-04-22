@@ -231,7 +231,7 @@ fn deterministic_uuid(data: &str) -> String {
 ///
 /// Pure function: returns a `serde_json::Value`. Separated from [`print_cbom`]
 /// so tests can inspect the structured output without capturing stdout.
-fn build_cbom(findings: &[Finding]) -> (serde_json::Value, bool) {
+pub fn build_cbom(findings: &[Finding]) -> (serde_json::Value, bool) {
     // Group findings by crypto_algorithm
     let mut groups: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
     for f in findings {
