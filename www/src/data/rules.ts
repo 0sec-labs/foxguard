@@ -243,6 +243,11 @@ const dockerfileRules: Rule[] = [
   { id: 'config/dockerfile-insecure-tls-env', cwe: 'CWE-295', desc: 'Dockerfile disables TLS certificate verification via environment variable or insecure command', severity: 'high' },
 ];
 
+const manifestRules: Rule[] = [
+  { id: 'manifest/cargo-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm', severity: 'high' },
+  { id: 'manifest/pip-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm', severity: 'high' },
+];
+
 export const ruleGroups: RuleGroup[] = [
   { name: 'JavaScript / TypeScript', slug: 'js', rules: jsRules },
   { name: 'Python', slug: 'py', rules: pyRules },
@@ -258,7 +263,8 @@ export const ruleGroups: RuleGroup[] = [
   { name: 'Apache', slug: 'apacheconf', rules: apacheconfRules },
   { name: 'HAProxy', slug: 'haproxyconf', rules: haproxyconfRules },
   { name: 'Dockerfile', slug: 'dockerfile', rules: dockerfileRules },
+  { name: 'Manifest', slug: 'manifest', rules: manifestRules },
 ];
 
 export const totalRules = ruleGroups.reduce((sum, g) => sum + g.rules.length, 0);
-export const productLanguageCount = 14;
+export const productLanguageCount = 15;

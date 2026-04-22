@@ -1,0 +1,10 @@
+# App dependencies
+flask>=3.0
+cryptography>=41.0
+requests==2.31.0
+python-rsa==4.9
+-e .
+# SSH tooling
+fabric[ssh]>=3.0; python_version >= "3.8"
+git+https://github.com/example/internal-lib.git
+paramiko>=3.0

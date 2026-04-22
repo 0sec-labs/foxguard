@@ -1853,6 +1853,7 @@ fn map_taint_findings(
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         })
         .collect()
 }
@@ -2798,6 +2799,7 @@ pub fn run_py_taint_batched(
                 tags: vec![],
                 crypto_algorithm: None,
                 cnsa2_deadline: None,
+                dep_name: None,
             })
         })
         .collect()

@@ -116,6 +116,7 @@ fn detect_config_language(path: &Path) -> Option<Language> {
         "nginx.conf" => return Some(Language::NginxConf),
         "httpd.conf" | "apache2.conf" => return Some(Language::ApacheConf),
         "haproxy.cfg" => return Some(Language::HAProxyConf),
+        "Cargo.lock" | "requirements.txt" => return Some(Language::Manifest),
         _ => {}
     }
 
@@ -492,7 +493,8 @@ fn comment_markers(language: Language) -> &'static [&'static str] {
         Language::NginxConf
         | Language::ApacheConf
         | Language::HAProxyConf
-        | Language::Dockerfile => &["#"],
+        | Language::Dockerfile
+        | Language::Manifest => &["#"],
     }
 }
 

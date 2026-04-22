@@ -1238,6 +1238,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
 
         let (config_path, added) =
@@ -1303,6 +1304,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         }
     }
 

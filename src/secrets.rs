@@ -284,6 +284,7 @@ pub fn scan_paths_with_config_and_notices(
                         tags: vec![],
                         crypto_algorithm: None,
                         cnsa2_deadline: None,
+                        dep_name: None,
                     });
                 }
             }

@@ -18,7 +18,8 @@ pub fn parse_file(source: &str, language: Language) -> Option<tree_sitter::Tree>
         Language::NginxConf
         | Language::ApacheConf
         | Language::HAProxyConf
-        | Language::Dockerfile => tree_sitter_bash::LANGUAGE.into(),
+        | Language::Dockerfile
+        | Language::Manifest => tree_sitter_bash::LANGUAGE.into(),
     };
 
     parser.set_language(&ts_language).ok()?;

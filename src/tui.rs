@@ -2844,6 +2844,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
         let medium = Finding {
             severity: Severity::Medium,
@@ -2891,6 +2892,7 @@ mod tests {
             // picks up `"2030"` without disturbing the unrelated dataflow path.
             crypto_algorithm: Some("RSA".to_string()),
             cnsa2_deadline: Some("2030".to_string()),
+            dep_name: None,
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -2936,6 +2938,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
 
         assert_eq!(
@@ -2972,6 +2975,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
 
         let rendered = open_target_lines(&finding, OpenFocus::Finding)
@@ -3012,6 +3016,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
 
         let rendered = render_source_context(
@@ -3086,6 +3091,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
 
         assert_eq!(
@@ -3137,6 +3143,7 @@ mod tests {
                 tags: vec![],
                 crypto_algorithm: None,
                 cnsa2_deadline: None,
+                dep_name: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3218,6 +3225,7 @@ mod tests {
                 tags: vec![],
                 crypto_algorithm: None,
                 cnsa2_deadline: None,
+                dep_name: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3279,6 +3287,7 @@ mod tests {
                 tags: vec![],
                 crypto_algorithm: None,
                 cnsa2_deadline: None,
+                dep_name: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3366,6 +3375,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3410,6 +3420,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
 
         let rendered = dataflow_lines(&finding, OpenFocus::Source)
@@ -3453,6 +3464,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
 
         let rendered = render_source_context(
@@ -3599,6 +3611,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
         let low_conf_high_sev = Finding {
             severity: Severity::Critical,
@@ -3667,6 +3680,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
         let low_conf = Finding {
             confidence: 0.5,
@@ -3740,6 +3754,7 @@ mod tests {
                 tags: vec![],
                 crypto_algorithm: None,
                 cnsa2_deadline: None,
+                dep_name: None,
             }],
             files_scanned: 1,
             duration: Duration::from_secs(1),
@@ -3796,6 +3811,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3859,6 +3875,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         };
         app.result = Some(TuiExecution {
             mode: TuiMode::Scan,
@@ -3913,6 +3930,7 @@ mod tests {
             // to care whether the finding carries a CNSA 2.0 deadline.
             crypto_algorithm: Some("RSA".to_string()),
             cnsa2_deadline: Some("2030".to_string()),
+            dep_name: None,
         };
 
         let rendered = render_source_context(
@@ -3970,6 +3988,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: deadline.map(String::from),
+            dep_name: None,
         }
     }
 
@@ -4004,6 +4023,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm,
             cnsa2_deadline,
+            dep_name: None,
         };
         let mut app = tui_app_with_findings(vec![finding]);
         app.show_launch = false;
