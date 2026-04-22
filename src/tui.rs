@@ -520,15 +520,21 @@ impl TuiApp {
     }
 
     fn export_findings(&mut self, format: ExportFormat) {
+        self.export_findings_to(format, format.filename().as_ref());
+    }
+
+    fn export_findings_to(&mut self, format: ExportFormat, path: &std::path::Path) {
         let findings = match self.result.as_ref() {
             Some(r) => &r.findings,
             None => return,
         };
 
-        let filename = format.filename();
+        let finding_count = findings.len();
+        let mut empty_cbom = false;
         let content = match format {
             ExportFormat::Cbom => {
-                let (cbom, _) = crate::report::cbom::build_cbom(findings);
+                let (cbom, empty_but_findings_present) = crate::report::cbom::build_cbom(findings);
+                empty_cbom = empty_but_findings_present;
                 serde_json::to_string_pretty(&cbom).expect("Failed to serialize CBOM")
             }
             ExportFormat::Json => {
@@ -540,12 +546,18 @@ impl TuiApp {
             }
         };
 
-        match std::fs::write(filename, &content) {
+        if empty_cbom {
+            self.push_runtime_notice(
+                "CBOM export is empty: no cryptographic findings detected".to_string(),
+            );
+        }
+
+        match std::fs::write(path, &content) {
             Ok(()) => {
                 self.push_runtime_notice(format!(
                     "exported {} findings to {}",
-                    findings.len(),
-                    filename
+                    finding_count,
+                    path.display()
                 ));
             }
             Err(err) => {
@@ -1796,7 +1808,7 @@ impl TuiApp {
             return;
         };
 
-        let area = centered_rect(40, 20, frame.area());
+        let area = centered_rect(40, 40, frame.area());
         let items = menu
             .formats
             .iter()
@@ -4252,9 +4264,11 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Char('N')));
         assert!(app.show_compliance_panel);
         // …but the draw_body gate requires pq_mode, so the panel won't render.
-        let would_show =
-            app.show_compliance_panel && app.result.is_some() && app.request.pq_mode;
-        assert!(!would_show, "compliance panel should be hidden when pq_mode is false");
+        let would_show = app.show_compliance_panel && app.result.is_some() && app.request.pq_mode;
+        assert!(
+            !would_show,
+            "compliance panel should be hidden when pq_mode is false"
+        );
     }
 
     #[test]
@@ -4409,12 +4423,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut app = tui_app_with_findings(vec![cnsa_finding("pq/rsa", Some("2030"))]);
         app.show_launch = false;
-        // Change cwd to tempdir so export writes there.
-        let original = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(dir.path()).expect("set_current_dir");
-        app.export_findings(ExportFormat::Cbom);
-        std::env::set_current_dir(&original).expect("restore cwd");
         let path = dir.path().join("findings.cbom.json");
+        app.export_findings_to(ExportFormat::Cbom, &path);
         assert!(path.exists(), "CBOM file should exist");
         let content = std::fs::read_to_string(&path).expect("read");
         assert!(content.contains("CycloneDX"));
