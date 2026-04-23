@@ -176,13 +176,19 @@ impl Rule for CargoLockPqCrypto {
             return Vec::new();
         };
 
-        // Build name→indices and adjacency list
+        // Build lookup indices and adjacency list.
+        // name_to_indices: all indices for a given crate name (may have multiple versions).
+        // name_ver_to_index: exact (name, version) → index for version-qualified dep strings.
         let mut name_to_indices: HashMap<&str, Vec<usize>> = HashMap::new();
+        let mut name_ver_to_index: HashMap<(&str, &str), usize> = HashMap::new();
         let mut graph: Vec<Vec<usize>> = Vec::with_capacity(packages.len());
 
         for (i, pkg) in packages.iter().enumerate() {
             if let Some(name) = pkg.get("name").and_then(|n| n.as_str()) {
                 name_to_indices.entry(name).or_default().push(i);
+                if let Some(ver) = pkg.get("version").and_then(|v| v.as_str()) {
+                    name_ver_to_index.insert((name, ver), i);
+                }
             }
             graph.push(Vec::new());
         }
@@ -191,14 +197,22 @@ impl Rule for CargoLockPqCrypto {
         for (i, pkg) in packages.iter().enumerate() {
             if let Some(deps) = pkg.get("dependencies").and_then(|d| d.as_array()) {
                 for dep in deps {
-                    // Cargo.lock v4: "ring" or "windows-sys 0.61.2"
-                    let dep_name = match dep.as_str() {
-                        Some(s) => s.split_once(' ').map_or(s, |(name, _)| name),
+                    let dep_str = match dep.as_str() {
+                        Some(s) => s,
                         None => continue,
                     };
-                    if let Some(indices) = name_to_indices.get(dep_name) {
-                        for &j in indices {
+                    // Cargo.lock v4: "ring" (unqualified) or "syn 2.0.0" (version-qualified)
+                    if let Some((name, ver)) = dep_str.split_once(' ') {
+                        // Version-qualified: resolve to exact package
+                        if let Some(&j) = name_ver_to_index.get(&(name, ver)) {
                             graph[i].push(j);
+                        }
+                    } else {
+                        // Unqualified: name is unique in the lockfile
+                        if let Some(indices) = name_to_indices.get(dep_str) {
+                            for &j in indices {
+                                graph[i].push(j);
+                            }
                         }
                     }
                 }
@@ -673,9 +687,12 @@ version = \"0.9.0\"\n";
 
     #[test]
     fn cargo_multi_version_diamond() {
-        // Two versions of syn; app depends on "syn 2.0.0" (version-qualified).
-        // syn 2.0 depends on rsa, syn 1.0 does not.
-        // Only app should be flagged (through syn 2.0), not from syn 1.0.
+        // app depends on "syn 2.0.0" (version-qualified).
+        // syn 1.0 depends on ring (tier 2, 0.6).
+        // syn 2.0 depends on rsa (tier 1, 0.9).
+        // app's edge must resolve to syn 2.0 only — so app's finding
+        // should have RSA/0.9, not ring/0.6. If the version qualifier
+        // is ignored, app would also reach ring through syn 1.0.
         let src = "\
 [[package]]\n\
 name = \"app\"\n\
@@ -685,6 +702,7 @@ dependencies = [\"syn 2.0.0\"]\n\
 [[package]]\n\
 name = \"syn\"\n\
 version = \"1.0.0\"\n\
+dependencies = [\"ring\"]\n\
 \n\
 [[package]]\n\
 name = \"syn\"\n\
@@ -693,22 +711,20 @@ dependencies = [\"rsa\"]\n\
 \n\
 [[package]]\n\
 name = \"rsa\"\n\
-version = \"0.9.0\"\n";
+version = \"0.9.0\"\n\
+\n\
+[[package]]\n\
+name = \"ring\"\n\
+version = \"0.17.0\"\n";
         let tree = dummy_tree(src);
         let findings = CargoLockPqCrypto.check(src, &tree);
-        let names: Vec<_> = findings
+        let app_finding = findings
             .iter()
-            .filter_map(|f| f.dep_name.as_deref())
-            .collect();
-        assert!(names.contains(&"app"));
-        // syn 1.0 has no crypto deps — should not be flagged
-        // syn 2.0 depends on rsa — should be flagged
-        assert_eq!(
-            findings.len(),
-            2,
-            "app + syn 2.0 flagged, syn 1.0 clean: {:?}",
-            names
-        );
+            .find(|f| f.dep_name.as_deref() == Some("app"))
+            .expect("app should be flagged");
+        // app → syn 2.0 → rsa (0.9, RSA). NOT ring (0.6) from syn 1.0.
+        assert_eq!(app_finding.confidence, 0.9, "should reach rsa, not ring");
+        assert_eq!(app_finding.crypto_algorithm.as_deref(), Some("RSA"));
     }
 
     // ─── RequirementsTxtPqCrypto::check ────────────────────────────────
