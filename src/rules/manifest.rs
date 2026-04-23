@@ -435,6 +435,13 @@ fn extract_pip_package_name(s: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::parser::parse_file;
+
+    fn dummy_tree(source: &str) -> tree_sitter::Tree {
+        parse_file(source, Language::Manifest).expect("parse")
+    }
+
+    // ─── extract_pip_package_name ───────────────────────────────────────
 
     #[test]
     fn extract_pip_name_simple() {
@@ -458,5 +465,285 @@ mod tests {
             extract_pip_package_name("my.package_name>=1.0"),
             "my.package_name"
         );
+    }
+
+    // ─── find_name_version_offset ──────────────────────────────────────
+
+    #[test]
+    fn offset_finds_exact_pair() {
+        let src = "[[package]]\nname = \"foo\"\nversion = \"1.0\"\n";
+        let r = find_name_version_offset(src, "name = \"foo\"", "version = \"1.0\"");
+        assert_eq!(r, Some((12, 40)));
+    }
+
+    #[test]
+    fn offset_disambiguates_duplicate_crate_names() {
+        let src = "\
+[[package]]\nname = \"syn\"\nversion = \"1.0\"\n\n\
+[[package]]\nname = \"syn\"\nversion = \"2.0\"\n";
+        let r = find_name_version_offset(src, "name = \"syn\"", "version = \"2.0\"");
+        let (start, _) = r.unwrap();
+        // Should point at the second occurrence, not the first
+        assert!(start > 30, "expected second occurrence, got offset {start}");
+    }
+
+    #[test]
+    fn offset_returns_none_when_missing() {
+        let src = "[[package]]\nname = \"foo\"\nversion = \"1.0\"\n";
+        assert!(find_name_version_offset(src, "name = \"bar\"", "version = \"1.0\"").is_none());
+    }
+
+    #[test]
+    fn offset_handles_crlf() {
+        let src = "[[package]]\r\nname = \"foo\"\r\nversion = \"1.0\"\r\n";
+        let r = find_name_version_offset(src, "name = \"foo\"", "version = \"1.0\"");
+        assert!(r.is_some());
+    }
+
+    // ─── CargoLockPqCrypto::check ──────────────────────────────────────
+
+    const CARGO_LOCK_BASIC: &str = "\
+[[package]]\n\
+name = \"my-app\"\n\
+version = \"0.1.0\"\n\
+dependencies = [\"rsa\"]\n\
+\n\
+[[package]]\n\
+name = \"rsa\"\n\
+version = \"0.9.0\"\n";
+
+    #[test]
+    fn cargo_direct_seed_dep_flagged() {
+        let tree = dummy_tree(CARGO_LOCK_BASIC);
+        let findings = CargoLockPqCrypto.check(CARGO_LOCK_BASIC, &tree);
+        assert_eq!(findings.len(), 1);
+        let f = &findings[0];
+        assert_eq!(f.dep_name.as_deref(), Some("my-app"));
+        assert_eq!(f.crypto_algorithm.as_deref(), Some("RSA"));
+        assert_eq!(f.confidence, 0.9);
+        assert!(f.tags.contains(&"PQ".to_string()));
+    }
+
+    #[test]
+    fn cargo_seed_crate_itself_not_flagged() {
+        let tree = dummy_tree(CARGO_LOCK_BASIC);
+        let findings = CargoLockPqCrypto.check(CARGO_LOCK_BASIC, &tree);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.dep_name.as_deref() != Some("rsa")),
+            "seed crate rsa should not be flagged"
+        );
+    }
+
+    #[test]
+    fn cargo_transitive_dep_flagged() {
+        let src = "\
+[[package]]\n\
+name = \"app\"\n\
+version = \"0.1.0\"\n\
+dependencies = [\"mid\"]\n\
+\n\
+[[package]]\n\
+name = \"mid\"\n\
+version = \"1.0.0\"\n\
+dependencies = [\"p256\"]\n\
+\n\
+[[package]]\n\
+name = \"p256\"\n\
+version = \"0.13.0\"\n";
+        let tree = dummy_tree(src);
+        let findings = CargoLockPqCrypto.check(src, &tree);
+        // Both app (transitive) and mid (direct) should be flagged
+        assert_eq!(findings.len(), 2);
+        let names: Vec<_> = findings
+            .iter()
+            .filter_map(|f| f.dep_name.as_deref())
+            .collect();
+        assert!(names.contains(&"app"));
+        assert!(names.contains(&"mid"));
+        assert!(findings
+            .iter()
+            .all(|f| f.crypto_algorithm.as_deref() == Some("ECDSA")));
+    }
+
+    #[test]
+    fn cargo_bfs_stops_at_seed_no_duplicate_accumulation() {
+        // ring depends on openssl-sys — BFS should stop at ring, not also pick up openssl-sys
+        let src = "\
+[[package]]\n\
+name = \"app\"\n\
+version = \"0.1.0\"\n\
+dependencies = [\"ring\"]\n\
+\n\
+[[package]]\n\
+name = \"ring\"\n\
+version = \"0.17.0\"\n\
+dependencies = [\"openssl-sys\"]\n\
+\n\
+[[package]]\n\
+name = \"openssl-sys\"\n\
+version = \"0.9.0\"\n";
+        let tree = dummy_tree(src);
+        let findings = CargoLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        let f = &findings[0];
+        // Should report ring (first seed hit), not openssl-sys
+        assert!(
+            f.description.contains("ring"),
+            "description should mention ring: {}",
+            f.description
+        );
+    }
+
+    #[test]
+    fn cargo_tier1_beats_tier2_confidence() {
+        // If a crate reaches both rsa (0.9) and ring (0.6), rsa wins
+        let src = "\
+[[package]]\n\
+name = \"app\"\n\
+version = \"0.1.0\"\n\
+dependencies = [\"rsa\", \"ring\"]\n\
+\n\
+[[package]]\n\
+name = \"rsa\"\n\
+version = \"0.9.0\"\n\
+\n\
+[[package]]\n\
+name = \"ring\"\n\
+version = \"0.17.0\"\n";
+        let tree = dummy_tree(src);
+        let findings = CargoLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].confidence, 0.9);
+        assert_eq!(findings[0].crypto_algorithm.as_deref(), Some("RSA"));
+    }
+
+    #[test]
+    fn cargo_no_findings_for_clean_lockfile() {
+        let src = "\
+[[package]]\n\
+name = \"serde\"\n\
+version = \"1.0.0\"\n\
+\n\
+[[package]]\n\
+name = \"serde_json\"\n\
+version = \"1.0.0\"\n\
+dependencies = [\"serde\"]\n";
+        let tree = dummy_tree(src);
+        let findings = CargoLockPqCrypto.check(src, &tree);
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn cargo_invalid_toml_returns_empty() {
+        let src = "this is not valid toml {{{";
+        let tree = dummy_tree(src);
+        assert!(CargoLockPqCrypto.check(src, &tree).is_empty());
+    }
+
+    #[test]
+    fn cargo_version_qualified_dep_string() {
+        // Cargo.lock v4 format: "windows-sys 0.61.2"
+        let src = "\
+[[package]]\n\
+name = \"app\"\n\
+version = \"0.1.0\"\n\
+dependencies = [\"rsa 0.9.0\"]\n\
+\n\
+[[package]]\n\
+name = \"rsa\"\n\
+version = \"0.9.0\"\n";
+        let tree = dummy_tree(src);
+        let findings = CargoLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].dep_name.as_deref(), Some("app"));
+    }
+
+    // ─── RequirementsTxtPqCrypto::check ────────────────────────────────
+
+    #[test]
+    fn pip_detects_known_packages() {
+        let src = "python-rsa==4.9\nflask>=2.0\ncryptography>=41.0\n";
+        let tree = dummy_tree(src);
+        let findings = RequirementsTxtPqCrypto.check(src, &tree);
+        let names: Vec<_> = findings
+            .iter()
+            .filter_map(|f| f.dep_name.as_deref())
+            .collect();
+        assert!(names.contains(&"python-rsa"));
+        assert!(names.contains(&"cryptography"));
+        assert!(!names.contains(&"flask"));
+    }
+
+    #[test]
+    fn pip_high_confidence_has_algorithm() {
+        let src = "python-rsa==4.9\n";
+        let tree = dummy_tree(src);
+        let findings = RequirementsTxtPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].crypto_algorithm.as_deref(), Some("RSA"));
+        assert_eq!(findings[0].confidence, 0.95);
+    }
+
+    #[test]
+    fn pip_kitchen_sink_has_fix_suggestion() {
+        let src = "cryptography>=41.0\n";
+        let tree = dummy_tree(src);
+        let findings = RequirementsTxtPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].crypto_algorithm.is_none());
+        assert!(findings[0].fix_suggestion.is_some());
+    }
+
+    #[test]
+    fn pip_skips_comments_and_options() {
+        let src = "# a comment\n-r other.txt\n-e .\ngit+https://example.com/foo.git\nhttps://example.com/bar.whl\n";
+        let tree = dummy_tree(src);
+        assert!(RequirementsTxtPqCrypto.check(src, &tree).is_empty());
+    }
+
+    #[test]
+    fn pip_strips_environment_markers() {
+        let src = "paramiko>=2.0; python_version >= \"3.8\"\n";
+        let tree = dummy_tree(src);
+        let findings = RequirementsTxtPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].dep_name.as_deref(), Some("paramiko"));
+    }
+
+    #[test]
+    fn pip_strips_extras() {
+        let src = "fabric[ssh]>=3.0\n";
+        let tree = dummy_tree(src);
+        let findings = RequirementsTxtPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].dep_name.as_deref(), Some("fabric"));
+    }
+
+    #[test]
+    fn pip_pep503_normalization() {
+        // PyNaCl with mixed case and no version spec
+        let src = "PyNaCl\n";
+        let tree = dummy_tree(src);
+        let findings = RequirementsTxtPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].dep_name.as_deref(), Some("PyNaCl"));
+    }
+
+    #[test]
+    fn pip_crlf_offsets_correct() {
+        let src = "flask>=2.0\r\npython-rsa==4.9\r\nrequests>=2.28\r\n";
+        let tree = dummy_tree(src);
+        let findings = RequirementsTxtPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        // python-rsa starts after "flask>=2.0\r\n" = 12 bytes
+        assert_eq!(findings[0].line, 2);
+    }
+
+    #[test]
+    fn pip_empty_input_returns_empty() {
+        let tree = dummy_tree("");
+        assert!(RequirementsTxtPqCrypto.check("", &tree).is_empty());
     }
 }
