@@ -493,23 +493,9 @@ fn validate_rules_path(rules: Option<&str>) -> Result<(), String> {
 
 /// Returns `true` if the rule ID belongs to the PQ audit rule set.
 fn is_pq_rule_id(id: &str) -> bool {
-    matches!(
-        id,
-        "py/pq-vulnerable-crypto"
-            | "js/pq-vulnerable-crypto"
-            | "go/pq-vulnerable-crypto"
-            | "java/pq-vulnerable-crypto"
-            | "rs/pq-vulnerable-crypto"
-            | "config/nginx-pq-vulnerable-tls"
-            | "config/apache-pq-vulnerable-tls"
-            | "config/haproxy-pq-vulnerable-tls"
-            | "config/dockerfile-insecure-tls-env"
-            | "manifest/cargo-pq-vulnerable-dep"
-            | "manifest/pip-pq-vulnerable-dep"
-            | "py/hardcoded-crypto-algorithm"
-            | "js/hardcoded-crypto-algorithm"
-            | "java/hardcoded-crypto-algorithm"
-    )
+    id.contains("pq-vulnerable")
+        || id.contains("hardcoded-crypto-algorithm")
+        || id == "config/dockerfile-insecure-tls-env"
 }
 
 fn collect_changed_targets(path: &str, changed: bool) -> Result<Option<Vec<PathBuf>>, String> {
