@@ -4172,6 +4172,35 @@ mod tests {
         // not a severity signal, and should read as muted.
         assert!(!span.style.add_modifier.contains(Modifier::BOLD));
     }
+
+    #[test]
+    fn list_item_includes_crypto_algorithm_chip_in_title_spans() {
+        let app = app_with_single_finding(Some("RSA".to_string()), Some("2033".to_string()));
+        let finding = &app.result.as_ref().unwrap().findings[0];
+        let item = list_item(finding, None);
+        // ListItem.content is pub(crate), so we use Debug output to verify
+        let debug = format!("{:?}", item);
+        assert!(
+            debug.contains(" RSA "),
+            "expected RSA chip in list row: {debug}"
+        );
+        assert!(
+            debug.contains("on_magenta"),
+            "expected magenta background for algorithm chip: {debug}"
+        );
+    }
+
+    #[test]
+    fn list_item_omits_crypto_chip_when_none() {
+        let app = app_with_single_finding(None, None);
+        let finding = &app.result.as_ref().unwrap().findings[0];
+        let item = list_item(finding, None);
+        let debug = format!("{:?}", item);
+        assert!(
+            !debug.contains("on_magenta"),
+            "non-crypto finding should not have algorithm chip: {debug}"
+        );
+    }
 }
 
 fn append_diff_summary(spans: &mut Vec<Span<'static>>, summary: &DiffSummary) {
@@ -4214,6 +4243,15 @@ fn list_item(finding: &Finding, review_state: Option<ReviewState>) -> ListItem<'
                 .bg(Color::Cyan)
                 .fg(Color::Black)
                 .add_modifier(Modifier::BOLD),
+        ));
+    }
+    // Crypto algorithm chip — dimmed magenta, sits between tags and deadline.
+    // Only PQ findings carry this field; non-crypto rows are untouched.
+    if let Some(algo) = finding.crypto_algorithm.as_ref() {
+        title_spans.push(Span::raw(" "));
+        title_spans.push(Span::styled(
+            format!(" {} ", algo),
+            Style::default().bg(Color::Magenta).fg(Color::White),
         ));
     }
     // CNSA 2.0 deadline chip — muted amber to read as advisory, not urgent.
