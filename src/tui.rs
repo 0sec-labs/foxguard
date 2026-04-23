@@ -4174,20 +4174,12 @@ mod tests {
     }
 
     #[test]
-    fn list_item_includes_crypto_algorithm_chip_in_title_spans() {
-        let app = app_with_single_finding(Some("RSA".to_string()), Some("2033".to_string()));
-        let finding = &app.result.as_ref().unwrap().findings[0];
-        let item = list_item(finding, None);
-        // ListItem.content is pub(crate), so we use Debug output to verify
-        let debug = format!("{:?}", item);
-        assert!(
-            debug.contains(" RSA "),
-            "expected RSA chip in list row: {debug}"
-        );
-        assert!(
-            debug.contains("on_magenta"),
-            "expected magenta background for algorithm chip: {debug}"
-        );
+    fn crypto_algorithm_chip_renders_padded_name_with_magenta_background() {
+        let span = crypto_algorithm_chip_span("RSA");
+        assert_eq!(span.content, " RSA ");
+        assert_eq!(span.style.bg, Some(Color::Magenta));
+        assert_eq!(span.style.fg, Some(Color::White));
+        assert!(!span.style.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -4197,7 +4189,7 @@ mod tests {
         let item = list_item(finding, None);
         let debug = format!("{:?}", item);
         assert!(
-            !debug.contains("on_magenta"),
+            !debug.contains("Magenta"),
             "non-crypto finding should not have algorithm chip: {debug}"
         );
     }
@@ -4245,14 +4237,11 @@ fn list_item(finding: &Finding, review_state: Option<ReviewState>) -> ListItem<'
                 .add_modifier(Modifier::BOLD),
         ));
     }
-    // Crypto algorithm chip — dimmed magenta, sits between tags and deadline.
+    // Crypto algorithm chip — magenta, sits between tags and deadline.
     // Only PQ findings carry this field; non-crypto rows are untouched.
     if let Some(algo) = finding.crypto_algorithm.as_ref() {
         title_spans.push(Span::raw(" "));
-        title_spans.push(Span::styled(
-            format!(" {} ", algo),
-            Style::default().bg(Color::Magenta).fg(Color::White),
-        ));
+        title_spans.push(crypto_algorithm_chip_span(algo));
     }
     // CNSA 2.0 deadline chip — muted amber to read as advisory, not urgent.
     // Only rendered when `cnsa2_deadline` is `Some`, so non-crypto findings
@@ -4283,6 +4272,16 @@ fn cnsa2_deadline_chip_span(deadline: &str) -> Span<'static> {
     Span::styled(
         format!(" {} ", deadline),
         Style::default().bg(Color::Yellow).fg(Color::Black),
+    )
+}
+
+/// Compact algorithm chip for findings that carry `crypto_algorithm`.
+/// Magenta on white, no bold — metadata context, same reasoning as the
+/// deadline chip.
+fn crypto_algorithm_chip_span(algo: &str) -> Span<'static> {
+    Span::styled(
+        format!(" {} ", algo),
+        Style::default().bg(Color::Magenta).fg(Color::White),
     )
 }
 
