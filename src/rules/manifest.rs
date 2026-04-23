@@ -5,60 +5,74 @@ use crate::rules::common::make_finding_from_offsets;
 use crate::rules::Rule;
 use crate::{Finding, Language, Severity};
 
-// ─── Cargo.lock seed database ───────────────────────────────────────────────
+// ─── Shared seed entry ─────────────────────────────────────────────────────
 
-struct CrateEntry {
+struct SeedEntry {
     name: &'static str,
     crypto_algorithm: Option<&'static str>,
     confidence: f32,
 }
 
+const MANIFEST_PQ_CWE: &str = "CWE-327";
+const MANIFEST_PQ_DESC: &str = "Dependency uses quantum-vulnerable cryptographic algorithm";
+const MANIFEST_PQ_DEADLINE: &str = "2033";
+
+/// Apply shared PQ fields to a manifest finding.
+fn finalize_manifest_finding(f: &mut Finding, entry: &SeedEntry, pkg_name: &str) {
+    f.tags = vec!["PQ".into()];
+    f.crypto_algorithm = entry.crypto_algorithm.map(String::from);
+    f.confidence = entry.confidence;
+    f.dep_name = Some(pkg_name.to_string());
+}
+
+// ─── Cargo.lock seed database ───────────────────────────────────────────────
+
 /// Tier 1: single-purpose crypto crates with a known algorithm.
 /// Tier 2: multi-algorithm crates where we can't attribute one algorithm.
-const CARGO_SEEDS: &[CrateEntry] = &[
+const CARGO_SEEDS: &[SeedEntry] = &[
     // Tier 1 — confidence 0.9, specific algorithm
-    CrateEntry {
+    SeedEntry {
         name: "rsa",
         crypto_algorithm: Some("RSA"),
         confidence: 0.9,
     },
-    CrateEntry {
+    SeedEntry {
         name: "p256",
         crypto_algorithm: Some("ECDSA"),
         confidence: 0.9,
     },
-    CrateEntry {
+    SeedEntry {
         name: "p384",
         crypto_algorithm: Some("ECDSA"),
         confidence: 0.9,
     },
-    CrateEntry {
+    SeedEntry {
         name: "ed25519-dalek",
         crypto_algorithm: Some("Ed25519"),
         confidence: 0.9,
     },
-    CrateEntry {
+    SeedEntry {
         name: "x25519-dalek",
         crypto_algorithm: Some("X25519"),
         confidence: 0.9,
     },
-    CrateEntry {
+    SeedEntry {
         name: "ecdsa",
         crypto_algorithm: Some("ECDSA"),
         confidence: 0.9,
     },
     // Tier 2 — confidence 0.6, mixed algorithms
-    CrateEntry {
+    SeedEntry {
         name: "ring",
         crypto_algorithm: None,
         confidence: 0.6,
     },
-    CrateEntry {
+    SeedEntry {
         name: "openssl-sys",
         crypto_algorithm: None,
         confidence: 0.6,
     },
-    CrateEntry {
+    SeedEntry {
         name: "aws-lc-rs",
         crypto_algorithm: None,
         confidence: 0.6,
@@ -67,64 +81,58 @@ const CARGO_SEEDS: &[CrateEntry] = &[
 
 // ─── requirements.txt curated list ──────────────────────────────────────────
 
-struct PipEntry {
-    name: &'static str,
-    crypto_algorithm: Option<&'static str>,
-    confidence: f32,
-}
-
-const PIP_PACKAGES: &[PipEntry] = &[
-    PipEntry {
+const PIP_PACKAGES: &[SeedEntry] = &[
+    SeedEntry {
         name: "python-rsa",
         crypto_algorithm: Some("RSA"),
         confidence: 0.95,
     },
-    PipEntry {
+    SeedEntry {
         name: "rsa",
         crypto_algorithm: Some("RSA"),
         confidence: 0.95,
     },
-    PipEntry {
+    SeedEntry {
         name: "ecdsa",
         crypto_algorithm: Some("ECDSA"),
         confidence: 0.95,
     },
-    PipEntry {
+    SeedEntry {
         name: "ed25519",
         crypto_algorithm: Some("Ed25519"),
         confidence: 0.95,
     },
-    PipEntry {
+    SeedEntry {
         name: "pynacl",
         crypto_algorithm: Some("Ed25519"),
         confidence: 0.9,
     },
-    PipEntry {
+    SeedEntry {
         name: "paramiko",
         crypto_algorithm: Some("RSA"),
         confidence: 0.8,
     },
-    PipEntry {
+    SeedEntry {
         name: "fabric",
         crypto_algorithm: Some("RSA"),
         confidence: 0.7,
     },
-    PipEntry {
+    SeedEntry {
         name: "cryptography",
         crypto_algorithm: None,
         confidence: 0.5,
     },
-    PipEntry {
+    SeedEntry {
         name: "pyopenssl",
         crypto_algorithm: None,
         confidence: 0.5,
     },
-    PipEntry {
+    SeedEntry {
         name: "pycryptodome",
         crypto_algorithm: None,
         confidence: 0.5,
     },
-    PipEntry {
+    SeedEntry {
         name: "pycryptodomex",
         crypto_algorithm: None,
         confidence: 0.5,
@@ -143,16 +151,16 @@ impl Rule for CargoLockPqCrypto {
         Severity::High
     }
     fn cwe(&self) -> Option<&str> {
-        Some("CWE-327")
+        Some(MANIFEST_PQ_CWE)
     }
     fn description(&self) -> &str {
-        "Dependency uses quantum-vulnerable cryptographic algorithm"
+        MANIFEST_PQ_DESC
     }
     fn language(&self) -> Language {
         Language::Manifest
     }
     fn cnsa2_deadline(&self) -> Option<&'static str> {
-        Some("2033")
+        Some(MANIFEST_PQ_DEADLINE)
     }
 
     fn applies_to_path(&self, path: &Path) -> bool {
@@ -198,8 +206,7 @@ impl Rule for CargoLockPqCrypto {
         }
 
         // Build seed index
-        let seed_map: HashMap<&str, &CrateEntry> =
-            CARGO_SEEDS.iter().map(|e| (e.name, e)).collect();
+        let seed_map: HashMap<&str, &SeedEntry> = CARGO_SEEDS.iter().map(|e| (e.name, e)).collect();
 
         let mut findings = Vec::new();
 
@@ -220,21 +227,24 @@ impl Rule for CargoLockPqCrypto {
             visited.insert(i);
             queue.push_back(i);
 
-            let mut reached_seeds: Vec<&CrateEntry> = Vec::new();
+            let mut reached_seeds: Vec<&SeedEntry> = Vec::new();
 
             while let Some(node) = queue.pop_front() {
                 for &neighbor in &graph[node] {
                     if !visited.insert(neighbor) {
                         continue;
                     }
-                    let neighbor_name = packages[neighbor]
-                        .get("name")
-                        .and_then(|n| n.as_str())
-                        .unwrap_or("");
+                    let Some(neighbor_name) =
+                        packages[neighbor].get("name").and_then(|n| n.as_str())
+                    else {
+                        queue.push_back(neighbor);
+                        continue;
+                    };
                     if let Some(entry) = seed_map.get(neighbor_name) {
                         reached_seeds.push(entry);
+                    } else {
+                        queue.push_back(neighbor);
                     }
-                    queue.push_back(neighbor);
                 }
             }
 
@@ -243,15 +253,17 @@ impl Rule for CargoLockPqCrypto {
             }
 
             // Pick the highest-confidence seed
-            reached_seeds.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
-            let best = reached_seeds[0];
+            reached_seeds.sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
+            let best = reached_seeds.first().unwrap();
 
             // Find byte offset of this package entry.
             // Use name+version to disambiguate duplicate crate names (e.g. syn 1.x vs 2.x).
             let version_str = pkg.get("version").and_then(|v| v.as_str()).unwrap_or("?");
             let name_pat = format!("name = \"{}\"", pkg_name);
             let ver_pat = format!("version = \"{}\"", version_str);
-            let (offset, end) = find_name_version_offset(source, &name_pat, &ver_pat);
+            let Some((offset, end)) = find_name_version_offset(source, &name_pat, &ver_pat) else {
+                continue;
+            };
 
             let desc = if let Some(algo) = best.crypto_algorithm {
                 format!(
@@ -274,10 +286,7 @@ impl Rule for CargoLockPqCrypto {
                 offset,
                 end,
             );
-            f.tags = vec!["PQ".into()];
-            f.crypto_algorithm = best.crypto_algorithm.map(String::from);
-            f.confidence = best.confidence;
-            f.dep_name = Some(pkg_name.to_string());
+            finalize_manifest_finding(&mut f, best, pkg_name);
             findings.push(f);
         }
 
@@ -297,16 +306,16 @@ impl Rule for RequirementsTxtPqCrypto {
         Severity::High
     }
     fn cwe(&self) -> Option<&str> {
-        Some("CWE-327")
+        Some(MANIFEST_PQ_CWE)
     }
     fn description(&self) -> &str {
-        "Dependency uses quantum-vulnerable cryptographic algorithm"
+        MANIFEST_PQ_DESC
     }
     fn language(&self) -> Language {
         Language::Manifest
     }
     fn cnsa2_deadline(&self) -> Option<&'static str> {
-        Some("2033")
+        Some(MANIFEST_PQ_DEADLINE)
     }
 
     fn applies_to_path(&self, path: &Path) -> bool {
@@ -314,7 +323,7 @@ impl Rule for RequirementsTxtPqCrypto {
     }
 
     fn check(&self, source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
-        let pip_map: HashMap<String, &PipEntry> = PIP_PACKAGES
+        let pip_map: HashMap<String, &SeedEntry> = PIP_PACKAGES
             .iter()
             .map(|e| (e.name.to_lowercase().replace(['_', '.'], "-"), e))
             .collect();
@@ -326,9 +335,11 @@ impl Rule for RequirementsTxtPqCrypto {
             let line_start = byte_offset;
             let line_end = byte_offset + line.len();
             // Account for actual line ending: \r\n (2 bytes) or \n (1 byte)
-            byte_offset = if source.as_bytes().get(line_end) == Some(&b'\r') {
+            byte_offset = if source.as_bytes().get(line_end) == Some(&b'\r')
+                && source.as_bytes().get(line_end + 1) == Some(&b'\n')
+            {
                 line_end + 2
-            } else if source.as_bytes().get(line_end) == Some(&b'\n') {
+            } else if matches!(source.as_bytes().get(line_end), Some(&b'\r') | Some(&b'\n')) {
                 line_end + 1
             } else {
                 line_end // EOF, no trailing newline
@@ -376,10 +387,7 @@ impl Rule for RequirementsTxtPqCrypto {
                     line_start,
                     line_end,
                 );
-                f.tags = vec!["PQ".into()];
-                f.crypto_algorithm = entry.crypto_algorithm.map(String::from);
-                f.confidence = entry.confidence;
-                f.dep_name = Some(pkg_name.to_string());
+                finalize_manifest_finding(&mut f, entry, pkg_name);
 
                 if entry.crypto_algorithm.is_none() {
                     f.fix_suggestion = Some(format!(
@@ -398,24 +406,21 @@ impl Rule for RequirementsTxtPqCrypto {
 
 /// Find the byte offset of a `name = "X"` / `version = "Y"` pair in source.
 /// Handles both LF and CRLF line endings and disambiguates duplicate crate names.
-fn find_name_version_offset(source: &str, name_pat: &str, ver_pat: &str) -> (usize, usize) {
+fn find_name_version_offset(source: &str, name_pat: &str, ver_pat: &str) -> Option<(usize, usize)> {
     let mut search_from = 0;
     while let Some(pos) = source[search_from..].find(name_pat) {
         let abs = search_from + pos;
-        // Check if the version line follows (with LF or CRLF)
         let after_name = abs + name_pat.len();
         let rest = &source[after_name..];
         if rest.starts_with('\n') || rest.starts_with("\r\n") {
             let ver_start = after_name + if rest.starts_with("\r\n") { 2 } else { 1 };
             if source[ver_start..].starts_with(ver_pat) {
-                return (abs, ver_start + ver_pat.len());
+                return Some((abs, ver_start + ver_pat.len()));
             }
         }
         search_from = abs + 1;
     }
-    // Fallback: return first occurrence of name pattern
-    let offset = source.find(name_pat).unwrap_or(0);
-    (offset, offset + name_pat.len())
+    None
 }
 
 /// Extract the package name from a requirements.txt line (before version
