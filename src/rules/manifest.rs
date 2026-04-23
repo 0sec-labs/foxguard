@@ -494,6 +494,13 @@ mod tests {
     }
 
     #[test]
+    fn offset_returns_none_when_version_doesnt_follow() {
+        // name exists but version on next line doesn't match — should return None
+        let src = "[[package]]\nname = \"foo\"\nversion = \"1.0\"\n";
+        assert!(find_name_version_offset(src, "name = \"foo\"", "version = \"9.9\"").is_none());
+    }
+
+    #[test]
     fn offset_handles_crlf() {
         let src = "[[package]]\r\nname = \"foo\"\r\nversion = \"1.0\"\r\n";
         let r = find_name_version_offset(src, "name = \"foo\"", "version = \"1.0\"");
@@ -568,8 +575,11 @@ version = \"0.13.0\"\n";
     }
 
     #[test]
-    fn cargo_bfs_stops_at_seed_no_duplicate_accumulation() {
-        // ring depends on openssl-sys — BFS should stop at ring, not also pick up openssl-sys
+    fn cargo_bfs_stops_at_seed_no_traversal_through() {
+        // app → ring (tier 2, 0.6) → rsa (tier 1, 0.9)
+        // If BFS traverses through ring, it finds rsa (0.9) which wins.
+        // If BFS correctly stops at ring, only ring (0.6) is found.
+        // The confidence value distinguishes the two behaviors.
         let src = "\
 [[package]]\n\
 name = \"app\"\n\
@@ -579,20 +589,21 @@ dependencies = [\"ring\"]\n\
 [[package]]\n\
 name = \"ring\"\n\
 version = \"0.17.0\"\n\
-dependencies = [\"openssl-sys\"]\n\
+dependencies = [\"rsa\"]\n\
 \n\
 [[package]]\n\
-name = \"openssl-sys\"\n\
+name = \"rsa\"\n\
 version = \"0.9.0\"\n";
         let tree = dummy_tree(src);
         let findings = CargoLockPqCrypto.check(src, &tree);
         assert_eq!(findings.len(), 1);
         let f = &findings[0];
-        // Should report ring (first seed hit), not openssl-sys
+        assert_eq!(f.dep_name.as_deref(), Some("app"));
+        // BFS stopped at ring — did NOT traverse through to rsa
+        assert_eq!(f.confidence, 0.6, "should be ring's 0.6, not rsa's 0.9");
         assert!(
-            f.description.contains("ring"),
-            "description should mention ring: {}",
-            f.description
+            f.crypto_algorithm.is_none(),
+            "ring has no specific algorithm"
         );
     }
 
@@ -658,6 +669,46 @@ version = \"0.9.0\"\n";
         let findings = CargoLockPqCrypto.check(src, &tree);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].dep_name.as_deref(), Some("app"));
+    }
+
+    #[test]
+    fn cargo_multi_version_diamond() {
+        // Two versions of syn; app depends on "syn 2.0.0" (version-qualified).
+        // syn 2.0 depends on rsa, syn 1.0 does not.
+        // Only app should be flagged (through syn 2.0), not from syn 1.0.
+        let src = "\
+[[package]]\n\
+name = \"app\"\n\
+version = \"0.1.0\"\n\
+dependencies = [\"syn 2.0.0\"]\n\
+\n\
+[[package]]\n\
+name = \"syn\"\n\
+version = \"1.0.0\"\n\
+\n\
+[[package]]\n\
+name = \"syn\"\n\
+version = \"2.0.0\"\n\
+dependencies = [\"rsa\"]\n\
+\n\
+[[package]]\n\
+name = \"rsa\"\n\
+version = \"0.9.0\"\n";
+        let tree = dummy_tree(src);
+        let findings = CargoLockPqCrypto.check(src, &tree);
+        let names: Vec<_> = findings
+            .iter()
+            .filter_map(|f| f.dep_name.as_deref())
+            .collect();
+        assert!(names.contains(&"app"));
+        // syn 1.0 has no crypto deps — should not be flagged
+        // syn 2.0 depends on rsa — should be flagged
+        assert_eq!(
+            findings.len(),
+            2,
+            "app + syn 2.0 flagged, syn 1.0 clean: {:?}",
+            names
+        );
     }
 
     // ─── RequirementsTxtPqCrypto::check ────────────────────────────────
@@ -739,6 +790,9 @@ version = \"0.9.0\"\n";
         assert_eq!(findings.len(), 1);
         // python-rsa starts after "flask>=2.0\r\n" = 12 bytes
         assert_eq!(findings[0].line, 2);
+        assert_eq!(findings[0].column, 1);
+        // end_column should span "python-rsa==4.9" (15 chars) → column 16
+        assert_eq!(findings[0].end_column, 16);
     }
 
     #[test]
