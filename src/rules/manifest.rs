@@ -688,11 +688,11 @@ version = \"0.9.0\"\n";
     #[test]
     fn cargo_multi_version_diamond() {
         // app depends on "syn 2.0.0" (version-qualified).
-        // syn 1.0 depends on ring (tier 2, 0.6).
-        // syn 2.0 depends on rsa (tier 1, 0.9).
-        // app's edge must resolve to syn 2.0 only — so app's finding
-        // should have RSA/0.9, not ring/0.6. If the version qualifier
-        // is ignored, app would also reach ring through syn 1.0.
+        // syn 1.0 depends on rsa (tier 1, 0.9) — the WRONG version.
+        // syn 2.0 depends on ring (tier 2, 0.6) — the RIGHT version.
+        // If version qualifier is ignored (old bug), app fans out to both
+        // syn versions and reaches rsa (0.9), which wins the sort.
+        // Correct resolution: app → syn 2.0 → ring only → confidence 0.6.
         let src = "\
 [[package]]\n\
 name = \"app\"\n\
@@ -702,12 +702,12 @@ dependencies = [\"syn 2.0.0\"]\n\
 [[package]]\n\
 name = \"syn\"\n\
 version = \"1.0.0\"\n\
-dependencies = [\"ring\"]\n\
+dependencies = [\"rsa\"]\n\
 \n\
 [[package]]\n\
 name = \"syn\"\n\
 version = \"2.0.0\"\n\
-dependencies = [\"rsa\"]\n\
+dependencies = [\"ring\"]\n\
 \n\
 [[package]]\n\
 name = \"rsa\"\n\
@@ -722,9 +722,9 @@ version = \"0.17.0\"\n";
             .iter()
             .find(|f| f.dep_name.as_deref() == Some("app"))
             .expect("app should be flagged");
-        // app → syn 2.0 → rsa (0.9, RSA). NOT ring (0.6) from syn 1.0.
-        assert_eq!(app_finding.confidence, 0.9, "should reach rsa, not ring");
-        assert_eq!(app_finding.crypto_algorithm.as_deref(), Some("RSA"));
+        // app → syn 2.0 → ring (0.6). Old bug would also reach rsa (0.9).
+        assert_eq!(app_finding.confidence, 0.6, "should reach ring, not rsa");
+        assert!(app_finding.crypto_algorithm.is_none());
     }
 
     // ─── RequirementsTxtPqCrypto::check ────────────────────────────────
