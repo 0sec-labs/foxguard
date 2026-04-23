@@ -3729,12 +3729,7 @@ mod config_files {
     #[test]
     fn cargo_lock_pq_finds_transitive_rsa_dep() {
         let output = foxguard_cmd()
-            .args([
-                "pqc",
-                "tests/fixtures/deps/Cargo.lock",
-                "-f",
-                "json",
-            ])
+            .args(["pqc", "tests/fixtures/deps/Cargo.lock", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
 
@@ -3782,12 +3777,7 @@ mod config_files {
     #[test]
     fn requirements_txt_pq_finds_crypto_deps() {
         let output = foxguard_cmd()
-            .args([
-                "pqc",
-                "tests/fixtures/deps/requirements.txt",
-                "-f",
-                "json",
-            ])
+            .args(["pqc", "tests/fixtures/deps/requirements.txt", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
 
@@ -3807,7 +3797,10 @@ mod config_files {
 
         // Should NOT find: flask, requests, -e ., git+...
         assert!(!dep_names.contains(&"flask"), "flask is not a crypto lib");
-        assert!(!dep_names.contains(&"requests"), "requests is not a crypto lib");
+        assert!(
+            !dep_names.contains(&"requests"),
+            "requests is not a crypto lib"
+        );
 
         // python-rsa should have high confidence and RSA algorithm
         let python_rsa = findings
@@ -3824,7 +3817,10 @@ mod config_files {
             .unwrap();
         assert!(crypto["crypto_algorithm"].is_null());
         assert_eq!(crypto["confidence"], 0.5);
-        assert!(crypto["fix_suggestion"].as_str().unwrap().contains("PQ-safe"));
+        assert!(crypto["fix_suggestion"]
+            .as_str()
+            .unwrap()
+            .contains("PQ-safe"));
     }
 
     #[test]
