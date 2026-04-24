@@ -140,11 +140,6 @@ const PIP_PACKAGES: &[SeedEntry] = &[
         confidence: 0.8,
     },
     SeedEntry {
-        name: "fabric",
-        crypto_algorithm: None,
-        confidence: 0.7,
-    },
-    SeedEntry {
         name: "pyjwt",
         crypto_algorithm: None,
         confidence: 0.8,
@@ -163,6 +158,11 @@ const PIP_PACKAGES: &[SeedEntry] = &[
         name: "jwcrypto",
         crypto_algorithm: None,
         confidence: 0.8,
+    },
+    SeedEntry {
+        name: "fabric",
+        crypto_algorithm: None,
+        confidence: 0.7,
     },
     SeedEntry {
         name: "m2crypto",
