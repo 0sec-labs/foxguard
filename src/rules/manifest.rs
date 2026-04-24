@@ -293,7 +293,7 @@ impl Rule for CargoLockPqCrypto {
             visited.insert(i);
             queue.push_back(i);
 
-            let mut reached_seeds: Vec<&SeedEntry> = Vec::new();
+            let mut reached_seeds: HashMap<&str, &SeedEntry> = HashMap::new();
 
             while let Some(node) = queue.pop_front() {
                 for &neighbor in &graph[node] {
@@ -307,7 +307,14 @@ impl Rule for CargoLockPqCrypto {
                         continue;
                     };
                     if let Some(entry) = seed_map.get(neighbor_name) {
-                        reached_seeds.push(entry);
+                        reached_seeds
+                            .entry(entry.name)
+                            .and_modify(|existing| {
+                                if entry.confidence > existing.confidence {
+                                    *existing = entry;
+                                }
+                            })
+                            .or_insert(entry);
                     } else {
                         queue.push_back(neighbor);
                     }
@@ -320,7 +327,7 @@ impl Rule for CargoLockPqCrypto {
 
             // Pick the highest-confidence seed
             let best = reached_seeds
-                .iter()
+                .values()
                 .max_by(|a, b| a.confidence.total_cmp(&b.confidence))
                 .unwrap();
 
