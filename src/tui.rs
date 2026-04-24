@@ -4172,6 +4172,27 @@ mod tests {
         // not a severity signal, and should read as muted.
         assert!(!span.style.add_modifier.contains(Modifier::BOLD));
     }
+
+    #[test]
+    fn crypto_algorithm_chip_renders_padded_name_with_magenta_background() {
+        let span = crypto_algorithm_chip_span("RSA");
+        assert_eq!(span.content, " RSA ");
+        assert_eq!(span.style.bg, Some(Color::Magenta));
+        assert_eq!(span.style.fg, Some(Color::White));
+        assert!(!span.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn list_item_omits_crypto_chip_when_none() {
+        let app = app_with_single_finding(None, None);
+        let finding = &app.result.as_ref().unwrap().findings[0];
+        let item = list_item(finding, None);
+        let debug = format!("{:?}", item);
+        assert!(
+            !debug.contains("Magenta"),
+            "non-crypto finding should not have algorithm chip: {debug}"
+        );
+    }
 }
 
 fn append_diff_summary(spans: &mut Vec<Span<'static>>, summary: &DiffSummary) {
@@ -4216,6 +4237,12 @@ fn list_item(finding: &Finding, review_state: Option<ReviewState>) -> ListItem<'
                 .add_modifier(Modifier::BOLD),
         ));
     }
+    // Crypto algorithm chip — magenta, sits between tags and deadline.
+    // Only PQ findings carry this field; non-crypto rows are untouched.
+    if let Some(algo) = finding.crypto_algorithm.as_ref() {
+        title_spans.push(Span::raw(" "));
+        title_spans.push(crypto_algorithm_chip_span(algo));
+    }
     // CNSA 2.0 deadline chip — muted amber to read as advisory, not urgent.
     // Only rendered when `cnsa2_deadline` is `Some`, so non-crypto findings
     // keep their existing row layout untouched.
@@ -4245,6 +4272,16 @@ fn cnsa2_deadline_chip_span(deadline: &str) -> Span<'static> {
     Span::styled(
         format!(" {} ", deadline),
         Style::default().bg(Color::Yellow).fg(Color::Black),
+    )
+}
+
+/// Compact algorithm chip for findings that carry `crypto_algorithm`.
+/// Magenta on white, no bold — metadata context, same reasoning as the
+/// deadline chip.
+fn crypto_algorithm_chip_span(algo: &str) -> Span<'static> {
+    Span::styled(
+        format!(" {} ", algo),
+        Style::default().bg(Color::Magenta).fg(Color::White),
     )
 }
 
