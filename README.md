@@ -5,9 +5,11 @@
 <h1 align="center">foxguard</h1>
 
 <p align="center">
-  <strong>A security scanner as fast as a linter, written in Rust.</strong>
+  <strong>Fast local security scanning in a single Rust binary.</strong>
   <br/>
-  170+ built-in rules &middot; 10 languages &middot; cross-file taint tracking for Python, JavaScript, Go, Kotlin &middot; single Rust binary &middot; Semgrep-compatible YAML bridge
+  scan &middot; diff &middot; secrets &middot; post-quantum crypto audit &middot; interactive TUI triage
+  <br/>
+  170+ built-in rules across 10 languages &middot; cross-file taint tracking &middot; Semgrep-compatible YAML bridge
   <br/><br/>
   <a href="https://foxguard.dev">foxguard.dev</a> &middot; <a href="https://www.npmjs.com/package/foxguard">npm</a> &middot; <a href="https://crates.io/crates/foxguard">crates.io</a>
 </p>
@@ -23,82 +25,82 @@
 ---
 
 <p align="center">
-  <img src="assets/demo.gif" alt="foxguard vs semgrep side-by-side" width="640" />
+  <img src="assets/demo.gif" alt="foxguard scan demo" width="640" />
 </p>
 
 <p align="center">
   <img src="assets/tui-findings.png" alt="foxguard TUI findings list with source/sink dataflow" width="640" />
-  <br/><em>v0.7.0 adds <code>foxguard tui .</code> for interactive triage — scan, diff, and secrets modes with in-app review, baseline, and ignore actions. <a href="https://foxguard.dev/blog/foxguard-0-7-0-tui-launch">Read the launch post</a>.</em>
+  <br/><em><code>foxguard tui .</code> — interactive triage with scan, diff, secrets, and PQ modes. <a href="https://foxguard.dev/blog/foxguard-0-7-0-tui-launch">Launch post</a>.</em>
 </p>
 
-Security scanners are slow. 10 seconds, 30 seconds, sometimes a minute. So developers don't run them locally — they get pushed to CI, findings pile up in PRs, and nobody looks at them.
+foxguard is a security scanner you can run on every save. A single Rust binary with 170+ built-in rules across 10 languages, cross-file taint tracking, Semgrep-compatible YAML loading, and four top-level modes — general scan, diff-against-branch, secrets, and post-quantum crypto audit — all reachable from the same CLI or interactive TUI.
 
-foxguard fixes this by being fast enough that you never notice it's there. Same scan, 0.03 seconds instead of 10. You can run it on every save, every commit, every push. Security feedback becomes instant.
-
-```sh
-npx foxguard .
-```
-
-```
-src/auth/login.js
-  14:5  CRITICAL  js/no-sql-injection (CWE-89)
-        SQL query built with template literal interpolation
-
-src/utils/config.py
-   7:1  HIGH      py/no-hardcoded-secret (CWE-798)
-        Hardcoded secret in 'api_key'
-
-WARNING 2 issues in 5 files (0.03s): 1 critical, 1 high, 0 medium, 0 low
-```
-
-## Why foxguard
-
-- **Fast enough to leave on.** foxguard is built for local runs, pre-commit hooks, and changed-file scans instead of “security later in CI”.
-- **Useful before you tune anything.** The default value is built-in framework-aware rules for common real-world mistakes across JavaScript, Python, Go, Ruby, Java, PHP, Rust, C#, and Swift.
-- **Taint tracking built in.** Intraprocedural taint flow from framework sources (Flask, Django, FastAPI, Express, Next.js, Hono, Gin, net/http) into sinks like `eval`, `exec`, SQL execute, and SSRF — no rule writing required.
-- **Adoption-friendly.** If you already have Semgrep/OpenGrep YAML, foxguard can load a focused compatible subset on top of built-ins so migration is incremental instead of all-or-nothing.
-
-See [docs/precision.md](docs/precision.md) for per-rule precision tiers and our false-positive methodology.
+It is fast enough for pre-commit hooks and the `--changed` path runs in milliseconds on a real repo. Output formats: terminal, JSON, SARIF (for GitHub Code Scanning), and CycloneDX 1.6 CBOM.
 
 ## Quick start
 
 ```sh
 npx foxguard .                        # scan the repo
-npx foxguard tui .                    # interactive findings explorer
-npx foxguard --changed .              # only modified files
-npx foxguard diff main .              # new findings vs target branch
-npx foxguard tui --diff main .        # interactive diff triage
-npx foxguard --explain .              # show source-to-sink dataflow traces
-npx foxguard --quiet .                # exit code only (CI mode)
-npx foxguard --github-pr 42 .         # post findings as PR review comments
-npx foxguard secrets .                # leaked credentials and private keys
-npx foxguard tui --secrets .          # interactive secrets triage
-npx foxguard init                     # install a local pre-commit hook
+npx foxguard pqc .                    # post-quantum crypto audit
+npx foxguard --format cbom .          # CycloneDX 1.6 CBOM for compliance
+npx foxguard tui .                    # interactive triage (scan, diff, secrets, pqc)
 ```
 
-## What it is
+Other common flags:
 
-Rust + [tree-sitter](https://tree-sitter.github.io/) for AST parsing + [rayon](https://github.com/rayon-rs/rayon) for parallelism. No JVM startup, no Python interpreter, no network calls, no rule download step. Just a native binary that reads your files and reports findings.
+```sh
+npx foxguard --changed .              # only modified files
+npx foxguard diff main .              # new findings vs target branch
+npx foxguard --explain .              # source-to-sink dataflow traces
+npx foxguard --github-pr 42 .         # post as PR review comments
+npx foxguard secrets .                # leaked credentials and private keys
+npx foxguard init                     # install local pre-commit hook
+```
 
-170+ built-in rules across 10 languages. SQL injection, XSS, SSRF, command injection, hardcoded secrets, weak crypto, unsafe deserialization, log injection, and framework-specific checks for Express, Django, Rails, Spring, Laravel, Gin, Kotlin, .NET, and iOS. Python, JavaScript, and Go also get a taint engine that follows untrusted input from framework request sources into dangerous sinks — including **across file boundaries** via two-pass function summary analysis.
+## The four modes
 
-Also scans for leaked credentials (AWS keys, GitHub/GitLab/Slack/Stripe tokens, private keys) with redacted output. Loads Semgrep-compatible YAML rules with `--rules` if you have existing ones. Outputs terminal, JSON, or SARIF for GitHub Code Scanning.
+| Mode | Command | What it does |
+|------|---------|--------------|
+| **Scan** | `foxguard .` | General security scan. 170+ built-in rules across JavaScript/TypeScript, Python, Go, Ruby, Java, PHP, Rust, C#, Swift, Kotlin. Framework-aware checks for Express, Next.js, Django, Flask, FastAPI, Rails, Spring, Laravel, Gin, .NET, and iOS. Intraprocedural taint flow with cross-file summaries for Python, JS, Go, Kotlin. |
+| **Diff** | `foxguard diff main .` | Only findings that are new since a target branch. Pairs with `--changed` for staged/unstaged files only. |
+| **Secrets** | `foxguard secrets .` | AWS keys, GitHub/GitLab/Slack/Stripe tokens, private keys. Redacted output, baseline support. |
+| **PQC** | `foxguard pqc .` | Post-quantum crypto audit. PQ-vulnerable-crypto rules for 5 languages plus TLS/config files. Each finding annotated with its CNSA 2.0 migration deadline. FN-DSA (FIPS 206) and HQC awareness. |
 
-`foxguard diff main` shows only new findings introduced by your changes. `--github-pr` posts findings as inline review comments on pull requests. `--explain` shows source-to-sink dataflow traces with fix suggestions.
+All four are reachable from `foxguard tui .` — interactive triage with review, baseline, ignore, severity overrides, confidence filter, and a CNSA 2.0 compliance panel.
 
-foxguard dogfoods itself — it scans its own Rust source in CI on every push.
+## Also in the box
 
-## What it is not
+| Area | What you get |
+|------|--------------|
+| **Outputs** | Terminal, JSON, SARIF (GitHub Code Scanning), CycloneDX 1.6 CBOM (`--format cbom`). Each CBOM component links back to a source location and severity. |
+| **Semgrep compatibility** | Loads a Semgrep/OpenGrep YAML subset via `--rules`. Parity-tested in CI against the real `semgrep` CLI. See [`COMPATIBILITY.md`](./COMPATIBILITY.md). |
+| **CI integration** | Native GitHub Action (below), SARIF upload, `--github-pr` for PR review comments, exit code on findings. |
+| **Config** | `.foxguard.yml` for per-rule enable/disable, severity overrides, entropy and taint-hop thresholds, per-rule options. |
 
-foxguard is not trying to be a full Semgrep or OpenGrep drop-in replacement.
+## Post-quantum crypto audit
 
-The intended model is:
+NSA's CNSA 2.0 suite ([CSI, Sept 2022; FAQ v2.1, Dec 2024](https://media.defense.gov/2022/Sep/07/2003071836/-1/-1/0/CSI_CNSA_2.0_FAQ_.PDF)) mandates exclusive use of ML-KEM and ML-DSA by specific deadlines. Software and firmware signing are the earliest class — exclusive use by 2030 — with traditional networking, operating systems, and web browsers trailing through 2033. Every finding foxguard produces for a PQ-vulnerable algorithm carries the matching deadline in the output.
 
-- **foxguard built-ins** for fast local feedback
-- **Semgrep/OpenGrep-compatible YAML subset** as an adoption bridge
-- **Semgrep/OpenGrep themselves** when you need the broadest external rule ecosystem
+```sh
+foxguard pqc .
+```
 
-That boundary is deliberate. It keeps local scans fast, rule support understandable, and compatibility claims testable.
+```
+src/tls/client.go
+  42:14  HIGH      go/pq-vulnerable-crypto (CWE-327)
+         ECDH P-256 is not post-quantum safe. CNSA 2.0 mandates ML-KEM-1024
+         for NSS; ML-KEM-768 is the NIST default for commercial use.
+         CNSA 2.0 deadline: traditional networking equipment, 2030.
+
+WARNING 1 PQ finding in 18 files (0.04s): 1 high, 0 medium, 0 low
+CNSA 2.0 migration: at-risk (1 finding with an NSA transition deadline)
+```
+
+As far as we can tell, foxguard is the first OSS source-code scanner that annotates each PQ finding with its CNSA 2.0 migration deadline. Remediation guidance surfaces ML-KEM-1024 / ML-DSA-87 for NSS workloads and ML-KEM-768 / ML-DSA-65 for commercial use, per the CNSA 2.0 algorithm table.
+
+**CBOM export.** `foxguard --format cbom .` produces a CycloneDX 1.6 cryptographic bill of materials. Each component (algorithm, key, protocol) is linked back to the source location that emitted it and the severity of any finding on that site. IBM's [CBOMkit](https://github.com/IBM/cbomkit), [sonar-cryptography](https://github.com/IBM/sonar-cryptography), and [cdxgen](https://github.com/CycloneDX/cdxgen) all ship CBOM output; foxguard's contribution is that the scan and the inventory are one artifact, so `crypto-agility` scoring and CNSA 2.0 annotations travel with the BOM.
+
+**Rule coverage.** PQ-vulnerable-crypto rules ship for Python, JavaScript/TypeScript, Go, Java, and Rust; TLS configuration files (OpenSSL, nginx, Apache) are also scanned for non-PQ cipher suites.
 
 ## Install
 
@@ -108,54 +110,9 @@ curl -fsSL https://foxguard.dev/install.sh | sh          # prebuilt binary (macO
 cargo install foxguard                                   # crates.io
 ```
 
-**Editor:** Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=peaktwilight.foxguard) — scans on save, shows findings as underlines.
+**Editor:** [VS Code extension](https://marketplace.visualstudio.com/items?itemName=peaktwilight.foxguard) scans on save and shows findings inline.
 
-## Benchmarks
-
-Reproducible benchmarks via `./benchmarks/run.sh`. Numbers below are from a local run on an Apple Silicon laptop with `foxguard 0.6.2`, `semgrep 1.156.0`, `tokei 14.0.0`. LoC is counted by tokei, scoped to the target language only (no vendored HTML/JSON).
-
-| Repo | Files | LoC | foxguard | Semgrep | Speedup |
-|------|-------|-----|----------|---------|---------|
-| express (framework) | 141 | 15,804 JS | **0.276s** | 6.09s | **22x** |
-| flask (framework) | 83 | 14,029 Py | **0.333s** | 6.51s | **20x** |
-| gin (framework) | 99 | 17,669 Go | **0.499s** | 4.95s | **10x** |
-| **sentry (production)** | **8,539** | **1,291,606 Py** | **35.4s** | 194.0s | **5x** |
-
-Sentry is the larger-corpus stress target: a real production monitoring platform at ~1.3M Python LoC. foxguard scans the whole tree in ~35 seconds; Semgrep with `--config auto` takes ~3m14s. The framework benchmarks (express/flask/gin) are sub-second. Run on one machine — your numbers will vary; reproduce locally with `./benchmarks/run.sh`.
-
-To reproduce: `./benchmarks/run.sh` (add `BENCH_SKIP_LARGE=1` for the quick matrix only). See `benchmarks/README.md` for the reproduction recipe.
-
-## Built-in coverage
-
-| Language | Rules | Frameworks |
-|----------|-------|------------|
-| JavaScript/TypeScript | 27 | Express, Next.js, Hono, Fastify, SvelteKit, Deno, JWT, XSS, taint |
-| Python | 32 | Flask, Django, FastAPI, CSRF, session, intraprocedural taint |
-| Go | 11 | Gin, net/http, TLS, intraprocedural taint |
-| Ruby | 10 | Rails, mass assignment, CSRF |
-| Java | 10 | Spring, XXE, deserialization |
-| PHP | 10 | Laravel, file inclusion, unserialize |
-| Rust | 10 | unsafe, transmute, TLS |
-| C# | 10 | .NET, LDAP, XXE, CORS |
-| Swift | 10 | iOS keychain, transport, WebView |
-
-## Why teams adopt it
-
-- **Changed-file scans** for tight local loops
-- **Repo-local baselines** so legacy findings stop blocking adoption
-- **Secrets scanning** alongside code scanning
-- **JSON and SARIF output** for CI and GitHub Code Scanning
-- **Semgrep/OpenGrep YAML subset** when teams already have rule investments
-
-## Compatibility
-
-Load existing Semgrep/OpenGrep YAML rules with `--rules`. Supports `pattern`, `pattern-regex`, `pattern-either`, `pattern-not`, `pattern-inside`, `pattern-not-inside`, `metavariable-regex`, and `paths.include/exclude`. This supported subset is parity-tested in CI against the real `semgrep` CLI. See [`COMPATIBILITY.md`](./COMPATIBILITY.md).
-
-foxguard does not currently aim to support multiple unrelated external rule formats. The compatibility target is the focused Semgrep/OpenGrep YAML subset above.
-
-## CI Integration
-
-### GitHub Actions
+## CI integration
 
 ```yaml
 name: Security
@@ -175,23 +132,9 @@ jobs:
           upload-sarif: "true"
 ```
 
-Findings show up in **Security → Code Scanning**.
+Findings land in **Security → Code Scanning**. On any other CI: `npx foxguard@latest --format sarif . > out.sarif`. For Claude Code and other editor hooks, see [docs/claude-code-integration.md](docs/claude-code-integration.md).
 
-### Any CI
-
-```sh
-npx foxguard@latest .                             # scan
-npx foxguard@latest --format sarif . > out.sarif   # SARIF output
-npx foxguard@latest secrets .                      # secrets
-```
-
-### Badge
-
-```md
-[![foxguard](https://img.shields.io/badge/foxguard-clean-3fb950?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSI+PHBhdGggZD0iTTggOEwyMCAyOEwzMiAyMEw0NCAyOEw1NiA4TDUyIDMyTDQ0IDQ0TDM2IDUySDI4TDIwIDQ0TDEyIDMyTDggOFoiIGZpbGw9IiNGNTlFMEIiIGZpbGwtb3BhY2l0eT0iMC4zIiBzdHJva2U9IiNGNTlFMEIiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjI0IiBjeT0iMzIiIHI9IjIuNSIgZmlsbD0iI0Y1OUUwQiIvPjxjaXJjbGUgY3g9IjQwIiBjeT0iMzIiIHI9IjIuNSIgZmlsbD0iI0Y1OUUwQiIvPjwvc3ZnPg==)](https://github.com/PwnKit-Labs/foxguard)
-```
-
-### Pre-commit
+**Pre-commit:**
 
 ```yaml
 repos:
@@ -199,29 +142,24 @@ repos:
     rev: v0.7.1
     hooks:
       - id: foxguard
-      - id: foxguard-secrets
 ```
 
-Or run `foxguard init` to install a git hook directly.
+## Benchmarks
 
-### Claude Code
+Reproducible via `./benchmarks/run.sh`. Numbers below are from a local run on an Apple Silicon laptop with `foxguard 0.6.2`, `semgrep 1.156.0`, `tokei 14.0.0`. LoC is counted by tokei, scoped to the target language only (no vendored HTML/JSON).
 
-Add foxguard as a pre-commit hook in your Claude Code configuration to automatically scan agent-written code before each commit:
+| Repo | Files | LoC | foxguard | Semgrep | Speedup |
+|------|-------|-----|----------|---------|---------|
+| express (framework) | 141 | 15,804 JS | **0.276s** | 6.09s | **22x** |
+| flask (framework) | 83 | 14,029 Py | **0.333s** | 6.51s | **20x** |
+| gin (framework) | 99 | 17,669 Go | **0.499s** | 4.95s | **10x** |
+| **sentry (production)** | **8,539** | **1,291,606 Py** | **35.4s** | 194.0s | **5x** |
 
-```json
-{
-  "hooks": {
-    "PreCommit": [
-      {
-        "command": "npx foxguard --changed --severity high .",
-        "description": "foxguard security scan"
-      }
-    ]
-  }
-}
-```
+Sentry is the stress target at ~1.3M Python LoC: foxguard scans the whole tree in ~35 seconds; Semgrep with `--config auto` takes ~3m14s. Run on one machine — reproduce locally with `./benchmarks/run.sh` (add `BENCH_SKIP_LARGE=1` to skip sentry). See [`benchmarks/README.md`](./benchmarks/README.md) for the reproduction recipe.
 
-Add this to `.claude/settings.json` in your project root. Claude Code will run foxguard before every commit and block if high-severity findings are detected, giving the agent a chance to fix issues before they land. See [docs/claude-code-integration.md](docs/claude-code-integration.md) for the full setup guide.
+## Rules
+
+170+ built-in rules across 10 languages, covering SQL injection, XSS, SSRF, command injection, hardcoded secrets, weak crypto, unsafe deserialization, log injection, PQ-vulnerable crypto, crypto-agility, and framework-specific checks. Full per-rule coverage, precision tiers, and false-positive methodology live in [docs/precision.md](docs/precision.md) and on the [rules page at foxguard.dev](https://foxguard.dev/rules).
 
 ## Configuration
 
@@ -231,63 +169,21 @@ foxguard auto-discovers `.foxguard.yml` from the scan path upward.
 scan:
   baseline: .foxguard/baseline.json
   rules: ./semgrep-rules
-
-  # Optional allowlist: when non-empty, ONLY these rule IDs run.
-  # enable_rules:
-  #   - py/no-sql-injection
-  #   - py/no-xss
-  # Denylist: these rule IDs never run (applied after enable_rules).
-  # disable_rules:
-  #   - py/no-eval
-  #   - js/no-function-constructor
+  enable_rules: [py/no-sql-injection, py/no-xss]   # optional allowlist
+  disable_rules: [py/no-eval]                      # optional denylist
+  severity_overrides:
+    py/no-hardcoded-secret: medium
 
 secrets:
   baseline: .foxguard/secrets-baseline.json
-  exclude_paths:
-    - fixtures
-    - testdata
-  ignore_rules:
-    - secret/github-token
+  exclude_paths: [fixtures, testdata]
 ```
 
-### Per-rule enable / disable
+Inline suppressions work with `// foxguard: ignore[rule-id]` or `# foxguard: ignore` on the target line. Full configuration reference, rule options, and threshold tuning are documented at [foxguard.dev/docs](https://foxguard.dev/docs).
 
-`scan.enable_rules` and `scan.disable_rules` filter the active rule set globally.
+## What it is not
 
-- If `enable_rules` is present, only those rule IDs run (allowlist).
-- `disable_rules` always applies — listed IDs are removed.
-- If both are present, `enable_rules` is applied first (intersection with
-  the registry), then `disable_rules` subtracts any IDs you want
-  explicitly off. So a rule listed in both lists is disabled.
-- Unknown rule IDs are reported on stderr once at scan start and the scan
-  continues.
-
-For path-scoped suppression of a specific rule on a specific file, use
-`scan.ignore_rules` instead.
-
-## Suppressing Deliberate Findings
-
-For one-off, deliberate code patterns, you can suppress code-scan findings inline instead of
-adding them to a baseline.
-
-```js
-// Ignore the next code line for one rule
-// foxguard: ignore[js/no-ssrf]
-fileContent = fetch(userControlledUrl);
-
-// Ignore the current line for one rule
-fileContent = fetch(userControlledUrl); // foxguard: ignore[js/no-ssrf]
-
-// Ignore the current line for all foxguard code findings
-eval(userInput); // foxguard: ignore
-```
-
-Notes:
-
-- Inline ignores currently apply to code scanning findings, not `foxguard secrets`.
-- Rule IDs must match exactly, for example `js/no-ssrf`.
-- Comment-only directives apply to the next non-empty, non-comment code line.
-- Supported comment styles are `//` and `#`, depending on the language.
+foxguard is not a full Semgrep or OpenGrep drop-in replacement. The intended model: foxguard built-ins for fast local feedback, a Semgrep/OpenGrep-compatible YAML subset as an adoption bridge, and Semgrep/OpenGrep themselves when you need the broadest external rule ecosystem. That boundary keeps local scans fast and compatibility claims testable.
 
 ## Contributing
 
@@ -295,7 +191,8 @@ Adding a rule is one struct implementing a trait. See [`CONTRIBUTING.md`](./CONT
 
 ## Part of PwnKit Labs
 
-**Open-source adversarial security for the agentic AI era.** foxguard is one piece of the open-source PwnKit Labs stack:
+**Open-source adversarial security for the agentic AI era.** foxguard is one piece of the stack:
+
 - **[pwnkit](https://github.com/PwnKit-Labs/pwnkit)** — AI agent pentester (detect)
 - **[foxguard](https://github.com/PwnKit-Labs/foxguard)** — Rust security scanner (prevent)
 - **[opensoar](https://github.com/opensoar-hq/opensoar-core)** — Python-native SOAR platform (respond)

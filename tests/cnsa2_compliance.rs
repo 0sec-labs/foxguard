@@ -165,9 +165,23 @@ fn cnsa2_flag_off_does_not_mention_cnsa_in_terminal() {
         .output()
         .expect("foxguard should run");
     let text = String::from_utf8_lossy(&out.stdout);
+    // The remediation text itself references "CNSA 2.0 / NSS:" to distinguish
+    // the general-use FIPS-cat-III parameter sets from the CNSA 2.0 / NSS
+    // parameter sets (issue #253). The `--cnsa2` flag controls the separate
+    // *compliance annotations* — the per-finding "CNSA 2.0: migrate before
+    // end of YYYY" line and the summary block. Assert on the annotation
+    // markers rather than the bare substring "CNSA 2.0".
     assert!(
-        !text.contains("CNSA 2.0"),
-        "default terminal output must not mention CNSA 2.0; got:\n{text}"
+        !text.contains("CNSA 2.0:"),
+        "default terminal output must not render the per-finding CNSA 2.0 deadline annotation; got:\n{text}"
+    );
+    assert!(
+        !text.contains("migrate before end of"),
+        "default terminal output must not render the per-finding CNSA 2.0 deadline annotation; got:\n{text}"
+    );
+    assert!(
+        !text.contains(" at-risk ") && !text.contains(" on-track ") && !text.contains(" clean "),
+        "default terminal output must not render the CNSA 2.0 summary level label; got:\n{text}"
     );
 }
 
@@ -179,9 +193,13 @@ fn cnsa2_flag_on_adds_deadline_annotation_and_summary() {
         .output()
         .expect("foxguard should run");
     let text = String::from_utf8_lossy(&out.stdout);
+    // The flag renders the per-finding annotation line ("CNSA 2.0: migrate
+    // before end of YYYY"). The bare substring "CNSA 2.0" now also appears
+    // in remediation text regardless of the flag (see issue #253), so check
+    // for the annotation-specific marker.
     assert!(
-        text.contains("CNSA 2.0"),
-        "--cnsa2 should surface the CNSA label in terminal output; got:\n{text}"
+        text.contains("CNSA 2.0:") || text.contains("migrate before end of"),
+        "--cnsa2 should surface the per-finding CNSA deadline annotation; got:\n{text}"
     );
     // Summary block names the migration level and per-year counts.
     assert!(

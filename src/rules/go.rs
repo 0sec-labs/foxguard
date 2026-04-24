@@ -399,12 +399,12 @@ impl_rule! {
                         std::borrow::Cow::Borrowed(raw)
                     };
                     let (algo, canonical_algo, replacement) = match func_text.as_ref() {
-                        s if s.starts_with("rsa.") => ("RSA", "RSA", "ML-KEM (FIPS 203) or HQC (code-based diversity hedge, draft) for encryption, or ML-DSA (FIPS 204) / FN-DSA (FIPS 206, draft) for signatures"),
-                        s if s.starts_with("ecdsa.") => ("ECDSA", "ECDSA", "ML-DSA (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures"),
-                        s if s.starts_with("ecdh.") => ("ECDH", "ECDH", "ML-KEM (FIPS 203) or HQC (code-based diversity hedge, draft)"),
-                        s if s.starts_with("dsa.") => ("DSA", "DSA", "ML-DSA (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures"),
-                        s if s.starts_with("elliptic.") => ("ECDH/ECDSA (elliptic)", "ECDH", "ML-KEM (FIPS 203) / HQC (draft) or ML-DSA (FIPS 204) / FN-DSA (FIPS 206, draft)"),
-                        s if s.starts_with("ed25519.") => ("Ed25519", "Ed25519", "ML-DSA (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures"),
+                        s if s.starts_with("rsa.") => ("RSA", "RSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC for code-based diversity, draft) for encryption, ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) for signatures. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+                        s if s.starts_with("ecdsa.") => ("ECDSA", "ECDSA", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+                        s if s.starts_with("ecdh.") => ("ECDH", "ECDH", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (FIPS 203) or HQC (code-based diversity hedge, draft). CNSA 2.0 / NSS: ML-KEM-1024 for key establishment."),
+                        s if s.starts_with("dsa.") => ("DSA", "DSA", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+                        s if s.starts_with("elliptic.") => ("ECDH/ECDSA (elliptic)", "ECDH", "General use (FIPS category III): X25519MLKEM768 hybrid KEM / HQC (draft) or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft). CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+                        s if s.starts_with("ed25519.") => ("Ed25519", "Ed25519", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
                         _ => return,
                     };
                     let mut f = make_finding(

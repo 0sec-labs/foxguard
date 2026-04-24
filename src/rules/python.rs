@@ -539,14 +539,14 @@ impl_rule! {
         // Canonical prefixes for quantum-vulnerable asymmetric crypto.
         // Tuple: (module prefix, display algo, canonical CBOM algo, replacement)
         let pq_vulnerable: &[(&str, &str, &str, &str)] = &[
-            ("cryptography.hazmat.primitives.asymmetric.rsa", "RSA", "RSA", "X25519MLKEM768 hybrid KEM (or HQC for code-based diversity, draft) for encryption, or ML-KEM-768 (FIPS 203) standalone"),
-            ("cryptography.hazmat.primitives.asymmetric.ec", "ECDSA/ECDH", "ECDSA", "X25519MLKEM768 hybrid KEM (or HQC, draft) for key exchange, or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures"),
-            ("cryptography.hazmat.primitives.asymmetric.dsa", "DSA", "DSA", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition"),
-            ("cryptography.hazmat.primitives.asymmetric.ed25519", "Ed25519", "Ed25519", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition"),
-            ("cryptography.hazmat.primitives.asymmetric.x25519", "X25519", "X25519", "X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative"),
-            ("Crypto.PublicKey.RSA", "RSA", "RSA", "X25519MLKEM768 hybrid KEM (or HQC, draft) for encryption, or ML-KEM-768 (FIPS 203) standalone"),
-            ("Crypto.PublicKey.DSA", "DSA", "DSA", "ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition"),
-            ("Crypto.PublicKey.ECC", "ECC", "ECDSA", "X25519MLKEM768 hybrid KEM (or HQC, draft) or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains"),
+            ("cryptography.hazmat.primitives.asymmetric.rsa", "RSA", "RSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC for code-based diversity, draft) for encryption, ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+            ("cryptography.hazmat.primitives.asymmetric.ec", "ECDSA/ECDH", "ECDSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC, draft) for key exchange, ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+            ("cryptography.hazmat.primitives.asymmetric.dsa", "DSA", "DSA", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+            ("cryptography.hazmat.primitives.asymmetric.ed25519", "Ed25519", "Ed25519", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+            ("cryptography.hazmat.primitives.asymmetric.x25519", "X25519", "X25519", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment."),
+            ("Crypto.PublicKey.RSA", "RSA", "RSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC, draft) for encryption, ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+            ("Crypto.PublicKey.DSA", "DSA", "DSA", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+            ("Crypto.PublicKey.ECC", "ECC", "ECDSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC, draft) or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
         ];
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
