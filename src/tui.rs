@@ -146,6 +146,7 @@ struct TuiApp {
     source_context_cache: Option<SourceContextCache>,
     open_focus: OpenFocus,
     action_menu: Option<ActionMenu>,
+    export_menu: Option<ExportMenu>,
     severity_picker: Option<SeverityPicker>,
     review_states: HashMap<String, ReviewState>,
 }
@@ -181,6 +182,7 @@ impl TuiApp {
             source_context_cache: None,
             open_focus: OpenFocus::Finding,
             action_menu: None,
+            export_menu: None,
             severity_picker: None,
             review_states: HashMap::new(),
         }
@@ -284,6 +286,10 @@ impl TuiApp {
             return self.handle_action_menu_key(key.code);
         }
 
+        if self.export_menu.is_some() {
+            return self.handle_export_menu_key(key.code);
+        }
+
         if self.search_mode {
             return self.handle_search_key(key.code);
         }
@@ -335,6 +341,7 @@ impl TuiApp {
                 self.show_compliance_panel = !self.show_compliance_panel;
                 ControlFlow::Continue
             }
+            KeyCode::Char('e') => self.open_export_menu(),
             KeyCode::Char('i') => self.open_action_menu(),
             KeyCode::PageDown => {
                 self.scroll_detail(8);
@@ -469,6 +476,93 @@ impl TuiApp {
                 ControlFlow::ApplyAction(action)
             }
             _ => ControlFlow::Continue,
+        }
+    }
+
+    fn open_export_menu(&mut self) -> ControlFlow {
+        if self.result.is_none() {
+            self.push_runtime_notice("no results to export".to_string());
+            return ControlFlow::Continue;
+        }
+        self.export_menu = Some(ExportMenu {
+            formats: vec![ExportFormat::Cbom, ExportFormat::Json, ExportFormat::Sarif],
+            selected: 0,
+        });
+        ControlFlow::Continue
+    }
+
+    fn handle_export_menu_key(&mut self, key: KeyCode) -> ControlFlow {
+        let Some(menu) = self.export_menu.as_mut() else {
+            return ControlFlow::Continue;
+        };
+
+        match key {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.export_menu = None;
+                ControlFlow::Continue
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                menu.selected = (menu.selected + 1).min(menu.formats.len().saturating_sub(1));
+                ControlFlow::Continue
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                menu.selected = menu.selected.saturating_sub(1);
+                ControlFlow::Continue
+            }
+            KeyCode::Enter => {
+                let format = menu.formats[menu.selected];
+                self.export_menu = None;
+                self.export_findings(format);
+                ControlFlow::Continue
+            }
+            _ => ControlFlow::Continue,
+        }
+    }
+
+    fn export_findings(&mut self, format: ExportFormat) {
+        self.export_findings_to(format, format.filename().as_ref());
+    }
+
+    fn export_findings_to(&mut self, format: ExportFormat, path: &std::path::Path) {
+        let findings = match self.result.as_ref() {
+            Some(r) => &r.findings,
+            None => return,
+        };
+
+        let finding_count = findings.len();
+        let mut empty_cbom = false;
+        let content = match format {
+            ExportFormat::Cbom => {
+                let (cbom, empty_but_findings_present) = crate::report::cbom::build_cbom(findings);
+                empty_cbom = empty_but_findings_present;
+                serde_json::to_string_pretty(&cbom).expect("Failed to serialize CBOM")
+            }
+            ExportFormat::Json => {
+                serde_json::to_string_pretty(findings).expect("Failed to serialize findings")
+            }
+            ExportFormat::Sarif => {
+                let sarif = crate::report::sarif::build_sarif(findings);
+                serde_json::to_string_pretty(&sarif).expect("Failed to serialize SARIF")
+            }
+        };
+
+        if empty_cbom {
+            self.push_runtime_notice(
+                "CBOM export is empty: no cryptographic findings detected".to_string(),
+            );
+        }
+
+        match std::fs::write(path, &content) {
+            Ok(()) => {
+                self.push_runtime_notice(format!(
+                    "exported {} findings to {}",
+                    finding_count,
+                    path.display()
+                ));
+            }
+            Err(err) => {
+                self.push_runtime_notice(format!("export failed: {}", err));
+            }
         }
     }
 
@@ -810,6 +904,10 @@ impl TuiApp {
 
         if self.action_menu.is_some() {
             self.draw_action_menu(frame);
+        }
+
+        if self.export_menu.is_some() {
+            self.draw_export_menu(frame);
         }
 
         if self.severity_picker.is_some() {
@@ -1166,7 +1264,8 @@ impl TuiApp {
         // The compliance strip sits *below* notices so notices never shrink
         // when it is toggled on.
         let show_notices = self.show_notices && self.notice_count() > 0;
-        let show_compliance = self.show_compliance_panel && self.result.is_some();
+        let show_compliance =
+            self.show_compliance_panel && self.result.is_some() && self.request.pq_mode;
 
         let mut body_constraints: Vec<Constraint> = vec![Constraint::Min(8)];
         if show_notices {
@@ -1585,6 +1684,7 @@ impl TuiApp {
             Line::from("Enter          open the current target in your editor"),
             Line::from("w              show or hide notices panel"),
             Line::from("Shift+N        toggle CNSA 2.0 compliance panel"),
+            Line::from("e              export findings (CBOM / JSON / SARIF)"),
             Line::from("PageUp/Down    scroll detail pane"),
             Line::from("[/]            scroll notices pane"),
             Line::from("r              rescan"),
@@ -1700,6 +1800,69 @@ impl TuiApp {
                 .style(Style::default().bg(PANEL_BG).fg(Color::Gray))
                 .alignment(Alignment::Left),
             layout[3],
+        );
+    }
+
+    fn draw_export_menu(&self, frame: &mut ratatui::Frame) {
+        let Some(menu) = self.export_menu.as_ref() else {
+            return;
+        };
+
+        let area = centered_rect(40, 40, frame.area());
+        let items = menu
+            .formats
+            .iter()
+            .map(|fmt| ListItem::new(Line::from(Span::styled(fmt.label(), Style::default()))))
+            .collect::<Vec<_>>();
+        let list = List::new(items)
+            .block(panel_block(None, PANEL_BG))
+            .highlight_style(
+                Style::default()
+                    .fg(Color::White)
+                    .bg(DETAIL_BG)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("> ");
+        let inner = area.inner(Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(menu.formats.len() as u16 + 2),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Block::default()
+                .title("export")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(PANEL_BG)),
+            area,
+        );
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "export findings as",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .style(Style::default().bg(PANEL_BG)),
+            layout[0],
+        );
+
+        let mut state = ListState::default();
+        state.select(Some(menu.selected));
+        frame.render_stateful_widget(list, layout[1], &mut state);
+        frame.render_widget(
+            Paragraph::new("Enter export  Esc cancel")
+                .style(Style::default().bg(PANEL_BG).fg(Color::Gray))
+                .alignment(Alignment::Left),
+            layout[2],
         );
     }
 
@@ -2354,6 +2517,36 @@ impl ReviewState {
 
 struct ActionMenu {
     actions: Vec<TriageAction>,
+    selected: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExportFormat {
+    Cbom,
+    Json,
+    Sarif,
+}
+
+impl ExportFormat {
+    fn label(self) -> &'static str {
+        match self {
+            ExportFormat::Cbom => "CBOM (CycloneDX 1.6)",
+            ExportFormat::Json => "JSON",
+            ExportFormat::Sarif => "SARIF",
+        }
+    }
+
+    fn filename(self) -> &'static str {
+        match self {
+            ExportFormat::Cbom => "findings.cbom.json",
+            ExportFormat::Json => "findings.json",
+            ExportFormat::Sarif => "findings.sarif.json",
+        }
+    }
+}
+
+struct ExportMenu {
+    formats: Vec<ExportFormat>,
     selected: usize,
 }
 
@@ -4052,12 +4245,30 @@ mod tests {
         // visible; emulate the post-scan state the user sees when pressing
         // Shift+N.
         app.show_launch = false;
+        app.request.pq_mode = true;
         assert!(!app.show_compliance_panel);
         let flow = app.handle_key(KeyEvent::from(KeyCode::Char('N')));
         assert!(matches!(flow, ControlFlow::Continue));
         assert!(app.show_compliance_panel);
         app.handle_key(KeyEvent::from(KeyCode::Char('N')));
         assert!(!app.show_compliance_panel);
+    }
+
+    #[test]
+    fn compliance_panel_hidden_outside_pqc_mode() {
+        let mut app = tui_app_with_findings(vec![]);
+        app.show_launch = false;
+        // pq_mode defaults to false via tui_app_with_findings
+        assert!(!app.request.pq_mode);
+        // Shift+N still toggles the flag…
+        app.handle_key(KeyEvent::from(KeyCode::Char('N')));
+        assert!(app.show_compliance_panel);
+        // …but the draw_body gate requires pq_mode, so the panel won't render.
+        let would_show = app.show_compliance_panel && app.result.is_some() && app.request.pq_mode;
+        assert!(
+            !would_show,
+            "compliance panel should be hidden when pq_mode is false"
+        );
     }
 
     #[test]
@@ -4171,6 +4382,52 @@ mod tests {
         // Explicitly check BOLD is not set — deadline is advisory context,
         // not a severity signal, and should read as muted.
         assert!(!span.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn export_menu_opens_when_results_exist() {
+        let mut app = tui_app_with_findings(vec![cnsa_finding("pq/rsa", Some("2030"))]);
+        app.show_launch = false;
+        assert!(app.export_menu.is_none());
+        app.handle_key(KeyEvent::from(KeyCode::Char('e')));
+        assert!(app.export_menu.is_some());
+        let menu = app.export_menu.as_ref().unwrap();
+        assert_eq!(menu.formats.len(), 3);
+        assert_eq!(menu.selected, 0);
+    }
+
+    #[test]
+    fn export_menu_noop_without_results() {
+        let mut app = TuiApp::new(TuiArgs {
+            path: ".".to_string(),
+            config: None,
+            severity: None,
+            rules: None,
+            no_builtins: false,
+            changed: false,
+            exclude: Vec::new(),
+            baseline: None,
+            diff: None,
+            secrets: false,
+            explain: false,
+            max_file_size: 1_048_576,
+            pq_mode: false,
+        });
+        app.show_launch = false;
+        app.handle_key(KeyEvent::from(KeyCode::Char('e')));
+        assert!(app.export_menu.is_none());
+    }
+
+    #[test]
+    fn export_writes_cbom_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut app = tui_app_with_findings(vec![cnsa_finding("pq/rsa", Some("2030"))]);
+        app.show_launch = false;
+        let path = dir.path().join("findings.cbom.json");
+        app.export_findings_to(ExportFormat::Cbom, &path);
+        assert!(path.exists(), "CBOM file should exist");
+        let content = std::fs::read_to_string(&path).expect("read");
+        assert!(content.contains("CycloneDX"));
     }
 
     #[test]
