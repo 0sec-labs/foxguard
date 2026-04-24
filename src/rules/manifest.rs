@@ -307,14 +307,7 @@ impl Rule for CargoLockPqCrypto {
                         continue;
                     };
                     if let Some(entry) = seed_map.get(neighbor_name) {
-                        reached_seeds
-                            .entry(entry.name)
-                            .and_modify(|existing| {
-                                if entry.confidence > existing.confidence {
-                                    *existing = entry;
-                                }
-                            })
-                            .or_insert(entry);
+                        reached_seeds.entry(entry.name).or_insert(entry);
                     } else {
                         queue.push_back(neighbor);
                     }
@@ -464,7 +457,7 @@ impl Rule for RequirementsTxtPqCrypto {
                 );
                 finalize_manifest_finding(&mut f, entry, pkg_name);
 
-                if entry.crypto_algorithm.is_none() {
+                if entry.crypto_algorithm.is_none() && entry.confidence <= 0.6 {
                     f.fix_suggestion = Some(format!(
                         "Review usage — `{}` also provides PQ-safe primitives (AES, SHA-256)",
                         pkg_name
