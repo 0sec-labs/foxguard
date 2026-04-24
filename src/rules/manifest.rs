@@ -15,6 +15,8 @@ struct SeedEntry {
 
 const MANIFEST_PQ_CWE: &str = "CWE-327";
 const MANIFEST_PQ_DESC: &str = "Dependency uses quantum-vulnerable cryptographic algorithm";
+const CARGO_PQ_DESC: &str =
+    "Dependency uses quantum-vulnerable cryptographic algorithm (dev-dependencies not distinguished)";
 const MANIFEST_PQ_DEADLINE: &str = "2033";
 
 /// Apply shared PQ fields to a manifest finding.
@@ -204,7 +206,7 @@ impl Rule for CargoLockPqCrypto {
         Some(MANIFEST_PQ_CWE)
     }
     fn description(&self) -> &str {
-        MANIFEST_PQ_DESC
+        CARGO_PQ_DESC
     }
     fn language(&self) -> Language {
         Language::Manifest
