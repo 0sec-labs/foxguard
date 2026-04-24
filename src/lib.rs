@@ -51,6 +51,7 @@ pub enum Language {
     ApacheConf,
     HAProxyConf,
     Dockerfile,
+    Manifest,
 }
 
 impl std::fmt::Display for Language {
@@ -70,6 +71,7 @@ impl std::fmt::Display for Language {
             Language::ApacheConf => write!(f, "apacheconf"),
             Language::HAProxyConf => write!(f, "haproxyconf"),
             Language::Dockerfile => write!(f, "dockerfile"),
+            Language::Manifest => write!(f, "manifest"),
         }
     }
 }
@@ -129,4 +131,8 @@ pub struct Finding {
     /// compliance module after scanning. `None` for non-crypto findings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cnsa2_deadline: Option<String>,
+    /// Dependency name for manifest-level findings (e.g. "rustls", "paramiko").
+    /// `None` for source-level rules.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dep_name: Option<String>,
 }

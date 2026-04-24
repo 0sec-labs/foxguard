@@ -262,6 +262,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: deadline.map(String::from),
+            dep_name: None,
         }
     }
 

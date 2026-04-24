@@ -334,6 +334,7 @@ mod tests {
             tags: vec!["PQ".to_string()],
             crypto_algorithm: Some(algo.to_string()),
             cnsa2_deadline: None,
+            dep_name: None,
         }
     }
 
@@ -382,6 +383,7 @@ mod tests {
             tags: vec![],
             crypto_algorithm: None,
             cnsa2_deadline: None,
+            dep_name: None,
         }];
 
         let groups: BTreeMap<String, Vec<&Finding>> = findings

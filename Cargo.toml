@@ -37,6 +37,7 @@ globset = "0.4"
 tempfile = "3"
 ratatui = "0.30"
 crossterm = "0.28"
+toml = "0.8"
 
 [[bin]]
 name = "foxguard-mcp"

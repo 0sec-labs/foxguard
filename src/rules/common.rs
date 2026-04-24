@@ -233,6 +233,7 @@ pub fn make_finding(
         tags: vec![],
         crypto_algorithm: None,
         cnsa2_deadline: None,
+        dep_name: None,
     }
 }
 
@@ -281,6 +282,7 @@ pub fn make_finding_from_offsets(
         tags: vec![],
         crypto_algorithm: None,
         cnsa2_deadline: None,
+        dep_name: None,
     }
 }
 

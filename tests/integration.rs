@@ -3723,4 +3723,118 @@ mod config_files {
             Some(Language::ApacheConf)
         );
     }
+
+    // ── Manifest / dependency-level PQ scanning (#221) ──────────────────
+
+    #[test]
+    fn cargo_lock_pq_finds_transitive_rsa_dep() {
+        let output = foxguard_cmd()
+            .args(["pqc", "tests/fixtures/deps/Cargo.lock", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+        // rustls -> rsa (tier 1, RSA)
+        let rustls = findings
+            .iter()
+            .find(|f| f["dep_name"].as_str() == Some("rustls"));
+        assert!(rustls.is_some(), "expected finding for rustls");
+        let rustls = rustls.unwrap();
+        assert_eq!(rustls["rule_id"], "manifest/cargo-pq-vulnerable-dep");
+        assert_eq!(rustls["crypto_algorithm"], "RSA");
+        assert_eq!(rustls["confidence"], 0.9);
+
+        // reqwest -> ring (tier 2, no specific algorithm)
+        let reqwest = findings
+            .iter()
+            .find(|f| f["dep_name"].as_str() == Some("reqwest"));
+        assert!(reqwest.is_some(), "expected finding for reqwest");
+        let reqwest = reqwest.unwrap();
+        assert!(reqwest["crypto_algorithm"].is_null());
+        assert_eq!(reqwest["confidence"], 0.6);
+
+        // my-app -> rustls -> rsa (transitive)
+        let my_app = findings
+            .iter()
+            .find(|f| f["dep_name"].as_str() == Some("my-app"));
+        assert!(my_app.is_some(), "expected finding for my-app (transitive)");
+
+        // serde should NOT appear (no crypto dependency)
+        let serde = findings
+            .iter()
+            .find(|f| f["dep_name"].as_str() == Some("serde"));
+        assert!(serde.is_none(), "serde should not be flagged");
+
+        // rsa itself should NOT appear (don't flag seeds)
+        let rsa = findings
+            .iter()
+            .find(|f| f["dep_name"].as_str() == Some("rsa"));
+        assert!(rsa.is_none(), "seed crate rsa should not be flagged itself");
+    }
+
+    #[test]
+    fn requirements_txt_pq_finds_crypto_deps() {
+        let output = foxguard_cmd()
+            .args(["pqc", "tests/fixtures/deps/requirements.txt", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+
+        let dep_names: Vec<&str> = findings
+            .iter()
+            .filter_map(|f| f["dep_name"].as_str())
+            .collect();
+
+        // Should find: cryptography, python-rsa, fabric, paramiko
+        assert!(dep_names.contains(&"python-rsa"), "expected python-rsa");
+        assert!(dep_names.contains(&"cryptography"), "expected cryptography");
+        assert!(dep_names.contains(&"fabric"), "expected fabric");
+        assert!(dep_names.contains(&"paramiko"), "expected paramiko");
+
+        // Should NOT find: flask, requests, -e ., git+...
+        assert!(!dep_names.contains(&"flask"), "flask is not a crypto lib");
+        assert!(
+            !dep_names.contains(&"requests"),
+            "requests is not a crypto lib"
+        );
+
+        // python-rsa should have high confidence and RSA algorithm
+        let python_rsa = findings
+            .iter()
+            .find(|f| f["dep_name"].as_str() == Some("python-rsa"))
+            .unwrap();
+        assert_eq!(python_rsa["crypto_algorithm"], "RSA");
+        assert_eq!(python_rsa["confidence"], 0.95);
+
+        // cryptography should have low confidence and null algorithm
+        let crypto = findings
+            .iter()
+            .find(|f| f["dep_name"].as_str() == Some("cryptography"))
+            .unwrap();
+        assert!(crypto["crypto_algorithm"].is_null());
+        assert_eq!(crypto["confidence"], 0.5);
+        assert!(crypto["fix_suggestion"]
+            .as_str()
+            .unwrap()
+            .contains("PQ-safe"));
+    }
+
+    #[test]
+    fn detect_language_recognises_manifest_files() {
+        assert_eq!(
+            detect_language(Path::new("Cargo.lock")),
+            Some(Language::Manifest)
+        );
+        assert_eq!(
+            detect_language(Path::new("requirements.txt")),
+            Some(Language::Manifest)
+        );
+        // Regular .txt files should not match
+        assert_eq!(detect_language(Path::new("notes.txt")), None);
+        assert_eq!(detect_language(Path::new("Cargo.toml")), None);
+    }
 }

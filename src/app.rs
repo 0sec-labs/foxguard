@@ -495,7 +495,7 @@ fn validate_rules_path(rules: Option<&str>) -> Result<(), String> {
 fn is_pq_rule_id(id: &str) -> bool {
     id.contains("pq-vulnerable")
         || id.contains("hardcoded-crypto-algorithm")
-        || (id.starts_with("config/") && id.contains("tls"))
+        || id == "config/dockerfile-insecure-tls-env"
 }
 
 fn collect_changed_targets(path: &str, changed: bool) -> Result<Option<Vec<PathBuf>>, String> {

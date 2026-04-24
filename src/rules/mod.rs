@@ -8,6 +8,7 @@ pub mod java;
 pub mod javascript;
 pub mod javascript_taint;
 pub mod kotlin;
+pub mod manifest;
 pub mod php;
 pub mod python;
 pub mod python_aliases;
@@ -474,6 +475,10 @@ impl RuleRegistry {
         registry.register(Box::new(config::ApachePqVulnerableTls));
         registry.register(Box::new(config::HAProxyPqVulnerableTls));
         registry.register(Box::new(config::DockerfileInsecureTlsEnv));
+
+        // Register manifest rules (dependency-level PQ scanning)
+        registry.register(Box::new(manifest::CargoLockPqCrypto));
+        registry.register(Box::new(manifest::RequirementsTxtPqCrypto));
 
         registry
     }

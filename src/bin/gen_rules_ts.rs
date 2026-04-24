@@ -29,6 +29,7 @@ const LANGUAGE_ORDER: &[Language] = &[
     Language::ApacheConf,
     Language::HAProxyConf,
     Language::Dockerfile,
+    Language::Manifest,
 ];
 
 fn language_slug(language: Language) -> &'static str {
@@ -47,6 +48,7 @@ fn language_slug(language: Language) -> &'static str {
         Language::ApacheConf => "apacheconf",
         Language::HAProxyConf => "haproxyconf",
         Language::Dockerfile => "dockerfile",
+        Language::Manifest => "manifest",
     }
 }
 
@@ -66,6 +68,7 @@ fn language_display_name(language: Language) -> &'static str {
         Language::ApacheConf => "Apache",
         Language::HAProxyConf => "HAProxy",
         Language::Dockerfile => "Dockerfile",
+        Language::Manifest => "Manifest",
     }
 }
 
@@ -85,6 +88,7 @@ fn language_array_name(language: Language) -> &'static str {
         Language::ApacheConf => "apacheconfRules",
         Language::HAProxyConf => "haproxyconfRules",
         Language::Dockerfile => "dockerfileRules",
+        Language::Manifest => "manifestRules",
     }
 }
 

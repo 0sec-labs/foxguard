@@ -211,6 +211,7 @@ impl Rule for SemgrepRule {
                 tags: vec![],
                 crypto_algorithm: None,
                 cnsa2_deadline: None,
+                dep_name: None,
             });
         }
 
