@@ -61,6 +61,26 @@ const CARGO_SEEDS: &[SeedEntry] = &[
         crypto_algorithm: Some("ECDSA"),
         confidence: 0.9,
     },
+    SeedEntry {
+        name: "k256",
+        crypto_algorithm: Some("ECDSA"),
+        confidence: 0.9,
+    },
+    SeedEntry {
+        name: "secp256k1",
+        crypto_algorithm: Some("ECDSA"),
+        confidence: 0.9,
+    },
+    SeedEntry {
+        name: "libsecp256k1",
+        crypto_algorithm: Some("ECDSA"),
+        confidence: 0.9,
+    },
+    SeedEntry {
+        name: "ed448-goldilocks",
+        crypto_algorithm: Some("Ed448"),
+        confidence: 0.9,
+    },
     // Tier 2 — confidence 0.6, mixed algorithms
     SeedEntry {
         name: "ring",
@@ -69,6 +89,11 @@ const CARGO_SEEDS: &[SeedEntry] = &[
     },
     SeedEntry {
         name: "openssl-sys",
+        crypto_algorithm: None,
+        confidence: 0.6,
+    },
+    SeedEntry {
+        name: "openssl",
         crypto_algorithm: None,
         confidence: 0.6,
     },
@@ -114,8 +139,33 @@ const PIP_PACKAGES: &[SeedEntry] = &[
     },
     SeedEntry {
         name: "fabric",
-        crypto_algorithm: Some("RSA"),
+        crypto_algorithm: None,
         confidence: 0.7,
+    },
+    SeedEntry {
+        name: "pyjwt",
+        crypto_algorithm: None,
+        confidence: 0.8,
+    },
+    SeedEntry {
+        name: "authlib",
+        crypto_algorithm: None,
+        confidence: 0.8,
+    },
+    SeedEntry {
+        name: "python-jose",
+        crypto_algorithm: None,
+        confidence: 0.8,
+    },
+    SeedEntry {
+        name: "jwcrypto",
+        crypto_algorithm: None,
+        confidence: 0.8,
+    },
+    SeedEntry {
+        name: "m2crypto",
+        crypto_algorithm: None,
+        confidence: 0.6,
     },
     SeedEntry {
         name: "cryptography",
@@ -817,5 +867,46 @@ version = \"0.17.0\"\n";
     fn pip_empty_input_returns_empty() {
         let tree = dummy_tree("");
         assert!(RequirementsTxtPqCrypto.check("", &tree).is_empty());
+    }
+
+    #[test]
+    fn cargo_k256_seed_flagged() {
+        let src = "\
+[[package]]\n\
+name = \"wallet\"\n\
+version = \"0.1.0\"\n\
+dependencies = [\"k256\"]\n\
+\n\
+[[package]]\n\
+name = \"k256\"\n\
+version = \"0.13.0\"\n";
+        let tree = dummy_tree(src);
+        let findings = CargoLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].dep_name.as_deref(), Some("wallet"));
+        assert_eq!(findings[0].crypto_algorithm.as_deref(), Some("ECDSA"));
+    }
+
+    #[test]
+    fn pip_jwt_lib_flagged() {
+        let src = "pyjwt>=2.0\n";
+        let tree = dummy_tree(src);
+        let findings = RequirementsTxtPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].dep_name.as_deref(), Some("pyjwt"));
+        assert!(findings[0].crypto_algorithm.is_none());
+        assert_eq!(findings[0].confidence, 0.8);
+    }
+
+    #[test]
+    fn pip_fabric_no_algorithm() {
+        let src = "fabric>=3.0\n";
+        let tree = dummy_tree(src);
+        let findings = RequirementsTxtPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert!(
+            findings[0].crypto_algorithm.is_none(),
+            "fabric should not attribute RSA"
+        );
     }
 }
