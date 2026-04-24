@@ -30,6 +30,8 @@ The rules file under CWE-327. We flag the caveat once and move on: CWE-327's can
 
 `foxguard --format cbom .` emits a CycloneDX 1.6 cryptographic bill of materials where every component links back to a file, a line, and the severity of any finding attached to it. The scan and the inventory are one artifact.
 
+And the dependencies: `foxguard pqc .` now also walks `Cargo.lock` and `requirements.txt` (closes [#221](https://github.com/PwnKit-Labs/foxguard/issues/221)). For Rust, a BFS over the transitive graph flags crates whose PQ-vulnerability is seed-confidence (`rsa`, `ed25519-dalek`, `p256` at 0.9) or review-required (`ring`, `aws-lc-rs` at 0.6 — both ship PQ-safe AEADs alongside Ed25519/ECDSA, so a bare hit warrants a look rather than a panic). For Python, membership is matched against a curated list of ~11 packages with per-package confidence. Each manifest finding carries a `dep_name` field so downstream tooling can attribute the hit to the lockfile entry rather than the source tree. Combined with the source-code rules, the single `pqc` pass answers both "which of my own calls?" and "which of my dependencies?"
+
 ## Prior art, honestly
 
 CBOM is a young standard and it already has tooling. IBM's [CBOMkit](https://github.com/IBM/cbomkit), [sonar-cryptography](https://github.com/PQCA/sonar-cryptography), and [cdxgen](https://github.com/CycloneDX/cdxgen) all produce CycloneDX CBOM output; the [CycloneDX Tool Center](https://cyclonedx.org/tool-center/) lists more. Most are import-graph or dependency-focused. foxguard's contribution is narrower and more specific: the scan and the inventory come out of one pass, each CBOM component ties back to a source location and severity, and crypto-agility scoring plus CNSA 2.0 annotations travel with the BOM.
@@ -56,7 +58,7 @@ cargo install foxguard
 
 ## What's next
 
-Dependency-level PQ scanning — so a `Cargo.lock` or `package-lock.json` with a transitively RSA-locked library shows up alongside the source hits — is next. A GitHub App for one-click install on any repo is on the roadmap. Cloudflare reports over half of human TLS traffic on their edge is already post-quantum ([Cloudflare, 2025](https://blog.cloudflare.com/pq-2025/)); application code is catching up slower. We'd like to make that migration less painful.
+More lockfile formats — `Pipfile.lock`, `poetry.lock`, `uv.lock`, `package-lock.json`, `pnpm-lock.yaml` — so the dependency story covers modern Python and Node projects end to end ([#262](https://github.com/PwnKit-Labs/foxguard/issues/262)). A GitHub App for one-click install on any repo is on the roadmap. Cloudflare reports over half of human TLS traffic on their edge is already post-quantum ([Cloudflare, 2025](https://blog.cloudflare.com/pq-2025/)); application code is catching up slower. We'd like to make that migration less painful.
 
 ---
 
