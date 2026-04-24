@@ -48,6 +48,9 @@ pub fn build_sarif(findings: &[Finding]) -> serde_json::Value {
             if let Some(deadline) = &f.cnsa2_deadline {
                 props.insert("cnsa2Deadline".to_string(), json!(deadline));
             }
+            if let Some(dep) = &f.dep_name {
+                props.insert("depName".to_string(), json!(dep));
+            }
 
             // SARIF `rank` is a native 0.0..=100.0 ordering hint. Map
             // confidence linearly so 1.0 → 100 and 0.0 → 0.
