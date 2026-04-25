@@ -105,6 +105,21 @@ pub fn is_secret_value_long_enough(inner: &str) -> bool {
     true
 }
 
+/// Returns `false` for values that are almost certainly not secrets
+/// (contain spaces, look like URLs or file paths).
+pub fn looks_like_secret_value(inner: &str) -> bool {
+    if inner.contains(' ') {
+        return false;
+    }
+    if inner.starts_with("http://") || inner.starts_with("https://") {
+        return false;
+    }
+    if inner.starts_with('/') || inner.starts_with("./") || inner.starts_with("../") {
+        return false;
+    }
+    true
+}
+
 /// Shared per-file import alias table.
 ///
 /// Maps a local identifier (as it appears in source) to its canonical

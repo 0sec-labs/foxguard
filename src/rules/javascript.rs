@@ -1,5 +1,5 @@
 use crate::impl_rule;
-use crate::rules::common::{get_source_line, is_secret_value_long_enough, make_finding, walk_tree};
+use crate::rules::common::{get_source_line, is_secret_value_long_enough, looks_like_secret_value, make_finding, walk_tree};
 use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
 use regex::Regex;
@@ -74,7 +74,7 @@ impl_rule! {
                         let val = &src[value_node.byte_range()];
                         // Skip empty strings and short placeholders
                         let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
-                        if is_secret_value_long_enough(inner) {
+                        if is_secret_value_long_enough(inner) && looks_like_secret_value(inner) {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
@@ -104,7 +104,7 @@ impl_rule! {
                     {
                         let val = &src[right.byte_range()];
                         let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
-                        if is_secret_value_long_enough(inner) {
+                        if is_secret_value_long_enough(inner) && looks_like_secret_value(inner) {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
