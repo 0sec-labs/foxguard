@@ -277,6 +277,19 @@ impl_rule! {
                     // Match child_process.exec(...) or exec(...)
                     let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
 
+                    // Skip RegExp.prototype.exec() — only flag bare exec()
+                    // or child_process.exec() receivers.
+                    if func_name == "exec" && func_text.contains('.') {
+                        let receiver = &func_text[..func_text.rfind('.').unwrap()];
+                        if !receiver.contains("child_process")
+                            && !["cp", "proc", "subprocess"]
+                                .iter()
+                                .any(|alias| receiver == *alias)
+                        {
+                            return;
+                        }
+                    }
+
                     if dangerous_fns.contains(&func_name) {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
