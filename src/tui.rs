@@ -2739,8 +2739,7 @@ impl TerminalSession {
     fn enter() -> Result<Self, String> {
         enable_raw_mode().map_err(|e| e.to_string())?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
-            .map_err(|e| e.to_string())?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture).map_err(|e| e.to_string())?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend).map_err(|e| e.to_string())?;
         Ok(Self {
