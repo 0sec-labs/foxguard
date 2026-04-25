@@ -129,6 +129,7 @@ struct TuiApp {
     /// legacy severity-desc ordering; cycled via `Shift+C` (feature B).
     sort_mode: SortMode,
     selected: usize,
+    list_state: ListState,
     show_notices: bool,
     show_help: bool,
     /// When on, a CNSA 2.0 migration-readiness strip is drawn at the bottom
@@ -170,6 +171,7 @@ impl TuiApp {
             session_min_confidence: 0.0,
             sort_mode: SortMode::default(),
             selected: 0,
+            list_state: ListState::default(),
             show_notices: true,
             show_help: false,
             show_compliance_panel: false,
@@ -1331,13 +1333,15 @@ impl TuiApp {
                     .bg(DETAIL_BG)
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol(">> ");
+            .highlight_symbol(">> ")
+            .scroll_padding(0);
 
-        let mut state = ListState::default();
         if !filtered.is_empty() {
-            state.select(Some(self.selected));
+            self.list_state.select(Some(self.selected));
+        } else {
+            self.list_state.select(None);
         }
-        frame.render_stateful_widget(list, layout[0], &mut state);
+        frame.render_stateful_widget(list, layout[0], &mut self.list_state);
 
         let detail = Paragraph::new(self.detail_text())
             .block(panel_block(Some("Detail"), DETAIL_BG))
