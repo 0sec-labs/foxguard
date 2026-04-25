@@ -591,6 +591,24 @@ impl_rule! {
     }
 }
 
+/// Returns `true` when every leaf of a binary expression is a string literal
+/// or the identifier `__dirname` — i.e. the concatenation is fully static.
+fn is_static_concat(node: tree_sitter::Node, src: &str) -> bool {
+    match node.kind() {
+        "string" => true,
+        "identifier" => &src[node.byte_range()] == "__dirname",
+        "binary_expression" => {
+            let left = node.child_by_field_name("left");
+            let right = node.child_by_field_name("right");
+            match (left, right) {
+                (Some(l), Some(r)) => is_static_concat(l, src) && is_static_concat(r, src),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
 // ─── Rule 9: no-path-traversal ─────────────────────────────────────────────
 
 pub struct NoPathTraversal;
@@ -654,15 +672,38 @@ impl_rule! {
                     if func_name == "sendFile" || func_name == "download" {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
-                                let is_dynamic = matches!(
-                                    first_arg.kind(),
-                                    "binary_expression"
-                                        | "template_string"
-                                        | "identifier"
-                                        | "member_expression"
-                                        | "subscript_expression"
-                                        | "call_expression"
-                                );
+                                let is_dynamic = match first_arg.kind() {
+                                    "call_expression" => {
+                                        // Whitelist path.join/path.resolve with all-static args
+                                        let safe = (|| {
+                                            let func = first_arg.child_by_field_name("function")?;
+                                            let ft = &src[func.byte_range()];
+                                            if ft != "path.join" && ft != "path.resolve" {
+                                                return None;
+                                            }
+                                            let a = first_arg.child_by_field_name("arguments")?;
+                                            let mut c = a.walk();
+                                            let all_static = a.named_children(&mut c).all(|arg| {
+                                                arg.kind() == "string"
+                                                    || (arg.kind() == "identifier"
+                                                        && &src[arg.byte_range()] == "__dirname")
+                                            });
+                                            Some(all_static)
+                                        })();
+                                        !safe.unwrap_or(false)
+                                    }
+                                    "binary_expression" => !is_static_concat(first_arg, src),
+                                    "template_string" => {
+                                        let mut cursor = first_arg.walk();
+                                        let has_sub = first_arg
+                                            .children(&mut cursor)
+                                            .any(|c| c.kind() == "template_substitution");
+                                        has_sub
+                                    }
+                                    "identifier" | "member_expression"
+                                    | "subscript_expression" => true,
+                                    _ => false,
+                                };
                                 if is_dynamic {
                                     findings.push(make_finding(
                                         _self.id(),
