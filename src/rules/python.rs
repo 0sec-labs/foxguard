@@ -1,5 +1,8 @@
 use crate::impl_rule;
-use crate::rules::common::{get_source_line, is_secret_value_long_enough, looks_like_secret_value, make_finding, walk_tree};
+use crate::rules::common::{
+    get_source_line, is_high_signal_secret_name, is_secret_value_long_enough,
+    looks_like_secret_value, make_finding, walk_tree,
+};
 use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
 use regex::Regex;
@@ -93,7 +96,10 @@ impl_rule! {
                             .trim_start_matches("f\"")
                             .trim_start_matches("f'")
                             .trim_matches(|c| c == '"' || c == '\'');
-                        if is_secret_value_long_enough(inner) && looks_like_secret_value(inner) {
+                        if is_secret_value_long_enough(inner)
+                            && (looks_like_secret_value(inner)
+                                || is_high_signal_secret_name(left_text))
+                        {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
