@@ -750,8 +750,14 @@ impl_rule! {
                         && !arg_text.contains("url: \"")
                         && !arg_text.contains("url: '")
                 }
-                "template_string"
-                | "binary_expression"
+                "template_string" => {
+                    let mut cursor = first_arg.walk();
+                    let has_sub = first_arg
+                        .children(&mut cursor)
+                        .any(|c| c.kind() == "template_substitution");
+                    has_sub
+                }
+                "binary_expression"
                 | "identifier"
                 | "member_expression"
                 | "call_expression"
