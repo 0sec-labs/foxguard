@@ -7,7 +7,10 @@ use crate::config::{
     load_for_scan,
 };
 use crate::{Finding, Severity};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    MouseEvent, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -46,7 +49,95 @@ pub fn run_scan_tui(args: &TuiArgs) -> Result<i32, String> {
             .map_err(|e| e.to_string())?;
 
         if event::poll(Duration::from_millis(100)).map_err(|e| e.to_string())? {
-            let Event::Key(key) = event::read().map_err(|e| e.to_string())? else {
+            let ev = event::read().map_err(|e| e.to_string())?;
+
+            if let Event::Mouse(MouseEvent {
+                kind: kind @ (MouseEventKind::ScrollUp | MouseEventKind::ScrollDown),
+                ..
+            }) = ev
+            {
+                // Drain any queued scroll events so momentum scrolling
+                // doesn't keep moving after the wheel stops.
+                let mut last_kind = kind;
+                while event::poll(Duration::ZERO).unwrap_or(false) {
+                    if let Ok(Event::Mouse(MouseEvent {
+                        kind: k @ (MouseEventKind::ScrollUp | MouseEventKind::ScrollDown),
+                        ..
+                    })) = event::read()
+                    {
+                        last_kind = k;
+                    } else {
+                        break;
+                    }
+                }
+                match last_kind {
+                    MouseEventKind::ScrollUp => app.move_selection(-1),
+                    MouseEventKind::ScrollDown => app.move_selection(1),
+                    _ => {}
+                }
+                continue;
+            }
+
+            if let Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(event::MouseButton::Left),
+                column,
+                row,
+                ..
+            }) = ev
+            {
+                let area = app.list_area;
+                // panel_block uses: title (1 row) + Padding top=1 = 2 rows overhead
+                let content_y = area.y + 2;
+                let content_x = area.x + 1; // Padding left=1
+                let content_h = area.height.saturating_sub(2); // top overhead, no bottom padding
+                let content_w = area.width.saturating_sub(2); // left+right padding
+                if column >= content_x
+                    && column < content_x + content_w
+                    && row >= content_y
+                    && row < content_y + content_h
+                {
+                    let clicked_row = (row - content_y) as usize;
+                    let item_height = 2; // each ListItem is 2 lines (title + path)
+                    let index = app.list_state.offset() + clicked_row / item_height;
+                    let filtered_len = app.filtered_indices().len();
+                    if index < filtered_len {
+                        app.selected = index;
+                        app.detail_scroll = 0;
+                        app.source_context_cache = None;
+                    }
+                }
+                continue;
+            }
+
+            if let Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Moved,
+                column,
+                row,
+                ..
+            }) = ev
+            {
+                let area = app.list_area;
+                let content_y = area.y + 2;
+                let content_h = area.height.saturating_sub(2);
+                if column >= area.x
+                    && column < area.x + area.width
+                    && row >= content_y
+                    && row < content_y + content_h
+                {
+                    let clicked_row = (row - content_y) as usize;
+                    let index = app.list_state.offset() + clicked_row / 2;
+                    if index < app.filtered_indices().len() {
+                        app.hover_index = Some(index);
+                    } else {
+                        app.hover_index = None;
+                    }
+                } else {
+                    app.hover_index = None;
+                }
+                continue;
+            }
+
+            let Event::Key(key) = ev else {
                 continue;
             };
 
@@ -130,6 +221,8 @@ struct TuiApp {
     sort_mode: SortMode,
     selected: usize,
     list_state: ListState,
+    list_area: Rect,
+    hover_index: Option<usize>,
     show_notices: bool,
     show_help: bool,
     /// When on, a CNSA 2.0 migration-readiness strip is drawn at the bottom
@@ -172,6 +265,8 @@ impl TuiApp {
             sort_mode: SortMode::default(),
             selected: 0,
             list_state: ListState::default(),
+            list_area: Rect::default(),
+            hover_index: None,
             show_notices: true,
             show_help: false,
             show_compliance_panel: false,
@@ -1297,12 +1392,18 @@ impl TuiApp {
             .split(body_layout[0]);
 
         let filtered = self.filtered_indices();
+        let hover = self.hover_index;
         let items = if let Some(result) = self.result.as_ref() {
             filtered
                 .iter()
-                .map(|index| {
+                .enumerate()
+                .map(|(i, index)| {
                     let finding = &result.findings[*index];
-                    list_item(finding, self.review_state_for(finding))
+                    let mut item = list_item(finding, self.review_state_for(finding));
+                    if hover == Some(i) && self.selected != i {
+                        item = item.style(Style::default().bg(Color::Rgb(40, 40, 50)));
+                    }
+                    item
                 })
                 .collect::<Vec<_>>()
         } else {
@@ -1341,6 +1442,7 @@ impl TuiApp {
         } else {
             self.list_state.select(None);
         }
+        self.list_area = layout[0];
         frame.render_stateful_widget(list, layout[0], &mut self.list_state);
 
         let detail = Paragraph::new(self.detail_text())
@@ -2637,7 +2739,8 @@ impl TerminalSession {
     fn enter() -> Result<Self, String> {
         enable_raw_mode().map_err(|e| e.to_string())?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen).map_err(|e| e.to_string())?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+            .map_err(|e| e.to_string())?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend).map_err(|e| e.to_string())?;
         Ok(Self {
@@ -2652,7 +2755,12 @@ impl TerminalSession {
         }
 
         disable_raw_mode().map_err(|e| e.to_string())?;
-        execute!(self.terminal.backend_mut(), LeaveAlternateScreen).map_err(|e| e.to_string())?;
+        execute!(
+            self.terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )
+        .map_err(|e| e.to_string())?;
         self.terminal.show_cursor().map_err(|e| e.to_string())?;
         self.active = false;
         Ok(())
@@ -2664,7 +2772,12 @@ impl TerminalSession {
         }
 
         enable_raw_mode().map_err(|e| e.to_string())?;
-        execute!(self.terminal.backend_mut(), EnterAlternateScreen).map_err(|e| e.to_string())?;
+        execute!(
+            self.terminal.backend_mut(),
+            EnterAlternateScreen,
+            EnableMouseCapture
+        )
+        .map_err(|e| e.to_string())?;
         self.terminal.clear().map_err(|e| e.to_string())?;
         self.active = true;
         Ok(())
@@ -2674,7 +2787,11 @@ impl TerminalSession {
 impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        );
         let _ = self.terminal.show_cursor();
     }
 }
