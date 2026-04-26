@@ -2,7 +2,7 @@ use crate::impl_rule;
 use crate::rules::common::AliasTable;
 use crate::rules::common::{
     get_source_line, is_secret_value_long_enough, make_finding, make_finding_from_offsets,
-    walk_tree,
+    walk_tree, HARDCODED_SECRET_PATTERN,
 };
 use crate::rules::go_taint::{
     self, go_aliases_from_tree, go_taint_sources, NodeMatcher as GoNodeMatcher,
@@ -149,7 +149,7 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let secret_pattern =
-            Regex::new(r"(?i)(password|secret|api_?key|token|auth|credential|private_?key)")
+            Regex::new(HARDCODED_SECRET_PATTERN)
                 .unwrap();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
