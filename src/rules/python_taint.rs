@@ -32,6 +32,10 @@
 
 use crate::rules::common::AliasTable;
 use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
+use crate::rules::taint_engine::{node_text, sanitizer_fingerprints_eq, TaintState};
+pub use crate::rules::taint_engine::{
+    BatchedRule, NodeMatcher, ReturnSummary, RuleFilter, TaintFinding, TaintSpec,
+};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tree_sitter::Node;
@@ -58,143 +62,7 @@ pub struct CrossFileInfo<'a> {
     pub rule_filter: RuleFilter<'a>,
 }
 
-/// How cross-file findings should be attributed to rules.
-#[derive(Clone)]
-pub enum RuleFilter<'a> {
-    /// Only emit cross-file findings whose `sink_rule_id` equals the
-    /// given value; the finding is attributed to that rule.
-    Single(&'a str),
-    /// Emit cross-file findings whose `sink_rule_id` appears in the
-    /// given set; each finding is attributed to the matching rule via
-    /// `rule_id_hint`.
-    Any(&'a HashSet<String>),
-}
-
-impl<'a> RuleFilter<'a> {
-    fn allows(&self, rule_id: &str) -> bool {
-        match self {
-            RuleFilter::Single(id) => *id == rule_id,
-            RuleFilter::Any(set) => set.contains(rule_id),
-        }
-    }
-}
-
-// ─── Public API ───────────────────────────────────────────────────────────
-
-/// A pattern that matches an AST node for the purposes of taint analysis.
-///
-/// Kept intentionally narrow so that the YAML bridge in the follow-up PR
-/// has a finite target to compile into. Every match returns a short human
-/// description that is propagated to findings so the report can say
-/// *why* something was tainted.
-#[derive(Debug, Clone)]
-pub enum NodeMatcher {
-    /// Match an attribute access like `request.data` or `request.form`.
-    ///
-    /// The match is conservative: it triggers whenever the *leftmost*
-    /// identifier in a dotted chain equals `root` and the *final* attribute
-    /// segment equals `field`. This catches both `request.data` and
-    /// `flask.request.data`-style forms after alias resolution, without
-    /// over-fitting to a specific depth.
-    Attribute {
-        root: String,
-        field: String,
-        description: String,
-    },
-
-    /// Match a function or method call by its canonical dotted callee
-    /// path, after resolution through the per-file import alias table.
-    ///
-    /// Example: `canonical: "request.get_json"` matches `request.get_json()`,
-    /// `req.get_json()` where `req` is an alias for `request`, and
-    /// `from flask import request; request.get_json()`.
-    Call {
-        canonical: String,
-        description: String,
-    },
-
-    /// Match any use of a function parameter whose name is in this list.
-    ///
-    /// Useful for marking `request`-typed parameters as implicit sources:
-    /// `def handler(request): pickle.loads(request.data)` flags without
-    /// requiring an explicit assignment from a known source.
-    ParamName {
-        names: Vec<String>,
-        description: String,
-    },
-
-    /// Match any method call whose final attribute name equals `method`,
-    /// regardless of receiver. Useful for sinks like `cursor.execute`,
-    /// `connection.execute`, `db.execute`, etc., where the receiver can be
-    /// any DB-like object and enumerating every plausible name is
-    /// impractical. Only meaningful as a *sink* matcher; the source path
-    /// ignores it.
-    MethodName { method: String, description: String },
-}
-
-impl NodeMatcher {
-    /// Short human description used in findings.
-    pub fn description(&self) -> &str {
-        match self {
-            NodeMatcher::Attribute { description, .. } => description,
-            NodeMatcher::Call { description, .. } => description,
-            NodeMatcher::ParamName { description, .. } => description,
-            NodeMatcher::MethodName { description, .. } => description,
-        }
-    }
-}
-
-/// Declarative taint specification consumed by the engine. Each rule that
-/// wants to use taint analysis builds one of these and passes it to
-/// [`analyze_function`].
-#[derive(Debug, Clone, Default)]
-pub struct TaintSpec {
-    pub sources: Vec<NodeMatcher>,
-    pub sinks: Vec<NodeMatcher>,
-    /// Calls whose callee matches one of these matchers are treated as
-    /// producing a clean value, even if their arguments were tainted. See
-    /// the module-level docs for the collapsed-to-clean semantics.
-    pub sanitizers: Vec<NodeMatcher>,
-}
-
-/// A single source→sink flow reported by the engine.
-#[derive(Debug, Clone)]
-pub struct TaintFinding {
-    /// Byte range of the sink node within the source string.
-    pub sink_start_byte: usize,
-    pub sink_end_byte: usize,
-    /// 1-indexed line of the sink.
-    pub sink_line: usize,
-    /// 1-indexed column of the sink.
-    pub sink_column: usize,
-    pub sink_end_line: usize,
-    pub sink_end_column: usize,
-    /// Description of the source matcher that tainted this flow.
-    pub source_description: String,
-    /// Description of the sink matcher that flagged this flow.
-    pub sink_description: String,
-    /// 1-indexed line where the taint source was introduced.
-    pub source_line: usize,
-    /// Optional rule id hint set by the batched analyzer so callers can
-    /// dispatch a finding back to the correct rule. `None` for
-    /// single-rule callers of [`analyze_tree`] / [`analyze_tree_with_cross_file`].
-    pub rule_id_hint: Option<String>,
-    /// Approximate number of hops along the source→sink flow. 1 for a
-    /// direct in-function flow, 2 for a flow that crosses a file
-    /// boundary via cross-file summaries. Used by the reporting layer
-    /// to derive a confidence score.
-    pub hops: u8,
-}
-
-/// Return-taint summary for a single function. Keyed by the function's
-/// simple name (class/nesting are ignored for v1). The value is `Some`
-/// description if any `return` statement in the function returns a
-/// tainted expression, `None` otherwise.
-///
-/// Function-name collisions (e.g. a nested `def helper` inside an outer
-/// function when another top-level `def helper` exists) are resolved
-/// last-write-wins, which is a known v1 limitation.
-pub type ReturnSummary = HashMap<String, Option<String>>;
+// ─── Public API ────────────────────────────────────────────────────────��──
 
 /// Bundles the read-only context that every internal walker needs,
 /// replacing the repeated `(source, spec, aliases, summaries)` tuple.
@@ -291,13 +159,6 @@ pub fn analyze_tree_with_cross_file<'a>(
         analyze_function(func_node, &ctx, &mut findings);
     });
     findings
-}
-
-/// Inputs to [`analyze_tree_batched`]: a set of rules that should share
-/// Pass 1/Pass 2 walks when their sanitizer profile matches.
-pub struct BatchedRule<'a> {
-    pub rule_id: &'a str,
-    pub spec: &'a TaintSpec,
 }
 
 /// Cross-file info used by the batched analyzer.
@@ -456,41 +317,6 @@ pub fn analyze_tree_batched<'a>(
     }
 
     out
-}
-
-fn sanitizer_fingerprints_eq(a: &[NodeMatcher], b: &[NodeMatcher]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let fingerprint = |matchers: &[NodeMatcher]| -> Vec<String> {
-        let mut v: Vec<String> = matchers.iter().map(matcher_fingerprint).collect();
-        v.sort();
-        v
-    };
-    fingerprint(a) == fingerprint(b)
-}
-
-fn matcher_fingerprint(m: &NodeMatcher) -> String {
-    match m {
-        NodeMatcher::Attribute {
-            root,
-            field,
-            description,
-        } => format!("A|{root}|{field}|{description}"),
-        NodeMatcher::Call {
-            canonical,
-            description,
-        } => format!("C|{canonical}|{description}"),
-        NodeMatcher::ParamName { names, description } => {
-            format!("P|{}|{description}", names.join(","))
-        }
-        NodeMatcher::MethodName {
-            method,
-            description,
-        } => {
-            format!("M|{method}|{description}")
-        }
-    }
 }
 
 /// Extract cross-file function taint summaries for all top-level functions
@@ -772,34 +598,6 @@ where
 }
 
 /// Taint metadata carried alongside a tainted variable: the human-readable
-/// description and the 1-indexed source line where the taint was introduced.
-#[derive(Clone, Debug)]
-struct TaintInfo {
-    description: String,
-    line: usize,
-}
-
-/// State maintained while walking a single function body. Maps local
-/// identifier names to a description of the source that tainted them.
-#[derive(Default)]
-struct TaintState {
-    tainted: HashMap<String, TaintInfo>,
-}
-
-impl TaintState {
-    fn taint(&mut self, name: String, description: String, line: usize) {
-        self.tainted.insert(name, TaintInfo { description, line });
-    }
-
-    fn clear(&mut self, name: &str) {
-        self.tainted.remove(name);
-    }
-
-    fn info(&self, name: &str) -> Option<&TaintInfo> {
-        self.tainted.get(name)
-    }
-}
-
 fn analyze_function(
     func_node: Node<'_>,
     ctx: &AnalysisContext<'_>,
@@ -1648,9 +1446,8 @@ fn match_source(
                 // from the function's parameter list, not when walking
                 // expressions.
             }
-            NodeMatcher::MethodName { .. } => {
-                // MethodName is a sink-only matcher. Ignore in source
-                // matching — sources match on precise callee shapes.
+            NodeMatcher::MethodName { .. } | NodeMatcher::MemberAssign { .. } => {
+                // Sink-only matchers; MemberAssign is JS-specific.
             }
         }
     }
@@ -1892,10 +1689,6 @@ fn leftmost_identifier<'a>(mut node: Node<'_>, source: &'a str) -> Option<&'a st
             _ => return None,
         }
     }
-}
-
-fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
-    &source[node.byte_range()]
 }
 
 #[cfg(test)]
