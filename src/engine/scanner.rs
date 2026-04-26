@@ -343,7 +343,7 @@ fn block_comment_ignore_regex() -> &'static Regex {
 
 fn parse_block_comment_ignore(line: &str) -> Option<(bool, InlineIgnoreSpec)> {
     let captures = block_comment_ignore_regex().captures(line)?;
-    let full_match = captures.get(0).unwrap();
+    let full_match = captures.get(0).expect("group 0 always present");
 
     let mut spec = InlineIgnoreSpec::default();
     match captures.name("rules").map(|rules| rules.as_str().trim()) {
@@ -746,7 +746,7 @@ fn scan_files(
 
             match std::fs::metadata(path) {
                 Ok(m) if m.len() > max_file_size => {
-                    warnings.lock().unwrap().push(format!(
+                    warnings.lock().expect("lock poisoned").push(format!(
                         "warning: skipping {} ({} bytes exceeds --max-file-size)",
                         path.display(),
                         m.len()
@@ -754,7 +754,7 @@ fn scan_files(
                     return Vec::new();
                 }
                 Err(_) => {
-                    warnings.lock().unwrap().push(format!(
+                    warnings.lock().expect("lock poisoned").push(format!(
                         "warning: skipping {} (cannot read metadata)",
                         path.display()
                     ));
