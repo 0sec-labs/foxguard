@@ -1,7 +1,6 @@
 use crate::impl_rule;
 use crate::rules::common::{
-    get_source_line, is_secret_value_long_enough, make_finding, walk_tree,
-    HARDCODED_SECRET_PATTERN,
+    get_source_line, is_secret_value_long_enough, make_finding, walk_tree, HARDCODED_SECRET_PATTERN,
 };
 use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
