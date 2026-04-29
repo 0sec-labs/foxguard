@@ -11,6 +11,8 @@ We wrote foxguard 0.8 for that question.
 
 ## What 0.8 does
 
+![foxguard TUI launcher with four cards: Scan, Diff, Secrets, and Pqc](/tui/launch-pqc.png)
+
 `foxguard pqc .` runs the PQ-vulnerable-crypto rules across a repository and prints the migration deadline alongside every hit:
 
 ```
@@ -24,6 +26,8 @@ WARNING  1 PQ finding in 18 files (0.04s): 1 high, 0 medium, 0 low
 CNSA 2.0 migration: at-risk (1 finding with an NSA transition deadline)
 ```
 
+![foxguard TUI PQ findings list with magenta algorithm chips and amber CNSA 2.0 deadline chips](/tui/pqc-findings.png)
+
 Rules ship for Python, JavaScript/TypeScript, Go, Java, and Rust; TLS configuration files (OpenSSL, nginx, Apache) are also scanned for non-PQ cipher suites. Each finding carries a CNSA 2.0 deadline derived from rule metadata — not from substring matching on rule IDs — and the remediation text splits cleanly: **ML-KEM-1024 / ML-DSA-87** for NSS workloads, **ML-KEM-768 / ML-DSA-65** for commercial use, per the CNSA 2.0 algorithm table. Getting that split right mattered: `--cnsa2` mode would have otherwise contradicted itself ([#256](https://github.com/PwnKit-Labs/foxguard/pull/256)).
 
 The rules file under CWE-327. We flag the caveat once and move on: CWE-327's canonical examples are already-broken ciphers like DES and MD5, and RSA/ECDSA aren't broken yet — they're quantum-vulnerable. The industry tags PQ findings under CWE-327 anyway; we follow the convention.
@@ -31,6 +35,8 @@ The rules file under CWE-327. We flag the caveat once and move on: CWE-327's can
 `foxguard --format cbom .` emits a CycloneDX 1.6 cryptographic bill of materials where every component links back to a file, a line, and the severity of any finding attached to it. The scan and the inventory are one artifact.
 
 And the dependencies: `foxguard pqc .` now also walks `Cargo.lock` and `requirements.txt` (closes [#221](https://github.com/PwnKit-Labs/foxguard/issues/221)). For Rust, a BFS over the transitive graph flags crates whose PQ-vulnerability is seed-confidence (`rsa`, `ed25519-dalek`, `p256` at 0.9) or review-required (`ring`, `aws-lc-rs` at 0.6 — both ship PQ-safe AEADs alongside Ed25519/ECDSA, so a bare hit warrants a look rather than a panic). For Python, membership is matched against a curated list of ~11 packages with per-package confidence. Each manifest finding carries a `dep_name` field so downstream tooling can attribute the hit to the lockfile entry rather than the source tree. Combined with the source-code rules, the single `pqc` pass answers both "which of my own calls?" and "which of my dependencies?"
+
+![foxguard TUI CNSA 2.0 compliance panel showing at-risk migration level and per-year finding tallies](/tui/compliance-panel.png)
 
 ## Prior art, honestly
 
