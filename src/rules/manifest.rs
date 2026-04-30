@@ -307,7 +307,14 @@ impl Rule for CargoLockPqCrypto {
                         continue;
                     };
                     if let Some(entry) = seed_map.get(neighbor_name) {
-                        reached_seeds.entry(entry.name).or_insert(entry);
+                        reached_seeds
+                            .entry(entry.name)
+                            .and_modify(|existing| {
+                                if entry.confidence > existing.confidence {
+                                    *existing = entry;
+                                }
+                            })
+                            .or_insert(entry);
                     } else {
                         queue.push_back(neighbor);
                     }
@@ -319,9 +326,13 @@ impl Rule for CargoLockPqCrypto {
             }
 
             // Pick the highest-confidence seed
-            let best = reached_seeds
-                .values()
-                .max_by(|a, b| a.confidence.total_cmp(&b.confidence))
+            let (_, best) = reached_seeds
+                .iter()
+                .max_by(|(k1, v1), (k2, v2)| {
+                    v1.confidence
+                        .total_cmp(&v2.confidence)
+                        .then_with(|| k1.cmp(k2))
+                })
                 .unwrap();
 
             // Find byte offset of this package entry.

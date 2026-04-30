@@ -50,6 +50,18 @@ pub fn shannon_entropy(s: &str) -> f32 {
     entropy
 }
 
+/// Base regex pattern shared by all `*/no-hardcoded-secret` rules.
+///
+/// Each language rule file should use this constant (or
+/// [`CSHARP_HARDCODED_SECRET_PATTERN`] for C#) instead of inlining its
+/// own copy of the pattern.
+pub const HARDCODED_SECRET_PATTERN: &str =
+    r"(?i)(password|secret|api_?key|token|auth|credential|private_?key)";
+
+/// Extended variant for C# that adds `connection_?string` /
+/// `connectionstring` to the base keyword set.
+pub const CSHARP_HARDCODED_SECRET_PATTERN: &str = r"(?i)(password|secret|api_?key|token|auth|credential|private_?key|connection_?string|connectionstring)";
+
 /// Default minimum length for strings flagged as a hardcoded secret.
 ///
 /// Historically this was hardcoded as `>= 4` across every language-specific
@@ -337,5 +349,32 @@ mod tests {
         assert_eq!(confidence_for_hops(2), 0.8);
         assert_eq!(confidence_for_hops(3), 0.6);
         assert_eq!(confidence_for_hops(10), 0.6);
+    }
+
+    #[test]
+    fn csharp_pattern_is_superset_of_base() {
+        let base = regex::Regex::new(HARDCODED_SECRET_PATTERN).unwrap();
+        let extended = regex::Regex::new(CSHARP_HARDCODED_SECRET_PATTERN).unwrap();
+
+        // Every keyword the base pattern matches must also match the C# pattern.
+        for kw in &[
+            "password",
+            "secret",
+            "api_key",
+            "apikey",
+            "token",
+            "auth",
+            "credential",
+            "private_key",
+            "privatekey",
+        ] {
+            assert!(base.is_match(kw), "base should match {kw}");
+            assert!(extended.is_match(kw), "csharp should match {kw}");
+        }
+        // C#-specific extras
+        for kw in &["connection_string", "connectionstring"] {
+            assert!(!base.is_match(kw), "base should NOT match {kw}");
+            assert!(extended.is_match(kw), "csharp should match {kw}");
+        }
     }
 }
