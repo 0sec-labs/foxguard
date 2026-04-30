@@ -18,6 +18,7 @@ pub mod rust_lang;
 pub mod semgrep_compat;
 pub mod semgrep_taint;
 pub mod swift;
+pub mod taint_engine;
 
 use crate::{Finding, Language, Severity};
 use std::path::Path;

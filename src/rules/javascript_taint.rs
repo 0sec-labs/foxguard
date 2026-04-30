@@ -25,6 +25,10 @@
 //! Everything specific to a library is expressed declaratively via `TaintSpec`.
 
 use super::common::AliasTable;
+use super::taint_engine::{node_text, sanitizer_fingerprints_eq, TaintState};
+pub use super::taint_engine::{
+    BatchedRule, NodeMatcher, ReturnSummary, RuleFilter, TaintFinding, TaintSpec,
+};
 use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -32,92 +36,6 @@ use std::path::PathBuf;
 use tree_sitter::{Node, Tree};
 
 // ─── Public API ───────────────────────────────────────────────────────────
-
-/// A pattern that matches an AST node for taint analysis.
-///
-/// Surface matches `python_taint::NodeMatcher` exactly so both engines can
-/// share a YAML bridge later.
-#[derive(Debug, Clone)]
-pub enum NodeMatcher {
-    /// Match a member-expression access like `req.body` or `request.query`.
-    ///
-    /// Triggers whenever the *leftmost* identifier in a chain equals `root`
-    /// and the *final* property segment equals `field`.
-    Attribute {
-        root: String,
-        field: String,
-        description: String,
-    },
-
-    /// Match a call whose callee resolves (raw or via the alias table) to
-    /// `canonical`.
-    Call {
-        canonical: String,
-        description: String,
-    },
-
-    /// Match any use of a function parameter whose name is in this list.
-    /// Used to mark Express-style handlers `(req, res) => {...}` as having
-    /// `req` pre-tainted without an explicit source assignment.
-    ParamName {
-        names: Vec<String>,
-        description: String,
-    },
-
-    /// Match any method call whose final property name equals `method`,
-    /// regardless of receiver. Only meaningful as a sink matcher.
-    MethodName { method: String, description: String },
-
-    /// Match an assignment where the LHS is a member expression whose
-    /// property name equals `field`. JS-specific: covers the
-    /// `element.innerHTML = tainted` pattern, which is not a call and so
-    /// cannot be expressed as `Call`.
-    MemberAssign { field: String, description: String },
-}
-
-impl NodeMatcher {
-    pub fn description(&self) -> &str {
-        match self {
-            NodeMatcher::Attribute { description, .. } => description,
-            NodeMatcher::Call { description, .. } => description,
-            NodeMatcher::ParamName { description, .. } => description,
-            NodeMatcher::MethodName { description, .. } => description,
-            NodeMatcher::MemberAssign { description, .. } => description,
-        }
-    }
-}
-
-/// Declarative taint specification consumed by the engine.
-#[derive(Debug, Clone, Default)]
-pub struct TaintSpec {
-    pub sources: Vec<NodeMatcher>,
-    pub sinks: Vec<NodeMatcher>,
-    pub sanitizers: Vec<NodeMatcher>,
-}
-
-/// A single source→sink flow reported by the engine.
-#[derive(Debug, Clone)]
-pub struct TaintFinding {
-    pub sink_start_byte: usize,
-    pub sink_end_byte: usize,
-    pub sink_line: usize,
-    pub sink_column: usize,
-    pub sink_end_line: usize,
-    pub sink_end_column: usize,
-    pub source_description: String,
-    pub sink_description: String,
-    /// 1-indexed line where the taint source was introduced.
-    pub source_line: usize,
-    /// Optional rule id hint set by the batched analyzer so callers can
-    /// dispatch a finding back to the correct rule. `None` for
-    /// single-rule callers of [`analyze_tree`] / [`analyze_tree_with_cross_file`].
-    pub rule_id_hint: Option<String>,
-    /// Approximate number of hops along the source→sink flow. 1 for a
-    /// direct in-function flow, 2 for a flow that crosses a file
-    /// boundary via cross-file summaries. Used by the reporting layer
-    /// to derive a confidence score.
-    pub hops: u8,
-}
 
 /// Cross-file context passed to `analyze_tree_with_cross_file` to enable
 /// cross-file taint propagation. When `Some`, the engine resolves calls to
@@ -140,35 +58,6 @@ pub struct CrossFileInfo<'a> {
     ///   batched rules.
     pub rule_filter: RuleFilter<'a>,
 }
-
-/// How cross-file findings should be attributed to rules.
-pub enum RuleFilter<'a> {
-    /// Only emit cross-file findings whose `sink_rule_id` equals the
-    /// given value; the finding is attributed to that rule.
-    Single(&'a str),
-    /// Emit cross-file findings whose `sink_rule_id` appears in the
-    /// given set; each finding is attributed to the matching rule via
-    /// `rule_id_hint`.
-    Any(&'a HashSet<String>),
-}
-
-impl<'a> RuleFilter<'a> {
-    fn allows(&self, rule_id: &str) -> bool {
-        match self {
-            RuleFilter::Single(id) => *id == rule_id,
-            RuleFilter::Any(set) => set.contains(rule_id),
-        }
-    }
-}
-
-/// Return-taint summary map keyed by a function's simple name. Mirrors
-/// `python_taint::ReturnSummary`. Only top-level `function_declaration`s
-/// and arrow/function-expression helpers assigned to a `const`/`let`/
-/// `var` identifier are collected — instance methods and object-literal
-/// methods are out of scope for v1 because they live on objects with
-/// different call semantics. Function-name collisions are resolved
-/// last-write-wins (known v1 limitation).
-pub type ReturnSummary = HashMap<String, Option<String>>;
 
 /// Bundles the read-only context that every internal walker needs,
 /// replacing the repeated `(source, spec, aliases, summaries)` tuple.
@@ -243,13 +132,6 @@ pub fn analyze_tree_with_cross_file<'a>(
         analyze_function(func_node, &ctx, &mut findings);
     });
     findings
-}
-
-/// Inputs to [`analyze_tree_batched`]: a set of rules that should share
-/// Pass 1/Pass 2 walks when their sanitizer profile matches.
-pub struct BatchedRule<'a> {
-    pub rule_id: &'a str,
-    pub spec: &'a TaintSpec,
 }
 
 /// Cross-file info used by the batched analyzer.
@@ -382,44 +264,6 @@ pub fn analyze_tree_batched<'a>(
     }
 
     out
-}
-
-fn sanitizer_fingerprints_eq(a: &[NodeMatcher], b: &[NodeMatcher]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let fingerprint = |matchers: &[NodeMatcher]| -> Vec<String> {
-        let mut v: Vec<String> = matchers.iter().map(matcher_fingerprint).collect();
-        v.sort();
-        v
-    };
-    fingerprint(a) == fingerprint(b)
-}
-
-fn matcher_fingerprint(m: &NodeMatcher) -> String {
-    match m {
-        NodeMatcher::Attribute {
-            root,
-            field,
-            description,
-        } => format!("A|{root}|{field}|{description}"),
-        NodeMatcher::Call {
-            canonical,
-            description,
-        } => format!("C|{canonical}|{description}"),
-        NodeMatcher::ParamName { names, description } => {
-            format!("P|{}|{description}", names.join(","))
-        }
-        NodeMatcher::MethodName {
-            method,
-            description,
-        } => {
-            format!("M|{method}|{description}")
-        }
-        NodeMatcher::MemberAssign { field, description } => {
-            format!("MA|{field}|{description}")
-        }
-    }
 }
 
 /// Walk `root` and invoke `visit(name, body_node)` for every function
@@ -1383,31 +1227,6 @@ where
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         collect_function_scopes(child, visit);
-    }
-}
-
-#[derive(Clone, Debug)]
-struct TaintInfo {
-    description: String,
-    line: usize,
-}
-
-#[derive(Default)]
-struct TaintState {
-    tainted: HashMap<String, TaintInfo>,
-}
-
-impl TaintState {
-    fn taint(&mut self, name: String, description: String, line: usize) {
-        self.tainted.insert(name, TaintInfo { description, line });
-    }
-
-    fn clear(&mut self, name: &str) {
-        self.tainted.remove(name);
-    }
-
-    fn info(&self, name: &str) -> Option<&TaintInfo> {
-        self.tainted.get(name)
     }
 }
 
@@ -2410,10 +2229,6 @@ fn leftmost_identifier<'a>(mut node: Node<'_>, source: &'a str) -> Option<&'a st
             _ => return None,
         }
     }
-}
-
-fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
-    &source[node.byte_range()]
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────
