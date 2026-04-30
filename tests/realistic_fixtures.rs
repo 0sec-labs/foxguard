@@ -198,7 +198,7 @@ fn realistic_express_api_multifile() {
 /// fire yet and will light up after issue #46.
 #[test]
 fn realistic_next_app_multifile() {
-    assert_fixture("next_app", 5, &[("js/taint-sql-injection", 1)]);
+    assert_fixture("next_app", 4, &[("js/taint-sql-injection", 1)]);
 }
 
 /// Multi-file Gin fixture (issue #48). `handlers.go` holds request

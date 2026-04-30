@@ -117,6 +117,37 @@ pub fn is_secret_value_long_enough(inner: &str) -> bool {
     true
 }
 
+/// Returns `false` for values that are almost certainly not secrets
+/// (contain spaces, look like URLs or file paths).
+pub fn looks_like_secret_value(inner: &str) -> bool {
+    if inner.contains(' ') {
+        return false;
+    }
+    if inner.starts_with("http://") || inner.starts_with("https://") {
+        return false;
+    }
+    if inner.starts_with('/') || inner.starts_with("./") || inner.starts_with("../") {
+        return false;
+    }
+    true
+}
+
+/// Returns `true` when the variable name is high-signal enough that we
+/// should flag the value even if it doesn't look secret-shaped (e.g.
+/// passphrases with spaces). Low-signal names like `auth` or `token`
+/// need the value to also pass `looks_like_secret_value`.
+pub fn is_high_signal_secret_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("password")
+        || lower.contains("passwd")
+        || lower.contains("secret")
+        || lower.contains("api_key")
+        || lower.contains("apikey")
+        || lower.contains("credential")
+        || lower.contains("private_key")
+        || lower.contains("privatekey")
+}
+
 /// Shared per-file import alias table.
 ///
 /// Maps a local identifier (as it appears in source) to its canonical

@@ -1,6 +1,7 @@
 use crate::impl_rule;
 use crate::rules::common::{
-    get_source_line, is_secret_value_long_enough, make_finding, walk_tree, HARDCODED_SECRET_PATTERN,
+    get_source_line, is_high_signal_secret_name, is_secret_value_long_enough,
+    looks_like_secret_value, make_finding, walk_tree, HARDCODED_SECRET_PATTERN,
 };
 use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
@@ -76,7 +77,10 @@ impl_rule! {
                         let val = &src[value_node.byte_range()];
                         // Skip empty strings and short placeholders
                         let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
-                        if is_secret_value_long_enough(inner) {
+                        if is_secret_value_long_enough(inner)
+                            && (looks_like_secret_value(inner)
+                                || is_high_signal_secret_name(name))
+                        {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
@@ -106,7 +110,10 @@ impl_rule! {
                     {
                         let val = &src[right.byte_range()];
                         let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
-                        if is_secret_value_long_enough(inner) {
+                        if is_secret_value_long_enough(inner)
+                            && (looks_like_secret_value(inner)
+                                || is_high_signal_secret_name(left_text))
+                        {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
@@ -278,6 +285,17 @@ impl_rule! {
 
                     // Match child_process.exec(...) or exec(...)
                     let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
+
+                    // Skip RegExp.prototype.exec() — only flag bare exec()
+                    // or child_process.exec() receivers.
+                    if func_name == "exec" && func_text.contains('.') {
+                        let receiver = &func_text[..func_text.rfind('.').unwrap()];
+                        if !receiver.contains("child_process")
+                            && !["cp", "proc", "subprocess"].contains(&receiver)
+                        {
+                            return;
+                        }
+                    }
 
                     if dangerous_fns.contains(&func_name) {
                         if let Some(args) = node.child_by_field_name("arguments") {
@@ -580,6 +598,24 @@ impl_rule! {
     }
 }
 
+/// Returns `true` when every leaf of a binary expression is a string literal
+/// or the identifier `__dirname` — i.e. the concatenation is fully static.
+fn is_static_concat(node: tree_sitter::Node, src: &str) -> bool {
+    match node.kind() {
+        "string" => true,
+        "identifier" => &src[node.byte_range()] == "__dirname",
+        "binary_expression" => {
+            let left = node.child_by_field_name("left");
+            let right = node.child_by_field_name("right");
+            match (left, right) {
+                (Some(l), Some(r)) => is_static_concat(l, src) && is_static_concat(r, src),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
 // ─── Rule 9: no-path-traversal ─────────────────────────────────────────────
 
 pub struct NoPathTraversal;
@@ -643,15 +679,38 @@ impl_rule! {
                     if func_name == "sendFile" || func_name == "download" {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
-                                let is_dynamic = matches!(
-                                    first_arg.kind(),
-                                    "binary_expression"
-                                        | "template_string"
-                                        | "identifier"
-                                        | "member_expression"
-                                        | "subscript_expression"
-                                        | "call_expression"
-                                );
+                                let is_dynamic = match first_arg.kind() {
+                                    "call_expression" => {
+                                        // Whitelist path.join/path.resolve with all-static args
+                                        let safe = (|| {
+                                            let func = first_arg.child_by_field_name("function")?;
+                                            let ft = &src[func.byte_range()];
+                                            if ft != "path.join" && ft != "path.resolve" {
+                                                return None;
+                                            }
+                                            let a = first_arg.child_by_field_name("arguments")?;
+                                            let mut c = a.walk();
+                                            let all_static = a.named_children(&mut c).all(|arg| {
+                                                arg.kind() == "string"
+                                                    || (arg.kind() == "identifier"
+                                                        && &src[arg.byte_range()] == "__dirname")
+                                            });
+                                            Some(all_static)
+                                        })();
+                                        !safe.unwrap_or(false)
+                                    }
+                                    "binary_expression" => !is_static_concat(first_arg, src),
+                                    "template_string" => {
+                                        let mut cursor = first_arg.walk();
+                                        let has_sub = first_arg
+                                            .children(&mut cursor)
+                                            .any(|c| c.kind() == "template_substitution");
+                                        has_sub
+                                    }
+                                    "identifier" | "member_expression"
+                                    | "subscript_expression" => true,
+                                    _ => false,
+                                };
                                 if is_dynamic {
                                     findings.push(make_finding(
                                         _self.id(),
@@ -739,8 +798,14 @@ impl_rule! {
                         && !arg_text.contains("url: \"")
                         && !arg_text.contains("url: '")
                 }
-                "template_string"
-                | "binary_expression"
+                "template_string" => {
+                    let mut cursor = first_arg.walk();
+                    let has_sub = first_arg
+                        .children(&mut cursor)
+                        .any(|c| c.kind() == "template_substitution");
+                    has_sub
+                }
+                "binary_expression"
                 | "identifier"
                 | "member_expression"
                 | "call_expression"
