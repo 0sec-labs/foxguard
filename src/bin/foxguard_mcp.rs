@@ -190,7 +190,7 @@ fn format_scan_result(result: ScanResult) -> Value {
         "content": [
             {
                 "type": "text",
-                "text": serde_json::to_string(&output).unwrap()
+                "text": serde_json::to_string(&output).expect("json!() is always serializable")
             }
         ]
     })

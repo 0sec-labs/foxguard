@@ -390,10 +390,9 @@ fn match_single_pattern(
     // Find the first meaningful child of the pattern (skip module/program wrapper)
     let pat_node = first_meaningful_node(pat_root, pattern);
 
-    if pat_node.is_none() {
+    let Some(pat_node) = pat_node else {
         return results;
-    }
-    let pat_node = pat_node.unwrap();
+    };
 
     // Walk every node in the target tree and try matching
     walk_and_match(root, source, pat_node, pattern, &mut results);
@@ -890,7 +889,7 @@ fn build_matcher(yaml: &SemgrepRuleYaml) -> Result<PatternMatcher, String> {
         && yaml.pattern_inside.is_none()
         && yaml.pattern_not_inside.is_none()
     {
-        return Ok(positives.into_iter().next().unwrap());
+        return Ok(positives.into_iter().next().expect("checked len == 1"));
     }
 
     if !positives.is_empty() {
