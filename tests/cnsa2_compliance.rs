@@ -233,3 +233,17 @@ fn sarif_always_includes_cnsa2_deadline_in_properties() {
         "SARIF must use camelCase cnsa2Deadline, not snake_case; got:\n{text}"
     );
 }
+
+#[test]
+fn sarif_includes_dep_name_in_properties() {
+    let out = foxguard_cmd()
+        .arg(fixture("deps/requirements.txt"))
+        .args(["--format", "sarif"])
+        .output()
+        .expect("foxguard should run");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("\"depName\""),
+        "SARIF should expose depName in properties; got:\n{text}"
+    );
+}
