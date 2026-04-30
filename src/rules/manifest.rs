@@ -468,7 +468,7 @@ impl Rule for RequirementsTxtPqCrypto {
                 );
                 finalize_manifest_finding(&mut f, entry, pkg_name);
 
-                if entry.crypto_algorithm.is_none() {
+                if entry.crypto_algorithm.is_none() && entry.confidence <= 0.6 {
                     f.fix_suggestion = Some(format!(
                         "Review usage — `{}` also provides PQ-safe primitives (AES, SHA-256)",
                         pkg_name
