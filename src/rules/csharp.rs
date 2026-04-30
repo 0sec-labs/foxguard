@@ -1,5 +1,7 @@
 use crate::impl_rule;
-use crate::rules::common::{is_secret_value_long_enough, make_finding, walk_tree};
+use crate::rules::common::{
+    is_secret_value_long_enough, make_finding, walk_tree, CSHARP_HARDCODED_SECRET_PATTERN,
+};
 use crate::{Language, Severity};
 use regex::Regex;
 
@@ -443,10 +445,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let secret_pattern = Regex::new(
-            r"(?i)(password|secret|api_?key|apikey|token|credential|private_?key|connection_?string|connectionstring)",
-        )
-        .unwrap();
+        let secret_pattern = Regex::new(CSHARP_HARDCODED_SECRET_PATTERN).unwrap();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // variable_declarator: string password = "hardcoded"

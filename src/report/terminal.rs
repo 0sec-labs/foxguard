@@ -123,7 +123,7 @@ pub fn print_findings_full(
             current_file = &f.file;
             by_file.push((&f.file, Vec::new()));
         }
-        by_file.last_mut().unwrap().1.push(f);
+        by_file.last_mut().expect("just pushed").1.push(f);
     }
 
     println!();

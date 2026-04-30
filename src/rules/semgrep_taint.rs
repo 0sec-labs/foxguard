@@ -641,7 +641,7 @@ fn compile_pattern(pattern: &str, role: MatcherRole) -> Option<GenericMatcher> {
         // `root.field` or `root.intermediate.field`. The engine only
         // supports one-level roots, so we take the leftmost segment as
         // the root and the outermost (last) segment as the field.
-        let root = pat[..pat.find('.').unwrap()].to_string();
+        let root = pat[..pat.find('.').expect("rfind guarantees at least one dot")].to_string();
         let field = pat[dot + 1..].to_string();
         if root.is_empty() || field.is_empty() {
             return None;

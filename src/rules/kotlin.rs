@@ -1,6 +1,7 @@
 use crate::impl_rule;
 use crate::rules::common::{
     is_secret_value_long_enough, make_finding, make_finding_from_offsets, walk_tree,
+    HARDCODED_SECRET_PATTERN,
 };
 use crate::{Finding, Language, Severity};
 use regex::Regex;
@@ -521,7 +522,7 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let secret_pattern =
-            Regex::new(r"(?i)(password|secret|api_?key|apiKey|token|auth|credential|private_?key)")
+            Regex::new(HARDCODED_SECRET_PATTERN)
                 .unwrap();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {

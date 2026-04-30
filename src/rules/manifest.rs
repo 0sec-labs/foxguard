@@ -326,9 +326,13 @@ impl Rule for CargoLockPqCrypto {
             }
 
             // Pick the highest-confidence seed
-            let best = reached_seeds
-                .values()
-                .max_by(|a, b| a.confidence.total_cmp(&b.confidence))
+            let (_, best) = reached_seeds
+                .iter()
+                .max_by(|(k1, v1), (k2, v2)| {
+                    v1.confidence
+                        .total_cmp(&v2.confidence)
+                        .then_with(|| k1.cmp(k2))
+                })
                 .unwrap();
 
             // Find byte offset of this package entry.
