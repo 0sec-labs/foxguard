@@ -1,0 +1,10 @@
+foxguard is active. Apply these secure-coding defaults when writing or editing code:
+
+- Never concatenate user input into shell, SQL, or path strings. Use parameterized APIs (`subprocess` arg lists, prepared statements, `pathlib.Path` joins).
+- Never hardcode secrets, tokens, or keys. Read from env vars or a secrets manager. Treat any string that looks like a credential as a finding.
+- Validate and canonicalize paths before file ops; reject paths that escape the intended root after resolution.
+- For HTTP fetchers, validate the destination host against an allowlist or block private IP ranges to avoid SSRF.
+- Prefer post-quantum-ready primitives where the project already supports them; flag legacy RSA / ECDSA / ECDH usage in security-sensitive paths.
+- Use `crypto.randomBytes` / `secrets` / `OsRng` for security-sensitive randomness — never `Math.random`, `rand()`, or `random.random()`.
+
+After every Write/Edit, foxguard scans the touched file. If findings come back, fix them before continuing rather than working around them. Use `/foxguard:scan` for a full repo scan, `/foxguard:diff-scan` for changed-only review, `/foxguard:pq-audit` for post-quantum readiness, and `/foxguard:triage` for the interactive TUI.
