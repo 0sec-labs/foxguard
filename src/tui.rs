@@ -7,7 +7,10 @@ use crate::config::{
     load_for_scan,
 };
 use crate::{Finding, Severity};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    MouseEvent, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -46,7 +49,16 @@ pub fn run_scan_tui(args: &TuiArgs) -> Result<i32, String> {
             .map_err(|e| e.to_string())?;
 
         if event::poll(Duration::from_millis(100)).map_err(|e| e.to_string())? {
-            let Event::Key(key) = event::read().map_err(|e| e.to_string())? else {
+            let ev = event::read().map_err(|e| e.to_string())?;
+
+            if let Event::Mouse(mouse) = ev {
+                if app.can_handle_finding_mouse() {
+                    app.handle_mouse(mouse);
+                }
+                continue;
+            }
+
+            let Event::Key(key) = ev else {
                 continue;
             };
 
@@ -129,6 +141,9 @@ struct TuiApp {
     /// legacy severity-desc ordering; cycled via `Shift+C` (feature B).
     sort_mode: SortMode,
     selected: usize,
+    list_state: ListState,
+    list_area: Rect,
+    hover_index: Option<usize>,
     show_notices: bool,
     show_help: bool,
     /// When on, a CNSA 2.0 migration-readiness strip is drawn at the bottom
@@ -170,6 +185,9 @@ impl TuiApp {
             session_min_confidence: 0.0,
             sort_mode: SortMode::default(),
             selected: 0,
+            list_state: ListState::default(),
+            list_area: Rect::default(),
+            hover_index: None,
             show_notices: true,
             show_help: false,
             show_compliance_panel: false,
@@ -193,6 +211,8 @@ impl TuiApp {
         self.error = None;
         self.result = None;
         self.selected = 0;
+        self.list_state = ListState::default();
+        self.hover_index = None;
         self.scanning = true;
         self.show_launch = false;
         self.show_help = false;
@@ -375,6 +395,49 @@ impl TuiApp {
                 ControlFlow::Continue
             }
             _ => ControlFlow::Continue,
+        }
+    }
+
+    fn can_handle_finding_mouse(&self) -> bool {
+        !self.show_launch
+            && !self.show_help
+            && self.severity_picker.is_none()
+            && self.action_menu.is_none()
+            && self.export_menu.is_none()
+            && !self.search_mode
+    }
+
+    fn handle_mouse(&mut self, mouse: MouseEvent) {
+        match mouse.kind {
+            kind @ (MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) => {
+                let last_kind = drain_queued_scroll_events(kind);
+                match last_kind {
+                    MouseEventKind::ScrollUp => self.move_selection(-1),
+                    MouseEventKind::ScrollDown => self.move_selection(1),
+                    _ => {}
+                }
+            }
+            MouseEventKind::Down(event::MouseButton::Left) => {
+                if let Some(index) = finding_list_index_at_position(
+                    self.list_area,
+                    self.list_state.offset(),
+                    self.filtered_indices().len(),
+                    mouse.column,
+                    mouse.row,
+                ) {
+                    self.select_filtered_index(index);
+                }
+            }
+            MouseEventKind::Moved => {
+                self.hover_index = finding_list_index_at_position(
+                    self.list_area,
+                    self.list_state.offset(),
+                    self.filtered_indices().len(),
+                    mouse.column,
+                    mouse.row,
+                );
+            }
+            _ => {}
         }
     }
 
@@ -730,6 +793,21 @@ impl TuiApp {
         let len = filtered.len() as isize;
         let next = (self.selected as isize + delta).clamp(0, len - 1);
         self.selected = next as usize;
+        if self.selected != previous {
+            self.detail_scroll = 0;
+            self.source_context_cache = None;
+            self.normalize_open_focus();
+        }
+    }
+
+    fn select_filtered_index(&mut self, index: usize) {
+        let filtered_len = self.filtered_indices().len();
+        if index >= filtered_len {
+            return;
+        }
+
+        let previous = self.selected;
+        self.selected = index;
         if self.selected != previous {
             self.detail_scroll = 0;
             self.source_context_cache = None;
@@ -1295,12 +1373,18 @@ impl TuiApp {
             .split(body_layout[0]);
 
         let filtered = self.filtered_indices();
+        let hover = self.hover_index;
         let items = if let Some(result) = self.result.as_ref() {
             filtered
                 .iter()
-                .map(|index| {
+                .enumerate()
+                .map(|(display_index, index)| {
                     let finding = &result.findings[*index];
-                    list_item(finding, self.review_state_for(finding))
+                    let mut item = list_item(finding, self.review_state_for(finding));
+                    if hover == Some(display_index) && self.selected != display_index {
+                        item = item.style(Style::default().bg(Color::Rgb(40, 40, 50)));
+                    }
+                    item
                 })
                 .collect::<Vec<_>>()
         } else {
@@ -1331,13 +1415,16 @@ impl TuiApp {
                     .bg(DETAIL_BG)
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol(">> ");
+            .highlight_symbol(">> ")
+            .scroll_padding(0);
 
-        let mut state = ListState::default();
         if !filtered.is_empty() {
-            state.select(Some(self.selected));
+            self.list_state.select(Some(self.selected));
+        } else {
+            self.list_state.select(None);
         }
-        frame.render_stateful_widget(list, layout[0], &mut state);
+        self.list_area = layout[0];
+        frame.render_stateful_widget(list, layout[0], &mut self.list_state);
 
         let detail = Paragraph::new(self.detail_text())
             .block(panel_block(Some("Detail"), DETAIL_BG))
@@ -1687,6 +1774,9 @@ impl TuiApp {
             Line::from("e              export findings (CBOM / JSON / SARIF)"),
             Line::from("PageUp/Down    scroll detail pane"),
             Line::from("[/]            scroll notices pane"),
+            Line::from("mouse wheel    move between findings"),
+            Line::from("mouse click    select a finding"),
+            Line::from("Shift-drag     terminal-native text selection"),
             Line::from("r              rescan"),
             Line::from("q              quit"),
             Line::from("? or Esc       close this help"),
@@ -2633,7 +2723,7 @@ impl TerminalSession {
     fn enter() -> Result<Self, String> {
         enable_raw_mode().map_err(|e| e.to_string())?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen).map_err(|e| e.to_string())?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture).map_err(|e| e.to_string())?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend).map_err(|e| e.to_string())?;
         Ok(Self {
@@ -2648,7 +2738,12 @@ impl TerminalSession {
         }
 
         disable_raw_mode().map_err(|e| e.to_string())?;
-        execute!(self.terminal.backend_mut(), LeaveAlternateScreen).map_err(|e| e.to_string())?;
+        execute!(
+            self.terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )
+        .map_err(|e| e.to_string())?;
         self.terminal.show_cursor().map_err(|e| e.to_string())?;
         self.active = false;
         Ok(())
@@ -2660,7 +2755,12 @@ impl TerminalSession {
         }
 
         enable_raw_mode().map_err(|e| e.to_string())?;
-        execute!(self.terminal.backend_mut(), EnterAlternateScreen).map_err(|e| e.to_string())?;
+        execute!(
+            self.terminal.backend_mut(),
+            EnterAlternateScreen,
+            EnableMouseCapture
+        )
+        .map_err(|e| e.to_string())?;
         self.terminal.clear().map_err(|e| e.to_string())?;
         self.active = true;
         Ok(())
@@ -2670,7 +2770,11 @@ impl TerminalSession {
 impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        );
         let _ = self.terminal.show_cursor();
     }
 }
@@ -2815,6 +2919,50 @@ fn adjust_scroll(current: u16, delta: i32) -> u16 {
     }
 }
 
+fn drain_queued_scroll_events(first_kind: MouseEventKind) -> MouseEventKind {
+    let mut last_kind = first_kind;
+    while event::poll(Duration::ZERO).unwrap_or(false) {
+        match event::read() {
+            Ok(Event::Mouse(MouseEvent {
+                kind: kind @ (MouseEventKind::ScrollUp | MouseEventKind::ScrollDown),
+                ..
+            })) => last_kind = kind,
+            _ => break,
+        }
+    }
+    last_kind
+}
+
+fn finding_list_index_at_position(
+    list_area: Rect,
+    list_offset: usize,
+    item_count: usize,
+    column: u16,
+    row: u16,
+) -> Option<usize> {
+    let content = finding_list_content_area(list_area);
+    if column < content.x
+        || column >= content.x.saturating_add(content.width)
+        || row < content.y
+        || row >= content.y.saturating_add(content.height)
+    {
+        return None;
+    }
+
+    let row_in_content = row.saturating_sub(content.y);
+    let index = list_offset + usize::from(row_in_content / FINDING_LIST_ITEM_HEIGHT);
+    (index < item_count).then_some(index)
+}
+
+fn finding_list_content_area(area: Rect) -> Rect {
+    Rect {
+        x: area.x.saturating_add(1),
+        y: area.y.saturating_add(2),
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    }
+}
+
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -2839,6 +2987,35 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finding_list_index_at_position_maps_two_line_rows() {
+        let area = Rect {
+            x: 10,
+            y: 5,
+            width: 40,
+            height: 12,
+        };
+
+        assert_eq!(finding_list_index_at_position(area, 0, 10, 11, 7), Some(0));
+        assert_eq!(finding_list_index_at_position(area, 0, 10, 11, 8), Some(0));
+        assert_eq!(finding_list_index_at_position(area, 0, 10, 11, 9), Some(1));
+        assert_eq!(finding_list_index_at_position(area, 3, 10, 11, 9), Some(4));
+    }
+
+    #[test]
+    fn finding_list_index_at_position_rejects_outside_content() {
+        let area = Rect {
+            x: 10,
+            y: 5,
+            width: 40,
+            height: 12,
+        };
+
+        assert_eq!(finding_list_index_at_position(area, 0, 10, 10, 7), None);
+        assert_eq!(finding_list_index_at_position(area, 0, 10, 11, 6), None);
+        assert_eq!(finding_list_index_at_position(area, 0, 1, 11, 9), None);
+    }
 
     #[test]
     fn resolve_finding_path_joins_relative_file_under_directory_root() {
@@ -5348,6 +5525,8 @@ const LOADING_SKELETON_WIDTH: usize = 28;
 const LOADING_SHIMMER_GAP: usize = 8;
 const LOADING_SHIMMER_CYCLE: usize = LOADING_SKELETON_WIDTH + LOADING_SHIMMER_GAP * 2;
 const LOADING_SHIMMER_BAND: f32 = 7.0;
+// `list_item` renders exactly two lines: title/metadata and file:line.
+const FINDING_LIST_ITEM_HEIGHT: u16 = 2;
 const APP_BG: Color = Color::Rgb(20, 17, 14);
 const HEADER_BG: Color = Color::Rgb(44, 37, 28);
 const PANEL_BG: Color = Color::Rgb(27, 23, 18);
