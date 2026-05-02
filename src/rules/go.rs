@@ -27,7 +27,7 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let sql_pattern =
-            Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)").unwrap();
+            Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)").expect("static Go SQL regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: "SELECT ... WHERE id = " + userId (binary_expression with +)
@@ -150,7 +150,7 @@ impl_rule! {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(HARDCODED_SECRET_PATTERN)
-                .unwrap();
+                .expect("static hardcoded secret regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Short variable declaration: password := "hardcoded"
@@ -591,7 +591,8 @@ impl_rule! {
     fn check(_self, source, _tree) {
 
         let mut findings = Vec::new();
-        let pattern = Regex::new(r"InsecureSkipVerify\s*:\s*true").unwrap();
+        let pattern = Regex::new(r"InsecureSkipVerify\s*:\s*true")
+            .expect("static Go TLS regex should compile");
 
         for matched in pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
@@ -753,7 +754,8 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let hardcoded_byte_re = Regex::new(r#"\[\]byte\(\s*"[^"]{4,}"\s*\)"#).unwrap();
+        let hardcoded_byte_re = Regex::new(r#"\[\]byte\(\s*"[^"]{4,}"\s*\)"#)
+            .expect("static Go JWT secret regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() != "call_expression" {

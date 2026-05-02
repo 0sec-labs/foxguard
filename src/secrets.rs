@@ -86,7 +86,8 @@ fn patterns() -> &'static [SecretPattern] {
                 severity: Severity::Critical,
                 cwe: Some("CWE-798"),
                 description: "Possible AWS access key ID detected",
-                regex: Regex::new(r"\bAKIA[0-9A-Z]{16}\b").unwrap(),
+                regex: Regex::new(r"\bAKIA[0-9A-Z]{16}\b")
+                    .expect("static AWS access key regex should compile"),
             },
             SecretPattern {
                 rule_id: "secret/aws-secret-access-key",
@@ -96,7 +97,7 @@ fn patterns() -> &'static [SecretPattern] {
                 regex: Regex::new(
                     r#"(?i)\baws_secret_access_key\b\s*[:=]\s*["']?[A-Za-z0-9/+=]{40}["']?"#,
                 )
-                .unwrap(),
+                .expect("static AWS secret key regex should compile"),
             },
             SecretPattern {
                 rule_id: "secret/github-token",
@@ -104,35 +105,39 @@ fn patterns() -> &'static [SecretPattern] {
                 cwe: Some("CWE-798"),
                 description: "Possible GitHub personal access token detected",
                 regex: Regex::new(r"\bghp_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b")
-                    .unwrap(),
+                    .expect("static GitHub token regex should compile"),
             },
             SecretPattern {
                 rule_id: "secret/gitlab-token",
                 severity: Severity::Critical,
                 cwe: Some("CWE-798"),
                 description: "Possible GitLab personal access token detected",
-                regex: Regex::new(r"\bglpat-[A-Za-z0-9\-_]{20,}\b").unwrap(),
+                regex: Regex::new(r"\bglpat-[A-Za-z0-9\-_]{20,}\b")
+                    .expect("static GitLab token regex should compile"),
             },
             SecretPattern {
                 rule_id: "secret/npm-token",
                 severity: Severity::High,
                 cwe: Some("CWE-798"),
                 description: "Possible npm access token detected",
-                regex: Regex::new(r"\bnpm_[A-Za-z0-9]{36}\b").unwrap(),
+                regex: Regex::new(r"\bnpm_[A-Za-z0-9]{36}\b")
+                    .expect("static npm token regex should compile"),
             },
             SecretPattern {
                 rule_id: "secret/slack-token",
                 severity: Severity::High,
                 cwe: Some("CWE-798"),
                 description: "Possible Slack token detected",
-                regex: Regex::new(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b").unwrap(),
+                regex: Regex::new(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")
+                    .expect("static Slack token regex should compile"),
             },
             SecretPattern {
                 rule_id: "secret/stripe-live-key",
                 severity: Severity::Critical,
                 cwe: Some("CWE-798"),
                 description: "Possible Stripe live secret key detected",
-                regex: Regex::new(r"\b(?:sk|rk)_live_[0-9A-Za-z]{16,}\b").unwrap(),
+                regex: Regex::new(r"\b(?:sk|rk)_live_[0-9A-Za-z]{16,}\b")
+                    .expect("static Stripe key regex should compile"),
             },
             SecretPattern {
                 rule_id: "secret/private-key",
@@ -140,7 +145,7 @@ fn patterns() -> &'static [SecretPattern] {
                 cwe: Some("CWE-798"),
                 description: "Private key material detected",
                 regex: Regex::new(r"-----BEGIN (?:RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----")
-                    .unwrap(),
+                    .expect("static private key regex should compile"),
             },
         ]
     })

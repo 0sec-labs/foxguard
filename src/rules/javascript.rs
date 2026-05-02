@@ -60,7 +60,7 @@ impl_rule! {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(HARDCODED_SECRET_PATTERN)
-                .unwrap();
+                .expect("static hardcoded secret regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // variable_declarator: const password = "hardcoded"
@@ -153,7 +153,7 @@ impl_rule! {
         // This avoids matching plain English like res.send('delete ' + name)
         let sql_pattern = Regex::new(
             r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)"
-        ).unwrap();
+        ).expect("static JavaScript SQL pattern should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: query("SELECT * FROM users WHERE id = " + userId)
@@ -897,7 +897,8 @@ impl_rule! {
         let mut findings = Vec::new();
         // Patterns known to cause catastrophic backtracking: nested quantifiers
         let dangerous_pattern =
-            Regex::new(r"(\([^)]*[+*][^)]*\)[+*]|\([^)]*\|[^)]*\)[+*])").unwrap();
+            Regex::new(r"(\([^)]*[+*][^)]*\)[+*]|\([^)]*\|[^)]*\)[+*])")
+                .expect("static ReDoS regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect regex literals: /pattern/
@@ -1243,11 +1244,12 @@ impl_rule! {
 
         let mut findings = Vec::new();
         // Match user-controlled input objects
-        let user_input_re = Regex::new(r"^req\.(params|query|body|headers)(\b|\[|\.)").unwrap();
+        let user_input_re = Regex::new(r"^req\.(params|query|body|headers)(\b|\[|\.)")
+            .expect("static Express user-input regex should compile");
         // Sanitization wrappers that neutralise XSS risk
         let sanitize_re = Regex::new(
             r"(?i)(escapeHtml|escape|sanitize|encode|encodeURIComponent|encodeURI|htmlEncode|xss|purify|DOMPurify|validator|parseInt|parseFloat|Number|String)\s*\("
-        ).unwrap();
+        ).expect("static JavaScript sanitizer regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: res.send(req.query.foo), res.write(req.body.bar)

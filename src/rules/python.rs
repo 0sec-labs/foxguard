@@ -79,7 +79,7 @@ impl_rule! {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(HARDCODED_SECRET_PATTERN)
-                .unwrap();
+                .expect("static hardcoded secret regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // assignment: password = "hardcoded"
@@ -136,7 +136,7 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let sql_pattern =
-            Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)").unwrap();
+            Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)").expect("static Python SQL regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect f-strings with SQL: f"SELECT * FROM users WHERE id = {user_id}"

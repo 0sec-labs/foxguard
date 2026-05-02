@@ -137,7 +137,8 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let sql_methods = Regex::new(r"(?i)\b(query|sql_query|execute|raw_sql)\b").unwrap();
+        let sql_methods = Regex::new(r"(?i)\b(query|sql_query|execute|raw_sql)\b")
+            .expect("static Rust SQL method regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
@@ -186,7 +187,8 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let weak_hash = Regex::new(r"\b(md5|sha1|Md5|Sha1|MD5|SHA1)\b").unwrap();
+        let weak_hash = Regex::new(r"\b(md5|sha1|Md5|Sha1|MD5|SHA1)\b")
+            .expect("static Rust weak hash regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect use declarations: use md5::..., use sha1::...
@@ -338,7 +340,7 @@ impl_rule! {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(HARDCODED_SECRET_PATTERN)
-                .unwrap();
+                .expect("static hardcoded secret regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // let password = "hardcoded";

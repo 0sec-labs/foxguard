@@ -487,7 +487,7 @@ impl_rule! {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(HARDCODED_SECRET_PATTERN)
-                .unwrap();
+                .expect("static hardcoded secret regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // assignment: variable = "hardcoded"

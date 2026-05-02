@@ -80,7 +80,8 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let sql_methods =
-            Regex::new(r"^(executeQuery|execute|createQuery|createNativeQuery)$").unwrap();
+            Regex::new(r"^(executeQuery|execute|createQuery|createNativeQuery)$")
+                .expect("static Java SQL method regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "method_invocation" {
@@ -415,7 +416,8 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let weak_algo =
-            Regex::new(r#"(?i)"(DES|DESede|RC2|RC4|Blowfish|MD5|SHA-?1|.*ECB.*)"#).unwrap();
+            Regex::new(r#"(?i)"(DES|DESede|RC2|RC4|Blowfish|MD5|SHA-?1|.*ECB.*)"#)
+                .expect("static Java weak crypto regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "method_invocation" {
@@ -606,7 +608,7 @@ impl_rule! {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(HARDCODED_SECRET_PATTERN)
-                .unwrap();
+                .expect("static hardcoded secret regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // variable_declarator: String password = "hardcoded";
@@ -687,9 +689,10 @@ impl_rule! {
         let factory_pattern = Regex::new(
             r"(DocumentBuilderFactory|SAXParserFactory|XMLInputFactory)\.newInstance\(\)",
         )
-        .unwrap();
+        .expect("static Java XXE factory regex should compile");
         let secure_pattern =
-            Regex::new(r"setFeature\s*\(|setProperty\s*\(|setAttribute\s*\(").unwrap();
+            Regex::new(r"setFeature\s*\(|setProperty\s*\(|setAttribute\s*\(")
+                .expect("static Java XXE hardening regex should compile");
 
         // Simple heuristic: if a factory is created but no setFeature is called
         // in the same file, flag it.
@@ -729,7 +732,7 @@ impl_rule! {
         let csrf_pattern = Regex::new(
             r"\.csrf\(\s*\)\s*\.\s*disable\(\s*\)|csrf\s*\([^)]*\.\s*disable\(\s*\)\s*\)",
         )
-        .unwrap();
+        .expect("static Java CSRF regex should compile");
 
         for matched in csrf_pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
@@ -905,7 +908,8 @@ impl_rule! {
         let mut findings = Vec::new();
 
         // allowedOrigins("*")
-        let wildcard_pattern = Regex::new(r#"allowedOrigins\s*\(\s*"\*"\s*\)"#).unwrap();
+        let wildcard_pattern = Regex::new(r#"allowedOrigins\s*\(\s*"\*"\s*\)"#)
+            .expect("static Java CORS regex should compile");
         for matched in wildcard_pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
                 _self.id(),

@@ -23,7 +23,7 @@ impl_rule! {
         let mut reported_lines = std::collections::HashSet::new();
         let secret_pattern =
             Regex::new(HARDCODED_SECRET_PATTERN)
-                .unwrap();
+                .expect("static hardcoded secret regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Match property declarations: let password = "hardcoded"
@@ -175,7 +175,8 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let pattern =
-            Regex::new(r"\b(CC_MD5|CC_SHA1|\.md5|\.sha1|Insecure\.MD5|Insecure\.SHA1)\b").unwrap();
+            Regex::new(r"\b(CC_MD5|CC_SHA1|\.md5|\.sha1|Insecure\.MD5|Insecure\.SHA1)\b")
+                .expect("static Swift weak crypto regex should compile");
 
         for matched in pattern.find_iter(source) {
             let algo = if matched.as_str().contains("MD5") || matched.as_str().contains("md5") {
@@ -294,11 +295,12 @@ impl_rule! {
     fn check(_self, source, _tree) {
 
         let mut findings = Vec::new();
-        let sql_keywords =
-            Regex::new(r"(?i)(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\s").unwrap();
+        let sql_keywords = Regex::new(r"(?i)(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\s")
+            .expect("static Swift SQL keyword regex should compile");
 
         // Detect SQL strings with interpolation: "SELECT ... \(variable) ..."
-        let interp_string = Regex::new(r#""[^"]*\\\([^)]+\)[^"]*""#).unwrap();
+        let interp_string = Regex::new(r#""[^"]*\\\([^)]+\)[^"]*""#)
+            .expect("static Swift interpolation regex should compile");
         for matched in interp_string.find_iter(source) {
             let text = matched.as_str();
             if sql_keywords.is_match(text) {
@@ -318,7 +320,7 @@ impl_rule! {
         let sql_concat = Regex::new(
             r#"(?i)(execute|prepare|sqlite3_exec)\s*\([^)]*(?:SELECT|INSERT|UPDATE|DELETE|DROP)[^)]*\+\s*"#,
         )
-        .unwrap();
+        .expect("static Swift SQL concat regex should compile");
         for matched in sql_concat.find_iter(source) {
             findings.push(make_finding_from_offsets(
                 _self.id(),
@@ -352,7 +354,7 @@ impl_rule! {
         let mut findings = Vec::new();
         let pattern =
             Regex::new(r"\b(kSecAttrAccessibleAlways|kSecAttrAccessibleAlwaysThisDeviceOnly)\b")
-                .unwrap();
+                .expect("static Swift keychain regex should compile");
 
         for matched in pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
@@ -390,15 +392,17 @@ impl_rule! {
 
         let patterns = [
             (
-                Regex::new(r"allowsExpiredCertificates\s*=\s*true").unwrap(),
+                Regex::new(r"allowsExpiredCertificates\s*=\s*true")
+                    .expect("static Swift TLS regex should compile"),
                 "allowsExpiredCertificates = true disables certificate expiry validation",
             ),
             (
-                Regex::new(r"allowsExpiredRoots\s*=\s*true").unwrap(),
+                Regex::new(r"allowsExpiredRoots\s*=\s*true")
+                    .expect("static Swift TLS regex should compile"),
                 "allowsExpiredRoots = true disables root certificate expiry validation",
             ),
             (
-                Regex::new(r"\.disableEvaluation").unwrap(),
+                Regex::new(r"\.disableEvaluation").expect("static Swift TLS regex should compile"),
                 ".disableEvaluation disables TLS server trust evaluation entirely",
             ),
         ];

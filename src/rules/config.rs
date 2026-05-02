@@ -28,37 +28,55 @@ fn strip_comments(source: &str) -> String {
 
 fn nginx_protocols_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)ssl_protocols\s+[^;]+;").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)ssl_protocols\s+[^;]+;")
+            .expect("static nginx protocols regex should compile")
+    })
 }
 
 fn nginx_ciphers_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)ssl_ciphers\s+[^;]+;").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)ssl_ciphers\s+[^;]+;").expect("static nginx ciphers regex should compile")
+    })
 }
 
 fn apache_protocol_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)SSLProtocol\s+.+").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)SSLProtocol\s+.+").expect("static Apache protocol regex should compile")
+    })
 }
 
 fn apache_cipher_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)SSLCipherSuite\s+.+").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)SSLCipherSuite\s+.+").expect("static Apache cipher regex should compile")
+    })
 }
 
 fn haproxy_options_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)ssl-default-bind-options\s+.+").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)ssl-default-bind-options\s+.+")
+            .expect("static HAProxy options regex should compile")
+    })
 }
 
 fn haproxy_ciphers_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)ssl-default-bind-ciphers\s+.+").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)ssl-default-bind-ciphers\s+.+")
+            .expect("static HAProxy ciphers regex should compile")
+    })
 }
 
 fn haproxy_ciphersuites_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)ssl-default-bind-ciphersuites\s+.+").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)ssl-default-bind-ciphersuites\s+.+")
+            .expect("static HAProxy ciphersuites regex should compile")
+    })
 }
 
 fn dockerfile_insecure_env_re() -> &'static Regex {
@@ -66,7 +84,7 @@ fn dockerfile_insecure_env_re() -> &'static Regex {
     RE.get_or_init(|| {
         Regex::new(
             r#"(?im)^(?:ENV|ARG)\s+.*(?:NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*0|PYTHONHTTPSVERIFY\s*=\s*0|GIT_SSL_NO_VERIFY\s*=\s*(?:true|1)|CURL_CA_BUNDLE\s*=\s*(?:''|""|$)|REQUESTS_CA_BUNDLE\s*=\s*(?:''|""|$)|SSL_CERT_FILE\s*=\s*/dev/null)"#
-        ).unwrap()
+        ).expect("static Dockerfile insecure env regex should compile")
     })
 }
 
@@ -75,7 +93,7 @@ fn dockerfile_run_insecure_re() -> &'static Regex {
     RE.get_or_init(|| {
         Regex::new(
             r#"(?im)^RUN\s+.*(?:NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*0|PYTHONHTTPSVERIFY\s*=\s*0|GIT_SSL_NO_VERIFY\s*=\s*(?:true|1)|curl\s+.*--insecure|curl\s+.*-k[\s|&;]|wget\s+.*--no-check-certificate)"#
-        ).unwrap()
+        ).expect("static Dockerfile insecure RUN regex should compile")
     })
 }
 
