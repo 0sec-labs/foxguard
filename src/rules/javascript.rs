@@ -289,11 +289,13 @@ impl_rule! {
                     // Skip RegExp.prototype.exec() — only flag bare exec()
                     // or child_process.exec() receivers.
                     if func_name == "exec" && func_text.contains('.') {
-                        let receiver = &func_text[..func_text.rfind('.').unwrap()];
-                        if !receiver.contains("child_process")
-                            && !["cp", "proc", "subprocess"].contains(&receiver)
-                        {
-                            return;
+                        if let Some(dot_index) = func_text.rfind('.') {
+                            let receiver = &func_text[..dot_index];
+                            if !receiver.contains("child_process")
+                                && !["cp", "proc", "subprocess"].contains(&receiver)
+                            {
+                                return;
+                            }
                         }
                     }
 
