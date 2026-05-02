@@ -371,15 +371,14 @@ fn go_collect_import_spec(aliases: &mut AliasTable, node: Node<'_>, source: &str
     // Canonical: last segment of the import path, e.g. `net/http` -> `http`.
     let canonical = path.rsplit('/').next().unwrap_or(path).to_string();
 
-    let name_node = node.child_by_field_name("name");
-    match name_node.map(|n| n.kind()) {
+    match node.child_by_field_name("name") {
         // `import . "fmt"` -- out of scope; record nothing.
-        Some("dot") => {}
+        Some(name_node) if name_node.kind() == "dot" => {}
         // `import _ "foo"` -- out of scope; record nothing.
-        Some("blank_identifier") => {}
+        Some(name_node) if name_node.kind() == "blank_identifier" => {}
         // `import f "fmt"` -- local alias `f` -> canonical `fmt`.
-        Some("package_identifier") => {
-            let local = node_text(name_node.unwrap(), source).to_string();
+        Some(name_node) if name_node.kind() == "package_identifier" => {
+            let local = node_text(name_node, source).to_string();
             aliases.insert(local, canonical);
         }
         // Plain `import "fmt"` -- the local name is the canonical.

@@ -326,14 +326,13 @@ impl Rule for CargoLockPqCrypto {
             }
 
             // Pick the highest-confidence seed
-            let (_, best) = reached_seeds
-                .iter()
-                .max_by(|(k1, v1), (k2, v2)| {
-                    v1.confidence
-                        .total_cmp(&v2.confidence)
-                        .then_with(|| k1.cmp(k2))
-                })
-                .unwrap();
+            let Some((_, best)) = reached_seeds.iter().max_by(|(k1, v1), (k2, v2)| {
+                v1.confidence
+                    .total_cmp(&v2.confidence)
+                    .then_with(|| k1.cmp(k2))
+            }) else {
+                continue;
+            };
 
             // Find byte offset of this package entry.
             // Use name+version to disambiguate duplicate crate names (e.g. syn 1.x vs 2.x).
