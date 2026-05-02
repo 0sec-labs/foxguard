@@ -110,7 +110,16 @@ curl -fsSL https://foxguard.dev/install.sh | sh          # prebuilt binary (macO
 cargo install foxguard                                   # crates.io
 ```
 
-**Editor:** [VS Code extension](https://marketplace.visualstudio.com/items?itemName=peaktwilight.foxguard) scans on save and shows findings inline.
+**Editors and agents:**
+
+- [VS Code extension](https://marketplace.visualstudio.com/items?itemName=peaktwilight.foxguard) scans on save and shows findings inline.
+- [Claude Code plugin](./plugins/claude-code) auto-scans files after Claude writes or edits them, adds `/foxguard:*` scan/triage/PQ/secrets skills, and injects secure-coding defaults into agent sessions.
+
+```sh
+claude --plugin-dir ./plugins/claude-code
+```
+
+Run `/foxguard:setup` inside Claude Code to verify the scanner is available. See [Claude Code integration](docs/claude-code-integration.md) for local plugin loading, hook behavior, and marketplace status.
 
 ## CI integration
 
@@ -132,7 +141,7 @@ jobs:
           upload-sarif: "true"
 ```
 
-Findings land in **Security → Code Scanning**. On any other CI: `npx foxguard@latest --format sarif . > out.sarif`. For Claude Code and other editor hooks, see [docs/claude-code-integration.md](docs/claude-code-integration.md).
+Findings land in **Security → Code Scanning**. On any other CI: `npx foxguard@latest --format sarif . > out.sarif`. For Claude Code and other agent/editor hooks, see [docs/claude-code-integration.md](docs/claude-code-integration.md).
 
 **Pre-commit:**
 

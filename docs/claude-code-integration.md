@@ -1,90 +1,85 @@
 # Claude Code Integration
 
-foxguard can run as a [Claude Code hook](https://docs.anthropic.com/en/docs/claude-code/hooks) to scan agent-written code before each commit. When findings are detected, the commit is blocked and Claude sees the output — giving it a chance to fix the issue before retrying.
+foxguard ships a Claude Code plugin in [`plugins/claude-code`](../plugins/claude-code). It is the recommended Claude Code integration path because it runs automatically during an agent session instead of waiting until commit time.
 
-## Setup
+## What The Plugin Does
 
-Add the following to `.claude/settings.json` in your project root:
+- Runs a `PostToolUse` hook after `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` so files Claude changes are scanned immediately.
+- Emits medium-and-above findings back to Claude so the agent can fix them before the issue lands in the repo.
+- Adds a `SessionStart` secure-coding preamble covering command execution, SQL, SSRF, path traversal, secrets, randomness, crypto, and deserialization.
+- Provides namespaced `/foxguard:*` skills for setup, full scans, diff scans, PQ audits, secrets scans, and TUI triage.
 
-```json
-{
-  "hooks": {
-    "PreCommit": [
-      {
-        "command": "npx foxguard --changed --severity high .",
-        "description": "foxguard security scan"
-      }
-    ]
-  }
-}
+## Local Install
+
+Install foxguard first:
+
+```sh
+curl -fsSL https://foxguard.dev/install.sh | sh
+# or: npm i -g foxguard
+# or: cargo install foxguard
 ```
 
-That's it. Claude Code will run foxguard before every commit.
+Then load the plugin from this repo:
 
-## What happens when findings are detected
+```sh
+claude --plugin-dir ./plugins/claude-code
+```
 
-1. Claude writes code and attempts to commit.
-2. foxguard scans the changed files.
-3. If any findings at or above the configured severity are found, foxguard exits non-zero.
-4. Claude Code blocks the commit and shows foxguard's output to the agent.
-5. The agent sees the finding (rule ID, file, line, description) and can fix it.
-6. On the next commit attempt, foxguard runs again.
+Inside Claude Code, run:
 
-## Customizing severity threshold
+```text
+/foxguard:setup
+```
 
-The `--severity` flag controls the minimum severity that causes a non-zero exit:
+That verifies the `foxguard` binary is available and explains the active hook severity threshold.
 
-```json
-{ "command": "npx foxguard --changed --severity critical ." }
+## Hook Behavior
+
+The auto-scan hook reads the Claude Code hook JSON from stdin, extracts `tool_input.file_path` or `tool_input.path`, and runs:
+
+```sh
+foxguard --format json --severity medium <edited-file>
+```
+
+If findings are present, the hook exits `2` and prints a compact finding summary to stderr. Missing binaries, unreadable files, invalid hook input, and clean scans exit `0` so plugin machinery does not block Claude by itself.
+
+Tune the threshold with:
+
+```sh
+export FOXGUARD_HOOK_SEVERITY=high
 ```
 
 Valid values: `low`, `medium`, `high`, `critical`.
 
-- `critical` — only block on critical findings (SQL injection, command injection, etc.)
-- `high` — block on high and critical (recommended default)
-- `medium` — block on medium and above
-- `low` — block on everything
+## Commands And Skills
 
-## Adding secrets scanning
+Claude Code plugin skills are namespaced by the plugin name:
 
-To also catch leaked credentials, add a second hook entry:
+- `/foxguard:setup` verifies installation and configuration.
+- `/foxguard:scan [path]` runs a full scan and summarizes findings.
+- `/foxguard:diff-scan [base]` reports findings introduced by the current branch.
+- `/foxguard:pq-audit [path]` runs post-quantum crypto and CNSA 2.0 checks.
+- `/foxguard:secrets [path]` scans for leaked credentials and private keys.
+- `/foxguard:triage [args]` opens or explains the interactive TUI triage flow.
 
-```json
-{
-  "hooks": {
-    "PreCommit": [
-      {
-        "command": "npx foxguard --changed --severity high .",
-        "description": "foxguard security scan"
-      },
-      {
-        "command": "npx foxguard secrets --changed .",
-        "description": "foxguard secrets scan"
-      }
-    ]
-  }
-}
+The plugin also includes a model-invoked `secure-coding` skill so Claude can pull in foxguard-aligned remediation guidance while writing security-sensitive code.
+
+## Pre-commit Still Helps
+
+The plugin is live feedback. A pre-commit hook is still useful as a final gate for human edits, other agents, or terminal changes outside Claude Code:
+
+```sh
+foxguard init
 ```
 
-## Combining with the VS Code extension
+Or configure your own hook to run:
 
-For a full agentic security loop:
-
-1. **VS Code extension** — scans on save, shows findings as inline underlines while the agent is editing.
-2. **Claude Code hook** — catches anything missed before commit.
-
-Install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=peaktwilight.foxguard), then add the hook config above. The two complement each other: the extension gives real-time feedback, the hook is the final gate.
-
-## Pinning a version
-
-To avoid network fetches on every commit, pin the version:
-
-```json
-{ "command": "npx foxguard@0.6.2 --changed --severity high ." }
+```sh
+npx foxguard --changed --severity high .
 ```
 
-Or install foxguard globally (`curl -fsSL https://foxguard.dev/install.sh | sh`) and reference the binary directly:
+## Publishing Status
 
-```json
-{ "command": "foxguard --changed --severity high ." }
-```
+The plugin can be loaded locally today with `--plugin-dir`. Publishing to an official Claude plugin marketplace is an external release step: it requires final marketplace metadata, a release/versioning decision, local plugin smoke testing in Claude Code, and submission through Anthropic's plugin form.
+
+Track the publishing checklist in the GitHub issue linked from the README/PR queue rather than treating it as part of the scanner binary release.
