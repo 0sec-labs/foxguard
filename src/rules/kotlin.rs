@@ -152,7 +152,7 @@ impl_rule! {
         let mut findings = Vec::new();
         let sql_methods =
             Regex::new(r"^(executeQuery|execute|createQuery|createNativeQuery|rawQuery|execSQL)$")
-                .unwrap();
+                .expect("static Kotlin SQL method regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
@@ -466,7 +466,8 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let weak_algo =
-            Regex::new(r#"(?i)"(DES|DESede|RC2|RC4|Blowfish|MD5|SHA-?1|.*ECB.*)"#).unwrap();
+            Regex::new(r#"(?i)"(DES|DESede|RC2|RC4|Blowfish|MD5|SHA-?1|.*ECB.*)"#)
+                .expect("static Kotlin weak crypto regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
@@ -523,7 +524,7 @@ impl_rule! {
         let mut findings = Vec::new();
         let secret_pattern =
             Regex::new(HARDCODED_SECRET_PATTERN)
-                .unwrap();
+                .expect("static hardcoded secret regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // property_declaration: val password = "hardcoded"
@@ -624,9 +625,10 @@ impl_rule! {
         let factory_pattern = Regex::new(
             r"(DocumentBuilderFactory|SAXParserFactory|XMLInputFactory)\.newInstance\(\)",
         )
-        .unwrap();
+        .expect("static Kotlin XXE factory regex should compile");
         let secure_pattern =
-            Regex::new(r"setFeature\s*\(|setProperty\s*\(|setAttribute\s*\(").unwrap();
+            Regex::new(r"setFeature\s*\(|setProperty\s*\(|setAttribute\s*\(")
+                .expect("static Kotlin XXE hardening regex should compile");
 
         if factory_pattern.is_match(source) && !secure_pattern.is_match(source) {
             for matched in factory_pattern.find_iter(source) {
@@ -663,7 +665,8 @@ impl_rule! {
 
         // allowedOrigins("*") / addAllowedOrigin("*")
         let wildcard_pattern =
-            Regex::new(r#"(allowedOrigins|addAllowedOrigin)\s*\(\s*"\*"\s*\)"#).unwrap();
+            Regex::new(r#"(allowedOrigins|addAllowedOrigin)\s*\(\s*"\*"\s*\)"#)
+                .expect("static Kotlin CORS regex should compile");
         for matched in wildcard_pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
                 _self.id(),

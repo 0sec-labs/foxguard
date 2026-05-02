@@ -762,8 +762,7 @@ fn scan_module_exports<'tree, F>(
         }
 
         // `module.exports.foo = function(...)` or `module.exports.foo = someFunc`
-        if left_text.starts_with("module.exports.") {
-            let export_name = left_text.strip_prefix("module.exports.").unwrap();
+        if let Some(export_name) = left_text.strip_prefix("module.exports.") {
             if matches!(right.kind(), "arrow_function" | "function_expression") {
                 visit(export_name.to_string(), right);
             } else if right.kind() == "identifier" {

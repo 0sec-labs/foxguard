@@ -445,7 +445,8 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let secret_pattern = Regex::new(CSHARP_HARDCODED_SECRET_PATTERN).unwrap();
+        let secret_pattern = Regex::new(CSHARP_HARDCODED_SECRET_PATTERN)
+            .expect("static C# hardcoded secret regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // variable_declarator: string password = "hardcoded"
@@ -656,7 +657,8 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let cors_star = Regex::new(r#"WithOrigins\s*\(\s*"\*"\s*\)"#).unwrap();
+        let cors_star = Regex::new(r#"WithOrigins\s*\(\s*"\*"\s*\)"#)
+            .expect("static C# CORS regex should compile");
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "invocation_expression" {
