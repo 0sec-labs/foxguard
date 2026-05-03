@@ -118,6 +118,19 @@ pub struct BatchedRule<'a> {
     pub spec: &'a TaintSpec,
 }
 
+/// A merged sanitizer-compatible batch of taint rules.
+pub(super) struct BatchedTaintGroup {
+    pub spec: TaintSpec,
+    pub sink_to_rule: HashMap<String, String>,
+    pub allowed_rule_ids: HashSet<String>,
+}
+
+/// Sink matcher result with the optional owning rule id used in batched mode.
+pub(super) struct MatchedSink {
+    pub description: String,
+    pub rule_id_hint: Option<String>,
+}
+
 // ─── Internal types (pub(super) for language engines) ────────────────────
 
 #[derive(Clone, Debug)]
@@ -149,6 +162,173 @@ impl TaintState {
 
 pub(super) fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
     &source[node.byte_range()]
+}
+
+pub(super) fn build_batched_taint_groups(rules: &[BatchedRule<'_>]) -> Vec<BatchedTaintGroup> {
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (i, r) in rules.iter().enumerate() {
+        let mut placed = false;
+        for g in groups.iter_mut() {
+            let rep = rules[g[0]].spec;
+            if sanitizer_fingerprints_eq(&rep.sanitizers, &r.spec.sanitizers) {
+                g.push(i);
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            groups.push(vec![i]);
+        }
+    }
+
+    let mut out = Vec::new();
+    for group in groups {
+        let mut merged_sources: Vec<NodeMatcher> = Vec::new();
+        let mut merged_sinks: Vec<NodeMatcher> = Vec::new();
+        let mut seen_source_descs: HashSet<String> = HashSet::new();
+        let mut seen_sink_descs: HashSet<String> = HashSet::new();
+        let mut sink_to_rule: HashMap<String, String> = HashMap::new();
+        let mut allowed_rule_ids: HashSet<String> = HashSet::new();
+
+        for idx in &group {
+            let rule = &rules[*idx];
+            allowed_rule_ids.insert(rule.rule_id.to_string());
+            for src in &rule.spec.sources {
+                if seen_source_descs.insert(src.description().to_string()) {
+                    merged_sources.push(src.clone());
+                }
+            }
+            for sink in &rule.spec.sinks {
+                sink_to_rule
+                    .entry(sink.description().to_string())
+                    .or_insert_with(|| rule.rule_id.to_string());
+                if seen_sink_descs.insert(sink.description().to_string()) {
+                    merged_sinks.push(sink.clone());
+                }
+            }
+        }
+
+        out.push(BatchedTaintGroup {
+            spec: TaintSpec {
+                sources: merged_sources,
+                sinks: merged_sinks,
+                sanitizers: rules[group[0]].spec.sanitizers.clone(),
+            },
+            sink_to_rule,
+            allowed_rule_ids,
+        });
+    }
+    out
+}
+
+pub(super) fn match_call_sink(
+    spec: &TaintSpec,
+    resolved_callee: &str,
+    sink_to_rule: Option<&HashMap<String, String>>,
+) -> Option<MatchedSink> {
+    let final_segment = resolved_callee
+        .rsplit('.')
+        .next()
+        .unwrap_or(resolved_callee);
+    let description = spec.sinks.iter().find_map(|matcher| match matcher {
+        NodeMatcher::Call {
+            canonical,
+            description,
+        } if canonical.as_str() == resolved_callee => Some(description.clone()),
+        NodeMatcher::MethodName {
+            method,
+            description,
+        } if method == final_segment => Some(description.clone()),
+        _ => None,
+    })?;
+    Some(MatchedSink {
+        rule_id_hint: rule_hint_for_sink_description(&description, sink_to_rule),
+        description,
+    })
+}
+
+pub(super) fn match_member_assign_sink(
+    spec: &TaintSpec,
+    field_name: &str,
+    sink_to_rule: Option<&HashMap<String, String>>,
+) -> Option<MatchedSink> {
+    let description = spec.sinks.iter().find_map(|matcher| match matcher {
+        NodeMatcher::MemberAssign { field, description } if field == field_name => {
+            Some(description.clone())
+        }
+        _ => None,
+    })?;
+    Some(MatchedSink {
+        rule_id_hint: rule_hint_for_sink_description(&description, sink_to_rule),
+        description,
+    })
+}
+
+pub(super) fn taint_finding_for_node(
+    node: Node<'_>,
+    source_description: String,
+    sink_description: String,
+    source_line: usize,
+    rule_id_hint: Option<String>,
+    hops: u8,
+) -> TaintFinding {
+    let start = node.start_position();
+    let end = node.end_position();
+    TaintFinding {
+        sink_start_byte: node.start_byte(),
+        sink_end_byte: node.end_byte(),
+        sink_line: start.row + 1,
+        sink_column: start.column + 1,
+        sink_end_line: end.row + 1,
+        sink_end_column: end.column + 1,
+        source_description,
+        sink_description,
+        source_line,
+        rule_id_hint,
+        hops,
+    }
+}
+
+pub(super) fn cross_file_taint_finding(
+    node: Node<'_>,
+    source_description: String,
+    source_line: usize,
+    sink_description: &str,
+    callee_name: &str,
+    sink_rule_id: &str,
+) -> TaintFinding {
+    taint_finding_for_node(
+        node,
+        source_description,
+        format!("{sink_description} (via cross-file call to {callee_name})"),
+        source_line,
+        Some(sink_rule_id.to_string()),
+        2,
+    )
+}
+
+pub(super) fn push_attributed_findings(
+    out: &mut Vec<(String, TaintFinding)>,
+    findings: Vec<TaintFinding>,
+    sink_to_rule: &HashMap<String, String>,
+) {
+    for mut finding in findings {
+        let rule_id = finding
+            .rule_id_hint
+            .clone()
+            .or_else(|| sink_to_rule.get(finding.sink_description.as_str()).cloned());
+        if let Some(rule_id) = rule_id {
+            finding.rule_id_hint = Some(rule_id.clone());
+            out.push((rule_id, finding));
+        }
+    }
+}
+
+fn rule_hint_for_sink_description(
+    sink_description: &str,
+    sink_to_rule: Option<&HashMap<String, String>>,
+) -> Option<String> {
+    sink_to_rule.and_then(|map| map.get(sink_description).cloned())
 }
 
 pub(super) fn sanitizer_fingerprints_eq(a: &[NodeMatcher], b: &[NodeMatcher]) -> bool {
