@@ -33,8 +33,8 @@
 use crate::rules::common::AliasTable;
 use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
 use crate::rules::taint_engine::{
-    build_batched_taint_groups, cross_file_taint_finding, match_call_sink, node_text,
-    push_attributed_findings, taint_finding_for_node, TaintState,
+    attribution_hint_for_sink, build_batched_taint_groups, cross_file_taint_finding,
+    match_call_sink, node_text, push_attributed_findings, taint_finding_for_node, TaintState,
 };
 pub use crate::rules::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, RuleFilter, TaintFinding, TaintSpec,
@@ -79,7 +79,7 @@ struct AnalysisContext<'a> {
     /// When the batched analyzer merges sinks from multiple rules into a
     /// single `TaintSpec`, this map attributes each matched sink back to
     /// its owning rule id. `None` in single-rule mode.
-    sink_to_rule: Option<&'a HashMap<String, String>>,
+    sink_to_rules: Option<&'a HashMap<String, Vec<String>>>,
 }
 
 /// Run the taint engine over every function definition inside `root` and
@@ -138,7 +138,7 @@ pub fn analyze_tree_with_cross_file<'a>(
         aliases,
         summaries: &empty_summary,
         cross_file: None,
-        sink_to_rule: None,
+        sink_to_rules: None,
     };
     collect_function_defs(root, &mut |func_node| {
         let (name, ret_taint) = summarize_function(func_node, &pass1_ctx);
@@ -155,7 +155,7 @@ pub fn analyze_tree_with_cross_file<'a>(
         aliases,
         summaries: &summaries,
         cross_file,
-        sink_to_rule: None,
+        sink_to_rules: None,
     };
     let mut findings = Vec::new();
     collect_function_defs(root, &mut |func_node| {
@@ -209,7 +209,7 @@ pub fn analyze_tree_batched<'a>(
             aliases,
             summaries: &empty_summary,
             cross_file: None,
-            sink_to_rule: None,
+            sink_to_rules: None,
         };
         let mut summaries = ReturnSummary::new();
         collect_function_defs(root, &mut |func_node| {
@@ -233,14 +233,14 @@ pub fn analyze_tree_batched<'a>(
             aliases,
             summaries: &summaries,
             cross_file: cross_file_for_group.as_ref(),
-            sink_to_rule: Some(&group.sink_to_rule),
+            sink_to_rules: Some(&group.sink_to_rules),
         };
         let mut group_findings: Vec<TaintFinding> = Vec::new();
         collect_function_defs(root, &mut |func_node| {
             analyze_function(func_node, &ctx, &mut group_findings);
         });
 
-        push_attributed_findings(&mut out, group_findings, &group.sink_to_rule);
+        push_attributed_findings(&mut out, group_findings, &group.sink_to_rules);
     }
 
     out
@@ -339,7 +339,7 @@ pub fn extract_cross_file_summaries(
                 aliases,
                 summaries: &empty_summary,
                 cross_file: None,
-                sink_to_rule: None,
+                sink_to_rules: None,
             };
             let (_, ret_taint) = summarize_function(func_node, &return_ctx);
             if ret_taint.is_some() && !params_to_return.contains(&param_idx) {
@@ -357,7 +357,7 @@ pub fn extract_cross_file_summaries(
                     aliases,
                     summaries: &empty_summary,
                     cross_file: None,
-                    sink_to_rule: None,
+                    sink_to_rules: None,
                 };
                 let mut findings = Vec::new();
                 analyze_function(func_node, &batched_ctx, &mut findings);
@@ -383,7 +383,7 @@ pub fn extract_cross_file_summaries(
                     aliases,
                     summaries: &empty_summary,
                     cross_file: None,
-                    sink_to_rule: None,
+                    sink_to_rules: None,
                 };
                 let mut findings = Vec::new();
                 analyze_function(func_node, &sink_ctx, &mut findings);
@@ -826,7 +826,7 @@ fn handle_call(
         None => callee_text.to_string(),
     };
 
-    if let Some(sink) = match_call_sink(ctx.spec, resolved.as_str(), ctx.sink_to_rule) {
+    if let Some(sink) = match_call_sink(ctx.spec, resolved.as_str(), ctx.sink_to_rules) {
         // Check each argument for taint.
         let Some(args) = node.child_by_field_name("arguments") else {
             return;
@@ -834,12 +834,13 @@ fn handle_call(
         let mut cursor = args.walk();
         for arg in args.named_children(&mut cursor) {
             if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
+                let rule_hint = attribution_hint_for_sink(&sink);
                 findings.push(taint_finding_for_node(
                     node,
                     source_desc,
-                    sink.description.clone(),
+                    sink.description,
                     src_line,
-                    sink.rule_id_hint.clone(),
+                    rule_hint,
                     1,
                 ));
                 // One finding per sink call is enough — don't double-report
