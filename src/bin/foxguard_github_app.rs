@@ -141,7 +141,10 @@ async fn webhook(
             info!(delivery, "ping received");
         }
         EventKind::Installation => {
-            info!(delivery, "installation event — TODO: persist install metadata");
+            info!(
+                delivery,
+                "installation event — TODO: persist install metadata"
+            );
         }
         EventKind::PullRequest => {
             info!(
