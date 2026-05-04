@@ -1,0 +1,38 @@
+# Reference Dockerfile for the foxguard GitHub App webhook receiver.
+# Built behind the `github-app` feature so the core scanner image
+# stays lean. See src/github_app/README.md and issue #246.
+#
+# Build:
+#   docker build -f Dockerfile.github-app -t foxguard/github-app:latest .
+#
+# Run:
+#   docker run --rm -p 8080:8080 \
+#     -e FOXGUARD_WEBHOOK_SECRET=$(openssl rand -hex 32) \
+#     foxguard/github-app:latest
+
+FROM rust:1.83-slim AS builder
+WORKDIR /usr/src/foxguard
+COPY . .
+# Build only the github-app binary; --features turns on the optional
+# axum/tokio/hmac/etc. closure required for the receiver.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo build --release --features github-app --bin foxguard-github-app
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --create-home --shell /bin/false foxguard
+
+COPY --from=builder /usr/src/foxguard/target/release/foxguard-github-app /usr/local/bin/foxguard-github-app
+
+USER foxguard
+EXPOSE 8080
+ENV FOXGUARD_BIND=0.0.0.0:8080
+# FOXGUARD_WEBHOOK_SECRET MUST be supplied at runtime — the binary
+# refuses to start without one rather than silently accepting every
+# delivery. See src/github_app/webhook.rs.
+
+ENTRYPOINT ["/usr/local/bin/foxguard-github-app"]
