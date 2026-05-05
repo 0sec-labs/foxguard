@@ -39,11 +39,7 @@ pub enum SignatureError {
 /// The comparison runs in constant time relative to the secret and
 /// signature length, so this function is safe to call on every
 /// request.
-pub fn verify_signature(
-    secret: &[u8],
-    header: &str,
-    body: &[u8],
-) -> Result<(), SignatureError> {
+pub fn verify_signature(secret: &[u8], header: &str, body: &[u8]) -> Result<(), SignatureError> {
     let prefix = "sha256=";
     let hex_digest = match header.strip_prefix(prefix) {
         Some(rest) => rest.trim(),
@@ -67,8 +63,7 @@ pub fn verify_signature(
         return Err(SignatureError::MalformedHeader);
     }
 
-    let mut mac =
-        HmacSha256::new_from_slice(secret).map_err(|_| SignatureError::Mismatch)?;
+    let mut mac = HmacSha256::new_from_slice(secret).map_err(|_| SignatureError::Mismatch)?;
     mac.update(body);
 
     // `hmac::Mac::verify_slice` does the constant-time comparison
@@ -124,8 +119,7 @@ mod tests {
     // Computed once with `python -c "import hmac, hashlib; print(hmac.new(b'sekret', b'hello', hashlib.sha256).hexdigest())"`.
     const SECRET: &[u8] = b"sekret";
     const BODY: &[u8] = b"hello";
-    const KNOWN_DIGEST: &str =
-        "24de3247aa41906931f59dd849ce2bf66043c21955d9f4726c198ee3006c5f47";
+    const KNOWN_DIGEST: &str = "24de3247aa41906931f59dd849ce2bf66043c21955d9f4726c198ee3006c5f47";
 
     fn ok_header() -> String {
         format!("sha256={KNOWN_DIGEST}")
@@ -196,8 +190,14 @@ mod tests {
 
     #[test]
     fn event_kind_maps_known_headers() {
-        assert_eq!(EventKind::from_header("pull_request"), EventKind::PullRequest);
-        assert_eq!(EventKind::from_header("installation"), EventKind::Installation);
+        assert_eq!(
+            EventKind::from_header("pull_request"),
+            EventKind::PullRequest
+        );
+        assert_eq!(
+            EventKind::from_header("installation"),
+            EventKind::Installation
+        );
         assert_eq!(
             EventKind::from_header("installation_repositories"),
             EventKind::Installation
