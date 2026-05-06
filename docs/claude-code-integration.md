@@ -82,4 +82,6 @@ npx foxguard --changed --severity high .
 
 The plugin can be loaded locally today with `--plugin-dir`. Publishing to an official Claude plugin marketplace is an external release step: it requires final marketplace metadata, a release/versioning decision, local plugin smoke testing in Claude Code, and submission through Anthropic's plugin form.
 
-Track the publishing checklist in the GitHub issue linked from the README/PR queue rather than treating it as part of the scanner binary release.
+Track the publishing checklist in the GitHub issue linked from the README/PR queue rather than treating it as part of the scanner binary release. Marketplace copy, versioning notes, and local validation commands live in [`plugins/claude-code/MARKETPLACE.md`](../plugins/claude-code/MARKETPLACE.md).
+
+This integration is intentionally Claude Code-specific. Generalizing foxguard for other agent or editor hook systems should be handled as a separate design and implementation issue.
