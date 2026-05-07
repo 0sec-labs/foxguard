@@ -25,7 +25,11 @@
 //! Everything specific to a library is expressed declaratively via `TaintSpec`.
 
 use super::common::AliasTable;
-use super::taint_engine::{node_text, sanitizer_fingerprints_eq, TaintState};
+use super::taint_engine::{
+    attribution_hint_for_sink, build_batched_taint_groups, cross_file_taint_finding,
+    match_call_sink, match_member_assign_sink, node_text, push_attributed_findings,
+    taint_finding_for_node, TaintState,
+};
 pub use super::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, RuleFilter, TaintFinding, TaintSpec,
 };
@@ -71,7 +75,7 @@ struct AnalysisContext<'a> {
     /// When the batched analyzer merges sinks from multiple rules into a
     /// single `TaintSpec`, this map attributes each matched sink back to
     /// its owning rule id. `None` in single-rule mode.
-    sink_to_rule: Option<&'a HashMap<String, String>>,
+    sink_to_rules: Option<&'a HashMap<String, Vec<String>>>,
 }
 
 /// Run the taint engine over every function/method body inside `root` and
@@ -112,7 +116,7 @@ pub fn analyze_tree_with_cross_file<'a>(
         aliases,
         summaries: &empty_summary,
         cross_file: None,
-        sink_to_rule: None,
+        sink_to_rules: None,
     };
     collect_summary_targets(root, source, &mut |name, func_node| {
         let ret = summarize_function(func_node, &pass1_ctx);
@@ -125,7 +129,7 @@ pub fn analyze_tree_with_cross_file<'a>(
         aliases,
         summaries: &summaries,
         cross_file,
-        sink_to_rule: None,
+        sink_to_rules: None,
     };
     let mut findings = Vec::new();
     collect_function_scopes(root, &mut |func_node| {
@@ -164,66 +168,17 @@ pub fn analyze_tree_batched<'a>(
         return Vec::new();
     }
 
-    // Group rules that share the same sanitizer matchers.
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    for (i, r) in rules.iter().enumerate() {
-        let mut placed = false;
-        for g in groups.iter_mut() {
-            let rep = rules[g[0]].spec;
-            if sanitizer_fingerprints_eq(&rep.sanitizers, &r.spec.sanitizers) {
-                g.push(i);
-                placed = true;
-                break;
-            }
-        }
-        if !placed {
-            groups.push(vec![i]);
-        }
-    }
-
     let mut out: Vec<(String, TaintFinding)> = Vec::new();
-    for group in &groups {
-        let mut merged_sources: Vec<NodeMatcher> = Vec::new();
-        let mut merged_sinks: Vec<NodeMatcher> = Vec::new();
-        let mut seen_source_descs: HashSet<String> = HashSet::new();
-        let mut seen_sink_descs: HashSet<String> = HashSet::new();
-        let mut sink_to_rule: HashMap<String, String> = HashMap::new();
-        let mut allowed_rule_ids: HashSet<String> = HashSet::new();
-
-        for &idx in group {
-            let r = &rules[idx];
-            allowed_rule_ids.insert(r.rule_id.to_string());
-            for src in &r.spec.sources {
-                if seen_source_descs.insert(src.description().to_string()) {
-                    merged_sources.push(src.clone());
-                }
-            }
-            for sink in &r.spec.sinks {
-                sink_to_rule
-                    .entry(sink.description().to_string())
-                    .or_insert_with(|| r.rule_id.to_string());
-                if seen_sink_descs.insert(sink.description().to_string()) {
-                    merged_sinks.push(sink.clone());
-                }
-            }
-        }
-
-        let sanitizers = rules[group[0]].spec.sanitizers.clone();
-        let merged_spec = TaintSpec {
-            sources: merged_sources,
-            sinks: merged_sinks,
-            sanitizers,
-        };
-
+    for group in build_batched_taint_groups(rules) {
         // Pass 1: compute summaries once for the entire group.
         let empty_summary = ReturnSummary::new();
         let pass1_ctx = AnalysisContext {
             source,
-            spec: &merged_spec,
+            spec: &group.spec,
             aliases,
             summaries: &empty_summary,
             cross_file: None,
-            sink_to_rule: None,
+            sink_to_rules: None,
         };
         let mut summaries = ReturnSummary::new();
         collect_summary_targets(root, source, &mut |name, func_node| {
@@ -235,32 +190,22 @@ pub fn analyze_tree_batched<'a>(
         let cross_file_for_group = cross_file.map(|cf| CrossFileInfo {
             import_to_path: cf.import_to_path,
             summaries: cf.summaries,
-            rule_filter: RuleFilter::Any(&allowed_rule_ids),
+            rule_filter: RuleFilter::Any(&group.allowed_rule_ids),
         });
         let ctx = AnalysisContext {
             source,
-            spec: &merged_spec,
+            spec: &group.spec,
             aliases,
             summaries: &summaries,
             cross_file: cross_file_for_group.as_ref(),
-            sink_to_rule: Some(&sink_to_rule),
+            sink_to_rules: Some(&group.sink_to_rules),
         };
         let mut group_findings: Vec<TaintFinding> = Vec::new();
         collect_function_scopes(root, &mut |func_node| {
             analyze_function(func_node, &ctx, &mut group_findings);
         });
 
-        // Attribute each finding back to the rule id.
-        for mut f in group_findings {
-            let rule_id = f
-                .rule_id_hint
-                .clone()
-                .or_else(|| sink_to_rule.get(f.sink_description.as_str()).cloned());
-            if let Some(rid) = rule_id {
-                f.rule_id_hint = Some(rid.clone());
-                out.push((rid, f));
-            }
-        }
+        push_attributed_findings(&mut out, group_findings, &group.sink_to_rules);
     }
 
     out
@@ -476,7 +421,7 @@ pub fn extract_cross_file_summaries(
                 aliases,
                 summaries: &empty_summary,
                 cross_file: None,
-                sink_to_rule: None,
+                sink_to_rules: None,
             };
             let ret_taint = summarize_function(func_node, &return_ctx);
             if ret_taint.is_some() && !params_to_return.contains(&param_idx) {
@@ -494,7 +439,7 @@ pub fn extract_cross_file_summaries(
                     aliases,
                     summaries: &empty_summary,
                     cross_file: None,
-                    sink_to_rule: None,
+                    sink_to_rules: None,
                 };
                 let mut findings = Vec::new();
                 analyze_function(func_node, &batched_ctx, &mut findings);
@@ -520,7 +465,7 @@ pub fn extract_cross_file_summaries(
                     aliases,
                     summaries: &empty_summary,
                     cross_file: None,
-                    sink_to_rule: None,
+                    sink_to_rules: None,
                 };
                 let mut findings = Vec::new();
                 analyze_function(func_node, &sink_ctx, &mut findings);
@@ -1423,32 +1368,17 @@ fn handle_assignment(
     if left.kind() == "member_expression" {
         if let Some(prop) = left.child_by_field_name("property") {
             let prop_name = node_text(prop, ctx.source);
-            if let Some(sink_desc) = ctx.spec.sinks.iter().find_map(|m| match m {
-                NodeMatcher::MemberAssign { field, description } if field == prop_name => {
-                    Some(description.clone())
-                }
-                _ => None,
-            }) {
+            if let Some(sink) = match_member_assign_sink(ctx.spec, prop_name, ctx.sink_to_rules) {
                 if let Some((src_desc, src_line)) = expression_taint(right, ctx, state) {
-                    let start = node.start_position();
-                    let end = node.end_position();
-                    let rule_id_hint = ctx
-                        .sink_to_rule
-                        .and_then(|m| m.get(sink_desc.as_str()))
-                        .map(|s| s.to_string());
-                    findings.push(TaintFinding {
-                        sink_start_byte: node.start_byte(),
-                        sink_end_byte: node.end_byte(),
-                        sink_line: start.row + 1,
-                        sink_column: start.column + 1,
-                        sink_end_line: end.row + 1,
-                        sink_end_column: end.column + 1,
-                        source_description: src_desc,
-                        sink_description: sink_desc,
-                        source_line: src_line,
-                        rule_id_hint,
-                        hops: 1,
-                    });
+                    let rule_hint = attribution_hint_for_sink(&sink);
+                    findings.push(taint_finding_for_node(
+                        node,
+                        src_desc,
+                        sink.description,
+                        src_line,
+                        rule_hint,
+                        1,
+                    ));
                 }
             }
         }
@@ -1495,52 +1425,23 @@ fn handle_call(
         Some(a) => a.resolve(callee_text),
         None => Cow::Borrowed(callee_text),
     };
-    let final_segment = resolved.rsplit('.').next().unwrap_or(resolved.as_ref());
 
-    let sink_desc = ctx.spec.sinks.iter().find_map(|m| match m {
-        NodeMatcher::Call {
-            canonical,
-            description,
-        } if canonical.as_str() == resolved.as_ref() => Some(description.clone()),
-        NodeMatcher::MethodName {
-            method,
-            description,
-        } if method == final_segment => Some(description.clone()),
-        _ => None,
-    });
-    // When the engine is running in batched mode, map the matched sink
-    // description back to the rule it came from so the caller can
-    // dispatch the finding correctly. `None` in single-rule mode.
-    let sink_desc = sink_desc.map(|d| {
-        let rule = ctx
-            .sink_to_rule
-            .and_then(|m| m.get(d.as_str()))
-            .map(|s| s.to_string());
-        (d, rule)
-    });
-
-    if let Some((sink_desc, sink_rule_id)) = sink_desc {
+    if let Some(sink) = match_call_sink(ctx.spec, resolved.as_ref(), ctx.sink_to_rules) {
         let Some(args) = node.child_by_field_name("arguments") else {
             return;
         };
         let mut cursor = args.walk();
         for arg in args.named_children(&mut cursor) {
             if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
-                let start = node.start_position();
-                let end = node.end_position();
-                findings.push(TaintFinding {
-                    sink_start_byte: node.start_byte(),
-                    sink_end_byte: node.end_byte(),
-                    sink_line: start.row + 1,
-                    sink_column: start.column + 1,
-                    sink_end_line: end.row + 1,
-                    sink_end_column: end.column + 1,
-                    source_description: source_desc,
-                    sink_description: sink_desc.clone(),
-                    source_line: src_line,
-                    rule_id_hint: sink_rule_id.clone(),
-                    hops: 1,
-                });
+                let rule_hint = attribution_hint_for_sink(&sink);
+                findings.push(taint_finding_for_node(
+                    node,
+                    source_desc,
+                    sink.description,
+                    src_line,
+                    rule_hint,
+                    1,
+                ));
                 break;
             }
         }
@@ -1600,24 +1501,14 @@ fn handle_cross_file_call(
         }
         let arg = arg_nodes[flow.param_index];
         if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
-            let start = node.start_position();
-            let end = node.end_position();
-            findings.push(TaintFinding {
-                sink_start_byte: node.start_byte(),
-                sink_end_byte: node.end_byte(),
-                sink_line: start.row + 1,
-                sink_column: start.column + 1,
-                sink_end_line: end.row + 1,
-                sink_end_column: end.column + 1,
-                source_description: source_desc,
-                sink_description: format!(
-                    "{} (via cross-file call to {})",
-                    flow.sink_description, func_name
-                ),
-                source_line: src_line,
-                rule_id_hint: Some(flow.sink_rule_id.clone()),
-                hops: 2,
-            });
+            findings.push(cross_file_taint_finding(
+                node,
+                source_desc,
+                src_line,
+                &flow.sink_description,
+                &func_name,
+                &flow.sink_rule_id,
+            ));
             return;
         }
     }

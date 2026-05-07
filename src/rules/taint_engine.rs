@@ -118,6 +118,20 @@ pub struct BatchedRule<'a> {
     pub spec: &'a TaintSpec,
 }
 
+/// A merged sanitizer-compatible batch of taint rules.
+pub(super) struct BatchedTaintGroup {
+    pub spec: TaintSpec,
+    pub sink_to_rules: HashMap<String, Vec<String>>,
+    pub allowed_rule_ids: HashSet<String>,
+}
+
+/// Sink matcher result with the optional owning rule id used in batched mode.
+pub(super) struct MatchedSink {
+    pub description: String,
+    pub attribution_key: Option<String>,
+    pub rule_ids: Vec<String>,
+}
+
 // ─── Internal types (pub(super) for language engines) ────────────────────
 
 #[derive(Clone, Debug)]
@@ -149,6 +163,190 @@ impl TaintState {
 
 pub(super) fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
     &source[node.byte_range()]
+}
+
+pub(super) fn build_batched_taint_groups(rules: &[BatchedRule<'_>]) -> Vec<BatchedTaintGroup> {
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (i, r) in rules.iter().enumerate() {
+        let mut placed = false;
+        for g in groups.iter_mut() {
+            let rep = rules[g[0]].spec;
+            if sanitizer_fingerprints_eq(&rep.sanitizers, &r.spec.sanitizers) {
+                g.push(i);
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            groups.push(vec![i]);
+        }
+    }
+
+    let mut out = Vec::new();
+    for group in groups {
+        let mut merged_sources: Vec<NodeMatcher> = Vec::new();
+        let mut merged_sinks: Vec<NodeMatcher> = Vec::new();
+        let mut seen_source_keys: HashSet<String> = HashSet::new();
+        let mut seen_sink_keys: HashSet<String> = HashSet::new();
+        let mut sink_to_rules: HashMap<String, Vec<String>> = HashMap::new();
+        let mut allowed_rule_ids: HashSet<String> = HashSet::new();
+
+        for idx in &group {
+            let rule = &rules[*idx];
+            allowed_rule_ids.insert(rule.rule_id.to_string());
+            for src in &rule.spec.sources {
+                let source_key = matcher_fingerprint(src);
+                if seen_source_keys.insert(source_key) {
+                    merged_sources.push(src.clone());
+                }
+            }
+            for sink in &rule.spec.sinks {
+                let sink_key = matcher_fingerprint(sink);
+                let rule_ids = sink_to_rules.entry(sink_key.clone()).or_default();
+                if !rule_ids.iter().any(|id| id == rule.rule_id) {
+                    rule_ids.push(rule.rule_id.to_string());
+                }
+                if seen_sink_keys.insert(sink_key) {
+                    merged_sinks.push(sink.clone());
+                }
+            }
+        }
+
+        out.push(BatchedTaintGroup {
+            spec: TaintSpec {
+                sources: merged_sources,
+                sinks: merged_sinks,
+                sanitizers: rules[group[0]].spec.sanitizers.clone(),
+            },
+            sink_to_rules,
+            allowed_rule_ids,
+        });
+    }
+    out
+}
+
+pub(super) fn match_call_sink(
+    spec: &TaintSpec,
+    resolved_callee: &str,
+    sink_to_rules: Option<&HashMap<String, Vec<String>>>,
+) -> Option<MatchedSink> {
+    let final_segment = resolved_callee
+        .rsplit('.')
+        .next()
+        .unwrap_or(resolved_callee);
+    spec.sinks.iter().find_map(|matcher| match matcher {
+        NodeMatcher::Call { canonical, .. } if canonical.as_str() == resolved_callee => {
+            Some(matched_sink_for_matcher(matcher, sink_to_rules))
+        }
+        NodeMatcher::MethodName { method, .. } if method == final_segment => {
+            Some(matched_sink_for_matcher(matcher, sink_to_rules))
+        }
+        _ => None,
+    })
+}
+
+pub(super) fn match_member_assign_sink(
+    spec: &TaintSpec,
+    field_name: &str,
+    sink_to_rules: Option<&HashMap<String, Vec<String>>>,
+) -> Option<MatchedSink> {
+    spec.sinks.iter().find_map(|matcher| match matcher {
+        NodeMatcher::MemberAssign { field, .. } if field == field_name => {
+            Some(matched_sink_for_matcher(matcher, sink_to_rules))
+        }
+        _ => None,
+    })
+}
+
+fn matched_sink_for_matcher(
+    matcher: &NodeMatcher,
+    sink_to_rules: Option<&HashMap<String, Vec<String>>>,
+) -> MatchedSink {
+    let key = matcher_fingerprint(matcher);
+    let rule_ids = sink_to_rules
+        .and_then(|map| map.get(&key).cloned())
+        .unwrap_or_default();
+    MatchedSink {
+        attribution_key: if rule_ids.is_empty() { None } else { Some(key) },
+        description: matcher.description().to_string(),
+        rule_ids,
+    }
+}
+
+pub(super) fn attribution_hint_for_sink(sink: &MatchedSink) -> Option<String> {
+    match &sink.attribution_key {
+        Some(key) => Some(key.clone()),
+        None => match sink.rule_ids.as_slice() {
+            [rule_id] => Some(rule_id.clone()),
+            _ => None,
+        },
+    }
+}
+
+pub(super) fn push_attributed_findings(
+    out: &mut Vec<(String, TaintFinding)>,
+    findings: Vec<TaintFinding>,
+    sink_to_rules: &HashMap<String, Vec<String>>,
+) {
+    for finding in findings {
+        let Some(hint) = finding.rule_id_hint.clone() else {
+            continue;
+        };
+        if let Some(rule_ids) = sink_to_rules.get(&hint) {
+            for rule_id in rule_ids {
+                let mut attributed = finding.clone();
+                attributed.rule_id_hint = Some(rule_id.clone());
+                out.push((rule_id.clone(), attributed));
+            }
+        } else {
+            let mut attributed = finding;
+            attributed.rule_id_hint = Some(hint.clone());
+            out.push((hint, attributed));
+        }
+    }
+}
+
+pub(super) fn taint_finding_for_node(
+    node: Node<'_>,
+    source_description: String,
+    sink_description: String,
+    source_line: usize,
+    rule_id_hint: Option<String>,
+    hops: u8,
+) -> TaintFinding {
+    let start = node.start_position();
+    let end = node.end_position();
+    TaintFinding {
+        sink_start_byte: node.start_byte(),
+        sink_end_byte: node.end_byte(),
+        sink_line: start.row + 1,
+        sink_column: start.column + 1,
+        sink_end_line: end.row + 1,
+        sink_end_column: end.column + 1,
+        source_description,
+        sink_description,
+        source_line,
+        rule_id_hint,
+        hops,
+    }
+}
+
+pub(super) fn cross_file_taint_finding(
+    node: Node<'_>,
+    source_description: String,
+    source_line: usize,
+    sink_description: &str,
+    callee_name: &str,
+    sink_rule_id: &str,
+) -> TaintFinding {
+    taint_finding_for_node(
+        node,
+        source_description,
+        format!("{sink_description} (via cross-file call to {callee_name})"),
+        source_line,
+        Some(sink_rule_id.to_string()),
+        2,
+    )
 }
 
 pub(super) fn sanitizer_fingerprints_eq(a: &[NodeMatcher], b: &[NodeMatcher]) -> bool {
@@ -186,5 +384,107 @@ pub(super) fn matcher_fingerprint(m: &NodeMatcher) -> String {
         NodeMatcher::MemberAssign { field, description } => {
             format!("MA|{field}|{description}")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rule_spec(source: NodeMatcher, sink: NodeMatcher) -> TaintSpec {
+        TaintSpec {
+            sources: vec![source],
+            sinks: vec![sink],
+            sanitizers: vec![],
+        }
+    }
+
+    fn param_source(name: &str, description: &str) -> NodeMatcher {
+        NodeMatcher::ParamName {
+            names: vec![name.to_string()],
+            description: description.to_string(),
+        }
+    }
+
+    fn call_sink(canonical: &str, description: &str) -> NodeMatcher {
+        NodeMatcher::Call {
+            canonical: canonical.to_string(),
+            description: description.to_string(),
+        }
+    }
+
+    #[test]
+    fn batched_group_keeps_distinct_matchers_with_same_description() {
+        let spec_a = rule_spec(
+            param_source("request", "input"),
+            call_sink("a.exec", "exec"),
+        );
+        let spec_b = rule_spec(param_source("ctx", "input"), call_sink("b.exec", "exec"));
+        let rules = [
+            BatchedRule {
+                rule_id: "rule-a",
+                spec: &spec_a,
+            },
+            BatchedRule {
+                rule_id: "rule-b",
+                spec: &spec_b,
+            },
+        ];
+
+        let groups = build_batched_taint_groups(&rules);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].spec.sources.len(), 2);
+        assert_eq!(groups[0].spec.sinks.len(), 2);
+
+        let matched = match_call_sink(&groups[0].spec, "a.exec", Some(&groups[0].sink_to_rules))
+            .expect("a.exec should match");
+        assert_eq!(matched.rule_ids, vec!["rule-a".to_string()]);
+    }
+
+    #[test]
+    fn batched_group_fans_out_identical_sink_matchers_to_all_owner_rules() {
+        let spec_a = rule_spec(param_source("request", "input"), call_sink("exec", "exec"));
+        let spec_b = rule_spec(param_source("request", "input"), call_sink("exec", "exec"));
+        let rules = [
+            BatchedRule {
+                rule_id: "rule-a",
+                spec: &spec_a,
+            },
+            BatchedRule {
+                rule_id: "rule-b",
+                spec: &spec_b,
+            },
+        ];
+
+        let groups = build_batched_taint_groups(&rules);
+        let group = &groups[0];
+        assert_eq!(group.spec.sources.len(), 1);
+        assert_eq!(group.spec.sinks.len(), 1);
+
+        let matched = match_call_sink(&group.spec, "exec", Some(&group.sink_to_rules))
+            .expect("exec should match");
+        assert_eq!(
+            matched.rule_ids,
+            vec!["rule-a".to_string(), "rule-b".to_string()]
+        );
+
+        let finding = TaintFinding {
+            sink_start_byte: 0,
+            sink_end_byte: 4,
+            sink_line: 1,
+            sink_column: 1,
+            sink_end_line: 1,
+            sink_end_column: 5,
+            source_description: "input".to_string(),
+            sink_description: "exec".to_string(),
+            source_line: 1,
+            rule_id_hint: attribution_hint_for_sink(&matched),
+            hops: 1,
+        };
+        let mut out = Vec::new();
+        push_attributed_findings(&mut out, vec![finding], &group.sink_to_rules);
+
+        let rule_ids: Vec<String> = out.into_iter().map(|(rule_id, _)| rule_id).collect();
+        assert_eq!(rule_ids, vec!["rule-a".to_string(), "rule-b".to_string()]);
     }
 }
