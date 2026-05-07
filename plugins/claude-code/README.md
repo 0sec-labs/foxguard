@@ -14,6 +14,7 @@ Live security scanning inside [Claude Code](https://code.claude.com). Every file
   - `/foxguard:secrets [path]` — hardcoded secrets, tokens, private keys
   - `/foxguard:triage [args]` — instructions for the interactive TUI
 - **`secure-coding` skill** — model-invoked remediation guidance for command exec, SQL, path traversal, SSRF, secrets, randomness, crypto, and deserialization.
+- **`foxguard` skill** — model-invoked router that picks the right scan mode (full / diff / secrets / pq) when the user asks for a security review. Also usable [standalone](#standalone-skill-no-plugin) without the rest of the plugin.
 
 ## Install
 
@@ -93,7 +94,8 @@ plugins/claude-code/
 │   ├── pq-audit/SKILL.md          # /foxguard:pq-audit
 │   ├── secrets/SKILL.md           # /foxguard:secrets
 │   ├── triage/SKILL.md            # /foxguard:triage
-│   └── secure-coding/SKILL.md     # model-invoked remediation guidance
+│   ├── secure-coding/SKILL.md     # model-invoked remediation guidance
+│   └── foxguard/SKILL.md          # model-invoked scan router (also installable standalone)
 └── README.md
 ```
 
@@ -105,6 +107,21 @@ plugins/claude-code/
 - foxguard's exit codes: `0` clean, `1` findings, `2` error. The hook checks for findings via the JSON, not the exit code, so a piped error doesn't trigger a false alarm.
 - This package is scoped to Claude Code. Broader agent or editor integration
   design should be tracked separately from the Claude Code marketplace release.
+
+## Standalone skill (no plugin)
+
+If you don't want the auto-scan-on-every-edit hook and just want Claude to know how to drive `foxguard` when you ask for a scan, copy a single file:
+
+```sh
+mkdir -p ~/.claude/skills/foxguard
+curl -fsSL \
+  https://raw.githubusercontent.com/PwnKit-Labs/foxguard/main/plugins/claude-code/skills/foxguard/SKILL.md \
+  -o ~/.claude/skills/foxguard/SKILL.md
+```
+
+That's it. Claude will invoke the skill the next time you ask for a security review, secrets scan, PQ audit, or diff scan. The `foxguard` binary still has to be on `PATH` — the skill walks you through install if it isn't.
+
+The full plugin (this directory) is the right choice if you want the proactive PostToolUse hook. The standalone skill is the right choice if you want pull-based invocation only.
 
 ## License
 
