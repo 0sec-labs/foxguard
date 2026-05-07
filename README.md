@@ -133,7 +133,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      - uses: PwnKit-Labs/foxguard/action@v0.7.1
+      - uses: PwnKit-Labs/foxguard/action@v0.8.0
         with:
           path: .
           severity: medium
@@ -148,7 +148,7 @@ Findings land in **Security → Code Scanning**. On any other CI: `npx foxguard@
 ```yaml
 repos:
   - repo: https://github.com/PwnKit-Labs/foxguard
-    rev: v0.7.1
+    rev: v0.8.0
     hooks:
       - id: foxguard
 ```
