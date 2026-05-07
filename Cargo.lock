@@ -559,6 +559,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
+ "shlex",
  "tempfile",
  "toml",
  "tree-sitter",
@@ -573,6 +574,8 @@ dependencies = [
  "tree-sitter-ruby",
  "tree-sitter-rust",
  "tree-sitter-swift",
+ "unicode-segmentation",
+ "unicode-width",
  "uuid",
  "walkdir",
 ]

@@ -38,6 +38,9 @@ tempfile = "3"
 ratatui = "0.30"
 crossterm = "0.28"
 toml = "0.8"
+shlex = "1"
+unicode-segmentation = "1"
+unicode-width = "0.2"
 
 [[bin]]
 name = "foxguard-mcp"
