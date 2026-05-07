@@ -1,0 +1,34 @@
+# Dirty Frag class — in-place AEAD decrypt on skb without cow gate.
+#
+# Pattern: aead_request_set_crypt(req, sg, sg, ...) followed by
+# crypto_aead_decrypt(req) within the same function body, with no
+# dominating cow / unshare / make-writable / pskb_expand_head call.
+#
+# Calibration sites (pre-patch): net/ipv4/esp4.c::esp_input,
+# net/ipv6/esp6.c::esp6_input. Patched by upstream commit
+# f4c50a4034e62ab75f1d5cdd191dd5f9c77fdff4 (extends skip_cow gate with
+# !skb_has_shared_frag()).
+#
+# This is a SYNTACTIC / structural rule — it does not prove the cow gate is
+# unreachable. Path-sensitive analysis (Coccinelle / CodeQL) is required for
+# definitive flagging; see PR body for the deferred-work pointer.
+rules:
+  - id: kernel/dirty-frag/skb-inplace-aead-no-cow
+    # Positive: aead_request_set_crypt(req, ?, ?, ...) followed (within the
+    # same C function body) by crypto_aead_decrypt(req). Rust regex has no
+    # backreferences so we cannot require arg2 == arg3 syntactically; manual
+    # triage / Coccinelle confirms the in-place property.
+    pattern-regex: '(?ms)^\s*aead_request_set_crypt\s*\([^}]*?crypto_aead_decrypt\s*\('
+    # Negative: a cow / unshare / make-writable / expand-head call appears
+    # BEFORE the in-place idiom within the same function body — suppress.
+    pattern-not-regex: '(?s)\b(?:skb_cow_data|skb_copy|skb_unshare|skb_make_writable|pskb_expand_head)\s*\([^}]*?aead_request_set_crypt\s*\([^}]*?crypto_aead_decrypt\s*\('
+    message: |
+      In-place AEAD decrypt on skb without a dominating cow/unshare gate
+      (Dirty Frag class). Verify skb_cow_data / skb_unshare / skb_make_writable /
+      pskb_expand_head is reached on the unsafe path before
+      aead_request_set_crypt(req, sg, sg, ...) + crypto_aead_decrypt(req).
+      See oss-security 2026-05-07 advisory and pwnkit issue #263.
+    severity: ERROR
+    languages: [c]
+    metadata:
+      cwe: "CWE-787"

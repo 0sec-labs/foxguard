@@ -1,0 +1,34 @@
+# Dirty Frag class — in-place skcipher decrypt on skb without cow gate.
+#
+# Pattern: skcipher_request_set_crypt(req, sg, sg, ...) followed by
+# crypto_skcipher_decrypt(req) within the same function body, with no
+# dominating cow / unshare / make-writable / pskb_expand_head call.
+#
+# Calibration sites (pre-patch): net/rxrpc/rxkad.c::rxkad_verify_packet_1.
+# Patched by upstream change to add data_len/nonlinear gate (see oss-security
+# advisory 2026-05-07).
+#
+# This is a SYNTACTIC / structural rule — it does not prove the cow gate is
+# unreachable. Path-sensitive analysis (Coccinelle / CodeQL) is required for
+# definitive flagging; see PR body for the deferred-work pointer.
+rules:
+  - id: kernel/dirty-frag/skb-inplace-skcipher-no-cow
+    # Positive: skcipher_request_set_crypt(req, ?, ?, ...) followed (within
+    # the same C function body, bounded by `}`) by crypto_skcipher_decrypt(req).
+    # Rust regex has no backreferences, so we cannot require arg2 == arg3
+    # syntactically. Manual triage / Coccinelle confirms the in-place property.
+    pattern-regex: '(?ms)^\s*skcipher_request_set_crypt\s*\([^}]*?crypto_skcipher_decrypt\s*\('
+    # Negative: same idiom, but a cow / unshare / make-writable / expand-head
+    # call appears BEFORE it within the same function body. Used to suppress
+    # the post-patch / safe-fixture variant.
+    pattern-not-regex: '(?s)\b(?:skb_cow_data|skb_copy|skb_unshare|skb_make_writable|pskb_expand_head)\s*\([^}]*?skcipher_request_set_crypt\s*\([^}]*?crypto_skcipher_decrypt\s*\('
+    message: |
+      In-place skcipher decrypt on skb without a dominating cow/unshare gate
+      (Dirty Frag class). Verify skb_cow_data / skb_unshare / skb_make_writable /
+      pskb_expand_head is reached on the unsafe path before
+      skcipher_request_set_crypt(req, sg, sg, ...) + crypto_skcipher_decrypt(req).
+      See oss-security 2026-05-07 advisory and pwnkit issue #263.
+    severity: ERROR
+    languages: [c]
+    metadata:
+      cwe: "CWE-787"

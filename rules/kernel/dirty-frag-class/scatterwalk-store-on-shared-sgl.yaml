@@ -1,0 +1,29 @@
+# Dirty Frag class — scatterwalk_map_and_copy STORE on AEAD-shared SGL.
+#
+# Pattern: scatterwalk_map_and_copy(..., dst, off, len, /*out=*/1) where dst
+# is part of an in-place AEAD request set up earlier in the same function via
+# aead_request_set_crypt(req, sg, sg, ...). This is the secondary STORE
+# primitive that Copy Fail and Dirty Frag both abuse in
+# crypto_authenc_esn_decrypt (crypto/authencesn.c).
+#
+# This is a SYNTACTIC / structural rule — it does not prove dst aliases the
+# shared SGL via taint analysis. Path-sensitive analysis (CodeQL) is required
+# to confirm aliasing; see PR body for the deferred-work pointer.
+rules:
+  - id: kernel/dirty-frag/scatterwalk-store-on-shared-sgl
+    # Positive: aead_request_set_crypt(...) is followed (within the same
+    # function body) by scatterwalk_map_and_copy(..., out=1). Rust regex has
+    # no backreferences, so we cannot require arg2 == arg3 of set_crypt to
+    # confirm the SGL is shared; manual triage / CodeQL confirms aliasing.
+    pattern-regex: '(?ms)^\s*aead_request_set_crypt\s*\([^}]*?scatterwalk_map_and_copy\s*\([^,]+,[^,]+,[^,]+,[^,]+,\s*1\s*\)'
+    message: |
+      scatterwalk_map_and_copy STORE (out=1) on an in-place AEAD scatterlist
+      (Dirty Frag class). The destination scatterlist is shared with the
+      attacker-controllable source SGL via aead_request_set_crypt(req, sg, sg, ...);
+      a 4-byte STORE lands in caller-pinned memory regardless of AEAD auth
+      result. Calibration site: crypto/authencesn.c::crypto_authenc_esn_decrypt.
+      See oss-security 2026-05-07 advisory and pwnkit issue #263.
+    severity: ERROR
+    languages: [c]
+    metadata:
+      cwe: "CWE-787"
