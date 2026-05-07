@@ -47,6 +47,9 @@ claude --plugin-dir /path/to/foxguard/plugins/claude-code
 
 Or add to your settings to load it permanently. Once installed, run `/foxguard:setup` to confirm it's wired up.
 
+Marketplace submission copy, versioning notes, and local validation commands are
+tracked in [MARKETPLACE.md](MARKETPLACE.md).
+
 ## Configuration
 
 Environment variables:
@@ -100,6 +103,8 @@ plugins/claude-code/
 - The hook calls `foxguard` from `PATH` first, then falls back to `npx --yes foxguard`. If neither is available it stays silent — run `/foxguard:setup` to fix that.
 - `--severity medium` is the default cutoff. Drop to `low` for stricter coverage; raise to `high` for noisier projects.
 - foxguard's exit codes: `0` clean, `1` findings, `2` error. The hook checks for findings via the JSON, not the exit code, so a piped error doesn't trigger a false alarm.
+- This package is scoped to Claude Code. Broader agent or editor integration
+  design should be tracked separately from the Claude Code marketplace release.
 
 ## License
 
