@@ -15,6 +15,7 @@ pub fn parse_file(source: &str, language: Language) -> Option<tree_sitter::Tree>
         Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
         Language::Swift => tree_sitter_swift::LANGUAGE.into(),
         Language::Kotlin => tree_sitter_kotlin_sg::LANGUAGE.into(),
+        Language::C => tree_sitter_c::LANGUAGE.into(),
         Language::NginxConf
         | Language::ApacheConf
         | Language::HAProxyConf

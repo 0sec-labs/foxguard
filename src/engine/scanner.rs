@@ -170,6 +170,7 @@ pub fn detect_language(path: &Path) -> Option<Language> {
         "cs" => Some(Language::CSharp),
         "swift" => Some(Language::Swift),
         "kt" | "kts" => Some(Language::Kotlin),
+        "c" | "h" => Some(Language::C),
         _ => None,
     }
 }
@@ -489,7 +490,8 @@ fn comment_markers(language: Language) -> &'static [&'static str] {
         | Language::Rust
         | Language::CSharp
         | Language::Swift
-        | Language::Kotlin => &["//"],
+        | Language::Kotlin
+        | Language::C => &["//"],
         Language::NginxConf
         | Language::ApacheConf
         | Language::HAProxyConf
