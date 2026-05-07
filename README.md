@@ -2,7 +2,7 @@
   <img src="assets/logo.svg" width="80" alt="foxguard logo" />
 </p>
 
-<h1 align="center">foxguard</h1>
+<h1 align="center">𓃥 foxguard 𓃦</h1>
 
 <p align="center">
   <strong>Fast local security scanning in a single Rust binary.</strong>
