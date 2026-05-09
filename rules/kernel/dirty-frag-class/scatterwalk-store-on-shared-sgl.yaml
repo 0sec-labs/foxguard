@@ -6,6 +6,28 @@
 # primitive that Copy Fail and Dirty Frag both abuse in
 # crypto_authenc_esn_decrypt (crypto/authencesn.c).
 #
+# Tier 1 sibling sites this rule also catches (see
+# scatterwalk_authenc_store_vulnerable.c):
+#   - crypto/authenc.c::crypto_authenc_decrypt (non-ESN sibling)
+#   - any out-of-tree authenc clone that mirrors the STORE primitive
+#
+# Recall caveats — shapes this rule MISSES:
+#   - the STORE done via memcpy_to_sglist or sg_pcopy_to_buffer instead of
+#     scatterwalk_map_and_copy — distinct primitives that need their own
+#     positive regex (deferred to follow-up).
+#   - cross-function setup (set_crypt in caller, STORE in callee).
+#   - calls where the `out` argument is a named constant (e.g.
+#     `SCATTERWALK_STORE`) instead of literal `1`.
+#
+# Precision caveats — false-positive shapes NOT suppressed:
+#   - in-place AEAD setup followed by a STORE that DOES happen after a
+#     cow gate above the set_crypt call (regex has no negative-regex on
+#     this rule because adding one would suppress the real Copy Fail
+#     primitive in authencesn). Triage step: confirm no skb_cow_data /
+#     skb_unshare dominates the STORE.
+#   - encrypt-side AEAD setup followed by a STORE — encrypt is technically
+#     also a write, but the auth-fail-then-write race is decrypt-specific.
+#
 # This is a SYNTACTIC / structural rule — it does not prove dst aliases the
 # shared SGL via taint analysis. Path-sensitive analysis (CodeQL) is required
 # to confirm aliasing; see PR body for the deferred-work pointer.
