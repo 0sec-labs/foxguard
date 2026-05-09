@@ -1,0 +1,9 @@
+rules:
+  - id: kernel/dirty-frag-inplace-crypto-no-cow
+    engine: coccinelle
+    severity: high
+    languages: [c]
+    metadata:
+      cwe: CWE-362
+    message: In-place crypto on skb data without a preceding copy-on-write gate.
+    script_path: dirty-frag-inplace-crypto-no-cow.cocci

@@ -9,7 +9,7 @@
   <br/>
   scan &middot; diff &middot; secrets &middot; post-quantum crypto audit &middot; interactive TUI triage
   <br/>
-  170+ built-in rules across 11 languages &middot; cross-file taint tracking &middot; Semgrep-compatible YAML bridge
+  170+ built-in rules across 11 languages &middot; cross-file taint tracking &middot; Semgrep-compatible YAML and Coccinelle bridges
   <br/><br/>
   <a href="https://foxguard.dev">foxguard.dev</a> &middot; <a href="https://www.npmjs.com/package/foxguard">npm</a> &middot; <a href="https://crates.io/crates/foxguard">crates.io</a>
 </p>
@@ -33,7 +33,7 @@
   <br/><em><code>foxguard tui .</code> — interactive triage with scan, diff, secrets, and PQ modes. <a href="https://foxguard.dev/blog/foxguard-0-7-0-tui-launch">Launch post</a>.</em>
 </p>
 
-foxguard is a security scanner you can run on every save. A single Rust binary with 170+ built-in rules across 10 source languages, plus C via Semgrep-compatible YAML rule packs (kernel/dirty-frag class shipped), cross-file taint tracking, Semgrep-compatible YAML loading, and four top-level modes — general scan, diff-against-branch, secrets, and post-quantum crypto audit — all reachable from the same CLI or interactive TUI.
+foxguard is a security scanner you can run on every save. A single Rust binary with 170+ built-in rules across 10 source languages, plus C via Semgrep-compatible YAML rule packs and Coccinelle-backed semantic patches (kernel/dirty-frag class shipped), cross-file taint tracking, Semgrep-compatible YAML loading, and four top-level modes — general scan, diff-against-branch, secrets, and post-quantum crypto audit — all reachable from the same CLI or interactive TUI.
 
 It is fast enough for pre-commit hooks and the `--changed` path runs in milliseconds on a real repo. Output formats: terminal, JSON, SARIF (for GitHub Code Scanning), and CycloneDX 1.6 CBOM.
 
@@ -73,7 +73,7 @@ All four are reachable from `foxguard tui .` — interactive triage with review,
 | Area | What you get |
 |------|--------------|
 | **Outputs** | Terminal, JSON, SARIF (GitHub Code Scanning), CycloneDX 1.6 CBOM (`--format cbom`). Each CBOM component links back to a source location and severity. |
-| **Semgrep compatibility** | Loads a Semgrep/OpenGrep YAML subset via `--rules`. Parity-tested in CI against the real `semgrep` CLI. See [`COMPATIBILITY.md`](./COMPATIBILITY.md). |
+| **External rule bridges** | Loads a Semgrep/OpenGrep YAML subset and `engine: coccinelle` SmPL rules via `--rules`. Semgrep parity is tested in CI; Coccinelle rules shell out to `spatch` when installed. See [`COMPATIBILITY.md`](./COMPATIBILITY.md). |
 | **CI integration** | Native GitHub Action (below), SARIF upload, `--github-pr` for PR review comments, exit code on findings. |
 | **Config** | `.foxguard.yml` for per-rule enable/disable, severity overrides, entropy and taint-hop thresholds, per-rule options. |
 

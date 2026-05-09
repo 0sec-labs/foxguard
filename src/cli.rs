@@ -37,7 +37,7 @@ pub struct ScanArgs {
     #[arg(short, long, value_enum)]
     pub severity: Option<SeverityFilter>,
 
-    /// Path to Semgrep YAML rule file or directory
+    /// Path to external YAML rule file or directory
     #[arg(short, long)]
     pub rules: Option<String>,
 
@@ -297,7 +297,7 @@ pub struct DiffArgs {
     #[arg(short, long, value_enum)]
     pub severity: Option<SeverityFilter>,
 
-    /// Path to Semgrep YAML rule file or directory
+    /// Path to external YAML rule file or directory
     #[arg(short, long)]
     pub rules: Option<String>,
 
@@ -328,7 +328,7 @@ pub struct TuiArgs {
     #[arg(short, long, value_enum)]
     pub severity: Option<SeverityFilter>,
 
-    /// Path to Semgrep YAML rule file or directory
+    /// Path to external YAML rule file or directory
     #[arg(short, long)]
     pub rules: Option<String>,
 
@@ -502,7 +502,7 @@ pub enum Command {
 #[derive(Parser, Debug)]
 #[command(
     name = "foxguard",
-    about = "Fast local security guard for changed files, built-in rules, and Semgrep-compatible YAML",
+    about = "Fast local security guard for changed files, built-in rules, and external YAML",
     version
 )]
 pub struct Cli {
