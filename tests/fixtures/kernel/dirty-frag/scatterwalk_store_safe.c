@@ -2,9 +2,9 @@
 // Reading the shared SGL is not a STORE primitive and must not be flagged.
 // Also exercises the case where dst is a separate (not-aliased) scatterlist.
 
-#include <crypto/aead.h>
-#include <crypto/scatterwalk.h>
 
+/* Tree-sitter fixture — scanned as text by foxguard, never compiled.
+ * Kernel headers replaced with the inline forward decls below to keep clangd quiet. */
 struct aead_request;
 struct scatterlist;
 

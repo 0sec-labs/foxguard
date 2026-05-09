@@ -7,9 +7,9 @@
 // from the patch-hunk shape alone to exercise the regex on a sibling site.
 // MUST be flagged by kernel/dirty-frag/skb-inplace-skcipher-no-cow.
 
-#include <linux/skbuff.h>
-#include <crypto/skcipher.h>
 
+/* Tree-sitter fixture — scanned as text by foxguard, never compiled.
+ * Kernel headers replaced with the inline forward decls below to keep clangd quiet. */
 struct sk_buff;
 struct skcipher_request;
 struct scatterlist;

@@ -2,9 +2,9 @@
 // Models net/ipv4/esp4.c::esp_input (pre-patch f4c50a4034e62ab).
 // MUST be flagged by kernel/dirty-frag/skb-inplace-aead-no-cow.
 
-#include <linux/skbuff.h>
-#include <crypto/aead.h>
 
+/* Tree-sitter fixture — scanned as text by foxguard, never compiled.
+ * Kernel headers replaced with the inline forward decls below to keep clangd quiet. */
 struct sk_buff;
 struct aead_request;
 struct scatterlist;

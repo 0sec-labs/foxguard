@@ -7,9 +7,9 @@
 // the patch-hunk shape alone to exercise the regex on a sibling protocol.
 // MUST be flagged by kernel/dirty-frag/skb-inplace-aead-no-cow.
 
-#include <linux/skbuff.h>
-#include <crypto/aead.h>
 
+/* Tree-sitter fixture — scanned as text by foxguard, never compiled.
+ * Kernel headers replaced with the inline forward decls below to keep clangd quiet. */
 struct sk_buff;
 struct aead_request;
 struct scatterlist;
