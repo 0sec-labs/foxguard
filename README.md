@@ -9,7 +9,7 @@
   <br/>
   scan &middot; diff &middot; secrets &middot; post-quantum crypto audit &middot; interactive TUI triage
   <br/>
-  170+ built-in rules across 10 languages &middot; cross-file taint tracking &middot; Semgrep-compatible YAML bridge
+  170+ built-in rules across 11 languages &middot; cross-file taint tracking &middot; Semgrep-compatible YAML bridge
   <br/><br/>
   <a href="https://foxguard.dev">foxguard.dev</a> &middot; <a href="https://www.npmjs.com/package/foxguard">npm</a> &middot; <a href="https://crates.io/crates/foxguard">crates.io</a>
 </p>
@@ -33,7 +33,7 @@
   <br/><em><code>foxguard tui .</code> — interactive triage with scan, diff, secrets, and PQ modes. <a href="https://foxguard.dev/blog/foxguard-0-7-0-tui-launch">Launch post</a>.</em>
 </p>
 
-foxguard is a security scanner you can run on every save. A single Rust binary with 170+ built-in rules across 10 languages, cross-file taint tracking, Semgrep-compatible YAML loading, and four top-level modes — general scan, diff-against-branch, secrets, and post-quantum crypto audit — all reachable from the same CLI or interactive TUI.
+foxguard is a security scanner you can run on every save. A single Rust binary with 170+ built-in rules across 10 source languages, plus C via Semgrep-compatible YAML rule packs (kernel/dirty-frag class shipped), cross-file taint tracking, Semgrep-compatible YAML loading, and four top-level modes — general scan, diff-against-branch, secrets, and post-quantum crypto audit — all reachable from the same CLI or interactive TUI.
 
 It is fast enough for pre-commit hooks and the `--changed` path runs in milliseconds on a real repo. Output formats: terminal, JSON, SARIF (for GitHub Code Scanning), and CycloneDX 1.6 CBOM.
 
@@ -168,7 +168,7 @@ Sentry is the stress target at ~1.3M Python LoC: foxguard scans the whole tree i
 
 ## Rules
 
-170+ built-in rules across 10 languages, covering SQL injection, XSS, SSRF, command injection, hardcoded secrets, weak crypto, unsafe deserialization, log injection, PQ-vulnerable crypto, crypto-agility, and framework-specific checks. Full per-rule coverage, precision tiers, and false-positive methodology live in [docs/precision.md](docs/precision.md) and on the [rules page at foxguard.dev](https://foxguard.dev/rules).
+170+ built-in rules across 10 source languages, plus C via Semgrep-compatible YAML rule packs (kernel/dirty-frag class shipped), covering SQL injection, XSS, SSRF, command injection, hardcoded secrets, weak crypto, unsafe deserialization, log injection, PQ-vulnerable crypto, crypto-agility, and framework-specific checks. Full per-rule coverage, precision tiers, and false-positive methodology live in [docs/precision.md](docs/precision.md) and on the [rules page at foxguard.dev](https://foxguard.dev/rules).
 
 ## Configuration
 
