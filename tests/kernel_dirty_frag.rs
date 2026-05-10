@@ -96,3 +96,82 @@ fn scatterwalk_store_on_shared_sgl_ignores_safe_fixture() {
         n
     );
 }
+
+// --- Tier 1 sibling-site fixtures (positive: must flag) ---
+
+#[test]
+fn skb_inplace_aead_no_cow_flags_ah_sibling_fixture() {
+    let n = run_rule(
+        "skb-inplace-aead-no-cow.yaml",
+        "ah_aead_no_cow_vulnerable.c",
+    );
+    assert!(
+        n >= 1,
+        "expected AH-style sibling positive fixture to be flagged, got {} findings",
+        n
+    );
+}
+
+#[test]
+fn skb_inplace_skcipher_no_cow_flags_ipcomp_sibling_fixture() {
+    let n = run_rule(
+        "skb-inplace-skcipher-no-cow.yaml",
+        "ipcomp_skcipher_no_cow_vulnerable.c",
+    );
+    assert!(
+        n >= 1,
+        "expected IPComp-style sibling positive fixture to be flagged, got {} findings",
+        n
+    );
+}
+
+// --- Tier 2 known-FP fixtures (negative: extra cow-gate names dominate) ---
+
+#[test]
+fn skb_inplace_aead_no_cow_ignores_tls_cow_fixture() {
+    let n = run_rule("skb-inplace-aead-no-cow.yaml", "tls_aead_cow_safe.c");
+    assert_eq!(
+        n, 0,
+        "expected kTLS-style cow-gate fixture (__skb_cow) to be unflagged, got {} findings",
+        n
+    );
+}
+
+#[test]
+fn skb_inplace_skcipher_no_cow_ignores_macsec_cow_fixture() {
+    let n = run_rule(
+        "skb-inplace-skcipher-no-cow.yaml",
+        "macsec_skcipher_cow_safe.c",
+    );
+    assert_eq!(
+        n, 0,
+        "expected MACsec-style cow-gate fixture (skb_copy_expand) to be unflagged, got {} findings",
+        n
+    );
+}
+
+#[test]
+fn scatterwalk_store_on_shared_sgl_flags_authenc_sibling_fixture() {
+    let n = run_rule(
+        "scatterwalk-store-on-shared-sgl.yaml",
+        "scatterwalk_authenc_store_vulnerable.c",
+    );
+    assert!(
+        n >= 1,
+        "expected authenc-style sibling positive fixture (in-place + STORE) to be flagged, got {} findings",
+        n
+    );
+}
+
+#[test]
+fn scatterwalk_store_on_shared_sgl_ignores_inplace_read_fixture() {
+    let n = run_rule(
+        "scatterwalk-store-on-shared-sgl.yaml",
+        "scatterwalk_inplace_read_safe.c",
+    );
+    assert_eq!(
+        n, 0,
+        "expected in-place + READ-back (out=0) fixture to be unflagged, got {} findings",
+        n
+    );
+}

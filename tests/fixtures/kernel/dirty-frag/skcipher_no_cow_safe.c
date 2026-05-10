@@ -2,9 +2,9 @@
 // Models the post-patch RxRPC verify path with skb_cow_data dominating
 // the in-place decrypt. MUST NOT be flagged.
 
-#include <linux/skbuff.h>
-#include <crypto/skcipher.h>
 
+/* Tree-sitter fixture — scanned as text by foxguard, never compiled.
+ * Kernel headers replaced with the inline forward decls below to keep clangd quiet. */
 struct sk_buff;
 struct skcipher_request;
 struct scatterlist;

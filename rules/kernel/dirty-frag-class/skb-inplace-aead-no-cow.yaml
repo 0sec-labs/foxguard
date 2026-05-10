@@ -9,6 +9,28 @@
 # f4c50a4034e62ab75f1d5cdd191dd5f9c77fdff4 (extends skip_cow gate with
 # !skb_has_shared_frag()).
 #
+# Tier 1 sibling sites this rule also catches (see ah_aead_no_cow_vulnerable.c):
+#   - net/ipv4/ah4.c::ah_input, net/ipv6/ah6.c::ah6_input (AH integrity)
+#   - any out-of-tree splice → in-place AEAD decrypt clone
+#
+# Recall caveats — shapes this rule MISSES:
+#   - cross-function cow gates (caller does skb_cow_data, callee does
+#     in-place decrypt). Regex is single-function bounded by `}`.
+#   - aead_request_set_crypt invoked via macro / wrapper (e.g. some inline
+#     helpers in TLS / MACsec). Add the wrapper symbol to the positive regex
+#     if the wrapper becomes a pattern in mainline.
+#   - encrypt-side counterpart (crypto_aead_encrypt) — the OOB-write class
+#     is decrypt-only per Hyunwoo Kim's 2026-05-07 advisory; encrypt is
+#     intentionally out of scope.
+#
+# Precision caveats — false-positive shapes NOT suppressed:
+#   - cow gate hidden behind a wrapper (e.g. tls_strp_msg_cow,
+#     pskb_carve_inside_*) — adding every wrapper would hide too many real
+#     positives. Triage step: confirm no helper between the gate and the
+#     in-place decrypt internally calls one of the listed cow primitives.
+#   - dominating gate that is in a loop's `continue` path or behind a
+#     condition that is always false — regex sees the textual call.
+#
 # This is a SYNTACTIC / structural rule — it does not prove the cow gate is
 # unreachable. Path-sensitive analysis (Coccinelle / CodeQL) is required for
 # definitive flagging; see PR body for the deferred-work pointer.
@@ -21,7 +43,7 @@ rules:
     pattern-regex: '(?ms)^\s*aead_request_set_crypt\s*\([^}]*?crypto_aead_decrypt\s*\('
     # Negative: a cow / unshare / make-writable / expand-head call appears
     # BEFORE the in-place idiom within the same function body — suppress.
-    pattern-not-regex: '(?s)\b(?:skb_cow_data|skb_copy|skb_unshare|skb_make_writable|pskb_expand_head)\s*\([^}]*?aead_request_set_crypt\s*\([^}]*?crypto_aead_decrypt\s*\('
+    pattern-not-regex: '(?s)\b(?:skb_cow_data|skb_cow|__skb_cow|skb_copy|skb_copy_expand|skb_unshare|skb_make_writable|pskb_expand_head)\s*\([^}]*?aead_request_set_crypt\s*\([^}]*?crypto_aead_decrypt\s*\('
     message: |
       In-place AEAD decrypt on skb without a dominating cow/unshare gate
       (Dirty Frag class). Verify skb_cow_data / skb_unshare / skb_make_writable /

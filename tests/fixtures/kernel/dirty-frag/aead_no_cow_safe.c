@@ -2,9 +2,9 @@
 // Models post-patch esp_input with skb_cow_data dominating the in-place
 // decrypt path. MUST NOT be flagged.
 
-#include <linux/skbuff.h>
-#include <crypto/aead.h>
 
+/* Tree-sitter fixture — scanned as text by foxguard, never compiled.
+ * Kernel headers replaced with the inline forward decls below to keep clangd quiet. */
 struct sk_buff;
 struct aead_request;
 struct scatterlist;
