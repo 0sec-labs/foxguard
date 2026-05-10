@@ -4,7 +4,7 @@ use crate::config::{
     apply_scan_defaults, apply_scan_thresholds, apply_secrets_defaults, apply_severity_overrides,
     load_for_scan, suppress_with_scan_ignores, FoxguardConfig,
 };
-use crate::diff::run_diff_with_warnings;
+use crate::diff::run_diff_with_coccinelle_warnings;
 use crate::engine::{
     coccinelle, scan_directory_with_notices, scan_paths_with_root_with_notices,
     PathExcludeMatcher, ScanResult, ScanStats,
@@ -359,14 +359,39 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     let config = load_for_scan(Path::new(&args.path), None)?;
     let identity_root = finding_identity_root(Path::new(&args.path), config.as_ref());
     apply_scan_thresholds(config.as_ref());
-    let mut registry = build_registry(args.no_builtins, args.rules.as_deref())?;
-    let rule_filter_unknown = if let Some(config) = config.as_ref() {
-        registry.apply_rule_filter(&config.scan.enable_rules, &config.scan.disable_rules)
-    } else {
-        registry.apply_rule_filter(&[], &[])
+    let rules_path = args.rules.as_deref().or_else(|| {
+        config
+            .as_ref()
+            .and_then(|config| config.scan.rules.as_deref())
+    });
+    let mut registry = build_registry(args.no_builtins, rules_path)?;
+    let (mut coccinelle_rules, mut coccinelle_notices) = match rules_path {
+        Some(rules_path) => coccinelle::load_coccinelle_rules(Path::new(rules_path)),
+        None => (Vec::new(), Vec::new()),
     };
-    let ((scan_result, mut diff_result), mut notices) =
-        run_diff_with_warnings(&args.path, &args.target, &registry, args.max_file_size)?;
+    let coccinelle_rule_ids = coccinelle::rule_ids(&coccinelle_rules);
+    let rule_filter_unknown = if let Some(config) = config.as_ref() {
+        coccinelle::apply_rule_filter(
+            &mut coccinelle_rules,
+            &config.scan.enable_rules,
+            &config.scan.disable_rules,
+        );
+        registry.apply_rule_filter_with_known(
+            &config.scan.enable_rules,
+            &config.scan.disable_rules,
+            &coccinelle_rule_ids,
+        )
+    } else {
+        registry.apply_rule_filter_with_known(&[], &[], &coccinelle_rule_ids)
+    };
+    let ((scan_result, mut diff_result), mut notices) = run_diff_with_coccinelle_warnings(
+        &args.path,
+        &args.target,
+        &registry,
+        &coccinelle_rules,
+        args.max_file_size,
+    )?;
+    notices.append(&mut coccinelle_notices);
     append_scan_stats_notice(&mut notices, &scan_result.stats);
 
     if !rule_filter_unknown.is_empty() {
@@ -387,7 +412,7 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     // Annotate CNSA 2.0 deadlines on the new findings surfaced by this diff.
     crate::compliance::annotate_cnsa2_deadlines(&mut diff_result.new_findings, &registry);
 
-    let known_rule_ids = collect_rule_ids(&registry, &[]);
+    let known_rule_ids = collect_rule_ids(&registry, &coccinelle_rules);
     let override_warnings = apply_severity_overrides(
         &mut diff_result.new_findings,
         config.as_ref(),

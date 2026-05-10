@@ -6,10 +6,12 @@ use regex::Regex;
 use serde::Deserialize;
 use serde_yaml::Value as YamlValue;
 use std::collections::HashSet;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::time::Duration;
+use wait_timeout::ChildExt;
 
 #[derive(Debug, Clone)]
 pub struct CoccinelleRule {
@@ -120,7 +122,10 @@ pub fn load_coccinelle_rules(path: &Path) -> (Vec<CoccinelleRule>, Vec<String>) 
 
     if path.is_file() {
         match parse_coccinelle_file(path) {
-            Ok(parsed) => rules.extend(parsed),
+            Ok((parsed, mut parsed_notices)) => {
+                rules.extend(parsed);
+                notices.append(&mut parsed_notices);
+            }
             Err(error) => notices.push(format!("Warning: {}", error)),
         }
     } else if path.is_dir() {
@@ -137,7 +142,10 @@ pub fn load_coccinelle_rules(path: &Path) -> (Vec<CoccinelleRule>, Vec<String>) 
 
         for entry in walker {
             match parse_coccinelle_file(entry.path()) {
-                Ok(parsed) => rules.extend(parsed),
+                Ok((parsed, mut parsed_notices)) => {
+                    rules.extend(parsed);
+                    notices.append(&mut parsed_notices);
+                }
                 Err(error) => notices.push(format!("Warning: {}", error)),
             }
         }
@@ -146,36 +154,60 @@ pub fn load_coccinelle_rules(path: &Path) -> (Vec<CoccinelleRule>, Vec<String>) 
     (rules, notices)
 }
 
-pub fn parse_coccinelle_file(path: &Path) -> Result<Vec<CoccinelleRule>, String> {
+pub fn parse_coccinelle_file(path: &Path) -> Result<(Vec<CoccinelleRule>, Vec<String>), String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
     let raw_doc: YamlValue = serde_yaml::from_str(&content)
         .map_err(|e| format!("Failed to parse YAML {}: {}", path.display(), e))?;
 
     let Some(raw_rules) = raw_doc.get("rules").and_then(YamlValue::as_sequence) else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     };
 
     let mut rules = Vec::new();
-    for raw_rule in raw_rules {
+    let mut notices = Vec::new();
+    for (index, raw_rule) in raw_rules.iter().enumerate() {
         if !is_coccinelle_rule(raw_rule) {
             continue;
         }
 
-        let yaml: CoccinelleRuleYaml = serde_yaml::from_value(raw_rule.clone()).map_err(|e| {
-            format!(
-                "Failed to parse Coccinelle rule in {}: {}",
-                path.display(),
-                e
-            )
-        })?;
+        let rule_position = index + 1;
+        let raw_id = raw_rule
+            .get("id")
+            .and_then(YamlValue::as_str)
+            .unwrap_or("<unknown>");
+        let yaml: CoccinelleRuleYaml = match serde_yaml::from_value(raw_rule.clone()) {
+            Ok(yaml) => yaml,
+            Err(error) => {
+                notices.push(format!(
+                    "Warning: Coccinelle rule '{}' in {} at rule {} skipped: {}",
+                    raw_id,
+                    path.display(),
+                    rule_position,
+                    error
+                ));
+                continue;
+            }
+        };
 
         let engine = yaml.engine.as_deref().unwrap_or_default();
         if !engine.eq_ignore_ascii_case("coccinelle") {
             continue;
         }
 
-        let script = resolve_script(path, &yaml)?;
+        let script = match resolve_script(path, &yaml) {
+            Ok(script) => script,
+            Err(error) => {
+                notices.push(format!(
+                    "Warning: Coccinelle rule '{}' in {} at rule {} skipped: {}",
+                    yaml.id,
+                    path.display(),
+                    rule_position,
+                    error
+                ));
+                continue;
+            }
+        };
         let cwe = yaml
             .metadata
             .as_ref()
@@ -192,7 +224,7 @@ pub fn parse_coccinelle_file(path: &Path) -> Result<Vec<CoccinelleRule>, String>
         });
     }
 
-    Ok(rules)
+    Ok((rules, notices))
 }
 
 pub fn scan_path_with_notices(
@@ -318,16 +350,42 @@ fn scan_candidates(
 }
 
 fn run_spatch(script_path: &Path, target: &Path) -> Result<String, String> {
-    let output = Command::new("spatch")
+    let timeout = spatch_timeout();
+    let mut child = Command::new("spatch")
         .arg("--very-quiet")
         .arg("--sp-file")
         .arg(script_path)
         .arg(target)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("failed to run spatch: {}", e))?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let status = match child
+        .wait_timeout(timeout)
+        .map_err(|e| format!("failed to wait for spatch: {}", e))?
+    {
+        Some(status) => status,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("spatch timed out after {}s", timeout.as_secs()));
+        }
+    };
+
+    let mut stdout = Vec::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        pipe.read_to_end(&mut stdout)
+            .map_err(|e| format!("failed to read spatch stdout: {}", e))?;
+    }
+    let mut stderr = Vec::new();
+    if let Some(mut pipe) = child.stderr.take() {
+        pipe.read_to_end(&mut stderr)
+            .map_err(|e| format!("failed to read spatch stderr: {}", e))?;
+    }
+
+    let stdout = String::from_utf8_lossy(&stdout);
+    let stderr = String::from_utf8_lossy(&stderr);
     let combined = if stderr.trim().is_empty() {
         stdout.to_string()
     } else if stdout.trim().is_empty() {
@@ -336,7 +394,7 @@ fn run_spatch(script_path: &Path, target: &Path) -> Result<String, String> {
         format!("{stdout}\n{stderr}")
     };
 
-    if output.status.success()
+    if status.success()
         || combined.contains("\n@@ ")
         || combined.starts_with("@@ ")
         || combined.contains("\n--- ")
@@ -351,6 +409,15 @@ fn run_spatch(script_path: &Path, target: &Path) -> Result<String, String> {
             Err(message.to_string())
         }
     }
+}
+
+fn spatch_timeout() -> Duration {
+    let secs = std::env::var("FOXGUARD_SPATCH_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .unwrap_or(60);
+    Duration::from_secs(secs)
 }
 
 fn probe_spatch() -> Result<(), String> {
@@ -380,17 +447,33 @@ fn parse_spatch_output(
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut seen = HashSet::new();
+    let source = std::fs::read_to_string(target).unwrap_or_default();
+    let line_starts = line_start_offsets(&source);
 
     for line in diff_hunk_lines(output) {
         if seen.insert(line) {
-            findings.push(make_finding(rule, target, scan_root, line));
+            findings.push(make_finding(
+                rule,
+                target,
+                scan_root,
+                line,
+                &source,
+                &line_starts,
+            ));
         }
     }
 
     if findings.is_empty() {
         for line in file_line_matches(output, target) {
             if seen.insert(line) {
-                findings.push(make_finding(rule, target, scan_root, line));
+                findings.push(make_finding(
+                    rule,
+                    target,
+                    scan_root,
+                    line,
+                    &source,
+                    &line_starts,
+                ));
             }
         }
     }
@@ -443,10 +526,16 @@ fn file_line_matches(output: &str, target: &Path) -> Vec<usize> {
         .collect()
 }
 
-fn make_finding(rule: &CoccinelleRule, target: &Path, scan_root: &Path, line: usize) -> Finding {
-    let source = std::fs::read_to_string(target).unwrap_or_default();
-    let line_start = byte_offset_for_line(&source, line);
-    let snippet = get_source_line(&source, line_start);
+fn make_finding(
+    rule: &CoccinelleRule,
+    target: &Path,
+    scan_root: &Path,
+    line: usize,
+    source: &str,
+    line_starts: &[usize],
+) -> Finding {
+    let line_start = byte_offset_for_line(line_starts, source.len(), line);
+    let snippet = get_source_line(source, line_start);
     let column = 1;
     let end_column = snippet.chars().count().max(1) + 1;
 
@@ -477,21 +566,21 @@ fn make_finding(rule: &CoccinelleRule, target: &Path, scan_root: &Path, line: us
     }
 }
 
-fn byte_offset_for_line(source: &str, line: usize) -> usize {
-    if line <= 1 {
-        return 0;
-    }
-
-    let mut current = 1;
+fn line_start_offsets(source: &str) -> Vec<usize> {
+    let mut offsets = vec![0];
     for (idx, byte) in source.bytes().enumerate() {
         if byte == b'\n' {
-            current += 1;
-            if current == line {
-                return idx + 1;
-            }
+            offsets.push(idx + 1);
         }
     }
-    source.len()
+    offsets
+}
+
+fn byte_offset_for_line(line_starts: &[usize], source_len: usize, line: usize) -> usize {
+    line_starts
+        .get(line.saturating_sub(1))
+        .copied()
+        .unwrap_or(source_len)
 }
 
 fn collect_c_files(
@@ -645,11 +734,52 @@ rules:
         )
         .unwrap();
 
-        let rules = parse_coccinelle_file(file.path()).unwrap();
+        let (rules, notices) = parse_coccinelle_file(file.path()).unwrap();
+        assert!(notices.is_empty());
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].id, "kernel/test-cocci");
         assert_eq!(rules[0].severity, Severity::High);
         assert_eq!(rules[0].cwe.as_deref(), Some("CWE-362"));
+    }
+
+    #[test]
+    fn skips_malformed_coccinelle_rule_with_notice() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(
+            br#"
+rules:
+  - id: kernel/good-cocci
+    engine: coccinelle
+    severity: high
+    message: good
+    script: |
+      @@
+      @@
+  - id: kernel/bad-cocci
+    engine: coccinelle
+    severity: unknown
+    message: bad
+    script: |
+      @@
+      @@
+  - id: kernel/second-good-cocci
+    engine: coccinelle
+    severity: low
+    message: second good
+    script: |
+      @@
+      @@
+"#,
+        )
+        .unwrap();
+
+        let (rules, notices) = parse_coccinelle_file(file.path()).unwrap();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].id, "kernel/good-cocci");
+        assert_eq!(rules[1].id, "kernel/second-good-cocci");
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].contains("kernel/bad-cocci"));
+        assert!(notices[0].contains("rule 2"));
     }
 
     #[test]
