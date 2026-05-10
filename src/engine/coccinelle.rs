@@ -6,7 +6,6 @@ use regex::Regex;
 use serde::Deserialize;
 use serde_yaml::Value as YamlValue;
 use std::collections::HashSet;
-use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -250,8 +249,7 @@ fn scan_candidates(
         };
     }
 
-    let spatch = spatch_command();
-    if let Err(error) = probe_spatch(&spatch) {
+    if let Err(error) = probe_spatch() {
         return CoccinelleScanResult {
             findings: Vec::new(),
             files_scanned: 0,
@@ -288,7 +286,7 @@ fn scan_candidates(
         }
 
         for path in &candidates {
-            match run_spatch(&spatch, temp_rule.path(), path) {
+            match run_spatch(temp_rule.path(), path) {
                 Ok(output) => {
                     scanned_files.insert(path.clone());
                     findings.extend(parse_spatch_output(rule, path, scan_root, &output));
@@ -319,8 +317,8 @@ fn scan_candidates(
     }
 }
 
-fn run_spatch(spatch: &OsString, script_path: &Path, target: &Path) -> Result<String, String> {
-    let output = Command::new(spatch)
+fn run_spatch(script_path: &Path, target: &Path) -> Result<String, String> {
+    let output = Command::new("spatch")
         .arg("--very-quiet")
         .arg("--sp-file")
         .arg(script_path)
@@ -355,8 +353,8 @@ fn run_spatch(spatch: &OsString, script_path: &Path, target: &Path) -> Result<St
     }
 }
 
-fn probe_spatch(spatch: &OsString) -> Result<(), String> {
-    match Command::new(spatch).arg("--version").output() {
+fn probe_spatch() -> Result<(), String> {
+    match Command::new("spatch").arg("--version").output() {
         Ok(output) if output.status.success() => Ok(()),
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -372,10 +370,6 @@ fn probe_spatch(spatch: &OsString) -> Result<(), String> {
         }
         Err(e) => Err(format!("failed to run spatch --version: {}", e)),
     }
-}
-
-fn spatch_command() -> OsString {
-    std::env::var_os("FOXGUARD_SPATCH").unwrap_or_else(|| OsString::from("spatch"))
 }
 
 fn parse_spatch_output(

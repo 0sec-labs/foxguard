@@ -65,7 +65,12 @@ fn coccinelle_rule_runs_via_spatch_and_normalizes_json() {
 
     let output = foxguard_cmd()
         .current_dir(repo.path())
-        .env("FOXGUARD_SPATCH", fake_spatch)
+        .env(
+            "PATH",
+            fake_spatch
+                .parent()
+                .expect("fake spatch should have a parent"),
+        )
         .args([
             ".",
             "-f",
@@ -116,7 +121,7 @@ fn missing_spatch_skips_coccinelle_once_without_failing_scan() {
 
     let output = foxguard_cmd()
         .current_dir(repo.path())
-        .env("FOXGUARD_SPATCH", repo.path().join("missing-spatch"))
+        .env("PATH", repo.path())
         .args([
             ".",
             "-f",
