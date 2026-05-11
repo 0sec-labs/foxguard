@@ -16,6 +16,7 @@ use crate::secrets::{
     scan_directory_with_config_and_notices, scan_paths_with_config_and_notices, SecretScanConfig,
 };
 use crate::Finding;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub struct ScanExecution {
@@ -137,12 +138,7 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
     // In PQ mode, filter to only PQ-related rules
     let pq_enable: Vec<String>;
     let rule_filter_unknown = if scan.pq_mode {
-        pq_enable = registry
-            .all_rules()
-            .iter()
-            .map(|r| r.id().to_string())
-            .filter(|id| is_pq_rule_id(id))
-            .collect();
+        pq_enable = collect_pq_rule_ids(&registry, &coccinelle_rule_ids);
         if pq_enable.is_empty() {
             eprintln!(
                 "Warning: no PQ rules registered in this build. \
@@ -568,8 +564,8 @@ fn tui_secrets_args(args: &TuiArgs) -> SecretsArgs {
 fn collect_rule_ids(
     registry: &RuleRegistry,
     coccinelle_rules: &[coccinelle::CoccinelleRule],
-) -> std::collections::HashSet<String> {
-    let mut ids: std::collections::HashSet<String> = registry
+) -> HashSet<String> {
+    let mut ids: HashSet<String> = registry
         .all_rules()
         .iter()
         .map(|rule| rule.id().to_string())
@@ -583,6 +579,26 @@ fn finding_identity_root(scan_path: &Path, config: Option<&FoxguardConfig>) -> P
         scan_path,
         config.map(|config| config.project_root.as_path()),
     )
+}
+
+fn collect_pq_rule_ids(
+    registry: &RuleRegistry,
+    coccinelle_rule_ids: &HashSet<String>,
+) -> Vec<String> {
+    let mut ids: Vec<String> = registry
+        .all_rules()
+        .iter()
+        .map(|rule| rule.id().to_string())
+        .filter(|id| is_pq_rule_id(id))
+        .collect();
+
+    for id in coccinelle_rule_ids {
+        if is_pq_rule_id(id) && !ids.iter().any(|existing| existing == id) {
+            ids.push(id.clone());
+        }
+    }
+
+    ids
 }
 
 fn build_registry(no_builtins: bool, rules: Option<&str>) -> Result<RuleRegistry, String> {
@@ -652,4 +668,23 @@ fn count_secret_files(scan_path: &Path) -> usize {
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
         .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pq_rule_ids_include_coccinelle_rules() {
+        let registry = RuleRegistry::empty();
+        let coccinelle_rule_ids = HashSet::from([
+            "kernel/pq-vulnerable-cocci".to_string(),
+            "kernel/non-pq-cocci".to_string(),
+        ]);
+
+        let ids = collect_pq_rule_ids(&registry, &coccinelle_rule_ids);
+
+        assert!(ids.contains(&"kernel/pq-vulnerable-cocci".to_string()));
+        assert!(!ids.contains(&"kernel/non-pq-cocci".to_string()));
+    }
 }
