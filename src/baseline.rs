@@ -26,8 +26,33 @@ impl BaselineFile {
         }
     }
 
+    pub fn from_findings_at_root(findings: &[Finding], identity_root: &Path) -> Self {
+        let entries = findings
+            .iter()
+            .map(|finding| BaselineEntry::from_finding_at_root(finding, identity_root))
+            .collect();
+        Self {
+            version: 1,
+            entries,
+        }
+    }
+
     pub fn add_finding(&mut self, finding: &Finding) -> bool {
         let entry = BaselineEntry::from_finding(finding);
+        if self
+            .entries
+            .iter()
+            .any(|existing| existing.fingerprint == entry.fingerprint)
+        {
+            return false;
+        }
+
+        self.entries.push(entry);
+        true
+    }
+
+    pub fn add_finding_at_root(&mut self, finding: &Finding, identity_root: &Path) -> bool {
+        let entry = BaselineEntry::from_finding_at_root(finding, identity_root);
         if self
             .entries
             .iter()
@@ -50,13 +75,32 @@ impl BaselineEntry {
             line: finding.line,
         }
     }
+
+    pub fn from_finding_at_root(finding: &Finding, identity_root: &Path) -> Self {
+        let normalized_file = crate::path_identity::finding_path_key(identity_root, &finding.file);
+        Self {
+            fingerprint: fingerprint_finding_with_file(finding, &normalized_file),
+            rule_id: finding.rule_id.clone(),
+            file: normalized_file,
+            line: finding.line,
+        }
+    }
 }
 
 pub fn fingerprint_finding(finding: &Finding) -> String {
+    fingerprint_finding_with_file(finding, &finding.file)
+}
+
+pub fn fingerprint_finding_at_root(finding: &Finding, identity_root: &Path) -> String {
+    let normalized_file = crate::path_identity::finding_path_key(identity_root, &finding.file);
+    fingerprint_finding_with_file(finding, &normalized_file)
+}
+
+fn fingerprint_finding_with_file(finding: &Finding, file: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(finding.rule_id.as_bytes());
     hasher.update([0]);
-    hasher.update(finding.file.as_bytes());
+    hasher.update(file.as_bytes());
     hasher.update([0]);
     hasher.update(finding.line.to_string().as_bytes());
     hasher.update([0]);
@@ -84,6 +128,21 @@ pub fn load_baseline(path: &Path) -> Result<Option<BaselineFile>, String> {
 }
 
 pub fn write_baseline(path: &Path, findings: &[Finding]) -> Result<(), String> {
+    write_baseline_file(path, BaselineFile::from_findings(findings))
+}
+
+pub fn write_baseline_at_root(
+    path: &Path,
+    findings: &[Finding],
+    identity_root: &Path,
+) -> Result<(), String> {
+    write_baseline_file(
+        path,
+        BaselineFile::from_findings_at_root(findings, identity_root),
+    )
+}
+
+fn write_baseline_file(path: &Path, baseline: BaselineFile) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
             format!(
@@ -94,7 +153,6 @@ pub fn write_baseline(path: &Path, findings: &[Finding]) -> Result<(), String> {
         })?;
     }
 
-    let baseline = BaselineFile::from_findings(findings);
     let content = serde_json::to_string_pretty(&baseline)
         .map_err(|e| format!("Failed to serialize baseline: {}", e))?;
     std::fs::write(path, content)
@@ -102,6 +160,22 @@ pub fn write_baseline(path: &Path, findings: &[Finding]) -> Result<(), String> {
 }
 
 pub fn append_finding_to_baseline(path: &Path, finding: &Finding) -> Result<bool, String> {
+    append_finding_to_baseline_inner(path, finding, None)
+}
+
+pub fn append_finding_to_baseline_at_root(
+    path: &Path,
+    finding: &Finding,
+    identity_root: &Path,
+) -> Result<bool, String> {
+    append_finding_to_baseline_inner(path, finding, Some(identity_root))
+}
+
+fn append_finding_to_baseline_inner(
+    path: &Path,
+    finding: &Finding,
+    identity_root: Option<&Path>,
+) -> Result<bool, String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
             format!(
@@ -116,7 +190,11 @@ pub fn append_finding_to_baseline(path: &Path, finding: &Finding) -> Result<bool
         version: 1,
         entries: Vec::new(),
     });
-    let added = baseline.add_finding(finding);
+    let added = if let Some(identity_root) = identity_root {
+        baseline.add_finding_at_root(finding, identity_root)
+    } else {
+        baseline.add_finding(finding)
+    };
 
     let content = serde_json::to_string_pretty(&baseline)
         .map_err(|e| format!("Failed to serialize baseline: {}", e))?;
@@ -130,6 +208,22 @@ pub fn suppress_with_baseline(
     findings: Vec<Finding>,
     baseline: Option<&BaselineFile>,
 ) -> Vec<Finding> {
+    suppress_with_baseline_inner(findings, baseline, None)
+}
+
+pub fn suppress_with_baseline_at_root(
+    findings: Vec<Finding>,
+    baseline: Option<&BaselineFile>,
+    identity_root: &Path,
+) -> Vec<Finding> {
+    suppress_with_baseline_inner(findings, baseline, Some(identity_root))
+}
+
+fn suppress_with_baseline_inner(
+    findings: Vec<Finding>,
+    baseline: Option<&BaselineFile>,
+    identity_root: Option<&Path>,
+) -> Vec<Finding> {
     let Some(baseline) = baseline else {
         return findings;
     };
@@ -137,11 +231,15 @@ pub fn suppress_with_baseline(
     findings
         .into_iter()
         .filter(|finding| {
-            let fingerprint = fingerprint_finding(finding);
-            !baseline
-                .entries
-                .iter()
-                .any(|entry| entry.fingerprint == fingerprint)
+            let fingerprint = identity_root
+                .map(|root| fingerprint_finding_at_root(finding, root))
+                .unwrap_or_else(|| fingerprint_finding(finding));
+            let legacy_fingerprint = fingerprint_finding(finding);
+            !baseline.entries.iter().any(|entry| {
+                entry.fingerprint == fingerprint
+                    || entry.fingerprint == legacy_fingerprint
+                    || entry.fingerprint == fingerprint_finding_with_file(finding, &entry.file)
+            })
         })
         .collect()
 }

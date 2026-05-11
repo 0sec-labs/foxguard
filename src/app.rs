@@ -1,8 +1,8 @@
-use crate::baseline::{load_baseline, suppress_with_baseline, write_baseline};
+use crate::baseline::{load_baseline, suppress_with_baseline_at_root, write_baseline_at_root};
 use crate::cli::{DiffArgs, OutputFormat, ScanArgs, SecretsArgs, TuiArgs};
 use crate::config::{
     apply_scan_defaults, apply_scan_thresholds, apply_secrets_defaults, apply_severity_overrides,
-    load_for_scan, suppress_with_scan_ignores,
+    load_for_scan, suppress_with_scan_ignores, FoxguardConfig,
 };
 use crate::diff::run_diff_with_warnings;
 use crate::engine::{
@@ -94,6 +94,7 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
     let config = load_for_scan(Path::new(&scan.path), scan.config.as_deref())?;
     validate_root_path(&scan.path)?;
     validate_rules_path(scan.rules.as_deref())?;
+    let identity_root = finding_identity_root(Path::new(&scan.path), config.as_ref());
 
     // Install any `scan.thresholds.*` overrides into process-wide state
     // before the rules run. Must happen after config load and before
@@ -192,10 +193,10 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
         findings.retain(|f| f.severity >= min);
     }
 
-    findings = suppress_with_scan_ignores(findings, config.as_ref());
+    findings = suppress_with_scan_ignores(findings, config.as_ref(), &identity_root);
 
     if let Some(ref path) = scan.write_baseline {
-        write_baseline(Path::new(path), &findings)?;
+        write_baseline_at_root(Path::new(path), &findings, &identity_root)?;
         notices.push(format!("Wrote baseline to {}", path));
     }
 
@@ -204,7 +205,7 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
         None => None,
     };
 
-    findings = suppress_with_baseline(findings, baseline.as_ref());
+    findings = suppress_with_baseline_at_root(findings, baseline.as_ref(), &identity_root);
 
     if files_scanned == 0 {
         notices.push(
@@ -224,6 +225,8 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
 
 pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
     let args = resolve_secrets_args(args)?;
+    let config_for_identity = load_for_scan(Path::new(&args.path), args.config.as_deref())?;
+    let identity_root = finding_identity_root(Path::new(&args.path), config_for_identity.as_ref());
     validate_root_path(&args.path)?;
 
     let scan_path = Path::new(&args.path);
@@ -257,7 +260,7 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
         };
 
     if let Some(ref path) = args.write_baseline {
-        write_baseline(Path::new(path), &findings)?;
+        write_baseline_at_root(Path::new(path), &findings, &identity_root)?;
         notices.push(format!("Wrote secrets baseline to {}", path));
     }
 
@@ -265,7 +268,7 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
         Some(path) => load_baseline(Path::new(path))?,
         None => None,
     };
-    findings = suppress_with_baseline(findings, baseline.as_ref());
+    findings = suppress_with_baseline_at_root(findings, baseline.as_ref(), &identity_root);
 
     Ok(SecretsExecution {
         args,
@@ -279,6 +282,7 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
 pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     validate_root_path(&args.path)?;
     let config = load_for_scan(Path::new(&args.path), None)?;
+    let identity_root = finding_identity_root(Path::new(&args.path), config.as_ref());
     apply_scan_thresholds(config.as_ref());
     let mut registry = build_registry(args.no_builtins, args.rules.as_deref())?;
     let rule_filter_unknown = if let Some(config) = config.as_ref() {
@@ -321,7 +325,7 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     }
 
     diff_result.new_findings =
-        suppress_with_scan_ignores(diff_result.new_findings, config.as_ref());
+        suppress_with_scan_ignores(diff_result.new_findings, config.as_ref(), &identity_root);
 
     notices.push(format!(
         "foxguard diff vs {}: {} new issue{} ({} total, {} existing)",
@@ -452,6 +456,13 @@ fn collect_rule_ids(registry: &RuleRegistry) -> std::collections::HashSet<String
         .iter()
         .map(|rule| rule.id().to_string())
         .collect()
+}
+
+fn finding_identity_root(scan_path: &Path, config: Option<&FoxguardConfig>) -> PathBuf {
+    crate::path_identity::project_root(
+        scan_path,
+        config.map(|config| config.project_root.as_path()),
+    )
 }
 
 fn build_registry(no_builtins: bool, rules: Option<&str>) -> Result<RuleRegistry, String> {

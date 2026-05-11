@@ -7,6 +7,7 @@ pub mod diff;
 pub mod engine;
 pub mod fix;
 pub mod git;
+pub mod path_identity;
 pub mod report;
 pub mod rules;
 pub mod secrets;

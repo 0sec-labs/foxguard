@@ -8,10 +8,11 @@ use super::widgets::{
 };
 use super::{open_command_spec, resolve_finding_path, OpenTarget, TerminalSession};
 use crate::app::TuiMode;
-use crate::baseline::append_finding_to_baseline;
+use crate::baseline::append_finding_to_baseline_at_root;
 use crate::config::{
     add_disabled_rule_to_config, add_scan_ignore_rule, add_secrets_ignored_rule,
     add_severity_override_to_config, current_severity_override, is_rule_disabled_in_config,
+    load_for_scan,
 };
 use crate::{Finding, Severity};
 use crossterm::event::{self, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
@@ -637,7 +638,16 @@ impl TuiApp {
         match action {
             TriageAction::AddToBaseline => {
                 let baseline_path = self.baseline_path_for_actions()?;
-                let added = append_finding_to_baseline(&baseline_path, &finding)?;
+                let config = load_for_scan(
+                    Path::new(&self.request.path),
+                    self.request.config.as_deref(),
+                )?;
+                let identity_root = crate::path_identity::project_root(
+                    Path::new(&self.request.path),
+                    config.as_ref().map(|config| config.project_root.as_path()),
+                );
+                let added =
+                    append_finding_to_baseline_at_root(&baseline_path, &finding, &identity_root)?;
                 if added {
                     self.push_runtime_notice(format!(
                         "added finding to baseline {}",

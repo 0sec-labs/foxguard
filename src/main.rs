@@ -3,7 +3,7 @@ use foxguard::app::{
     execute_diff, execute_scan, execute_secrets, resolve_scan_args as resolve_app_scan_args,
     scan_findings,
 };
-use foxguard::baseline::write_baseline;
+use foxguard::baseline::write_baseline_at_root;
 use foxguard::cli::{
     BaselineArgs, Cli, Command, DiffArgs, InitArgs, OutputFormat, PqcArgs, ScanArgs, SecretsArgs,
     TuiArgs,
@@ -116,7 +116,21 @@ fn run_baseline(args: &BaselineArgs) -> i32 {
         }
     };
 
-    if let Err(e) = write_baseline(Path::new(&args.output), &result.findings) {
+    let config = match load_for_scan(Path::new(&scan.path), scan.config.as_deref()) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+    let identity_root = foxguard::path_identity::project_root(
+        Path::new(&scan.path),
+        config.as_ref().map(|config| config.project_root.as_path()),
+    );
+
+    if let Err(e) =
+        write_baseline_at_root(Path::new(&args.output), &result.findings, &identity_root)
+    {
         eprintln!("Error: {}", e);
         return 2;
     }
