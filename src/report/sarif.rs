@@ -1,11 +1,18 @@
-use crate::Finding;
+use crate::{Finding, Severity};
 use serde_json::json;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Encode a file path as a URI suitable for SARIF `artifactLocation.uri`.
 /// Normalizes backslashes to forward slashes and percent-encodes characters
 /// that are not valid in URI path segments.
 fn path_to_uri(path: &str) -> String {
     let normalized = path.replace('\\', "/");
+    if has_uri_scheme(&normalized) {
+        return normalized;
+    }
+
+    let normalized = normalized.strip_prefix("./").unwrap_or(&normalized);
     let encoded = normalized
         .split('/')
         .map(|segment| {
@@ -19,13 +26,169 @@ fn path_to_uri(path: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("/");
-    format!("file://{encoded}")
+
+    if normalized.starts_with('/') {
+        format!("file://{encoded}")
+    } else if is_windows_drive_absolute(normalized) {
+        format!("file:///{encoded}")
+    } else {
+        encoded
+    }
+}
+
+fn has_uri_scheme(value: &str) -> bool {
+    let Some(colon) = value.find(':') else {
+        return false;
+    };
+    if colon == 1 && value.as_bytes()[0].is_ascii_alphabetic() {
+        return false;
+    }
+    value[..colon]
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+}
+
+fn is_windows_drive_absolute(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
+}
+
+#[derive(Debug, Clone)]
+struct RuleMetadata {
+    severity: Severity,
+    description: String,
+    tags: BTreeSet<String>,
+}
+
+fn collect_rules(findings: &[Finding]) -> (Vec<serde_json::Value>, BTreeMap<String, usize>) {
+    let mut by_id: BTreeMap<String, RuleMetadata> = BTreeMap::new();
+
+    for finding in findings {
+        let entry = by_id
+            .entry(finding.rule_id.clone())
+            .or_insert_with(|| RuleMetadata {
+                severity: finding.severity,
+                description: finding.description.clone(),
+                tags: BTreeSet::new(),
+            });
+
+        if finding.severity > entry.severity {
+            entry.severity = finding.severity;
+        }
+        if entry.description.trim().is_empty() && !finding.description.trim().is_empty() {
+            entry.description = finding.description.clone();
+        }
+
+        entry.tags.insert("security".to_string());
+        entry.tags.extend(finding.tags.iter().cloned());
+        if let Some(cwe) = &finding.cwe {
+            entry.tags.insert(cwe.clone());
+        }
+    }
+
+    let mut indices = BTreeMap::new();
+    let rules = by_id
+        .into_iter()
+        .enumerate()
+        .map(|(index, (id, metadata))| {
+            indices.insert(id.clone(), index);
+            let description =
+                non_empty_text(&metadata.description, &format!("Foxguard rule {id}"), 1024);
+            json!({
+                "id": id,
+                "name": non_empty_text(&id, "foxguard-rule", 255),
+                "shortDescription": {
+                    "text": description
+                },
+                "fullDescription": {
+                    "text": description
+                },
+                "defaultConfiguration": {
+                    "level": level_for_severity(metadata.severity)
+                },
+                "properties": {
+                    "tags": metadata.tags.into_iter().collect::<Vec<_>>(),
+                    "precision": "high",
+                    "security-severity": security_severity_score(metadata.severity)
+                }
+            })
+        })
+        .collect();
+
+    (rules, indices)
+}
+
+fn non_empty_text(value: &str, fallback: &str, max_chars: usize) -> String {
+    let trimmed = value.trim();
+    let source = if trimmed.is_empty() {
+        fallback
+    } else {
+        trimmed
+    };
+    source.chars().take(max_chars).collect()
+}
+
+fn level_for_severity(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Critical | Severity::High => "error",
+        Severity::Medium => "warning",
+        Severity::Low => "note",
+    }
+}
+
+fn security_severity_score(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Critical => "9.5",
+        Severity::High => "8.0",
+        Severity::Medium => "5.0",
+        Severity::Low => "2.0",
+    }
+}
+
+fn primary_location_line_hash(finding: &Finding, artifact_uri: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(finding.rule_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(artifact_uri.as_bytes());
+    hasher.update([0]);
+    hasher.update(finding.line.to_string().as_bytes());
+    hasher.update([0]);
+    hasher.update(finding.column.to_string().as_bytes());
+    hasher.update([0]);
+    hasher.update(finding.end_line.to_string().as_bytes());
+    hasher.update([0]);
+    hasher.update(finding.end_column.to_string().as_bytes());
+    hasher.update([0]);
+    hasher.update(normalized_fingerprint_snippet(finding).as_bytes());
+    let digest = hasher.finalize();
+    let hex = digest
+        .iter()
+        .take(8)
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
+    format!("{hex}:1")
+}
+
+fn normalized_fingerprint_snippet(finding: &Finding) -> String {
+    let mut normalized = finding
+        .snippet
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .chars()
+        .filter(|c| *c != ' ' && *c != '\t')
+        .collect::<String>();
+    if normalized.trim().is_empty() {
+        normalized = finding.description.trim().to_string();
+    }
+    normalized
 }
 
 pub fn build_sarif(findings: &[Finding]) -> serde_json::Value {
+    let (rules, rule_indices) = collect_rules(findings);
     let results: Vec<_> = findings
         .iter()
         .map(|f| {
+            let artifact_uri = path_to_uri(&f.file);
             let mut props = serde_json::Map::new();
             let mut tags: Vec<String> = f.tags.clone();
             if let Some(cwe) = &f.cwe {
@@ -58,11 +221,8 @@ pub fn build_sarif(findings: &[Finding]) -> serde_json::Value {
 
             let mut result = json!({
                 "ruleId": f.rule_id,
-                "level": match f.severity {
-                    crate::Severity::Critical | crate::Severity::High => "error",
-                    crate::Severity::Medium => "warning",
-                    crate::Severity::Low => "note",
-                },
+                "ruleIndex": rule_indices.get(&f.rule_id).copied().unwrap_or(0),
+                "level": level_for_severity(f.severity),
                 "rank": rank,
                 "message": {
                     "text": f.description
@@ -70,7 +230,7 @@ pub fn build_sarif(findings: &[Finding]) -> serde_json::Value {
                 "locations": [{
                     "physicalLocation": {
                         "artifactLocation": {
-                            "uri": path_to_uri(&f.file)
+                            "uri": artifact_uri
                         },
                         "region": {
                             "startLine": f.line,
@@ -80,6 +240,10 @@ pub fn build_sarif(findings: &[Finding]) -> serde_json::Value {
                         }
                     }
                 }],
+                "partialFingerprints": {
+                    "primaryLocationLineHash": primary_location_line_hash(f, &artifact_uri),
+                    "primaryLocationStartColumnFingerprint": f.column.to_string()
+                },
                 "properties": props
             });
 
@@ -103,7 +267,8 @@ pub fn build_sarif(findings: &[Finding]) -> serde_json::Value {
                 "driver": {
                     "name": "foxguard",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://foxguard.dev"
+                    "informationUri": "https://foxguard.dev",
+                    "rules": rules
                 }
             },
             "results": results
@@ -118,4 +283,81 @@ pub fn print_sarif(findings: &[Finding]) {
         "{}",
         serde_json::to_string_pretty(&build_sarif(findings)).expect("Failed to serialize SARIF")
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn finding(rule_id: &str, severity: Severity, file: &str) -> Finding {
+        Finding {
+            rule_id: rule_id.to_string(),
+            severity,
+            cwe: Some("CWE-79".to_string()),
+            description: "Use of dangerous HTML sink".to_string(),
+            file: file.to_string(),
+            line: 3,
+            column: 5,
+            end_line: 3,
+            end_column: 12,
+            snippet: "sink(value)".to_string(),
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+            confidence: 1.0,
+            taint_hops: None,
+            tags: vec!["framework".to_string()],
+            crypto_algorithm: None,
+            cnsa2_deadline: None,
+            dep_name: None,
+        }
+    }
+
+    #[test]
+    fn relative_paths_emit_relative_artifact_uris() {
+        assert_eq!(
+            path_to_uri("src/app file#[].js"),
+            "src/app%20file%23%5B%5D.js"
+        );
+        assert_eq!(path_to_uri("./src\\app.js"), "src/app.js");
+    }
+
+    #[test]
+    fn absolute_paths_emit_file_uris() {
+        assert_eq!(path_to_uri("/tmp/app.js"), "file:///tmp/app.js");
+        assert_eq!(path_to_uri("C:\\tmp\\app.js"), "file:///C:/tmp/app.js");
+    }
+
+    #[test]
+    fn sarif_includes_github_code_scanning_metadata() {
+        let findings = vec![finding("js/no-xss", Severity::High, "src/app.js")];
+        let sarif = build_sarif(&findings);
+
+        let driver = &sarif["runs"][0]["tool"]["driver"];
+        let rules = driver["rules"].as_array().expect("rules array");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0]["id"].as_str(), Some("js/no-xss"));
+        assert_eq!(
+            rules[0]["defaultConfiguration"]["level"].as_str(),
+            Some("error")
+        );
+        assert_eq!(
+            rules[0]["properties"]["security-severity"].as_str(),
+            Some("8.0")
+        );
+
+        let result = &sarif["runs"][0]["results"][0];
+        assert_eq!(result["ruleIndex"].as_u64(), Some(0));
+        assert_eq!(
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"].as_str(),
+            Some("src/app.js")
+        );
+        assert!(result["partialFingerprints"]["primaryLocationLineHash"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()));
+    }
 }
