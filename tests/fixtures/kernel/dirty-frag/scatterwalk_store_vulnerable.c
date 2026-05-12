@@ -1,7 +1,8 @@
 // Positive fixture: scatterwalk_map_and_copy STORE on in-place AEAD SGL.
 // Models crypto/authencesn.c::crypto_authenc_esn_decrypt — the secondary
 // STORE primitive abused by Copy Fail and Dirty Frag.
-// MUST be flagged by kernel/dirty-frag/scatterwalk-store-on-shared-sgl.
+// MUST be flagged by the authencesn exception at crypto/authencesn.c, and by
+// the broad scatterwalk rule when scanned as a non-crypto clone path.
 
 
 /* Tree-sitter fixture — scanned as text by foxguard, never compiled.

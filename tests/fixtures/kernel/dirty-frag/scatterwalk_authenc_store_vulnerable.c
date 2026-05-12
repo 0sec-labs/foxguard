@@ -1,7 +1,7 @@
 // Positive fixture (Tier 1 sibling): scatterwalk_map_and_copy STORE on
 // shared in-place AEAD SGL, sibling of crypto_authenc_esn_decrypt — covers
-// the structural shape in crypto/authenc.c::crypto_authenc_decrypt and
-// any downstream module that mirrors the authencesn STORE primitive.
+// the structural shape in downstream modules that mirror the authencesn
+// STORE primitive outside crypto/** template-wrapper paths.
 //
 // Synthetic minimal reproducer — NOT copied from kernel source.
 // MUST be flagged by kernel/dirty-frag/scatterwalk-store-on-shared-sgl.

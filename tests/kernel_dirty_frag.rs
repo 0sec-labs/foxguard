@@ -18,6 +18,10 @@ const RULES_DIR: &str = "rules/kernel/dirty-frag-class";
 const FIXTURES_DIR: &str = "tests/fixtures/kernel/dirty-frag";
 
 fn run_rule(rule_yaml: &str, fixture_basename: &str) -> usize {
+    run_rule_at_path(rule_yaml, fixture_basename, fixture_basename)
+}
+
+fn run_rule_at_path(rule_yaml: &str, fixture_basename: &str, scan_path: &str) -> usize {
     let rules =
         parse_semgrep_file(&Path::new(RULES_DIR).join(rule_yaml)).expect("rule parses cleanly");
     assert_eq!(rules.len(), 1, "expected one rule per yaml file");
@@ -25,6 +29,9 @@ fn run_rule(rule_yaml: &str, fixture_basename: &str) -> usize {
     let source =
         std::fs::read_to_string(Path::new(FIXTURES_DIR).join(fixture_basename)).expect("fixture");
     let tree = parse_file(&source, Language::C).expect("tree-sitter-c parses fixture");
+    if !rules[0].applies_to_path(Path::new(scan_path)) {
+        return 0;
+    }
     rules[0].check(&source, &tree).len()
 }
 
@@ -161,6 +168,40 @@ fn scatterwalk_store_on_shared_sgl_flags_authenc_sibling_fixture() {
         "expected authenc-style sibling positive fixture (in-place + STORE) to be flagged, got {} findings",
         n
     );
+}
+
+#[test]
+fn scatterwalk_authencesn_exception_flags_confirmed_crypto_site() {
+    let n = run_rule_at_path(
+        "scatterwalk-store-on-shared-sgl-authencesn.yaml",
+        "scatterwalk_store_vulnerable.c",
+        "crypto/authencesn.c",
+    );
+    assert!(
+        n >= 1,
+        "expected authencesn exception rule to flag confirmed crypto/authencesn.c shape, got {} findings",
+        n
+    );
+}
+
+#[test]
+fn dirty_frag_rules_ignore_crypto_template_wrapper_fixture() {
+    for rule_yaml in [
+        "skb-inplace-aead-no-cow.yaml",
+        "skb-inplace-skcipher-no-cow.yaml",
+        "scatterwalk-store-on-shared-sgl.yaml",
+        "scatterwalk-store-on-shared-sgl-authencesn.yaml",
+    ] {
+        let n = run_rule_at_path(
+            rule_yaml,
+            "crypto_template_wrapper_no_skb.c",
+            "crypto/gcm.c",
+        );
+        assert_eq!(
+            n, 0,
+            "expected {rule_yaml} to ignore crypto template-wrapper fixture, got {n} findings"
+        );
+    }
 }
 
 #[test]

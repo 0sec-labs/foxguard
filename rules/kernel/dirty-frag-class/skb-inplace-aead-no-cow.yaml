@@ -52,5 +52,8 @@ rules:
       See oss-security 2026-05-07 advisory and pwnkit issue #263.
     severity: ERROR
     languages: [c]
+    paths:
+      exclude:
+        - crypto/**
     metadata:
       cwe: "CWE-787"
