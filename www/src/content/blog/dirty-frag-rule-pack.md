@@ -13,7 +13,7 @@ Our read: the splice-frag-then-in-place-crypto shape is going to recur in any su
 
 ## What we shipped
 
-[PR #297](https://github.com/PwnKit-Labs/foxguard/pull/297) merged on the day the advisory landed. It adds C as a first-class scanner language (`tree-sitter-c`, `Language::C`, `.c` / `.h` extensions, Semgrep-compat `languages: [c]`) plus three rules under `rules/kernel/dirty-frag-class/`. Six calibration fixtures (three vulnerable, three safe) ship with it; `cargo test --test kernel_dirty_frag` is 6/6.
+[PR #297](https://github.com/0sec-labs/foxguard/pull/297) merged on the day the advisory landed. It adds C as a first-class scanner language (`tree-sitter-c`, `Language::C`, `.c` / `.h` extensions, Semgrep-compat `languages: [c]`) plus three rules under `rules/kernel/dirty-frag-class/`. Six calibration fixtures (three vulnerable, three safe) ship with it; `cargo test --test kernel_dirty_frag` is 6/6.
 
 ```sh
 $ npx foxguard@latest --no-builtins \
@@ -73,10 +73,10 @@ We also haven't run this against a real kernel checkout yet. The Tier 1 sibling 
 
 Path-sensitive cow-gate analysis lives in two issues we have open:
 
-- [foxguard #295](https://github.com/PwnKit-Labs/foxguard/issues/295) — Coccinelle integration. Coccinelle's `@@` metavariables can express `arg2 == arg3` directly, and SmPL has structural understanding of dominators. That's where the in-place property gets a real proof.
-- [foxguard #296](https://github.com/PwnKit-Labs/foxguard/issues/296) — CodeQL integration. CodeQL's data-flow library can carry SGL provenance from `MSG_SPLICE_PAGES` to the AEAD call, which is the actual bug-class invariant.
+- [foxguard #295](https://github.com/0sec-labs/foxguard/issues/295) — Coccinelle integration. Coccinelle's `@@` metavariables can express `arg2 == arg3` directly, and SmPL has structural understanding of dominators. That's where the in-place property gets a real proof.
+- [foxguard #296](https://github.com/0sec-labs/foxguard/issues/296) — CodeQL integration. CodeQL's data-flow library can carry SGL provenance from `MSG_SPLICE_PAGES` to the AEAD call, which is the actual bug-class invariant.
 
-The variant-hunt orchestrator that walks a kernel tree, fans out to all three engines (foxguard regex, Coccinelle, CodeQL), and reconciles the hits is [pwnkit #263](https://github.com/PwnKit-Labs/pwnkit/issues/263). The foxguard rules are the cheap fast-pass — first sieve, not last word.
+The variant-hunt orchestrator that walks a kernel tree, fans out to all three engines (foxguard regex, Coccinelle, CodeQL), and reconciles the hits is [pwnkit #263](https://github.com/0sec-labs/pwnkit/issues/263). The foxguard rules are the cheap fast-pass — first sieve, not last word.
 
 ## Try it
 
@@ -87,10 +87,10 @@ npx foxguard@latest --no-builtins \
   linux/
 ```
 
-The rule files live at [rules/kernel/dirty-frag-class/](https://github.com/PwnKit-Labs/foxguard/tree/main/rules/kernel/dirty-frag-class) on `main`. Calibration tests at [tests/kernel_dirty_frag.rs](https://github.com/PwnKit-Labs/foxguard/blob/main/tests/kernel_dirty_frag.rs) are 6/6 against the included fixtures. PR [#297](https://github.com/PwnKit-Labs/foxguard/pull/297) has the full rationale, and the original Dirty Frag write-up is at [V4bel/dirtyfrag](https://github.com/V4bel/dirtyfrag/blob/master/assets/write-up.md) — credit where it's due.
+The rule files live at [rules/kernel/dirty-frag-class/](https://github.com/0sec-labs/foxguard/tree/main/rules/kernel/dirty-frag-class) on `main`. Calibration tests at [tests/kernel_dirty_frag.rs](https://github.com/0sec-labs/foxguard/blob/main/tests/kernel_dirty_frag.rs) are 6/6 against the included fixtures. PR [#297](https://github.com/0sec-labs/foxguard/pull/297) has the full rationale, and the original Dirty Frag write-up is at [V4bel/dirtyfrag](https://github.com/V4bel/dirtyfrag/blob/master/assets/write-up.md) — credit where it's due.
 
 If you find a sibling site with this pack, open an issue. If you find a false positive, also open an issue — the negative-regex list is best-effort and grows.
 
 ---
 
-*foxguard is an open-source security scanner written in Rust. [GitHub](https://github.com/PwnKit-Labs/foxguard) · [foxguard.dev](https://foxguard.dev).*
+*foxguard is an open-source security scanner written in Rust. [GitHub](https://github.com/0sec-labs/foxguard) · [foxguard.dev](https://foxguard.dev).*

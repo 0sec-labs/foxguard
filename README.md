@@ -15,11 +15,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/PwnKit-Labs/foxguard/actions/workflows/ci.yml"><img src="https://github.com/PwnKit-Labs/foxguard/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://github.com/PwnKit-Labs/foxguard"><img src="https://img.shields.io/badge/foxguard-clean-3fb950?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSI+PHBhdGggZD0iTTggOEwyMCAyOEwzMiAyMEw0NCAyOEw1NiA4TDUyIDMyTDQ0IDQ0TDM2IDUySDI4TDIwIDQ0TDEyIDMyTDggOFoiIGZpbGw9IiNGNTlFMEIiIGZpbGwtb3BhY2l0eT0iMC4zIiBzdHJva2U9IiNGNTlFMEIiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjI0IiBjeT0iMzIiIHI9IjIuNSIgZmlsbD0iI0Y1OUUwQiIvPjxjaXJjbGUgY3g9IjQwIiBjeT0iMzIiIHI9IjIuNSIgZmlsbD0iI0Y1OUUwQiIvPjwvc3ZnPg==" alt="foxguard: clean" /></a>
+  <a href="https://github.com/0sec-labs/foxguard/actions/workflows/ci.yml"><img src="https://github.com/0sec-labs/foxguard/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/0sec-labs/foxguard"><img src="https://img.shields.io/badge/foxguard-clean-3fb950?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSI+PHBhdGggZD0iTTggOEwyMCAyOEwzMiAyMEw0NCAyOEw1NiA4TDUyIDMyTDQ0IDQ0TDM2IDUySDI4TDIwIDQ0TDEyIDMyTDggOFoiIGZpbGw9IiNGNTlFMEIiIGZpbGwtb3BhY2l0eT0iMC4zIiBzdHJva2U9IiNGNTlFMEIiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjI0IiBjeT0iMzIiIHI9IjIuNSIgZmlsbD0iI0Y1OUUwQiIvPjxjaXJjbGUgY3g9IjQwIiBjeT0iMzIiIHI9IjIuNSIgZmlsbD0iI0Y1OUUwQiIvPjwvc3ZnPg==" alt="foxguard: clean" /></a>
   <a href="https://crates.io/crates/foxguard"><img src="https://img.shields.io/crates/v/foxguard?color=d97706&label=crates.io" alt="crates.io" /></a>
   <a href="https://www.npmjs.com/package/foxguard"><img src="https://img.shields.io/npm/v/foxguard?color=d97706&label=npm" alt="npm" /></a>
-  <a href="https://github.com/PwnKit-Labs/foxguard/stargazers"><img src="https://img.shields.io/github/stars/PwnKit-Labs/foxguard?style=flat&color=e3b341&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/0sec-labs/foxguard/stargazers"><img src="https://img.shields.io/github/stars/0sec-labs/foxguard?style=flat&color=e3b341&logo=github" alt="GitHub stars" /></a>
 </p>
 
 ---
@@ -133,7 +133,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      - uses: PwnKit-Labs/foxguard/action@v0.8.0
+      - uses: 0sec-labs/foxguard/action@v0.8.0
         with:
           path: .
           severity: medium
@@ -147,7 +147,7 @@ Findings land in **Security → Code Scanning**. On any other CI: `npx foxguard@
 
 ```yaml
 repos:
-  - repo: https://github.com/PwnKit-Labs/foxguard
+  - repo: https://github.com/0sec-labs/foxguard
     rev: v0.8.0
     hooks:
       - id: foxguard
@@ -198,12 +198,12 @@ foxguard is not a full Semgrep or OpenGrep drop-in replacement. The intended mod
 
 Adding a rule is one struct implementing a trait. See [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
-## Part of PwnKit Labs
+## Part of 0sec Labs
 
 **Open-source adversarial security for the agentic AI era.** foxguard is one piece of the stack:
 
-- **[pwnkit](https://github.com/PwnKit-Labs/pwnkit)** — AI agent pentester (detect)
-- **[foxguard](https://github.com/PwnKit-Labs/foxguard)** — Rust security scanner (prevent)
+- **[pwnkit](https://github.com/0sec-labs/pwnkit)** — AI agent pentester (detect)
+- **[foxguard](https://github.com/0sec-labs/foxguard)** — Rust security scanner (prevent)
 - **[opensoar](https://github.com/opensoar-hq/opensoar-core)** — Python-native SOAR platform (respond)
 
 ## License

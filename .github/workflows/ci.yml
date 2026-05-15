@@ -169,7 +169,7 @@ jobs:
       - name: Check README install refs match Cargo.toml
         run: |
           cargo_v=$(grep '^version' Cargo.toml | head -1 | sed -E 's/version = "(.+)"/\1/')
-          action_v=$(grep -oE 'PwnKit-Labs/foxguard/action@v[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed -E 's/.*v(.+)/\1/')
+          action_v=$(grep -oE '0sec-labs/foxguard/action@v[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed -E 's/.*v(.+)/\1/')
           rev_v=$(grep -oE 'rev:\s+v[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed -E 's/.*v(.+)/\1/')
           fail=0
           if [ "$action_v" != "$cargo_v" ]; then

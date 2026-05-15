@@ -22,7 +22,7 @@ const { backLink, backLabel } = Astro.props;
     <a href="/#rules" class="hidden sm:block text-noir-500 hover:text-noir-100 transition-colors no-underline">Rules</a>
     <a href="/blog" class="hidden sm:block text-noir-500 hover:text-noir-100 transition-colors no-underline">Blog</a>
     <a
-      href="https://github.com/PwnKit-Labs/foxguard"
+      href="https://github.com/0sec-labs/foxguard"
       target="_blank"
       rel="noopener"
       class="flex items-center gap-1.5 rounded-lg border border-noir-700 px-3 py-1.5 text-noir-300 hover:border-noir-600 hover:text-noir-100 transition-colors no-underline"
@@ -40,7 +40,7 @@ const { backLink, backLabel } = Astro.props;
         if (cached && cachedAt && Date.now() - Number(cachedAt) < 3600000) {
           if (el) el.innerHTML = '★ ' + cached;
         } else {
-          const r = await fetch('https://api.github.com/repos/PwnKit-Labs/foxguard');
+          const r = await fetch('https://api.github.com/repos/0sec-labs/foxguard');
           if (r.ok) {
             const d = await r.json();
             if (el && d.stargazers_count) {

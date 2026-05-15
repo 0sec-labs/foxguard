@@ -13,7 +13,7 @@ This post is about how we found the regression, what the fix looks like, and why
 
 foxguard v0.4.0 scanned gin in ~110ms. v0.7.0 scanned it in ~360ms. That is a 3.3× slowdown over ten days.
 
-Issue [#174](https://github.com/PwnKit-Labs/foxguard/issues/174) flagged this. The obvious reply — *we added cross-file taint tracking, of course it is slower* — is partially right. Features cost time. But the regression was uneven:
+Issue [#174](https://github.com/0sec-labs/foxguard/issues/174) flagged this. The obvious reply — *we added cross-file taint tracking, of course it is slower* — is partially right. Features cost time. But the regression was uneven:
 
 | Repo | v0.4.0 | v0.7.0 | Slowdown |
 |------|-------:|-------:|---------:|
@@ -60,7 +60,7 @@ For the nine Go taint rules in v0.7.0, exactly one — `path-traversal` — decl
 
 Findings get attributed back to the correct rule via a new `rule_id_hint: Option<String>` field on `TaintFinding`, populated when a sink matches.
 
-The refactor lives in [PR #199](https://github.com/PwnKit-Labs/foxguard/pull/199) for Go, [PR #202](https://github.com/PwnKit-Labs/foxguard/pull/202) for Python, and [PR #203](https://github.com/PwnKit-Labs/foxguard/pull/203) for JavaScript. Same pattern across all three engines — 11 JavaScript taint rules collapse from 22 walks per file to 4, with the same `rule_id_hint` attribution mechanism.
+The refactor lives in [PR #199](https://github.com/0sec-labs/foxguard/pull/199) for Go, [PR #202](https://github.com/0sec-labs/foxguard/pull/202) for Python, and [PR #203](https://github.com/0sec-labs/foxguard/pull/203) for JavaScript. Same pattern across all three engines — 11 JavaScript taint rules collapse from 22 walks per file to 4, with the same `rule_id_hint` attribution mechanism.
 
 ## Results
 
@@ -100,4 +100,4 @@ v0.7.1 is a drop-in replacement for v0.7.0. Same rules, same output, faster.
 
 ---
 
-*foxguard is an open-source security scanner written in Rust. 170+ built-in rules, 10 languages, cross-file taint tracking for Python, JavaScript, and Go. [Try it](https://github.com/PwnKit-Labs/foxguard): `npx foxguard .`*
+*foxguard is an open-source security scanner written in Rust. 170+ built-in rules, 10 languages, cross-file taint tracking for Python, JavaScript, and Go. [Try it](https://github.com/0sec-labs/foxguard): `npx foxguard .`*

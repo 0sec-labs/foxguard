@@ -5,7 +5,7 @@ rules are classified, and the known false-positive patterns we have seen and
 tuned for. It is the honest, technical counterpart to the marketing-facing
 coverage table in the [README](../README.md).
 
-It is also the document [issue #9](https://github.com/PwnKit-Labs/foxguard/issues/9)
+It is also the document [issue #9](https://github.com/0sec-labs/foxguard/issues/9)
 asks for: rather than publishing a single global "precision number" that would
 be meaningless without a corpus, we publish a per-rule tier classification
 based on how each rule is implemented, and an explicit list of the false-positive
@@ -291,7 +291,7 @@ tuned for. Every item here is verifiable in the code or the git log.
 - **SQL injection on plain English.** Earlier versions of
   `js/no-sql-injection` flagged `res.send('delete ' + name)` because
   `delete` is a SQL keyword. Fixed in commit
-  [`13ea1ae`](https://github.com/PwnKit-Labs/foxguard/commit/13ea1ae) by
+  [`13ea1ae`](https://github.com/0sec-labs/foxguard/commit/13ea1ae) by
   requiring a full SQL structure in the regex (`SELECT ... FROM`,
   `INSERT INTO`, `UPDATE ... SET`, `DELETE FROM`, `DROP TABLE`, etc.) rather
   than a bare keyword. See `src/rules/javascript.rs` around the
@@ -356,6 +356,6 @@ next to the code) and baselines for gradual rollout on legacy repositories.
 
 ---
 
-*This document tracks [issue #9](https://github.com/PwnKit-Labs/foxguard/issues/9).
+*This document tracks [issue #9](https://github.com/0sec-labs/foxguard/issues/9).
 The labeled-corpus follow-up — pinned OSS repos, TP/FP labels per finding,
 per-rule precision table in CI — is scoped separately in the same issue.*

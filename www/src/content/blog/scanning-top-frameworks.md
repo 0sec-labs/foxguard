@@ -7,7 +7,7 @@ readTime: "5 min read"
 
 What happens when you point a security scanner at the source code of the frameworks everyone uses?
 
-I ran [foxguard](https://github.com/PwnKit-Labs/foxguard) against the latest HEAD of Express, Flask, Gin, Laravel, Rails, Spring Petclinic, and a Next.js example. All seven repos scanned in **0.86 seconds total**.
+I ran [foxguard](https://github.com/0sec-labs/foxguard) against the latest HEAD of Express, Flask, Gin, Laravel, Rails, Spring Petclinic, and a Next.js example. All seven repos scanned in **0.86 seconds total**.
 
 ## Results
 
@@ -98,4 +98,4 @@ Any application using `ginS` trusts all proxies by default, allowing IP spoofing
 
 ---
 
-*foxguard is an open-source security scanner written in Rust. 170+ built-in rules, 10 languages, sub-second scans. [Try it](https://github.com/PwnKit-Labs/foxguard): `npx foxguard .`*
+*foxguard is an open-source security scanner written in Rust. 170+ built-in rules, 10 languages, sub-second scans. [Try it](https://github.com/0sec-labs/foxguard): `npx foxguard .`*

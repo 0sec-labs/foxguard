@@ -1,7 +1,7 @@
 #!/bin/sh
 # foxguard installer
 #
-# Installs the latest foxguard release from github.com/PwnKit-Labs/foxguard.
+# Installs the latest foxguard release from github.com/0sec-labs/foxguard.
 # Usage:
 #   curl -fsSL https://foxguard.dev/install.sh | sh
 #
@@ -11,7 +11,7 @@
 
 set -eu
 
-REPO="PwnKit-Labs/foxguard"
+REPO="0sec-labs/foxguard"
 INSTALL_DIR="${FOXGUARD_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${FOXGUARD_VERSION:-latest}"
 
