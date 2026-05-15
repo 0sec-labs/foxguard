@@ -18,6 +18,10 @@ const RULES_DIR: &str = "rules/kernel/dirty-frag-class";
 const FIXTURES_DIR: &str = "tests/fixtures/kernel/dirty-frag";
 
 fn run_rule(rule_yaml: &str, fixture_basename: &str) -> usize {
+    run_rule_at_path(rule_yaml, fixture_basename, fixture_basename)
+}
+
+fn run_rule_at_path(rule_yaml: &str, fixture_basename: &str, scan_path: &str) -> usize {
     let rules =
         parse_semgrep_file(&Path::new(RULES_DIR).join(rule_yaml)).expect("rule parses cleanly");
     assert_eq!(rules.len(), 1, "expected one rule per yaml file");
@@ -25,6 +29,9 @@ fn run_rule(rule_yaml: &str, fixture_basename: &str) -> usize {
     let source =
         std::fs::read_to_string(Path::new(FIXTURES_DIR).join(fixture_basename)).expect("fixture");
     let tree = parse_file(&source, Language::C).expect("tree-sitter-c parses fixture");
+    if !rules[0].applies_to_path(Path::new(scan_path)) {
+        return 0;
+    }
     rules[0].check(&source, &tree).len()
 }
 
@@ -172,6 +179,48 @@ fn scatterwalk_store_on_shared_sgl_ignores_inplace_read_fixture() {
     assert_eq!(
         n, 0,
         "expected in-place + READ-back (out=0) fixture to be unflagged, got {} findings",
+        n
+    );
+}
+
+#[test]
+fn rxrpc_response_no_nonlinear_unshare_flags_wrapper_fixture() {
+    let n = run_rule_at_path(
+        "rxrpc-response-no-nonlinear-unshare.yaml",
+        "rxrpc_conn_event_vulnerable.c",
+        "net/rxrpc/conn_event.c",
+    );
+    assert!(
+        n >= 1,
+        "expected cloned-only RxRPC RESPONSE wrapper fixture to be flagged, got {} findings",
+        n
+    );
+}
+
+#[test]
+fn rxrpc_response_no_nonlinear_unshare_flags_direct_dispatch_fixture() {
+    let n = run_rule_at_path(
+        "rxrpc-response-no-nonlinear-unshare.yaml",
+        "rxrpc_conn_event_direct_vulnerable.c",
+        "net/rxrpc/conn_event.c",
+    );
+    assert!(
+        n >= 1,
+        "expected direct RxRPC RESPONSE dispatch fixture to be flagged, got {} findings",
+        n
+    );
+}
+
+#[test]
+fn rxrpc_response_no_nonlinear_unshare_ignores_safe_fixture() {
+    let n = run_rule_at_path(
+        "rxrpc-response-no-nonlinear-unshare.yaml",
+        "rxrpc_conn_event_safe.c",
+        "net/rxrpc/conn_event.c",
+    );
+    assert_eq!(
+        n, 0,
+        "expected nonlinear-gated RxRPC RESPONSE fixture to be unflagged, got {} findings",
         n
     );
 }

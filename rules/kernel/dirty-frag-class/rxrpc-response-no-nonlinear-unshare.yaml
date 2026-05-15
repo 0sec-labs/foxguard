@@ -1,0 +1,42 @@
+# Dirty Frag class — RxRPC RESPONSE verify without nonlinear skb unshare.
+#
+# Pattern: net/rxrpc/conn_event.c hands a RESPONSE skb to
+# conn->security->verify_response(conn, skb) without first copying / unsharing
+# non-linear skbs. The security implementation may decrypt in place, and a
+# non-linear skb can carry splice-backed page-cache frags.
+#
+# Calibration site (pre-patch): net/rxrpc/conn_event.c response handling.
+# Linux v6.14 dispatches directly from rxrpc_process_event(); later trees add
+# rxrpc_verify_response(), but the first wrapper only gated on skb_cloned(skb).
+# The Dirty Frag fix extends that gate to skb_is_nonlinear(skb) / skb->data_len.
+#
+# Recall caveats — shapes this rule MISSES:
+#   - equivalent gates hidden behind a helper wrapper with a different name.
+#   - future RxRPC security hooks that decrypt RESPONSE data via a different
+#     hook than verify_response.
+#
+# Precision caveats — this rule is intentionally path-scoped to
+# net/rxrpc/conn_event.c because it detects an indirect dispatch shape, not a
+# local crypto primitive. It does not widen the broad skb/crypto regexes.
+rules:
+  - id: kernel/dirty-frag/rxrpc-response-no-nonlinear-unshare
+    pattern-either:
+      # Older conn_event.c shape: RESPONSE dispatch calls the security hook
+      # directly with the original skb.
+      - pattern-regex: '(?ms)\bcase\s+RXRPC_PACKET_TYPE_RESPONSE\s*:[\s\S]*?\bconn\s*->\s*security\s*->\s*verify_response\s*\(\s*conn\s*,\s*skb\s*\)'
+      # Wrapper shape after the cloned-skb fix: only skb_cloned(skb) is copied,
+      # so non-linear-but-uncloned skbs still reach in-place RESPONSE decrypt.
+      - pattern-regex: '(?ms)^\s*static\s+int\s+rxrpc_verify_response\s*\([^)]*struct\s+sk_buff\s*\*\s*skb[^)]*\)\s*\{[\s\S]*?\bif\s*\(\s*skb_cloned\s*\(\s*skb\s*\)\s*\)[\s\S]*?\bconn\s*->\s*security\s*->\s*verify_response\s*\(\s*conn\s*,\s*skb\s*\)'
+    pattern-not-regex: '(?ms)^\s*static\s+int\s+rxrpc_verify_response\s*\([^)]*struct\s+sk_buff\s*\*\s*skb[^)]*\)\s*\{[\s\S]*?\b(?:skb_is_nonlinear\s*\(\s*skb\s*\)|skb\s*->\s*data_len)\b[\s\S]*?\bconn\s*->\s*security\s*->\s*verify_response\s*\(\s*conn\s*,\s*skb\s*\)'
+    message: |
+      RxRPC RESPONSE skb reaches conn->security->verify_response() without a
+      nonlinear-skb copy/unshare gate (Dirty Frag class). Verify the path copies
+      when skb_cloned(skb) or skb_is_nonlinear(skb) / skb->data_len is true
+      before RESPONSE security code performs in-place decrypt.
+    severity: ERROR
+    languages: [c]
+    paths:
+      include:
+        - net/rxrpc/conn_event.c
+    metadata:
+      cwe: "CWE-787"
