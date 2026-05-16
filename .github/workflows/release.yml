@@ -282,7 +282,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/pwnkit-labs/foxguard-github-app:${{ github.ref_name }}
-            ghcr.io/pwnkit-labs/foxguard-github-app:latest
+            ghcr.io/0sec-labs/foxguard-github-app:${{ github.ref_name }}
+            ghcr.io/0sec-labs/foxguard-github-app:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
