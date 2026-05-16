@@ -17,6 +17,9 @@
 # Recall caveats — shapes this rule MISSES:
 #   - cross-function cow gates (caller cows, callee decrypts in place).
 #   - skcipher_request_set_crypt called via static-inline wrapper.
+#   - indirect AF_RXRPC response dispatch via conn->security->verify_response
+#     in net/rxrpc/conn_event.c; covered by the narrower
+#     rxrpc-verify-response-dispatch companion rule.
 #   - the out-of-band SCTP-AUTH cipher path which uses HMAC, not skcipher
 #     (different rule territory).
 #

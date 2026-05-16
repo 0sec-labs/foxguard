@@ -92,8 +92,21 @@ pub fn scan_findings(scan: &ScanArgs) -> Result<ScanResult, String> {
     })
 }
 
+pub fn scan_findings_resolved(scan: ScanArgs) -> Result<ScanResult, String> {
+    let execution = execute_scan_resolved(scan)?;
+    Ok(ScanResult {
+        findings: execution.findings,
+        files_scanned: execution.files_scanned,
+        stats: execution.stats,
+        duration: execution.duration,
+    })
+}
+
 pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
-    let scan = resolve_scan_args(scan)?;
+    execute_scan_resolved(resolve_scan_args(scan)?)
+}
+
+fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
     let config = load_for_scan(Path::new(&scan.path), scan.config.as_deref())?;
     validate_root_path(&scan.path)?;
     validate_rules_path(scan.rules.as_deref())?;
@@ -438,6 +451,7 @@ fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
         explain: args.explain,
         github_pr: None,
         quiet: false,
+        output: None,
         max_file_size: args.max_file_size,
         fix: false,
         show_confidence: false,
@@ -455,6 +469,7 @@ fn tui_diff_args(args: &TuiArgs, target: &str) -> DiffArgs {
         severity: args.severity,
         rules: args.rules.clone(),
         no_builtins: args.no_builtins,
+        output: None,
         max_file_size: args.max_file_size,
     }
 }
@@ -470,6 +485,7 @@ fn tui_secrets_args(args: &TuiArgs) -> SecretsArgs {
         exclude_paths: Vec::new(),
         exclude_path_file: None,
         ignored_rules: Vec::new(),
+        output: None,
         max_file_size: args.max_file_size,
     }
 }

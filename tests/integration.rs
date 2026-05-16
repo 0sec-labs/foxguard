@@ -3,6 +3,41 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::TempDir;
 
+fn scan_json_report_from_slice(stdout: &[u8]) -> serde_json::Value {
+    serde_json::from_slice(stdout).unwrap_or_else(|e| panic!("invalid JSON output: {e}"))
+}
+
+fn scan_json_findings_from_slice(stdout: &[u8]) -> Vec<serde_json::Value> {
+    let report = scan_json_report_from_slice(stdout);
+    report["findings"].as_array().cloned().unwrap_or_else(|| {
+        panic!(
+            "JSON report missing findings array: {}",
+            serde_json::to_string_pretty(&report).unwrap_or_default()
+        )
+    })
+}
+
+fn scan_json_findings_from_str(stdout: &str) -> Vec<serde_json::Value> {
+    let report: serde_json::Value =
+        serde_json::from_str(stdout).unwrap_or_else(|e| panic!("invalid JSON output: {e}"));
+    report["findings"].as_array().cloned().unwrap_or_else(|| {
+        panic!(
+            "JSON report missing findings array: {}",
+            serde_json::to_string_pretty(&report).unwrap_or_default()
+        )
+    })
+}
+
+fn assert_json_number_eq(value: &serde_json::Value, expected: f64) {
+    let actual = value
+        .as_f64()
+        .unwrap_or_else(|| panic!("expected JSON number, got {value}"));
+    assert!(
+        (actual - expected).abs() < 1e-6,
+        "expected {expected}, got {actual}"
+    );
+}
+
 fn foxguard_cmd() -> Command {
     Command::new(env!("CARGO_BIN_EXE_foxguard"))
 }
@@ -119,8 +154,7 @@ mod python {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         // Count grew to 31 when `input()` became a taint source (issues
         // #29/#30): `dangerous()` now additionally fires py/taint-eval on
@@ -189,8 +223,7 @@ mod python {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -241,8 +274,7 @@ mod python {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for f in &findings {
@@ -334,8 +366,7 @@ mod python {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         for taint_rule in [
             "py/taint-pickle-deserialization",
@@ -375,8 +406,7 @@ mod python {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for f in &findings {
@@ -411,8 +441,7 @@ mod python {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         for taint_rule in [
             "py/taint-pickle-deserialization",
@@ -446,8 +475,7 @@ mod python {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for f in &findings {
@@ -479,8 +507,7 @@ mod python {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         for taint_rule in [
             "py/taint-pickle-deserialization",
@@ -516,8 +543,7 @@ mod python {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for f in &findings {
@@ -548,8 +574,7 @@ mod python {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         for taint_rule in [
             "py/taint-pickle-deserialization",
@@ -587,8 +612,7 @@ mod python {
             "safe_py_aliases.py should exit zero"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -607,8 +631,7 @@ mod python {
 
         assert!(output.status.success(), "safe.py should exit zero");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(findings.len(), 0, "safe.py should have 0 findings");
     }
@@ -631,8 +654,7 @@ mod javascript {
             "should exit non-zero when findings exist"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -696,8 +718,7 @@ mod javascript {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for f in &findings {
@@ -750,8 +771,7 @@ mod javascript {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         for taint_rule in [
             "js/taint-xss-innerhtml",
@@ -784,8 +804,7 @@ mod javascript {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let n = findings
             .iter()
@@ -805,8 +824,7 @@ mod javascript {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let n = findings
             .iter()
@@ -831,8 +849,7 @@ mod javascript {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let n = findings
             .iter()
@@ -852,8 +869,7 @@ mod javascript {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let n = findings
             .iter()
@@ -878,8 +894,7 @@ mod javascript {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let n = findings
             .iter()
@@ -899,8 +914,7 @@ mod javascript {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let n = findings
             .iter()
@@ -922,8 +936,7 @@ mod javascript {
 
         assert!(output.status.success(), "safe.js should exit zero");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(findings.len(), 0, "safe.js should have 0 findings");
     }
@@ -943,8 +956,7 @@ mod go {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -991,8 +1003,7 @@ mod go {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for f in &findings {
@@ -1060,8 +1071,7 @@ mod go {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         for taint_rule in [
             "go/taint-command-injection",
@@ -1095,8 +1105,7 @@ mod go {
 
         assert!(output.status.success(), "safe.go should exit zero");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(findings.len(), 0, "safe.go should have 0 findings");
     }
@@ -1116,8 +1125,7 @@ mod java {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -1194,7 +1202,7 @@ mod crypto_agility {
         if output.stdout.is_empty() {
             return vec![];
         }
-        serde_json::from_slice(&output.stdout).unwrap_or_default()
+        scan_json_findings_from_slice(&output.stdout)
     }
 
     #[test]
@@ -1260,8 +1268,7 @@ mod php {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -1308,8 +1315,7 @@ mod ruby {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -1380,8 +1386,7 @@ mod csharp {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -1428,8 +1433,7 @@ mod swift {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -1476,8 +1480,7 @@ mod rust_lang {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -1528,8 +1531,7 @@ mod cross_file {
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for f in &findings {
@@ -1570,8 +1572,7 @@ mod cross_file {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let lines: Vec<u64> = findings
             .iter()
@@ -1612,8 +1613,7 @@ mod cross_file {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let n = findings
             .iter()
@@ -1646,8 +1646,7 @@ mod cross_file {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let lines: Vec<u64> = findings
             .iter()
@@ -1678,8 +1677,7 @@ mod cross_file {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let n = findings
             .iter()
@@ -1710,8 +1708,7 @@ mod cross_file {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let lines: Vec<u64> = findings
             .iter()
@@ -1742,8 +1739,7 @@ mod cross_file {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let n = findings
             .iter()
@@ -1774,8 +1770,7 @@ mod cross_file {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let lines: Vec<u64> = findings
             .iter()
@@ -1806,8 +1801,7 @@ mod cross_file {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let n = findings
             .iter()
@@ -1834,10 +1828,30 @@ mod output_formats {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let report = scan_json_report_from_slice(&output.stdout);
+        let findings = report["findings"]
+            .as_array()
+            .expect("missing findings array");
 
         assert!(!findings.is_empty());
+        assert_eq!(report["schema_version"].as_str(), Some("1.0.0"));
+        assert_eq!(report["scanner"]["name"].as_str(), Some("foxguard"));
+        assert!(
+            report["scanner"]["version"].is_string(),
+            "missing scanner version"
+        );
+        assert_eq!(
+            report["target"]["path"].as_str(),
+            Some("tests/fixtures/vulnerable.js")
+        );
+        assert!(
+            report["timing"]["duration_ms"].is_number(),
+            "missing duration"
+        );
+        assert_eq!(
+            report["finding_counts"]["total"].as_u64(),
+            Some(findings.len() as u64)
+        );
 
         let first = &findings[0];
 
@@ -1851,6 +1865,315 @@ mod output_formats {
         assert!(first["end_line"].is_number(), "missing end_line");
         assert!(first["end_column"].is_number(), "missing end_column");
         assert!(first["snippet"].is_string(), "missing snippet");
+    }
+
+    #[test]
+    fn test_json_output_can_write_to_file() {
+        let dir = TempDir::new().expect("failed to create temp dir");
+        let report_path = dir.path().join("reports/findings.json");
+
+        let output = foxguard_cmd_isolated()
+            .args([
+                "tests/fixtures/vulnerable.js",
+                "-f",
+                "json",
+                "--output",
+                report_path.to_str().expect("non-utf8 report path"),
+            ])
+            .output()
+            .expect("failed to execute foxguard");
+
+        assert!(
+            !output.status.success(),
+            "scan should still exit 1 with findings"
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "stdout should stay empty when --output is used"
+        );
+
+        let report = scan_json_report_from_slice(
+            &fs::read(report_path).expect("failed to read JSON report file"),
+        );
+        assert_eq!(report["schema_version"].as_str(), Some("1.0.0"));
+        assert!(
+            report["findings"]
+                .as_array()
+                .is_some_and(|findings| !findings.is_empty()),
+            "written report should contain findings"
+        );
+    }
+
+    #[test]
+    fn test_sarif_output_can_write_to_file() {
+        let dir = TempDir::new().expect("failed to create temp dir");
+        let report_path = dir.path().join("reports/findings.sarif");
+
+        let output = foxguard_cmd_isolated()
+            .args([
+                "tests/fixtures/vulnerable.js",
+                "-f",
+                "sarif",
+                "--output",
+                report_path.to_str().expect("non-utf8 report path"),
+            ])
+            .output()
+            .expect("failed to execute foxguard");
+
+        assert!(
+            !output.status.success(),
+            "scan should still exit 1 with findings"
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "stdout should stay empty when --output is used"
+        );
+
+        let sarif: serde_json::Value = serde_json::from_slice(
+            &fs::read(report_path).expect("failed to read SARIF report file"),
+        )
+        .expect("invalid SARIF JSON");
+        assert_eq!(sarif["version"].as_str(), Some("2.1.0"));
+        assert!(
+            sarif["runs"][0]["results"]
+                .as_array()
+                .is_some_and(|results| !results.is_empty()),
+            "written SARIF report should contain results"
+        );
+    }
+
+    #[test]
+    fn test_cbom_output_can_write_to_file() {
+        let dir = TempDir::new().expect("failed to create temp dir");
+        let report_path = dir.path().join("reports/findings.cbom.json");
+
+        let output = foxguard_cmd_isolated()
+            .args([
+                "tests/fixtures/vulnerable.py",
+                "-f",
+                "cbom",
+                "--output",
+                report_path.to_str().expect("non-utf8 report path"),
+            ])
+            .output()
+            .expect("failed to execute foxguard");
+
+        assert!(
+            !output.status.success(),
+            "scan should still exit 1 with findings"
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "stdout should stay empty when --output is used"
+        );
+
+        let cbom: serde_json::Value = serde_json::from_slice(
+            &fs::read(report_path).expect("failed to read CBOM report file"),
+        )
+        .expect("invalid CBOM JSON");
+        assert_eq!(cbom["bomFormat"].as_str(), Some("CycloneDX"));
+        assert!(
+            cbom["components"]
+                .as_array()
+                .is_some_and(|components| !components.is_empty()),
+            "written CBOM report should contain crypto components"
+        );
+    }
+
+    #[test]
+    fn test_secrets_json_output_can_write_to_file() {
+        let dir = TempDir::new().expect("failed to create temp dir");
+        let secrets_path = write_secrets_fixture(dir.path());
+        let report_path = dir.path().join("reports/secrets.json");
+
+        let output = foxguard_cmd()
+            .args([
+                "secrets",
+                secrets_path.to_str().expect("non-utf8 secrets path"),
+                "-f",
+                "json",
+                "--output",
+                report_path.to_str().expect("non-utf8 report path"),
+            ])
+            .output()
+            .expect("failed to execute foxguard secrets");
+
+        assert!(
+            !output.status.success(),
+            "secrets scan should still exit 1 with findings"
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "stdout should stay empty when --output is used"
+        );
+
+        let report = scan_json_report_from_slice(
+            &fs::read(report_path).expect("failed to read secrets JSON report file"),
+        );
+        assert_eq!(report["scanner"]["command"].as_str(), Some("secrets"));
+        assert!(
+            report["findings"]
+                .as_array()
+                .is_some_and(|findings| !findings.is_empty()),
+            "written secrets report should contain findings"
+        );
+    }
+
+    #[test]
+    fn test_diff_json_output_can_write_to_file() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        Command::new("git")
+            .args(["init"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to initialize git repo");
+        fs::write(repo.path().join("app.js"), "console.log('safe');\n")
+            .expect("failed to write safe fixture");
+        Command::new("git")
+            .args(["add", "app.js"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to stage safe fixture");
+        Command::new("git")
+            .args([
+                "-c",
+                "user.name=Foxguard Test",
+                "-c",
+                "user.email=foxguard@example.test",
+                "commit",
+                "-m",
+                "base",
+            ])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to commit safe fixture");
+        fs::write(
+            repo.path().join("app.js"),
+            "const x = process.argv[2];\neval(x);\n",
+        )
+        .expect("failed to write vulnerable fixture");
+
+        let report_path = repo.path().join("reports/diff.json");
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([
+                "diff",
+                "HEAD",
+                ".",
+                "-f",
+                "json",
+                "--output",
+                report_path.to_str().expect("non-utf8 report path"),
+            ])
+            .output()
+            .expect("failed to execute foxguard diff");
+
+        assert!(
+            !output.status.success(),
+            "diff scan should still exit 1 with new findings"
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "stdout should stay empty when --output is used"
+        );
+
+        let report = scan_json_report_from_slice(
+            &fs::read(report_path).expect("failed to read diff JSON report file"),
+        );
+        assert_eq!(report["scanner"]["command"].as_str(), Some("diff"));
+        assert_eq!(report["target"]["diff_base"].as_str(), Some("HEAD"));
+        assert!(
+            report["findings"]
+                .as_array()
+                .is_some_and(|findings| !findings.is_empty()),
+            "written diff report should contain new findings"
+        );
+    }
+
+    #[test]
+    fn test_terminal_output_rejects_output_path_for_scan_secrets_and_diff() {
+        let dir = TempDir::new().expect("failed to create temp dir");
+        let secrets_path = write_secrets_fixture(dir.path());
+        let rejected_scan_path = dir.path().join("scan.txt");
+        let rejected_secrets_path = dir.path().join("reports/secrets.txt");
+
+        let scan = foxguard_cmd_isolated()
+            .args([
+                "tests/fixtures/vulnerable.js",
+                "--output",
+                rejected_scan_path.to_str().expect("non-utf8 report path"),
+            ])
+            .output()
+            .expect("failed to execute foxguard scan");
+        assert_eq!(scan.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&scan.stderr)
+            .contains("--output requires a machine-readable format"));
+        assert!(!rejected_scan_path.exists());
+
+        let secrets = foxguard_cmd()
+            .args([
+                "secrets",
+                secrets_path.to_str().expect("non-utf8 secrets path"),
+                "--output",
+                rejected_secrets_path
+                    .to_str()
+                    .expect("non-utf8 report path"),
+            ])
+            .output()
+            .expect("failed to execute foxguard secrets");
+        assert_eq!(secrets.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&secrets.stderr)
+            .contains("--output requires a machine-readable format"));
+        assert!(!rejected_secrets_path.exists());
+
+        let repo = TempDir::new().expect("failed to create temp dir");
+        Command::new("git")
+            .args(["init"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to initialize git repo");
+        fs::write(repo.path().join("app.js"), "console.log('safe');\n")
+            .expect("failed to write safe fixture");
+        Command::new("git")
+            .args(["add", "app.js"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to stage safe fixture");
+        Command::new("git")
+            .args([
+                "-c",
+                "user.name=Foxguard Test",
+                "-c",
+                "user.email=foxguard@example.test",
+                "commit",
+                "-m",
+                "base",
+            ])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to commit safe fixture");
+        fs::write(
+            repo.path().join("app.js"),
+            "const x = process.argv[2];\neval(x);\n",
+        )
+        .expect("failed to write vulnerable fixture");
+
+        let rejected_diff_path = repo.path().join("diff.txt");
+        let diff = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([
+                "diff",
+                "HEAD",
+                ".",
+                "--output",
+                rejected_diff_path.to_str().expect("non-utf8 report path"),
+            ])
+            .output()
+            .expect("failed to execute foxguard diff");
+        assert_eq!(diff.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&diff.stderr)
+            .contains("--output requires a machine-readable format"));
+        assert!(!rejected_diff_path.exists());
     }
 
     #[test]
@@ -1950,8 +2273,7 @@ mod features {
             "no built-ins and no external rules should exit zero"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(findings.len(), 0, "expected no findings without any rules");
     }
@@ -1975,8 +2297,7 @@ mod features {
             "external rules should still report findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert!(
             !findings.is_empty(),
@@ -2019,8 +2340,7 @@ rules:
             "path-filtered external rule should still report findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert!(
             findings.iter().all(|finding| finding["file"]
@@ -2072,8 +2392,7 @@ rules:
             "baseline should suppress the existing findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&suppressed.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&suppressed.stdout);
         assert_eq!(findings.len(), 0, "expected no findings after baseline");
     }
 
@@ -2124,12 +2443,115 @@ rules:
             "configured baseline should suppress the existing findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&suppressed.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&suppressed.stdout);
         assert_eq!(
             findings.len(),
             0,
             "expected no findings after config baseline"
+        );
+    }
+
+    #[test]
+    fn test_baseline_subcommand_ignores_configured_baseline_when_generating_new_baseline() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        fs::copy(
+            fixture_path("vulnerable.js"),
+            repo.path().join("vulnerable.js"),
+        )
+        .expect("failed to copy vulnerable fixture");
+
+        let configured_baseline = repo.path().join(".foxguard").join("baseline.json");
+        fs::create_dir_all(
+            configured_baseline
+                .parent()
+                .expect("missing baseline parent"),
+        )
+        .expect("failed to create baseline directory");
+
+        let initial = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([
+                "vulnerable.js",
+                "-f",
+                "json",
+                "--write-baseline",
+                configured_baseline.to_str().expect("non-utf8 path"),
+            ])
+            .output()
+            .expect("failed to write configured baseline");
+
+        assert!(
+            !initial.status.success(),
+            "writing the configured baseline should still report findings"
+        );
+
+        write_config_file(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  baseline: .foxguard/baseline.json\n",
+        );
+
+        let suppressed = foxguard_cmd()
+            .current_dir(repo.path())
+            .args(["vulnerable.js", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard with configured baseline");
+
+        assert!(
+            suppressed.status.success(),
+            "configured baseline should still suppress ordinary scan output"
+        );
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&suppressed.stdout);
+        assert_eq!(
+            findings.len(),
+            0,
+            "expected no findings after applying the configured baseline"
+        );
+
+        let refreshed_baseline = repo.path().join("refreshed-baseline.json");
+        let generated = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([
+                "baseline",
+                "vulnerable.js",
+                "--output",
+                refreshed_baseline.to_str().expect("non-utf8 path"),
+            ])
+            .output()
+            .expect("failed to execute baseline subcommand");
+
+        assert!(
+            generated.status.success(),
+            "baseline generation should succeed even when a config baseline is active"
+        );
+        assert!(
+            refreshed_baseline.exists(),
+            "baseline subcommand should write the requested baseline file"
+        );
+
+        let configured_entries = serde_json::from_str::<serde_json::Value>(
+            &fs::read_to_string(&configured_baseline).expect("failed to read configured baseline"),
+        )
+        .expect("invalid configured baseline JSON")["entries"]
+            .as_array()
+            .map(Vec::len)
+            .expect("configured baseline should contain entries");
+
+        let refreshed_entries = serde_json::from_str::<serde_json::Value>(
+            &fs::read_to_string(&refreshed_baseline).expect("failed to read refreshed baseline"),
+        )
+        .expect("invalid refreshed baseline JSON")["entries"]
+            .as_array()
+            .map(Vec::len)
+            .expect("refreshed baseline should contain entries");
+
+        assert!(
+            refreshed_entries > 0,
+            "refreshed baseline should be generated from unsuppressed findings"
+        );
+        assert_eq!(
+            refreshed_entries, configured_entries,
+            "refreshed baseline should contain the same findings as an unsuppressed baseline run"
         );
     }
 
@@ -2179,8 +2601,7 @@ rules:
             suppressed.status.success(),
             "root-relative baseline should suppress from nested cwd"
         );
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&suppressed.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&suppressed.stdout);
         assert_eq!(findings.len(), 0, "expected configured baseline to apply");
     }
 
@@ -2200,8 +2621,7 @@ rules:
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             !findings.is_empty(),
             "expected at least one py/no-eval finding"
@@ -2229,8 +2649,7 @@ rules:
             .args(["vulnerable.py", "-f", "json"])
             .output()
             .expect("failed to execute baseline foxguard scan");
-        let baseline_findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&baseline.stdout).expect("invalid JSON");
+        let baseline_findings = scan_json_findings_from_slice(&baseline.stdout);
         assert!(
             baseline_findings
                 .iter()
@@ -2250,8 +2669,7 @@ rules:
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             !findings.is_empty(),
             "other rules should still fire when only py/no-eval is disabled"
@@ -2282,8 +2700,7 @@ rules:
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             findings
                 .iter()
@@ -2335,8 +2752,7 @@ rules:
 
         // Scan should still proceed and the known disable (py/no-eval)
         // should apply.
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             findings
                 .iter()
@@ -2405,8 +2821,7 @@ rules:
             "non-excluded vulnerable files should still produce findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             !findings.is_empty(),
             "expected included file to still produce findings"
@@ -2457,8 +2872,7 @@ rules:
             "non-excluded changed files should still produce findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             !findings.is_empty(),
             "expected included changed file to still produce findings"
@@ -2489,8 +2903,7 @@ rules:
             .output()
             .expect("failed to execute foxguard with scan.ignore_rules");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             findings
                 .iter()
@@ -2560,8 +2973,7 @@ rules:
             "same-line ignore should suppress the matching finding"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             findings.is_empty(),
             "expected no findings after same-line ignore"
@@ -2585,8 +2997,7 @@ rules:
             "comment-only ignore should suppress the next code-line finding"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             findings.is_empty(),
             "expected no findings after next-line ignore"
@@ -2613,8 +3024,7 @@ rules:
             "mismatched rule ID should not suppress the finding"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert_eq!(findings.len(), 1, "expected the finding to remain");
         assert_eq!(findings[0]["rule_id"], "js/no-eval");
     }
@@ -2639,8 +3049,7 @@ rules:
             "ignore without rule list should suppress all findings on the line"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(findings.is_empty(), "expected no findings after ignore-all");
     }
 
@@ -2664,8 +3073,7 @@ rules:
             "directive on the end line of a multiline finding should still suppress it"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             findings.is_empty(),
             "expected no findings after multiline inline ignore"
@@ -2693,8 +3101,7 @@ rules:
             "changed-mode scan should report findings from staged vulnerable.js"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             findings.iter().all(|finding| finding["file"]
                 .as_str()
@@ -2804,8 +3211,7 @@ rules:
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         // High and Critical only
         assert_eq!(
@@ -2841,8 +3247,7 @@ rules:
 
         assert!(!output.status.success());
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         // All findings should be Critical
         for finding in &findings {
@@ -2871,8 +3276,7 @@ rules:
             "secrets mode should exit non-zero when findings exist"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -2928,8 +3332,7 @@ rules:
             "changed secrets scan should report staged secrets"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             findings.iter().all(|finding| finding["file"]
                 .as_str()
@@ -2956,8 +3359,7 @@ rules:
 
         assert!(output.status.success(), "binary file should be skipped");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert_eq!(
             findings.len(),
             0,
@@ -3006,8 +3408,7 @@ rules:
             "secrets baseline should suppress the existing findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&suppressed.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&suppressed.stdout);
         assert_eq!(
             findings.len(),
             0,
@@ -3041,8 +3442,7 @@ rules:
             .output()
             .expect("failed to execute foxguard secrets");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         for finding in findings {
             let snippet = finding["snippet"].as_str().expect("missing snippet");
@@ -3081,8 +3481,7 @@ rules:
             "non-excluded secrets should still produce findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(findings.len(), 1, "expected only one non-excluded finding");
         assert!(
@@ -3119,8 +3518,7 @@ rules:
             "excluded secrets should not produce findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(findings.is_empty(), "expected excluded file to be skipped");
     }
 
@@ -3146,8 +3544,7 @@ rules:
             "remaining secrets should still produce findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         assert_eq!(
             findings.len(),
@@ -3191,8 +3588,7 @@ rules:
             "configured excludes should suppress matching secret findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
             findings.is_empty(),
             "expected no findings after config excludes"
@@ -3257,8 +3653,7 @@ rules:
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let taint_findings: Vec<&serde_json::Value> = findings
             .iter()
@@ -3322,8 +3717,7 @@ rules:
             "should exit non-zero with findings"
         );
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let taint_findings: Vec<&serde_json::Value> = findings
             .iter()
@@ -3422,8 +3816,7 @@ rules:
     }
 
     fn count_py_hardcoded_secret_findings(stdout: &[u8]) -> usize {
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(stdout).unwrap_or_else(|e| panic!("invalid JSON output: {e}"));
+        let findings = scan_json_findings_from_slice(stdout);
         findings
             .iter()
             .filter(|f| f["rule_id"].as_str() == Some("py/no-hardcoded-secret"))
@@ -3559,8 +3952,7 @@ fn pqc_on_safe_fixture_returns_zero_findings() {
     // Once PQ rules land, safe.py should still produce zero PQ findings.
     let stdout = String::from_utf8_lossy(&output.stdout);
     if !stdout.trim().is_empty() {
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_str(&stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_str(&stdout);
         // All findings (if any) should be PQ-related
         for f in &findings {
             let rule_id = f["rule_id"].as_str().unwrap_or("");
@@ -3595,8 +3987,7 @@ fn pq_draft_standards_are_not_flagged() {
         if stdout.trim().is_empty() {
             continue;
         }
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_str(&stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_str(&stdout);
         for f in &findings {
             let rule_id = f["rule_id"].as_str().unwrap_or("");
             assert!(
@@ -3632,13 +4023,18 @@ mod config_files {
             .args([&format!("tests/fixtures/config/{relative}"), "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
-        serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
-            panic!(
-                "invalid JSON output for {relative}: {e}; stdout={} stderr={}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            )
-        })
+        let report: serde_json::Value =
+            serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+                panic!(
+                    "invalid JSON output for {relative}: {e}; stdout={} stderr={}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                )
+            });
+        report["findings"]
+            .as_array()
+            .cloned()
+            .expect("JSON report missing findings array")
     }
 
     fn findings_for_rule<'a>(
@@ -3862,8 +4258,7 @@ mod config_files {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         // rustls -> rsa (tier 1, RSA)
         let rustls = findings
@@ -3873,7 +4268,7 @@ mod config_files {
         let rustls = rustls.unwrap();
         assert_eq!(rustls["rule_id"], "manifest/cargo-pq-vulnerable-dep");
         assert_eq!(rustls["crypto_algorithm"], "RSA");
-        assert_eq!(rustls["confidence"], 0.9);
+        assert_json_number_eq(&rustls["confidence"], 0.9);
 
         // reqwest -> ring (tier 2, no specific algorithm)
         let reqwest = findings
@@ -3882,7 +4277,7 @@ mod config_files {
         assert!(reqwest.is_some(), "expected finding for reqwest");
         let reqwest = reqwest.unwrap();
         assert!(reqwest["crypto_algorithm"].is_null());
-        assert_eq!(reqwest["confidence"], 0.6);
+        assert_json_number_eq(&reqwest["confidence"], 0.6);
 
         // my-app -> rustls -> rsa (transitive)
         let my_app = findings
@@ -3910,8 +4305,7 @@ mod config_files {
             .output()
             .expect("failed to execute foxguard");
 
-        let findings: Vec<serde_json::Value> =
-            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
 
         let dep_names: Vec<&str> = findings
             .iter()
@@ -3937,7 +4331,7 @@ mod config_files {
             .find(|f| f["dep_name"].as_str() == Some("python-rsa"))
             .unwrap();
         assert_eq!(python_rsa["crypto_algorithm"], "RSA");
-        assert_eq!(python_rsa["confidence"], 0.95);
+        assert_json_number_eq(&python_rsa["confidence"], 0.95);
 
         // cryptography should have low confidence and null algorithm
         let crypto = findings
@@ -3945,7 +4339,7 @@ mod config_files {
             .find(|f| f["dep_name"].as_str() == Some("cryptography"))
             .unwrap();
         assert!(crypto["crypto_algorithm"].is_null());
-        assert_eq!(crypto["confidence"], 0.5);
+        assert_json_number_eq(&crypto["confidence"], 0.5);
         assert!(crypto["fix_suggestion"]
             .as_str()
             .unwrap()

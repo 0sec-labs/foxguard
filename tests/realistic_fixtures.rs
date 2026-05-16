@@ -34,6 +34,15 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn scan_json_findings(stdout: &[u8], file: &str) -> Vec<serde_json::Value> {
+    let report: serde_json::Value = serde_json::from_slice(stdout)
+        .unwrap_or_else(|e| panic!("invalid JSON output for {}: {}", file, e));
+    report["findings"]
+        .as_array()
+        .cloned()
+        .expect("JSON report missing findings array")
+}
+
 /// Scan a realistic fixture and assert exact total finding count and
 /// exact per-taint-rule counts. `taint_counts` lists every taint rule
 /// that must fire, with the expected count. Any taint rule observed in
@@ -47,8 +56,7 @@ fn assert_fixture(file: &str, expected_total: usize, taint_counts: &[(&str, usiz
         .output()
         .unwrap_or_else(|e| panic!("failed to run foxguard on {}: {}", file, e));
 
-    let findings: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout)
-        .unwrap_or_else(|e| panic!("invalid JSON output for {}: {}", file, e));
+    let findings = scan_json_findings(&output.stdout, file);
 
     assert_eq!(
         findings.len(),
