@@ -1,4 +1,6 @@
-use crate::engine::{scan_directory_with_notices, scan_paths_with_root_with_notices, ScanResult};
+use crate::engine::{
+    scan_directory_with_notices, scan_paths_with_root_with_notices, ScanResult, ScanStats,
+};
 use crate::rules::RuleRegistry;
 use crate::Finding;
 use std::collections::HashSet;
@@ -108,6 +110,7 @@ fn scan_target_branch_files_with_warnings(
             ScanResult {
                 findings: Vec::new(),
                 files_scanned: 0,
+                stats: ScanStats::default(),
                 duration: std::time::Duration::ZERO,
             },
             Vec::new(),
@@ -205,6 +208,7 @@ pub fn run_diff_with_warnings(
                 ScanResult {
                     findings: Vec::new(),
                     files_scanned: current_result.files_scanned,
+                    stats: current_result.stats,
                     duration: current_result.duration,
                 },
                 DiffResult {
@@ -220,6 +224,9 @@ pub fn run_diff_with_warnings(
     let (base_result, base_warnings) =
         scan_target_branch_files_with_warnings(&repo, target, &changed, registry, max_file_size)?;
     warnings.extend(base_warnings);
+    let current_files_scanned = current_result.files_scanned;
+    let current_stats = current_result.stats.clone();
+    let current_duration = current_result.duration;
 
     // Only diff findings from changed files (current side)
     let changed_rel: HashSet<String> = changed
@@ -247,8 +254,9 @@ pub fn run_diff_with_warnings(
         (
             ScanResult {
                 findings: Vec::new(), // not used; diff_result has everything
-                files_scanned: current_result.files_scanned,
-                duration: current_result.duration,
+                files_scanned: current_files_scanned,
+                stats: current_stats,
+                duration: current_duration,
             },
             DiffResult {
                 new_findings: diff.new_findings,

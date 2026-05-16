@@ -19,7 +19,113 @@ use std::time::Instant;
 pub struct ScanResult {
     pub findings: Vec<Finding>,
     pub files_scanned: usize,
+    pub stats: ScanStats,
     pub duration: std::time::Duration,
+}
+
+/// File accounting for a scan.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScanStats {
+    pub files_discovered: usize,
+    pub files_scanned: usize,
+    pub files_skipped: usize,
+    pub files_ignored: usize,
+    pub unsupported_files: usize,
+    pub noise_files: usize,
+    pub too_large_files: usize,
+    pub metadata_error_files: usize,
+    pub binary_files: usize,
+    pub read_error_files: usize,
+    pub minified_files: usize,
+    pub parse_error_files: usize,
+}
+
+impl ScanStats {
+    fn record_discovered(&mut self) {
+        self.files_discovered += 1;
+    }
+
+    fn record_scanned(&mut self) {
+        self.files_scanned += 1;
+    }
+
+    fn record_skipped(&mut self, reason: ScanSkipReason) {
+        self.files_skipped += 1;
+        match reason {
+            ScanSkipReason::Ignored => self.files_ignored += 1,
+            ScanSkipReason::Unsupported => self.unsupported_files += 1,
+            ScanSkipReason::Noise => self.noise_files += 1,
+            ScanSkipReason::TooLarge => self.too_large_files += 1,
+            ScanSkipReason::MetadataError => self.metadata_error_files += 1,
+            ScanSkipReason::Binary => self.binary_files += 1,
+            ScanSkipReason::ReadError => self.read_error_files += 1,
+            ScanSkipReason::Minified => self.minified_files += 1,
+            ScanSkipReason::ParseError => self.parse_error_files += 1,
+        }
+    }
+
+    fn extend(&mut self, other: ScanStats) {
+        self.files_discovered += other.files_discovered;
+        self.files_scanned += other.files_scanned;
+        self.files_skipped += other.files_skipped;
+        self.files_ignored += other.files_ignored;
+        self.unsupported_files += other.unsupported_files;
+        self.noise_files += other.noise_files;
+        self.too_large_files += other.too_large_files;
+        self.metadata_error_files += other.metadata_error_files;
+        self.binary_files += other.binary_files;
+        self.read_error_files += other.read_error_files;
+        self.minified_files += other.minified_files;
+        self.parse_error_files += other.parse_error_files;
+    }
+
+    pub fn skipped_summary(&self) -> Option<String> {
+        if self.files_skipped == 0 {
+            return None;
+        }
+
+        let mut parts = Vec::new();
+        push_count(&mut parts, self.files_ignored, "ignored");
+        push_count(&mut parts, self.unsupported_files, "unsupported extension");
+        push_count(&mut parts, self.noise_files, "noise path");
+        push_count(&mut parts, self.too_large_files, "too large");
+        push_count(&mut parts, self.metadata_error_files, "metadata error");
+        push_count(&mut parts, self.binary_files, "binary or non-UTF-8");
+        push_count(&mut parts, self.read_error_files, "read error");
+        push_count(&mut parts, self.minified_files, "minified");
+        push_count(&mut parts, self.parse_error_files, "parse error");
+
+        Some(parts.join(", "))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ScanSkipReason {
+    Ignored,
+    Unsupported,
+    Noise,
+    TooLarge,
+    MetadataError,
+    Binary,
+    ReadError,
+    Minified,
+    ParseError,
+}
+
+struct FileScanOutcome {
+    findings: Vec<Finding>,
+    stats: ScanStats,
+}
+
+impl FileScanOutcome {
+    fn skipped(reason: ScanSkipReason) -> Self {
+        let mut stats = ScanStats::default();
+        stats.record_skipped(reason);
+        Self {
+            findings: Vec::new(),
+            stats,
+        }
+    }
 }
 
 struct PreparedFile {
@@ -27,6 +133,18 @@ struct PreparedFile {
     tree: tree_sitter::Tree,
     aliases: AliasTable,
     canonical_path: PathBuf,
+}
+
+fn push_count(parts: &mut Vec<String>, count: usize, label: &str) {
+    if count == 0 {
+        return;
+    }
+    parts.push(format!(
+        "{} {}{}",
+        count,
+        label,
+        if count == 1 { "" } else { "s" }
+    ));
 }
 
 #[derive(Default)]
@@ -194,39 +312,8 @@ pub fn scan_directory_with_notices(
     let root_path = Path::new(root);
     let scan_root = scan_root(root_path);
 
-    let files: Vec<_> = if root_path.is_file() {
-        if let Some(lang) = detect_language(root_path) {
-            if excludes.is_some_and(|matcher| {
-                matcher.is_excluded(&relative_scan_path(scan_root, root_path))
-            }) {
-                vec![]
-            } else {
-                vec![(root_path.to_path_buf(), lang)]
-            }
-        } else {
-            vec![]
-        }
-    } else {
-        WalkBuilder::new(root)
-            .follow_links(false) // never follow symlinks
-            .hidden(true) // skip hidden files
-            .git_ignore(true) // respect .gitignore
-            .build()
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
-            .filter_map(|entry| {
-                let path = entry.into_path();
-                if excludes.is_some_and(|matcher| {
-                    matcher.is_excluded(&relative_scan_path(scan_root, &path))
-                }) {
-                    return None;
-                }
-                detect_language(&path).map(|lang| (path, lang))
-            })
-            .collect()
-    };
-
-    scan_files(scan_root, files, registry, max_file_size)
+    let (files, stats) = collect_scan_files(root_path, scan_root, excludes);
+    scan_files(scan_root, files, registry, max_file_size, stats)
 }
 
 /// Scan an explicit list of paths.
@@ -258,15 +345,90 @@ pub fn scan_paths_with_root_with_notices(
     excludes: Option<&PathExcludeMatcher>,
 ) -> (ScanResult, Vec<String>) {
     let scan_root = scan_root(root);
-    let files = paths
-        .iter()
-        .filter(|path| {
-            !excludes
-                .is_some_and(|matcher| matcher.is_excluded(&relative_scan_path(scan_root, path)))
-        })
-        .filter_map(|path| detect_language(path).map(|lang| (path.clone(), lang)))
-        .collect();
-    scan_files(scan_root, files, registry, max_file_size)
+    let (files, stats) = collect_explicit_scan_files(scan_root, paths, excludes);
+    scan_files(scan_root, files, registry, max_file_size, stats)
+}
+
+fn collect_scan_files(
+    root_path: &Path,
+    scan_root: &Path,
+    excludes: Option<&PathExcludeMatcher>,
+) -> (Vec<(PathBuf, Language)>, ScanStats) {
+    let mut files = Vec::new();
+    let mut stats = ScanStats::default();
+
+    if root_path.is_file() {
+        stats.record_discovered();
+        collect_scan_file(
+            root_path.to_path_buf(),
+            scan_root,
+            excludes,
+            &mut stats,
+            &mut files,
+        );
+        return (files, stats);
+    }
+
+    for entry in WalkBuilder::new(root_path)
+        .follow_links(false) // never follow symlinks
+        .hidden(true) // skip hidden files
+        .git_ignore(true) // respect .gitignore
+        .build()
+    {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+            continue;
+        }
+
+        stats.record_discovered();
+        collect_scan_file(
+            entry.into_path(),
+            scan_root,
+            excludes,
+            &mut stats,
+            &mut files,
+        );
+    }
+
+    (files, stats)
+}
+
+fn collect_explicit_scan_files(
+    scan_root: &Path,
+    paths: &[PathBuf],
+    excludes: Option<&PathExcludeMatcher>,
+) -> (Vec<(PathBuf, Language)>, ScanStats) {
+    let mut files = Vec::new();
+    let mut stats = ScanStats::default();
+
+    for path in paths {
+        stats.record_discovered();
+        collect_scan_file(path.clone(), scan_root, excludes, &mut stats, &mut files);
+    }
+
+    (files, stats)
+}
+
+fn collect_scan_file(
+    path: PathBuf,
+    scan_root: &Path,
+    excludes: Option<&PathExcludeMatcher>,
+    stats: &mut ScanStats,
+    files: &mut Vec<(PathBuf, Language)>,
+) {
+    if excludes.is_some_and(|matcher| matcher.is_excluded(&relative_scan_path(scan_root, &path))) {
+        stats.record_skipped(ScanSkipReason::Ignored);
+        return;
+    }
+
+    let Some(language) = detect_language(&path) else {
+        stats.record_skipped(ScanSkipReason::Unsupported);
+        return;
+    };
+
+    files.push((path, language));
 }
 
 /// Check if a file path is in a directory that typically contains
@@ -521,9 +683,9 @@ fn scan_files(
     files: Vec<(PathBuf, Language)>,
     registry: &RuleRegistry,
     max_file_size: u64,
+    mut stats: ScanStats,
 ) -> (ScanResult, Vec<String>) {
     let start = Instant::now();
-    let file_count = files.len();
     let warnings = Mutex::new(Vec::new());
 
     let mut rules_by_lang: HashMap<Language, Vec<&dyn crate::rules::Rule>> = HashMap::new();
@@ -576,6 +738,9 @@ fn scan_files(
                         return None;
                     }
                     let tree = super::parser::parse_file(&source, Language::Python)?;
+                    if tree.root_node().has_error() {
+                        return None;
+                    }
                     let aliases = py_aliases_from_tree(&source, &tree);
                     let summaries = python_taint::extract_cross_file_summaries(
                         tree.root_node(),
@@ -625,6 +790,11 @@ fn scan_files(
                     return None;
                 }
                 let tree = super::parser::parse_file(&source, Language::JavaScript)?;
+                if treats_tree_errors_as_parse_failures(Language::JavaScript, path)
+                    && tree.root_node().has_error()
+                {
+                    return None;
+                }
                 let aliases = js_aliases_from_tree(&source, &tree);
                 let summaries = javascript_taint::extract_cross_file_summaries(
                     tree.root_node(),
@@ -671,6 +841,9 @@ fn scan_files(
                     return None;
                 }
                 let tree = super::parser::parse_file(&source, Language::Go)?;
+                if tree.root_node().has_error() {
+                    return None;
+                }
                 let aliases = go_aliases_from_tree(&source, &tree);
                 let summaries = go_taint::extract_cross_file_summaries(
                     tree.root_node(),
@@ -738,12 +911,12 @@ fn scan_files(
     };
 
     // ── Pass 2: Full analysis with cross-file summaries available ─────
-    let mut results: Vec<Finding> = files
+    let outcomes: Vec<FileScanOutcome> = files
         .par_iter()
-        .flat_map(|(path, language)| {
+        .map(|(path, language)| {
             // Skip files in test/vendor/fixture directories
             if is_noise_path(path) {
-                return Vec::new();
+                return FileScanOutcome::skipped(ScanSkipReason::Noise);
             }
 
             match std::fs::metadata(path) {
@@ -753,14 +926,14 @@ fn scan_files(
                         path.display(),
                         m.len()
                     ));
-                    return Vec::new();
+                    return FileScanOutcome::skipped(ScanSkipReason::TooLarge);
                 }
                 Err(_) => {
                     warnings.lock().expect("lock poisoned").push(format!(
                         "warning: skipping {} (cannot read metadata)",
                         path.display()
                     ));
-                    return Vec::new();
+                    return FileScanOutcome::skipped(ScanSkipReason::MetadataError);
                 }
                 _ => {}
             }
@@ -770,11 +943,26 @@ fn scan_files(
             let source = if let Some(prepared) = prepared {
                 prepared.source.as_str()
             } else {
-                let Ok(read_source) = std::fs::read_to_string(path) else {
-                    return Vec::new();
+                let read_source = match std::fs::read_to_string(path) {
+                    Ok(source) => source,
+                    Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                        warnings.lock().expect("lock poisoned").push(format!(
+                            "warning: skipping {} (binary or non-UTF-8 content)",
+                            path.display()
+                        ));
+                        return FileScanOutcome::skipped(ScanSkipReason::Binary);
+                    }
+                    Err(error) => {
+                        warnings.lock().expect("lock poisoned").push(format!(
+                            "warning: skipping {} (cannot read file: {})",
+                            path.display(),
+                            error
+                        ));
+                        return FileScanOutcome::skipped(ScanSkipReason::ReadError);
+                    }
                 };
                 if is_minified(&read_source) {
-                    return Vec::new();
+                    return FileScanOutcome::skipped(ScanSkipReason::Minified);
                 }
                 owned_source = read_source;
                 owned_source.as_str()
@@ -784,19 +972,46 @@ fn scan_files(
 
             let owned_tree;
             let tree = if let Some(prepared) = prepared {
+                if treats_tree_errors_as_parse_failures(*language, path)
+                    && prepared.tree.root_node().has_error()
+                {
+                    warnings.lock().expect("lock poisoned").push(format!(
+                        "warning: skipping {} (parse error)",
+                        path.display()
+                    ));
+                    return FileScanOutcome::skipped(ScanSkipReason::ParseError);
+                }
                 &prepared.tree
             } else {
                 let Some(parsed_tree) = super::parser::parse_file(source, *language) else {
-                    return Vec::new();
+                    warnings.lock().expect("lock poisoned").push(format!(
+                        "warning: skipping {} (parser could not build a syntax tree)",
+                        path.display()
+                    ));
+                    return FileScanOutcome::skipped(ScanSkipReason::ParseError);
                 };
+                if treats_tree_errors_as_parse_failures(*language, path)
+                    && parsed_tree.root_node().has_error()
+                {
+                    warnings.lock().expect("lock poisoned").push(format!(
+                        "warning: skipping {} (parse error)",
+                        path.display()
+                    ));
+                    return FileScanOutcome::skipped(ScanSkipReason::ParseError);
+                }
                 owned_tree = parsed_tree;
                 &owned_tree
             };
+            let mut file_stats = ScanStats::default();
+            file_stats.record_scanned();
 
             let file_str = path.display().to_string();
             let relative_path = relative_scan_path(scan_root, path);
             let Some(rules) = rules_by_lang.get(language) else {
-                return Vec::new();
+                return FileScanOutcome {
+                    findings: Vec::new(),
+                    stats: file_stats,
+                };
             };
 
             // Per-file analysis context. Python builds an import alias table so
@@ -1005,9 +1220,18 @@ fn scan_files(
                 finding.file = file_str.clone();
             }
 
-            apply_inline_ignores(file_findings, &inline_ignores)
+            FileScanOutcome {
+                findings: apply_inline_ignores(file_findings, &inline_ignores),
+                stats: file_stats,
+            }
         })
         .collect();
+
+    let mut results = Vec::new();
+    for outcome in outcomes {
+        stats.extend(outcome.stats);
+        results.extend(outcome.findings);
+    }
 
     results.sort_by(|a, b| {
         a.file
@@ -1018,7 +1242,8 @@ fn scan_files(
     (
         ScanResult {
             findings: results,
-            files_scanned: file_count,
+            files_scanned: stats.files_scanned,
+            stats,
             duration: start.elapsed(),
         },
         warnings.into_inner().unwrap_or_default(),
@@ -1030,6 +1255,25 @@ fn resolve_canonical_path(lookup: &HashMap<PathBuf, PathBuf>, path: &Path) -> Pa
         return canonical.clone();
     }
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn treats_tree_errors_as_parse_failures(language: Language, path: &Path) -> bool {
+    match language {
+        Language::JavaScript => !is_typescript_path(path),
+        Language::NginxConf
+        | Language::ApacheConf
+        | Language::HAProxyConf
+        | Language::Dockerfile
+        | Language::Manifest => false,
+        _ => true,
+    }
+}
+
+fn is_typescript_path(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("ts" | "tsx" | "mts" | "cts")
+    )
 }
 
 fn scan_root(path: &Path) -> &Path {
@@ -1119,5 +1363,65 @@ mod tests {
 
         assert!(matcher.is_excluded(Path::new("generated/foo/bar.js")));
         assert!(!matcher.is_excluded(Path::new("generated/foo/bar.ts")));
+    }
+
+    #[test]
+    fn scan_stats_track_ignored_and_unsupported_files() {
+        let repo = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(repo.path().join("included.js"), "const value = 1;\n")
+            .expect("failed to write included file");
+        std::fs::write(repo.path().join("ignored.js"), "const value = 2;\n")
+            .expect("failed to write ignored file");
+        std::fs::write(repo.path().join("README.md"), "# fixture\n")
+            .expect("failed to write unsupported file");
+
+        let excludes =
+            PathExcludeMatcher::new(&["ignored.js".to_string()]).expect("exclude matcher");
+        let (result, notices) = scan_directory_with_notices(
+            repo.path().to_str().expect("non-utf8 path"),
+            &RuleRegistry::empty(),
+            1_048_576,
+            Some(&excludes),
+        );
+
+        assert!(notices.is_empty(), "unexpected notices: {notices:?}");
+        assert_eq!(result.files_scanned, 1);
+        assert_eq!(result.stats.files_discovered, 3);
+        assert_eq!(result.stats.files_scanned, 1);
+        assert_eq!(result.stats.files_skipped, 2);
+        assert_eq!(result.stats.files_ignored, 1);
+        assert_eq!(result.stats.unsupported_files, 1);
+    }
+
+    #[test]
+    fn scan_stats_track_binary_and_parse_error_files() {
+        let repo = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(repo.path().join("binary.js"), [0xff, 0xfe])
+            .expect("failed to write binary file");
+        std::fs::write(repo.path().join("broken.js"), "function (\n")
+            .expect("failed to write broken file");
+
+        let (result, notices) = scan_directory_with_notices(
+            repo.path().to_str().expect("non-utf8 path"),
+            &RuleRegistry::empty(),
+            1_048_576,
+            None,
+        );
+
+        assert_eq!(result.files_scanned, 0);
+        assert_eq!(result.stats.files_discovered, 2);
+        assert_eq!(result.stats.files_skipped, 2);
+        assert_eq!(result.stats.binary_files, 1);
+        assert_eq!(result.stats.parse_error_files, 1);
+        assert!(
+            notices
+                .iter()
+                .any(|notice| notice.contains("binary or non-UTF-8")),
+            "expected binary warning, got {notices:?}"
+        );
+        assert!(
+            notices.iter().any(|notice| notice.contains("parse error")),
+            "expected parse warning, got {notices:?}"
+        );
     }
 }
