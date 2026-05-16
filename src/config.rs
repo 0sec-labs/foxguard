@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_yaml::{Mapping, Sequence, Value};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 const CONFIG_NAMES: [&str; 4] = [
     ".foxguard.yml",
@@ -18,6 +18,7 @@ const CONFIG_NAMES: [&str; 4] = [
 
 #[derive(Debug, Clone, Default)]
 pub struct FoxguardConfig {
+    pub project_root: PathBuf,
     pub scan: ScanConfig,
     pub secrets: SecretsConfig,
 }
@@ -340,6 +341,7 @@ impl FoxguardConfig {
         };
 
         Ok(Self {
+            project_root: allowed_root.to_path_buf(),
             scan: ScanConfig {
                 rules: scan_rules,
                 no_builtins: raw.scan.no_builtins.unwrap_or(false),
@@ -415,6 +417,7 @@ pub fn apply_severity_overrides(
 pub fn suppress_with_scan_ignores(
     findings: Vec<Finding>,
     config: Option<&FoxguardConfig>,
+    identity_root: &Path,
 ) -> Vec<Finding> {
     let Some(config) = config else {
         return findings;
@@ -426,8 +429,11 @@ pub fn suppress_with_scan_ignores(
     findings
         .into_iter()
         .filter(|finding| {
+            let finding_path_key =
+                crate::path_identity::finding_path_key(identity_root, &finding.file);
             !config.scan.ignore_rules.iter().any(|entry| {
-                entry.path == finding.file
+                crate::path_identity::stored_path_key(identity_root, &entry.path)
+                    == finding_path_key
                     && entry
                         .rules
                         .iter()
@@ -461,7 +467,7 @@ pub fn editable_config_path(
         return Ok(path);
     }
 
-    Ok(resolve_scan_root(scan_path).join(".foxguard.yml"))
+    Ok(crate::path_identity::resolve_scan_root(scan_path).join(".foxguard.yml"))
 }
 
 pub fn add_scan_ignore_rule(
@@ -471,11 +477,8 @@ pub fn add_scan_ignore_rule(
 ) -> Result<(PathBuf, bool), String> {
     let config_path = editable_config_path(scan_path, explicit_config)?;
     let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
-    let finding_path = Path::new(&finding.file);
-    let stored_path = match finding_path.strip_prefix(config_dir) {
-        Ok(relative) => relative.display().to_string(),
-        Err(_) => finding.file.clone(),
-    };
+    let allowed_root = resolve_allowed_root(scan_path, config_dir);
+    let stored_path = crate::path_identity::finding_path_key(&allowed_root, &finding.file);
 
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
@@ -531,7 +534,7 @@ pub fn add_scan_ignore_rule(
         let path_matches = item_mapping
             .get(Value::String("path".to_string()))
             .and_then(Value::as_str)
-            .map(|value| value == stored_path)
+            .map(|value| crate::path_identity::stored_path_key(&allowed_root, value) == stored_path)
             .unwrap_or(false);
         if !path_matches {
             continue;
@@ -947,7 +950,7 @@ fn resolve_value_path(
     } else {
         base.join(value)
     };
-    let resolved = resolve_path_for_boundary(&joined);
+    let resolved = crate::path_identity::resolve_path_for_boundary(&joined);
 
     if !resolved.starts_with(allowed_root) {
         return Err(format!(
@@ -962,74 +965,14 @@ fn resolve_value_path(
 }
 
 fn resolve_allowed_root(scan_path: &Path, config_dir: &Path) -> PathBuf {
-    let scan_root = resolve_scan_root(scan_path);
-    let config_dir = resolve_path_for_boundary(config_dir);
+    let scan_root = crate::path_identity::resolve_scan_root(scan_path);
+    let config_dir = crate::path_identity::resolve_path_for_boundary(config_dir);
 
     if scan_root.starts_with(&config_dir) {
         config_dir
     } else {
         scan_root
     }
-}
-
-fn resolve_scan_root(scan_path: &Path) -> PathBuf {
-    let scan_root = resolve_path_for_boundary(scan_path);
-    if scan_root.is_file() {
-        scan_root
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf()
-    } else {
-        scan_root
-    }
-}
-
-fn resolve_path_for_boundary(path: &Path) -> PathBuf {
-    if let Ok(canonical) = path.canonicalize() {
-        return canonical;
-    }
-
-    let absolute = absolutize_path(path);
-    for ancestor in absolute.ancestors() {
-        if let Ok(canonical_ancestor) = ancestor.canonicalize() {
-            let suffix = absolute
-                .strip_prefix(ancestor)
-                .unwrap_or_else(|_| Path::new(""));
-            return normalize_path(&canonical_ancestor.join(suffix));
-        }
-    }
-
-    normalize_path(&absolute)
-}
-
-fn absolutize_path(path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
-    }
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-            Component::RootDir => normalized.push(component.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if !normalized.pop() {
-                    normalized.push(component.as_os_str());
-                }
-            }
-            Component::Normal(part) => normalized.push(part),
-        }
-    }
-
-    normalized
 }
 
 #[cfg(test)]
@@ -1048,6 +991,34 @@ mod tests {
         }
         fs::write(&path, content).expect("failed to write config");
         path
+    }
+
+    fn finding_at(path: &Path) -> Finding {
+        Finding {
+            rule_id: "py/no-command-injection".to_string(),
+            severity: crate::Severity::High,
+            cwe: None,
+            description: "tainted input reaches command sink".to_string(),
+            file: path.display().to_string(),
+            line: 10,
+            column: 5,
+            end_line: 10,
+            end_column: 20,
+            snippet: "os.system(cmd)".to_string(),
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+            confidence: crate::default_confidence(),
+            taint_hops: None,
+            tags: vec![],
+            crypto_algorithm: None,
+            cnsa2_deadline: None,
+            dep_name: None,
+        }
     }
 
     #[test]
@@ -1120,7 +1091,8 @@ mod tests {
         let loaded = load_for_scan(repo.path(), Some(config.to_str().expect("non-utf8 path")))
             .expect("failed to load config")
             .expect("expected config");
-        let expected = resolve_path_for_boundary(&repo.path().join("fixtures"));
+        let expected =
+            crate::path_identity::resolve_path_for_boundary(&repo.path().join("fixtures"));
 
         assert_eq!(
             loaded.secrets.exclude_paths,
@@ -1215,31 +1187,7 @@ mod tests {
     #[test]
     fn add_scan_ignore_rule_creates_or_updates_config() {
         let repo = TempDir::new().expect("failed to create temp dir");
-        let finding = Finding {
-            rule_id: "py/no-command-injection".to_string(),
-            severity: crate::Severity::High,
-            cwe: None,
-            description: "tainted input reaches command sink".to_string(),
-            file: repo.path().join("src/app.py").display().to_string(),
-            line: 10,
-            column: 5,
-            end_line: 10,
-            end_column: 20,
-            snippet: "os.system(cmd)".to_string(),
-            source_line: None,
-            source_description: None,
-            sink_line: None,
-            sink_description: None,
-            fix_suggestion: None,
-            sink_start_byte: None,
-            sink_end_byte: None,
-            confidence: crate::default_confidence(),
-            taint_hops: None,
-            tags: vec![],
-            crypto_algorithm: None,
-            cnsa2_deadline: None,
-            dep_name: None,
-        };
+        let finding = finding_at(&repo.path().join("src/app.py"));
 
         let (config_path, added) =
             add_scan_ignore_rule(repo.path(), None, &finding).expect("should write ignore rule");
@@ -1258,6 +1206,49 @@ mod tests {
         let (_, added_again) =
             add_scan_ignore_rule(repo.path(), None, &finding).expect("should preserve duplicate");
         assert!(!added_again);
+    }
+
+    #[test]
+    fn add_scan_ignore_rule_merges_legacy_absolute_path_entry() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        let app_path = repo.path().join("src/app.py");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            &format!(
+                "scan:\n  ignore_rules:\n    - path: {}\n      rules:\n        - py/no-sql-injection\n",
+                app_path.display()
+            ),
+        );
+        let finding = finding_at(&app_path);
+
+        let (_, added) =
+            add_scan_ignore_rule(repo.path(), None, &finding).expect("should update ignore rule");
+
+        assert!(added);
+        let content =
+            fs::read_to_string(repo.path().join(".foxguard.yml")).expect("failed to read config");
+        let value: Value = serde_yaml::from_str(&content).expect("failed to parse config");
+        let ignore_rules = value
+            .get("scan")
+            .and_then(|scan| scan.get("ignore_rules"))
+            .and_then(Value::as_sequence)
+            .expect("missing ignore_rules");
+        assert_eq!(
+            ignore_rules.len(),
+            1,
+            "expected existing legacy path entry to be updated"
+        );
+        let rules = ignore_rules[0]
+            .get("rules")
+            .and_then(Value::as_sequence)
+            .expect("missing rules");
+        assert!(
+            rules
+                .iter()
+                .any(|rule| rule.as_str() == Some("py/no-command-injection")),
+            "expected new rule to be merged into existing path entry"
+        );
     }
 
     #[test]

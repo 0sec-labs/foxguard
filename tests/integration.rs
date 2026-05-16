@@ -2118,6 +2118,57 @@ rules:
     }
 
     #[test]
+    fn test_config_baseline_applies_from_nested_working_directory() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        fs::create_dir_all(repo.path().join("src")).expect("failed to create src dir");
+        fs::copy(
+            fixture_path("vulnerable.js"),
+            repo.path().join("src/vulnerable.js"),
+        )
+        .expect("failed to copy vulnerable fixture");
+
+        write_config_file(repo.path(), ".foxguard.yml", "scan: {}\n");
+
+        let baseline = repo.path().join(".foxguard").join("baseline.json");
+        let initial = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([
+                "src/vulnerable.js",
+                "-f",
+                "json",
+                "--write-baseline",
+                baseline.to_str().expect("non-utf8 path"),
+            ])
+            .output()
+            .expect("failed to execute foxguard baseline write");
+
+        assert!(
+            !initial.status.success(),
+            "writing a baseline should still report current findings"
+        );
+
+        write_config_file(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  baseline: .foxguard/baseline.json\n",
+        );
+
+        let suppressed = foxguard_cmd()
+            .current_dir(repo.path().join("src"))
+            .args([".", "-f", "json", "--config", "../.foxguard.yml"])
+            .output()
+            .expect("failed to execute foxguard from nested cwd");
+
+        assert!(
+            suppressed.status.success(),
+            "root-relative baseline should suppress from nested cwd"
+        );
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_slice(&suppressed.stdout).expect("invalid JSON output");
+        assert_eq!(findings.len(), 0, "expected configured baseline to apply");
+    }
+
+    #[test]
     fn test_enable_rules_allowlist_runs_only_listed_ids() {
         let repo = TempDir::new().expect("failed to create temp dir");
         copy_fixture_to(repo.path(), "vulnerable.py", "vulnerable.py");
@@ -2401,6 +2452,34 @@ rules:
                 .as_str()
                 .is_some_and(|file| file.ends_with("src/included.js"))),
             "expected excluded changed files to be skipped"
+        );
+    }
+
+    #[test]
+    fn test_scan_ignore_rules_match_nested_cwd_and_windows_separators() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        fs::create_dir_all(repo.path().join("src")).expect("failed to create src dir");
+        fs::write(repo.path().join("src/ignored.js"), "eval(userInput);\n")
+            .expect("failed to write ignored fixture");
+        write_config_file(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  ignore_rules:\n    - path: src\\ignored.js\n      rules:\n        - js/no-eval\n",
+        );
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path().join("src"))
+            .args([".", "-f", "json", "--config", "../.foxguard.yml"])
+            .output()
+            .expect("failed to execute foxguard with scan.ignore_rules");
+
+        let findings: Vec<serde_json::Value> =
+            serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding["rule_id"].as_str() != Some("js/no-eval")),
+            "expected scan.ignore_rules to suppress js/no-eval from nested cwd"
         );
     }
 
