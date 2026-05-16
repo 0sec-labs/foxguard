@@ -3,13 +3,13 @@
 # Pattern: scatterwalk_map_and_copy(..., dst, off, len, /*out=*/1) where dst
 # is part of an in-place AEAD request set up earlier in the same function via
 # aead_request_set_crypt(req, sg, sg, ...). This is the secondary STORE
-# primitive that Copy Fail and Dirty Frag both abuse in
-# crypto_authenc_esn_decrypt (crypto/authencesn.c).
+# primitive used by Copy Fail / Dirty Frag-style authenc clones. The confirmed
+# crypto/authencesn.c advisory site is handled by the narrower authencesn
+# exception rule because this broad rule excludes crypto/** template wrappers.
 #
 # Tier 1 sibling sites this rule also catches (see
 # scatterwalk_authenc_store_vulnerable.c):
-#   - crypto/authenc.c::crypto_authenc_decrypt (non-ESN sibling)
-#   - any out-of-tree authenc clone that mirrors the STORE primitive
+#   - any non-crypto-path authenc clone that mirrors the STORE primitive
 #
 # Recall caveats — shapes this rule MISSES:
 #   - the STORE done via memcpy_to_sglist or sg_pcopy_to_buffer instead of
@@ -43,9 +43,13 @@ rules:
       (Dirty Frag class). The destination scatterlist is shared with the
       attacker-controllable source SGL via aead_request_set_crypt(req, sg, sg, ...);
       a 4-byte STORE lands in caller-pinned memory regardless of AEAD auth
-      result. Calibration site: crypto/authencesn.c::crypto_authenc_esn_decrypt.
+      result. The confirmed crypto/authencesn.c site is covered by the
+      scatterwalk-store-on-shared-sgl-authencesn exception rule.
       See oss-security 2026-05-07 advisory and pwnkit issue #263.
     severity: ERROR
     languages: [c]
+    paths:
+      exclude:
+        - crypto/**
     metadata:
       cwe: "CWE-787"

@@ -1,0 +1,22 @@
+# Dirty Frag class — authencesn exception for scatterwalk STORE on shared SGL.
+#
+# The broad Dirty Frag rules exclude crypto/** because most hits there are
+# AEAD/skcipher template wrappers with no skb-frag bug-class semantics.
+# crypto/authencesn.c is the named exception: it is a confirmed advisory site
+# for the scatterwalk_map_and_copy STORE primitive.
+rules:
+  - id: kernel/dirty-frag/scatterwalk-store-on-shared-sgl-authencesn
+    pattern-regex: '(?ms)^\s*aead_request_set_crypt\s*\([^}]*?scatterwalk_map_and_copy\s*\([^,]+,[^,]+,[^,]+,[^,]+,\s*1\s*\)'
+    message: |
+      scatterwalk_map_and_copy STORE (out=1) on the authencesn in-place AEAD
+      scatterlist (Dirty Frag class). crypto/authencesn.c is intentionally
+      included even though broader crypto template wrappers are excluded.
+      Verify the destination scatterlist aliases attacker-controllable input
+      before AEAD auth rejects the message.
+    severity: ERROR
+    languages: [c]
+    paths:
+      include:
+        - crypto/authencesn*.c
+    metadata:
+      cwe: "CWE-787"
