@@ -240,3 +240,49 @@ jobs:
           fi
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+  publish-ghcr-github-app:
+    name: Publish foxguard-github-app image (GHCR)
+    needs: github-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check Dockerfile presence
+        id: check
+        run: |
+          if [ -f Dockerfile.github-app ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Dockerfile.github-app not present at this tag — skipping image publish."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+        if: steps.check.outputs.exists == 'true'
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.check.outputs.exists == 'true'
+
+      - uses: docker/login-action@v3
+        if: steps.check.outputs.exists == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        if: steps.check.outputs.exists == 'true'
+        with:
+          context: .
+          file: Dockerfile.github-app
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/0sec-labs/foxguard-github-app:${{ github.ref_name }}
+            ghcr.io/0sec-labs/foxguard-github-app:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
