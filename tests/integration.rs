@@ -7,6 +7,22 @@ fn foxguard_cmd() -> Command {
     Command::new(env!("CARGO_BIN_EXE_foxguard"))
 }
 
+/// Like [`foxguard_cmd`] but forces `--config /dev/null`. Use this for tests
+/// that scan repo fixtures from `CARGO_MANIFEST_DIR` and assert exact
+/// finding counts — without it, any local developer `.foxguard.yml` or
+/// `.foxguard/baseline.json` in the project root will silently suppress
+/// findings (the repo's own baseline legitimately covers tests/fixtures/*
+/// for self-scan hygiene).
+///
+/// Do NOT use this for tests that set `current_dir` to a TempDir with their
+/// own `.foxguard.yml` — those rely on config discovery and an explicit
+/// `--config` would override them.
+fn foxguard_cmd_isolated() -> Command {
+    let mut cmd = foxguard_cmd();
+    cmd.args(["--config", "/dev/null"]);
+    cmd
+}
+
 fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -96,7 +112,7 @@ mod python {
 
     #[test]
     fn test_vulnerable_py_finds_all_rules() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -166,7 +182,7 @@ mod python {
     /// and fire.
     #[test]
     fn test_vulnerable_py_aliases_catches_all_bypass_forms() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_py_aliases.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -218,7 +234,7 @@ mod python {
     /// alongside it (the two rules coexist by design).
     #[test]
     fn test_vulnerable_py_taint_catches_every_flow() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_py_taint.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -313,7 +329,7 @@ mod python {
     /// rules.
     #[test]
     fn test_safe_py_taint_has_no_taint_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe_py_taint.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -352,7 +368,7 @@ mod python {
     /// access. Each taint rule must fire exactly once.
     #[test]
     fn test_vulnerable_django_taint_catches_flows() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_django_taint.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -390,7 +406,7 @@ mod python {
     /// argument, so no `py/taint-*` rule may fire.
     #[test]
     fn test_safe_django_taint_has_no_taint_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe_django_taint.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -423,7 +439,7 @@ mod python {
     /// name widening that recognizes `req: Request`.
     #[test]
     fn test_vulnerable_fastapi_taint_catches_flows() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_fastapi_taint.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -458,7 +474,7 @@ mod python {
     /// Negative FastAPI/Starlette fixture for issue #29.
     #[test]
     fn test_safe_fastapi_taint_has_no_taint_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe_fastapi_taint.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -493,7 +509,7 @@ mod python {
     /// two eval findings (input, stdin.read).
     #[test]
     fn test_vulnerable_cli_taint_catches_flows() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_cli_taint.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -527,7 +543,7 @@ mod python {
     /// Negative CLI fixture for issue #30.
     #[test]
     fn test_safe_cli_taint_has_no_taint_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe_cli_taint.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -561,7 +577,7 @@ mod python {
     /// match surface — this file should still produce zero findings.
     #[test]
     fn test_safe_py_aliases_no_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe_py_aliases.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -584,7 +600,7 @@ mod python {
 
     #[test]
     fn test_safe_py_no_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -605,7 +621,7 @@ mod javascript {
 
     #[test]
     fn test_vulnerable_js_finds_all_rules() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.js", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -673,7 +689,7 @@ mod javascript {
     /// alongside it (the two rule classes coexist by design).
     #[test]
     fn test_vulnerable_js_taint_catches_every_flow() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_js_taint.js", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -729,7 +745,7 @@ mod javascript {
     /// taint rule must not fire at all.
     #[test]
     fn test_safe_js_taint_has_no_taint_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe_js_taint.js", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -761,7 +777,7 @@ mod javascript {
     /// specific Attribute source. Both handlers must fire exactly once.
     #[test]
     fn test_vulnerable_nextjs_taint_catches_flow() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_nextjs_taint.ts", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -784,7 +800,7 @@ mod javascript {
 
     #[test]
     fn test_safe_nextjs_taint_has_no_taint_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe_nextjs_taint.ts", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -808,7 +824,7 @@ mod javascript {
     /// through the explicit `Call` matchers.
     #[test]
     fn test_vulnerable_hono_taint_catches_flow() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_hono_taint.ts", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -831,7 +847,7 @@ mod javascript {
 
     #[test]
     fn test_safe_hono_taint_has_no_taint_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe_hono_taint.ts", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -855,7 +871,7 @@ mod javascript {
     /// function bodies, so the fixture wraps its sinks accordingly.
     #[test]
     fn test_vulnerable_deno_taint_catches_flow() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_deno_taint.ts", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -878,7 +894,7 @@ mod javascript {
 
     #[test]
     fn test_safe_deno_taint_has_no_taint_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe_deno_taint.ts", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -899,7 +915,7 @@ mod javascript {
 
     #[test]
     fn test_safe_js_no_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe.js", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -920,7 +936,7 @@ mod go {
 
     #[test]
     fn test_vulnerable_go_finds_all_rules() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.go", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -968,7 +984,7 @@ mod go {
     /// go/no-* counterpart must coexist.
     #[test]
     fn test_vulnerable_go_taint_catches_every_flow() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_go_taint.go", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1039,7 +1055,7 @@ mod go {
     /// isolation. No go/taint-* rule may fire.
     #[test]
     fn test_safe_go_taint_has_no_taint_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe_go_taint.go", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1072,7 +1088,7 @@ mod go {
 
     #[test]
     fn test_safe_go_no_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe.go", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1093,7 +1109,7 @@ mod java {
 
     #[test]
     fn test_vulnerable_java_finds_all_rules() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.java", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1137,7 +1153,7 @@ mod java {
 
     #[test]
     fn test_safe_java_no_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe.java", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1237,7 +1253,7 @@ mod php {
 
     #[test]
     fn test_vulnerable_php_finds_all_rules() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.php", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1285,7 +1301,7 @@ mod ruby {
 
     #[test]
     fn test_vulnerable_ruby_finds_all_rules() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.rb", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1329,7 +1345,7 @@ mod ruby {
 
     #[test]
     fn test_safe_ruby_no_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe.rb", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1357,7 +1373,7 @@ mod csharp {
 
     #[test]
     fn test_vulnerable_csharp_finds_all_rules() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.cs", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1405,7 +1421,7 @@ mod swift {
 
     #[test]
     fn test_vulnerable_swift_finds_all_rules() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.swift", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1453,7 +1469,7 @@ mod rust_lang {
 
     #[test]
     fn test_vulnerable_rust_finds_all_rules() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.rs", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1505,7 +1521,7 @@ mod cross_file {
     /// must produce exactly one finding per go/taint-* rule.
     #[test]
     fn test_realistic_gin_app_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/realistic/gin_app.go", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1542,7 +1558,7 @@ mod cross_file {
     /// rule. See issue #17.
     #[test]
     fn test_semgrep_taint_yaml_bridge_vulnerable() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "tests/fixtures/vulnerable_py_taint.py",
                 "-f",
@@ -1584,7 +1600,7 @@ mod cross_file {
 
     #[test]
     fn test_semgrep_taint_yaml_bridge_safe() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "tests/fixtures/safe_py_taint.py",
                 "-f",
@@ -1618,7 +1634,7 @@ mod cross_file {
     /// must produce the same 16 findings on `vulnerable_py_taint.py`.
     #[test]
     fn test_semgrep_taint_yaml_bridge_pattern_either_vulnerable() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "tests/fixtures/vulnerable_py_taint.py",
                 "-f",
@@ -1650,7 +1666,7 @@ mod cross_file {
 
     #[test]
     fn test_semgrep_taint_yaml_bridge_pattern_either_safe() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "tests/fixtures/safe_py_taint.py",
                 "-f",
@@ -1682,7 +1698,7 @@ mod cross_file {
     /// req.query/body/params -> eval() rule.
     #[test]
     fn test_semgrep_taint_yaml_bridge_js_vulnerable() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "tests/fixtures/semgrep_taint/vulnerable_js_eval.js",
                 "-f",
@@ -1714,7 +1730,7 @@ mod cross_file {
 
     #[test]
     fn test_semgrep_taint_yaml_bridge_js_safe() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "tests/fixtures/semgrep_taint/safe_js_eval.js",
                 "-f",
@@ -1746,7 +1762,7 @@ mod cross_file {
     /// exec.Command() rule.
     #[test]
     fn test_semgrep_taint_yaml_bridge_go_vulnerable() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "tests/fixtures/semgrep_taint/vulnerable_go_exec.go",
                 "-f",
@@ -1778,7 +1794,7 @@ mod cross_file {
 
     #[test]
     fn test_semgrep_taint_yaml_bridge_go_safe() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "tests/fixtures/semgrep_taint/safe_go_exec.go",
                 "-f",
@@ -1813,7 +1829,7 @@ mod output_formats {
 
     #[test]
     fn test_json_output_structure() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.js", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1839,7 +1855,7 @@ mod output_formats {
 
     #[test]
     fn test_sarif_output_valid() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.js", "-f", "sarif"])
             .output()
             .expect("failed to execute foxguard");
@@ -1899,7 +1915,7 @@ mod features {
 
     #[test]
     fn test_invalid_path_exits_nonzero() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["not_a_real_path_foxguard_test", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -1919,7 +1935,7 @@ mod features {
 
     #[test]
     fn test_no_builtins_without_external_rules_finds_nothing() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "tests/fixtures/vulnerable.js",
                 "-f",
@@ -1942,7 +1958,7 @@ mod features {
 
     #[test]
     fn test_no_builtins_with_external_rules_still_finds_matches() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "tests/fixtures/vulnerable.py",
                 "-f",
@@ -2781,7 +2797,7 @@ rules:
 
     #[test]
     fn test_severity_filter_high() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.js", "-f", "json", "-s", "high"])
             .output()
             .expect("failed to execute foxguard");
@@ -2812,7 +2828,7 @@ rules:
 
     #[test]
     fn test_severity_filter_critical() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "tests/fixtures/vulnerable.js",
                 "-f",
@@ -3186,7 +3202,7 @@ rules:
     /// With --explain, taint findings show source/sink trace lines.
     #[test]
     fn test_explain_flag_shows_trace_on_taint_findings() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["--explain", "tests/fixtures/realistic/flask_app.py"])
             .output()
             .expect("failed to execute foxguard");
@@ -3211,7 +3227,7 @@ rules:
     /// Without --explain, taint findings must NOT show source/sink trace lines.
     #[test]
     fn test_no_explain_flag_hides_trace() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/realistic/flask_app.py"])
             .output()
             .expect("failed to execute foxguard");
@@ -3231,7 +3247,7 @@ rules:
     /// JSON output with --explain includes source/sink fields on taint findings.
     #[test]
     fn test_explain_json_includes_trace_fields() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([
                 "--explain",
                 "-f",
@@ -3296,7 +3312,7 @@ rules:
     fn test_taint_findings_include_fix_suggestion_in_json() {
         // Scan the Python taint fixture in JSON mode and verify that taint
         // findings carry a non-empty fix_suggestion field.
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_py_taint.py", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -3351,7 +3367,7 @@ rules:
 
     #[test]
     fn test_fix_suggestion_appears_in_sarif_output() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable_py_taint.py", "-f", "sarif"])
             .output()
             .expect("failed to execute foxguard");
@@ -3516,7 +3532,7 @@ rules:
 
 #[test]
 fn pqc_help_exits_zero() {
-    let output = foxguard_cmd()
+    let output = foxguard_cmd_isolated()
         .args(["pqc", "--help"])
         .output()
         .expect("failed to run foxguard pqc --help");
@@ -3841,7 +3857,7 @@ mod config_files {
 
     #[test]
     fn cargo_lock_pq_finds_transitive_rsa_dep() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["pqc", "tests/fixtures/deps/Cargo.lock", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
@@ -3889,7 +3905,7 @@ mod config_files {
 
     #[test]
     fn requirements_txt_pq_finds_crypto_deps() {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args(["pqc", "tests/fixtures/deps/requirements.txt", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");

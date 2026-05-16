@@ -16,7 +16,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn foxguard_cmd() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_foxguard"))
+    // `--config /dev/null` isolates the test from any developer-local
+    // `.foxguard.yml` in CARGO_MANIFEST_DIR. The repo's own baseline
+    // suppresses dozens of findings in tests/fixtures/* for self-scan
+    // hygiene, which would otherwise leak into every realistic-fixture
+    // "expected_total" assertion.
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_foxguard"));
+    cmd.args(["--config", "/dev/null"]);
+    cmd
 }
 
 fn fixture_path(name: &str) -> PathBuf {
