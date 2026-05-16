@@ -1,6 +1,6 @@
 [package]
 name = "foxguard"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 description = "A security scanner as fast as a linter, written in Rust. 170+ built-in rules across 11 languages."
 license = "MIT"

@@ -133,7 +133,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      - uses: 0sec-labs/foxguard/action@v0.8.0
+      - uses: 0sec-labs/foxguard/action@v0.8.1
         with:
           path: .
           severity: medium
@@ -148,7 +148,7 @@ Findings land in **Security → Code Scanning**. On any other CI: `npx foxguard@
 ```yaml
 repos:
   - repo: https://github.com/0sec-labs/foxguard
-    rev: v0.8.0
+    rev: v0.8.1
     hooks:
       - id: foxguard
 ```
