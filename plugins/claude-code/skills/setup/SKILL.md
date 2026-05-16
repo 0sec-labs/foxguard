@@ -8,7 +8,7 @@ Walk the user through getting foxguard installed and the plugin working:
 1. Run `foxguard --version` via the Bash tool. If it succeeds, report the version and tell the user the plugin is ready — every Write/Edit will now be auto-scanned.
 2. If `foxguard` is not on PATH, offer the install options in this order:
    - **Prebuilt binary (fastest)**: `curl -fsSL https://foxguard.dev/install.sh | sh`
-   - **Homebrew** (macOS): `brew install pwnkit-labs/foxguard/foxguard`
+   - **Homebrew** (macOS): `brew install 0sec-labs/foxguard/foxguard`
    - **npm**: `npm i -g foxguard` or zero-install via `npx foxguard`
    - **cargo**: `cargo install foxguard`
    Ask which the user prefers; do NOT install without confirmation.

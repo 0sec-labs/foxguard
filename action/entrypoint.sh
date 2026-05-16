@@ -4,7 +4,7 @@ set -euo pipefail
 # ─── Resolve version ────────────────────────────────────────────────────────
 
 VERSION="${INPUT_VERSION:-latest}"
-REPO="PwnKit-Labs/foxguard"
+REPO="0sec-labs/foxguard"
 
 if [ "$VERSION" = "latest" ]; then
     echo "::group::Fetching latest foxguard release"

@@ -53,8 +53,8 @@ If a finding is a confirmed false positive, a baseline is the right tool:
 If `foxguard --version` fails, offer the install options in this order, ask which they prefer, and **do not install without confirmation**:
 
 1. **Prebuilt binary**: `curl -fsSL https://foxguard.dev/install.sh | sh`
-2. **Homebrew** (macOS): `brew install pwnkit-labs/foxguard/foxguard`
+2. **Homebrew** (macOS): `brew install 0sec-labs/foxguard/foxguard`
 3. **npm**: `npm i -g foxguard` (or zero-install: `npx foxguard …`)
 4. **cargo**: `cargo install foxguard`
 
-For users who want auto-scan on every Claude edit, point them at the full plugin: `https://github.com/PwnKit-Labs/foxguard/tree/main/plugins/claude-code` — that ships a PostToolUse hook this skill intentionally does not.
+For users who want auto-scan on every Claude edit, point them at the full plugin: `https://github.com/0sec-labs/foxguard/tree/main/plugins/claude-code` — that ships a PostToolUse hook this skill intentionally does not.

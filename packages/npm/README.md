@@ -45,6 +45,6 @@ foxguard is built around fast local feedback.
 
 ## More
 
-- [GitHub](https://github.com/PwnKit-Labs/foxguard)
+- [GitHub](https://github.com/0sec-labs/foxguard)
 - [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=peaktwilight.foxguard)
 - [foxguard.dev](https://foxguard.dev)

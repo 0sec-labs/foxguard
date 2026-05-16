@@ -27,7 +27,7 @@ Pick whichever fits:
 curl -fsSL https://foxguard.dev/install.sh | sh
 
 # Homebrew
-brew install pwnkit-labs/foxguard/foxguard
+brew install 0sec-labs/foxguard/foxguard
 
 # npm (global or zero-install)
 npm i -g foxguard       # or just: npx foxguard
@@ -115,7 +115,7 @@ If you don't want the auto-scan-on-every-edit hook and just want Claude to know 
 ```sh
 mkdir -p ~/.claude/skills/foxguard
 curl -fsSL \
-  https://raw.githubusercontent.com/PwnKit-Labs/foxguard/main/plugins/claude-code/skills/foxguard/SKILL.md \
+  https://raw.githubusercontent.com/0sec-labs/foxguard/main/plugins/claude-code/skills/foxguard/SKILL.md \
   -o ~/.claude/skills/foxguard/SKILL.md
 ```
 

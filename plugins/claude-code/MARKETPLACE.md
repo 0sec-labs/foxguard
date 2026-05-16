@@ -42,7 +42,7 @@ triage, plus secure-coding defaults for common vulnerability classes.
 Repository:
 
 ```text
-https://github.com/PwnKit-Labs/foxguard
+https://github.com/0sec-labs/foxguard
 ```
 
 Homepage:

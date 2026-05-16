@@ -7,7 +7,7 @@ const os = require("os");
 const https = require("https");
 
 const VERSION = require("../package.json").version;
-const REPO = "PwnKit-Labs/foxguard";
+const REPO = "0sec-labs/foxguard";
 
 // Platform mapping: [node os, node arch] -> GitHub release asset suffix
 const PLATFORM_MAP = {
