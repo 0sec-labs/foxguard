@@ -88,17 +88,15 @@ fn non_pq_rules_do_not_declare_a_cnsa2_deadline() {
 // deadline field in every PQ finding and only in PQ findings ─────────────
 
 fn scan_json_findings(target: &Path) -> Vec<serde_json::Value> {
+    // --config /dev/null isolates the test from any developer-local
+    // .foxguard.yml in CARGO_MANIFEST_DIR. Without this the test will
+    // pick up the contributor's local baseline (which legitimately
+    // suppresses dozens of findings in tests/fixtures/vulnerable.py
+    // for self-scan hygiene) and the "non-PQ findings exist" assertion
+    // below collapses to zero.
     let out = foxguard_cmd()
         .arg(target)
-        .args(["--format", "json", "--no-builtins"])
-        .output()
-        .expect("foxguard should run");
-    // With --no-builtins we get 0 findings regardless; we want the real
-    // scan. Retry without --no-builtins.
-    drop(out);
-    let out = foxguard_cmd()
-        .arg(target)
-        .args(["--format", "json"])
+        .args(["--format", "json", "--config", "/dev/null"])
         .output()
         .expect("foxguard should run");
     // foxguard exits 1 when findings exist — accept non-zero exit codes.
