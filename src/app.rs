@@ -7,6 +7,7 @@ use crate::config::{
 use crate::diff::run_diff_with_warnings;
 use crate::engine::{
     scan_directory_with_notices, scan_paths_with_root_with_notices, PathExcludeMatcher, ScanResult,
+    ScanStats,
 };
 use crate::git::changed_files;
 use crate::rules::semgrep_compat::load_semgrep_rules;
@@ -21,6 +22,7 @@ pub struct ScanExecution {
     pub args: ScanArgs,
     pub findings: Vec<Finding>,
     pub files_scanned: usize,
+    pub stats: ScanStats,
     pub duration: std::time::Duration,
     pub notices: Vec<String>,
 }
@@ -85,6 +87,7 @@ pub fn scan_findings(scan: &ScanArgs) -> Result<ScanResult, String> {
     Ok(ScanResult {
         findings: execution.findings,
         files_scanned: execution.files_scanned,
+        stats: execution.stats,
         duration: execution.duration,
     })
 }
@@ -164,7 +167,9 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
 
     let files_scanned = result.files_scanned;
     let duration = result.duration;
+    let stats = result.stats;
     let mut findings = result.findings;
+    append_scan_stats_notice(&mut notices, &stats);
 
     // CNSA 2.0 deadline annotation. Runs regardless of the `--cnsa2`
     // opt-in flag because SARIF always carries the field in `properties`
@@ -208,16 +213,23 @@ pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
     findings = suppress_with_baseline_at_root(findings, baseline.as_ref(), &identity_root);
 
     if files_scanned == 0 {
-        notices.push(
-            "Warning: no files with supported extensions found. Supported: .js, .ts, .py, .go, .rb, .java, .php, .rs, .cs, .swift, .kt"
-                .to_string(),
-        );
+        if stats.files_discovered == 0 {
+            notices.push(
+                "Warning: no files found. Supported: .js, .ts, .py, .go, .rb, .java, .php, .rs, .cs, .swift, .kt"
+                    .to_string(),
+            );
+        } else {
+            notices.push(
+                "Warning: no files were scanned. See skipped-file summary for reasons.".to_string(),
+            );
+        }
     }
 
     Ok(ScanExecution {
         args: scan,
         findings,
         files_scanned,
+        stats,
         duration,
         notices,
     })
@@ -292,6 +304,7 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     };
     let ((scan_result, mut diff_result), mut notices) =
         run_diff_with_warnings(&args.path, &args.target, &registry, args.max_file_size)?;
+    append_scan_stats_notice(&mut notices, &scan_result.stats);
 
     if !rule_filter_unknown.is_empty() {
         notices.insert(
@@ -349,6 +362,17 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
         existing_count: diff_result.existing_count,
         notices,
     })
+}
+
+fn append_scan_stats_notice(notices: &mut Vec<String>, stats: &ScanStats) {
+    if let Some(summary) = stats.skipped_summary() {
+        notices.push(format!(
+            "Skipped {} file{}: {}.",
+            stats.files_skipped,
+            if stats.files_skipped == 1 { "" } else { "s" },
+            summary
+        ));
+    }
 }
 
 pub fn execute_tui(args: &TuiArgs) -> Result<TuiExecution, String> {

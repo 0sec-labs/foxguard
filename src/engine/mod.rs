@@ -4,5 +4,5 @@ pub mod scanner;
 pub use parser::parse_file;
 pub use scanner::{
     detect_language, scan_directory, scan_directory_with_notices, scan_paths, scan_paths_with_root,
-    scan_paths_with_root_with_notices, PathExcludeMatcher, ScanResult,
+    scan_paths_with_root_with_notices, PathExcludeMatcher, ScanResult, ScanStats,
 };
