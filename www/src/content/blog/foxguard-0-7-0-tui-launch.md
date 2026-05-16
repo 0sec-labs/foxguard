@@ -123,4 +123,4 @@ If you already use local scans in CI hooks/editor tasks, this release is meant t
 
 ---
 
-*foxguard is an open-source security scanner written in Rust. Built for local-first workflows: fast scans, focused findings, and practical triage. [Try it](https://github.com/PwnKit-Labs/foxguard).* 
+*foxguard is an open-source security scanner written in Rust. Built for local-first workflows: fast scans, focused findings, and practical triage. [Try it](https://github.com/0sec-labs/foxguard).* 

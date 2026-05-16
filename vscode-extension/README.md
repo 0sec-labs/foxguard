@@ -41,6 +41,6 @@ The extension auto-detects foxguard from PATH, or falls back to npx.
 
 ## Links
 
-- [GitHub](https://github.com/PwnKit-Labs/foxguard)
+- [GitHub](https://github.com/0sec-labs/foxguard)
 - [foxguard.dev](https://foxguard.dev)
 - [Blog](https://foxguard.dev/blog)

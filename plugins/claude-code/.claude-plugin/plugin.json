@@ -3,10 +3,10 @@
   "description": "Fast local security scanning in Claude Code: auto-scan edited files, slash commands for full scans, diff scans, post-quantum audits, and TUI triage. Powered by the foxguard Rust scanner — 170+ rules across 10 languages with cross-file taint tracking.",
   "version": "0.1.0",
   "author": {
-    "name": "PwnKit Labs",
+    "name": "0sec Labs",
     "url": "https://foxguard.dev"
   },
   "homepage": "https://foxguard.dev",
-  "repository": "https://github.com/PwnKit-Labs/foxguard",
+  "repository": "https://github.com/0sec-labs/foxguard",
   "license": "MIT"
 }

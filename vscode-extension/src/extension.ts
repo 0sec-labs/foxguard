@@ -308,7 +308,7 @@ function scanDocument(document: vscode.TextDocument): void {
             diag.code = {
               value: f.rule_id,
               target: vscode.Uri.parse(
-                `https://github.com/PwnKit-Labs/foxguard#built-in-coverage`
+                `https://github.com/0sec-labs/foxguard#built-in-coverage`
               ),
             };
             return diag;
@@ -415,7 +415,7 @@ async function scanWorkspace(): Promise<void> {
                 diag.code = {
                   value: f.rule_id,
                   target: vscode.Uri.parse(
-                    `https://github.com/PwnKit-Labs/foxguard#built-in-coverage`
+                    `https://github.com/0sec-labs/foxguard#built-in-coverage`
                   ),
                 };
                 return diag;

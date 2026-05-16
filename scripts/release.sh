@@ -50,7 +50,7 @@ done
 
 # Rewrite README install-ref examples so copy-pasteable snippets stay pinned
 # to the version users are about to receive.
-perl -i -pe 's{(PwnKit-Labs/foxguard/action)\@v[0-9]+\.[0-9]+\.[0-9]+}{$1\@v'"${VERSION}"'}g' README.md
+perl -i -pe 's{(0sec-labs/foxguard/action)\@v[0-9]+\.[0-9]+\.[0-9]+}{$1\@v'"${VERSION}"'}g' README.md
 perl -i -pe 's{(\s+rev:\s+)v[0-9]+\.[0-9]+\.[0-9]+}{${1}v'"${VERSION}"'}g' README.md
 
 (
