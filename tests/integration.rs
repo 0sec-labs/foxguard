@@ -1855,6 +1855,40 @@ mod output_formats {
             .as_array()
             .expect("missing results array");
         assert!(!results.is_empty(), "SARIF results should not be empty");
+
+        let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
+            .as_array()
+            .expect("missing SARIF tool driver rules");
+        assert!(!rules.is_empty(), "SARIF rules should not be empty");
+
+        let first = &results[0];
+        let rule_index = first["ruleIndex"]
+            .as_u64()
+            .expect("SARIF result missing ruleIndex") as usize;
+        assert_eq!(
+            rules[rule_index]["id"], first["ruleId"],
+            "SARIF ruleIndex should reference matching rule metadata"
+        );
+
+        let artifact_uri = first["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            .as_str()
+            .expect("SARIF result missing artifactLocation.uri");
+        assert!(
+            !artifact_uri.starts_with("file://"),
+            "relative fixture path should remain repo-relative for GitHub Code Scanning"
+        );
+        assert!(
+            first["partialFingerprints"]["primaryLocationLineHash"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty()),
+            "SARIF result missing primary location fingerprint"
+        );
+        assert!(
+            rules[rule_index]["properties"]["security-severity"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty()),
+            "SARIF rule metadata missing security severity"
+        );
     }
 }
 
