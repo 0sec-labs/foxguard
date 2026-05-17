@@ -55,11 +55,13 @@ hex = { version = "0.4", optional = true }
 tower-http = { version = "0.6", default-features = false, features = ["trace", "limit"], optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"], optional = true }
+jsonwebtoken = { version = "10.4.0", optional = true }
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls"], optional = true }
 
 [features]
 default = []
 # Builds the foxguard-github-app binary plus its dependency closure.
-github-app = ["dep:axum", "dep:tokio", "dep:hmac", "dep:hex", "dep:tower-http", "dep:tracing", "dep:tracing-subscriber"]
+github-app = ["dep:axum", "dep:tokio", "dep:hmac", "dep:hex", "dep:tower-http", "dep:tracing", "dep:tracing-subscriber", "dep:jsonwebtoken", "dep:reqwest"]
 
 [[bin]]
 name = "foxguard-mcp"
