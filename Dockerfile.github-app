@@ -18,14 +18,15 @@ COPY . .
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && cargo build --release --features github-app --bin foxguard-github-app
+    && cargo build --release --features github-app --bin foxguard --bin foxguard-github-app
 
 FROM debian:bookworm-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --shell /bin/false foxguard
 
+COPY --from=builder /usr/src/foxguard/target/release/foxguard /usr/local/bin/foxguard
 COPY --from=builder /usr/src/foxguard/target/release/foxguard-github-app /usr/local/bin/foxguard-github-app
 
 USER foxguard
