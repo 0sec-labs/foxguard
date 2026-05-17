@@ -6,6 +6,7 @@
 
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Component, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -15,6 +16,8 @@ const DEFAULT_API_HOST: &str = "api.github.com";
 const GITHUB_API_VERSION: &str = "2026-03-10";
 const JWT_BACKDATE_SECONDS: i64 = 60;
 const JWT_TTL_SECONDS: i64 = 9 * 60;
+const INSTALLATION_TOKEN_TTL: Duration = Duration::from_secs(60 * 60);
+const INSTALLATION_TOKEN_REFRESH_SKEW: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug)]
 pub enum AuthError {
@@ -235,6 +238,61 @@ pub struct InstallationToken {
     pub expires_at: String,
 }
 
+#[derive(Debug, Clone)]
+struct CachedInstallationToken {
+    token: String,
+    refresh_at: SystemTime,
+}
+
+impl CachedInstallationToken {
+    fn new(token: InstallationToken, received_at: SystemTime) -> Self {
+        Self {
+            token: token.token,
+            refresh_at: received_at + INSTALLATION_TOKEN_TTL - INSTALLATION_TOKEN_REFRESH_SKEW,
+        }
+    }
+
+    fn is_fresh(&self, now: SystemTime) -> bool {
+        now < self.refresh_at
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct InstallationTokenCache {
+    tokens: HashMap<u64, CachedInstallationToken>,
+}
+
+impl InstallationTokenCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn lookup(&self, installation_id: u64, now: SystemTime) -> Option<&str> {
+        let token = self
+            .tokens
+            .iter()
+            .find(|(cached_id, _)| **cached_id == installation_id)?
+            .1;
+        token.is_fresh(now).then_some(token.token.as_str())
+    }
+
+    pub fn remember(
+        &mut self,
+        installation_id: u64,
+        token: InstallationToken,
+        received_at: SystemTime,
+    ) {
+        self.tokens.insert(
+            installation_id,
+            CachedInstallationToken::new(token, received_at),
+        );
+    }
+
+    pub fn remove(&mut self, installation_id: u64) {
+        self.tokens.remove(&installation_id);
+    }
+}
+
 #[derive(Clone)]
 pub struct GitHubAppAuthClient {
     http: reqwest::Client,
@@ -270,6 +328,22 @@ impl GitHubAppAuthClient {
             .json::<InstallationToken>()
             .await?;
         Ok(token)
+    }
+
+    pub async fn installation_token(
+        &self,
+        cache: &mut InstallationTokenCache,
+        installation_id: u64,
+    ) -> Result<String, AuthError> {
+        let now = SystemTime::now();
+        if let Some(token) = cache.lookup(installation_id, now) {
+            return Ok(token.to_string());
+        }
+
+        let token = self.create_installation_token(installation_id).await?;
+        let value = token.token.clone();
+        cache.remember(installation_id, token, now);
+        Ok(value)
     }
 }
 
@@ -322,5 +396,60 @@ mod tests {
     fn invalid_private_key_is_reported_as_jwt_error() {
         let error = generate_app_jwt(12345, b"not a pem", 1_700_000_000).unwrap_err();
         assert!(matches!(error, AuthError::Jwt(_)));
+    }
+
+    #[test]
+    fn token_cache_reuses_fresh_installation_token() {
+        let mut cache = InstallationTokenCache::new();
+        let received_at = UNIX_EPOCH + Duration::from_secs(1_000);
+        cache.remember(
+            42,
+            InstallationToken {
+                token: "ghs_token".to_string(),
+                expires_at: "2026-05-17T15:00:00Z".to_string(),
+            },
+            received_at,
+        );
+
+        assert_eq!(
+            cache.lookup(42, received_at + Duration::from_secs(30 * 60)),
+            Some("ghs_token")
+        );
+    }
+
+    #[test]
+    fn token_cache_refreshes_before_github_expiry() {
+        let mut cache = InstallationTokenCache::new();
+        let received_at = UNIX_EPOCH + Duration::from_secs(1_000);
+        cache.remember(
+            42,
+            InstallationToken {
+                token: "ghs_token".to_string(),
+                expires_at: "2026-05-17T15:00:00Z".to_string(),
+            },
+            received_at,
+        );
+
+        assert_eq!(
+            cache.lookup(42, received_at + Duration::from_secs(56 * 60)),
+            None
+        );
+    }
+
+    #[test]
+    fn token_cache_can_remove_installation() {
+        let mut cache = InstallationTokenCache::new();
+        let received_at = UNIX_EPOCH + Duration::from_secs(1_000);
+        cache.remember(
+            42,
+            InstallationToken {
+                token: "ghs_token".to_string(),
+                expires_at: "2026-05-17T15:00:00Z".to_string(),
+            },
+            received_at,
+        );
+        cache.remove(42);
+
+        assert_eq!(cache.lookup(42, received_at), None);
     }
 }
