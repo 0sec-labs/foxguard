@@ -1,7 +1,7 @@
 //! Pull request review posting for the GitHub App receiver.
 
 use crate::report::github_pr::{review_comments_for_commentable_lines, COMMENT_MARKER};
-use crate::Finding;
+use crate::{Finding, Severity};
 use reqwest::Url;
 use serde::Deserialize;
 use serde_json::Value;
@@ -108,6 +108,45 @@ impl GitHubReviewClient {
         Ok(PostReviewOutcome {
             deleted_comments,
             posted_comments,
+        })
+    }
+
+    pub async fn post_check_run(
+        &self,
+        repo_full_name: &str,
+        head_sha: &str,
+        findings: &[Finding],
+        installation_token: &str,
+    ) -> Result<PostCheckRunOutcome, ReviewError> {
+        let repo = RepositoryPath::parse(repo_full_name)?;
+        let annotations = check_run_annotations(findings);
+        let annotation_count = annotations.len();
+        let url = self.endpoint(&format!("repos/{}/{}/check-runs", repo.owner, repo.name))?;
+        let body = serde_json::json!({
+            "name": "foxguard",
+            "head_sha": head_sha,
+            "status": "completed",
+            "conclusion": check_run_conclusion(findings),
+            "output": {
+                "title": check_run_title(findings),
+                "summary": check_run_summary(findings, annotation_count),
+                "annotations": annotations,
+            },
+        });
+        // URL construction is restricted to a validated GitHub API base URL plus
+        // repository path segments parsed by `RepositoryPath::parse`.
+        let request = self.http.post(url); // foxguard: ignore[rs/no-ssrf]
+        request
+            .bearer_auth(installation_token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
+
+        Ok(PostCheckRunOutcome {
+            posted_annotations: annotation_count,
         })
     }
 
@@ -271,6 +310,11 @@ pub struct PostReviewOutcome {
     pub posted_comments: usize,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct PostCheckRunOutcome {
+    pub posted_annotations: usize,
+}
+
 #[derive(Debug)]
 struct RepositoryPath {
     owner: String,
@@ -353,6 +397,97 @@ fn hunk_new_start(line: &str) -> Option<usize> {
     start.parse().ok()
 }
 
+fn check_run_conclusion(findings: &[Finding]) -> &'static str {
+    if findings.is_empty() {
+        return "success";
+    }
+    if findings
+        .iter()
+        .any(|finding| matches!(finding.severity, Severity::High | Severity::Critical))
+    {
+        return "failure";
+    }
+    "neutral"
+}
+
+fn check_run_title(findings: &[Finding]) -> &'static str {
+    if findings.is_empty() {
+        "foxguard found no issues"
+    } else {
+        "foxguard found issues"
+    }
+}
+
+fn check_run_summary(findings: &[Finding], annotation_count: usize) -> String {
+    if findings.is_empty() {
+        return "foxguard scan completed with no findings.".to_string();
+    }
+
+    let mut low = 0;
+    let mut medium = 0;
+    let mut high = 0;
+    let mut critical = 0;
+    for finding in findings {
+        match finding.severity {
+            Severity::Low => low += 1,
+            Severity::Medium => medium += 1,
+            Severity::High => high += 1,
+            Severity::Critical => critical += 1,
+        }
+    }
+
+    let mut summary = format!(
+        "foxguard found {} issue(s): {critical} critical, {high} high, {medium} medium, {low} low.",
+        findings.len()
+    );
+    if annotation_count < findings.len() {
+        summary.push_str(&format!(
+            " Showing the first {annotation_count} as check annotations."
+        ));
+    }
+    summary
+}
+
+fn check_run_annotations(findings: &[Finding]) -> Vec<Value> {
+    findings
+        .iter()
+        .filter(|finding| finding.line > 0)
+        .take(50)
+        .map(|finding| {
+            let end_line = finding.end_line.max(finding.line);
+            serde_json::json!({
+                "path": finding.file,
+                "start_line": finding.line,
+                "end_line": end_line,
+                "annotation_level": annotation_level(finding.severity),
+                "title": truncate(&format!("{} ({})", finding.rule_id, finding.severity), 255),
+                "message": truncate(&finding.description, 64_000),
+                "raw_details": truncate(&finding.snippet, 64_000),
+            })
+        })
+        .collect()
+}
+
+fn annotation_level(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Low => "notice",
+        Severity::Medium => "warning",
+        Severity::High | Severity::Critical => "failure",
+    }
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    if max_chars <= 3 {
+        return ".".repeat(max_chars);
+    }
+    let mut truncated: String = value.chars().take(max_chars - 3).collect();
+    truncated.push_str("...");
+    truncated
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,5 +553,70 @@ mod tests {
     #[test]
     fn commentable_lines_returns_none_without_patch() {
         assert!(commentable_lines_from_patch(None).is_none());
+    }
+
+    fn finding(severity: Severity, line: usize) -> Finding {
+        Finding {
+            rule_id: "test/rule".to_string(),
+            severity,
+            cwe: Some("CWE-79".to_string()),
+            description: "finding description".to_string(),
+            file: "src/app.js".to_string(),
+            line,
+            column: 1,
+            end_line: line,
+            end_column: 2,
+            snippet: "bad()".to_string(),
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+            confidence: 1.0,
+            taint_hops: None,
+            tags: Vec::new(),
+            crypto_algorithm: None,
+            cnsa2_deadline: None,
+            dep_name: None,
+        }
+    }
+
+    #[test]
+    fn check_run_conclusion_matches_severity() {
+        assert_eq!(check_run_conclusion(&[]), "success");
+        assert_eq!(
+            check_run_conclusion(&[finding(Severity::Low, 1)]),
+            "neutral"
+        );
+        assert_eq!(
+            check_run_conclusion(&[finding(Severity::High, 1)]),
+            "failure"
+        );
+    }
+
+    #[test]
+    fn check_run_annotations_cap_at_github_limit() {
+        let findings: Vec<_> = (1..=60)
+            .map(|line| finding(Severity::Critical, line))
+            .collect();
+        let annotations = check_run_annotations(&findings);
+
+        assert_eq!(annotations.len(), 50);
+        assert_eq!(annotations[0]["path"], "src/app.js");
+        assert_eq!(annotations[0]["start_line"], 1);
+        assert_eq!(annotations[0]["annotation_level"], "failure");
+    }
+
+    #[test]
+    fn check_run_summary_mentions_truncated_annotations() {
+        let findings: Vec<_> = (1..=60)
+            .map(|line| finding(Severity::Medium, line))
+            .collect();
+        let summary = check_run_summary(&findings, 50);
+
+        assert!(summary.contains("60 issue(s)"));
+        assert!(summary.contains("Showing the first 50"));
     }
 }

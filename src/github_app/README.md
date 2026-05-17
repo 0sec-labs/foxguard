@@ -14,14 +14,14 @@ cargo build --release --features github-app --bin foxguard-github-app
 - `webhook.rs` — HMAC-SHA256 signature verification (`verify_signature`) and the `EventKind` router enum. 10 unit tests pin the verification contract: known-good vector, modified body, wrong secret, missing/empty/non-hex/short-length digest, trailing-whitespace tolerance, and the kind-routing map.
 - `auth.rs` — GitHub App JWT generation, installation-token exchange, and conservative in-memory token caching. It reads app credentials from `FOXGUARD_GITHUB_APP_ID` and either `FOXGUARD_GITHUB_PRIVATE_KEY` or an absolute `FOXGUARD_GITHUB_PRIVATE_KEY_PATH`, and keeps the outbound GitHub API base URL configurable for tests and allowlisted GitHub Enterprise hosts.
 - `installation_store.rs` — small JSON-backed installation registry. It records account metadata and selected repositories from `installation` / `installation_repositories` webhooks so self-hosted operators can recover install state across restarts without a database dependency.
-- `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, extracts installation IDs from JSON payloads, persists installation metadata, prepares installation auth for `pull_request` deliveries, clones and scans pull-request heads in a bounded temp workspace, posts foxguard PR review comments through the installation token, clears cached tokens when installations are deleted, and returns `202 Accepted` for all known kinds.
-- `review.rs` — installation-token GitHub REST client for PR review comments. It deletes prior foxguard review comments, lists changed PR files, filters findings to commentable diff lines, and posts inline comments using the shared CLI comment formatter.
+- `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, extracts installation IDs from JSON payloads, persists installation metadata, prepares installation auth for `pull_request` deliveries, clones and scans pull-request heads in a bounded temp workspace, posts foxguard PR review comments and a check run through the installation token, clears cached tokens when installations are deleted, and returns `202 Accepted` for all known kinds.
+- `review.rs` — installation-token GitHub REST client for PR review comments and check runs. It deletes prior foxguard review comments, lists changed PR files, filters findings to commentable diff lines, posts inline comments using the shared CLI comment formatter, and creates a `foxguard` check run with up to 50 annotations.
 
 ## What's NOT here yet (Phase 2)
 
 The intentional gap. Each of these is a follow-up PR so the architecture above can land cleanly first:
 
-- **Check Runs API.** Inline annotations on the diff once the comment path is solid.
+- **App registration.** Create the production GitHub App, wire the real install URL into the landing page, and verify the requested permissions include pull request review comments plus check runs.
 
 ## Running locally
 
@@ -59,4 +59,4 @@ A reference Dockerfile lives at the repo root: [`Dockerfile.github-app`](../../D
 
 ## Status
 
-The receiver now covers the first useful App loop: verified webhook intake, installation metadata persistence, installation-token auth, bounded PR checkout + scan, and PR review comment posting. Check Runs annotations are still staged follow-up work.
+The receiver now covers the first useful App loop: verified webhook intake, installation metadata persistence, installation-token auth, bounded PR checkout + scan, PR review comment posting, and check-run annotations.

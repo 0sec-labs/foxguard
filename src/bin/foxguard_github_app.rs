@@ -6,7 +6,7 @@
 //!
 //! This binary receives webhook deliveries, verifies the signature,
 //! routes supported event types, and runs the Phase-1 GitHub App loop:
-//! `pull_request` → clone → scan → PR review comments.
+//! `pull_request` -> clone -> scan -> PR review comments + check run.
 //!
 //! Build:    `cargo build --release --features github-app --bin foxguard-github-app`
 //! Run:      `FOXGUARD_WEBHOOK_SECRET=xxx FOXGUARD_BIND=0.0.0.0:8080 foxguard-github-app`
@@ -272,7 +272,8 @@ async fn webhook(
                                     findings = result.findings.len(),
                                     posted_comments = result.posted_comments,
                                     deleted_comments = result.deleted_comments,
-                                    "pull_request scan complete and PR review updated"
+                                    posted_check_annotations = result.posted_check_annotations,
+                                    "pull_request scan complete and GitHub surfaces updated"
                                 );
                             }
                             Err(error) => {
@@ -375,6 +376,7 @@ struct PullRequestScanResult {
     findings: Vec<Finding>,
     posted_comments: usize,
     deleted_comments: usize,
+    posted_check_annotations: usize,
 }
 
 #[derive(Debug)]
@@ -418,6 +420,23 @@ async fn process_pull_request_delivery(
         .map_err(|error| error.to_string())?;
     result.posted_comments = review.posted_comments;
     result.deleted_comments = review.deleted_comments;
+    match state
+        .review
+        .post_check_run(&result.repo, &result.head_sha, &result.findings, &token)
+        .await
+    {
+        Ok(check_run) => {
+            result.posted_check_annotations = check_run.posted_annotations;
+        }
+        Err(error) => {
+            warn!(
+                repo = result.repo,
+                pr_number = result.pr_number,
+                %error,
+                "failed to post foxguard check run"
+            );
+        }
+    }
     Ok(result)
 }
 
@@ -457,6 +476,7 @@ fn run_pull_request_scan(
         findings,
         posted_comments: 0,
         deleted_comments: 0,
+        posted_check_annotations: 0,
     })
 }
 
