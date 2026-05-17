@@ -17,6 +17,6 @@
 //! reviewed in isolation before the full `pull_request` handler
 //! lands.
 //!
-//! Tracking issue: <https://github.com/PwnKit-Labs/foxguard/issues/246>.
+//! Tracking issue: <https://github.com/0sec-labs/foxguard/issues/246>.
 
 pub mod webhook;
