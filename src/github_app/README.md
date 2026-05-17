@@ -13,13 +13,13 @@ cargo build --release --features github-app --bin foxguard-github-app
 
 - `webhook.rs` — HMAC-SHA256 signature verification (`verify_signature`) and the `EventKind` router enum. 10 unit tests pin the verification contract: known-good vector, modified body, wrong secret, missing/empty/non-hex/short-length digest, trailing-whitespace tolerance, and the kind-routing map.
 - `auth.rs` — GitHub App JWT generation, installation-token exchange, and conservative in-memory token caching. It reads app credentials from `FOXGUARD_GITHUB_APP_ID` and either `FOXGUARD_GITHUB_PRIVATE_KEY` or an absolute `FOXGUARD_GITHUB_PRIVATE_KEY_PATH`, and keeps the outbound GitHub API base URL configurable for tests and allowlisted GitHub Enterprise hosts.
-- `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, extracts installation IDs from JSON payloads, prepares installation auth for `pull_request` deliveries, clones and scans pull-request heads in a bounded temp workspace, clears cached tokens when installations are deleted, and returns `202 Accepted` for all known kinds with comment posting still stubbed and clearly marked TODO.
+- `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, extracts installation IDs from JSON payloads, prepares installation auth for `pull_request` deliveries, clones and scans pull-request heads in a bounded temp workspace, posts foxguard PR review comments through the installation token, clears cached tokens when installations are deleted, and returns `202 Accepted` for all known kinds.
+- `review.rs` — installation-token GitHub REST client for PR review comments. It deletes prior foxguard review comments, lists changed PR files, filters findings to files in the diff, and creates a single review using the shared CLI comment formatter.
 
 ## What's NOT here yet (Phase 2)
 
 The intentional gap. Each of these is a follow-up PR so the architecture above can land cleanly first:
 
-- **PR comment posting.** Convert scan results into the existing GitHub PR review/comment output path using the installation token.
 - **`installation` handler.** Persist install metadata so we know which orgs we're serving. SQLite is fine for Phase 1; the data is small and operationally easy to back up.
 - **Check Runs API.** Inline annotations on the diff once the comment path is solid.
 
@@ -57,4 +57,4 @@ A reference Dockerfile lives at the repo root: [`Dockerfile.github-app`](../../D
 
 ## Status
 
-This PR is **Phase 1 only** — webhook foundation, no scan execution, no GitHub API calls outbound. The bones are here; everything else hangs off them. Ready for review on the architecture before the rest follows.
+The receiver now covers the first useful App loop: verified webhook intake, installation-token auth, bounded PR checkout + scan, and PR review comment posting. Persistent installation metadata and Check Runs annotations are still staged follow-ups.

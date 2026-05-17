@@ -17,4 +17,5 @@
 //! Tracking issue: <https://github.com/0sec-labs/foxguard/issues/246>.
 
 pub mod auth;
+pub mod review;
 pub mod webhook;
