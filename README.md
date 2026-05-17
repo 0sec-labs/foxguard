@@ -120,6 +120,7 @@ claude --plugin-dir ./plugins/claude-code
 ```
 
 Run `/foxguard:setup` inside Claude Code to verify the scanner is available. See [Claude Code integration](docs/claude-code-integration.md) for local plugin loading, hook behavior, and marketplace status.
+Shared behavior for future agent/editor adapters is documented in [Agent and Editor Integration Contract](docs/agent-editor-integration.md).
 
 ## CI integration
 
@@ -141,7 +142,7 @@ jobs:
           upload-sarif: "true"
 ```
 
-Findings land in **Security → Code Scanning**. On any other CI: `npx foxguard@latest --format sarif . > out.sarif`. For Claude Code and other agent/editor hooks, see [docs/claude-code-integration.md](docs/claude-code-integration.md).
+Findings land in **Security → Code Scanning**. On any other CI: `npx foxguard@latest --format sarif . > out.sarif`. For Claude Code and other agent/editor hooks, see [docs/claude-code-integration.md](docs/claude-code-integration.md) and [docs/agent-editor-integration.md](docs/agent-editor-integration.md).
 
 **Pre-commit:**
 

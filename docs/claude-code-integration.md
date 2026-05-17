@@ -84,4 +84,7 @@ The plugin can be loaded locally today with `--plugin-dir`. Publishing to an off
 
 Track the publishing checklist in the GitHub issue linked from the README/PR queue rather than treating it as part of the scanner binary release. Marketplace copy, versioning notes, and local validation commands live in [`plugins/claude-code/MARKETPLACE.md`](../plugins/claude-code/MARKETPLACE.md).
 
-This integration is intentionally Claude Code-specific. Generalizing foxguard for other agent or editor hook systems should be handled as a separate design and implementation issue.
+This integration is intentionally Claude Code-specific. Shared behavior for other
+agent or editor hook systems is documented in
+[`agent-editor-integration.md`](agent-editor-integration.md) so Claude Code
+marketplace work can proceed independently.
