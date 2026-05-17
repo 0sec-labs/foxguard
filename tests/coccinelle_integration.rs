@@ -57,6 +57,14 @@ fn repo_with_c_fixture() -> TempDir {
     repo
 }
 
+fn json_findings(stdout: &[u8]) -> Vec<serde_json::Value> {
+    let report: serde_json::Value = serde_json::from_slice(stdout).expect("invalid JSON output");
+    report["findings"]
+        .as_array()
+        .expect("JSON report should include findings array")
+        .clone()
+}
+
 #[test]
 fn coccinelle_rule_runs_via_spatch_and_normalizes_json() {
     let repo = repo_with_c_fixture();
@@ -87,8 +95,7 @@ fn coccinelle_rule_runs_via_spatch_and_normalizes_json() {
         "findings should make foxguard exit non-zero"
     );
 
-    let findings: Vec<serde_json::Value> =
-        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+    let findings = json_findings(&output.stdout);
     assert_eq!(findings.len(), 1, "expected one Coccinelle finding");
 
     let finding = &findings[0];
@@ -138,8 +145,7 @@ fn missing_spatch_skips_coccinelle_once_without_failing_scan() {
         "missing spatch should skip Coccinelle rules, not fail the scan"
     );
 
-    let findings: Vec<serde_json::Value> =
-        serde_json::from_slice(&output.stdout).expect("invalid JSON output");
+    let findings = json_findings(&output.stdout);
     assert!(
         findings.is_empty(),
         "missing spatch should emit no findings"

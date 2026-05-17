@@ -6,8 +6,8 @@ use crate::config::{
 };
 use crate::diff::run_diff_with_coccinelle_warnings;
 use crate::engine::{
-    coccinelle, scan_directory_with_notices, scan_paths_with_root_with_notices,
-    PathExcludeMatcher, ScanResult, ScanStats,
+    coccinelle, scan_directory_with_notices, scan_paths_with_root_with_notices, PathExcludeMatcher,
+    ScanResult, ScanStats,
 };
 use crate::git::changed_files;
 use crate::rules::semgrep_compat::load_semgrep_rules;
