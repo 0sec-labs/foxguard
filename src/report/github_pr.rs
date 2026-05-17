@@ -1,6 +1,8 @@
 use crate::{Finding, Severity};
 use std::path::Path;
 
+const COMMENT_MARKER: &str = "<!-- foxguard:pr-review -->";
+
 /// Format the severity as an uppercase label for the PR comment.
 fn severity_label(severity: Severity) -> &'static str {
     match severity {
@@ -20,7 +22,7 @@ fn format_comment_body(finding: &Finding) -> String {
         .unwrap_or_default();
 
     let mut body = format!(
-        "**foxguard** \u{00b7} `{}` \u{00b7} `{}`{}\n\n{}",
+        "{COMMENT_MARKER}\n\n**foxguard** \u{00b7} `{}` \u{00b7} `{}`{}\n\n{}",
         severity_label(finding.severity),
         finding.rule_id,
         cwe_suffix,
@@ -32,6 +34,61 @@ fn format_comment_body(finding: &Finding) -> String {
     }
 
     body
+}
+
+fn existing_foxguard_comment_ids(stdout: &[u8]) -> Result<Vec<u64>, String> {
+    let value: serde_json::Value = serde_json::from_slice(stdout)
+        .map_err(|e| format!("Failed to parse existing PR comments: {e}"))?;
+    let comments: Vec<&serde_json::Value> = match value.as_array() {
+        Some(values) if values.iter().all(|value| value.is_array()) => values
+            .iter()
+            .flat_map(|page| page.as_array().into_iter().flatten())
+            .collect(),
+        Some(values) => values.iter().collect(),
+        None => Vec::new(),
+    };
+
+    Ok(comments
+        .into_iter()
+        .filter(|comment| {
+            comment["body"]
+                .as_str()
+                .is_some_and(|body| body.contains(COMMENT_MARKER))
+        })
+        .filter_map(|comment| comment["id"].as_u64())
+        .collect())
+}
+
+fn delete_existing_foxguard_comments(repo: &str, pr_number: u64) -> Result<usize, String> {
+    let endpoint = format!("repos/{repo}/pulls/{pr_number}/comments");
+    let output = std::process::Command::new("gh")
+        .args(["api", &endpoint, "--paginate", "--slurp"])
+        .output()
+        .map_err(|e| format!("Failed to list existing PR comments: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh api returned {}: {}", output.status, stderr));
+    }
+
+    let ids = existing_foxguard_comment_ids(&output.stdout)?;
+    for id in &ids {
+        let endpoint = format!("repos/{repo}/pulls/comments/{id}");
+        let output = std::process::Command::new("gh")
+            .args(["api", &endpoint, "--method", "DELETE"])
+            .output()
+            .map_err(|e| format!("Failed to delete prior PR comment {id}: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "gh api failed to delete prior PR comment {id}: {}: {}",
+                output.status, stderr
+            ));
+        }
+    }
+
+    Ok(ids.len())
 }
 
 /// Make a file path relative to the repository root.
@@ -73,6 +130,14 @@ pub fn post_pr_review(
     let repo = std::env::var("GITHUB_REPOSITORY").map_err(|_| {
         "GITHUB_REPOSITORY environment variable not set; cannot post PR review".to_string()
     })?;
+
+    let deleted = delete_existing_foxguard_comments(&repo, pr_number)?;
+    if deleted > 0 {
+        eprintln!(
+            "Removed {} prior foxguard PR comment(s) on PR #{}",
+            deleted, pr_number
+        );
+    }
 
     if findings.is_empty() {
         return Ok(());
@@ -118,7 +183,7 @@ pub fn post_pr_review(
 
     let review_body = serde_json::json!({
         "event": "COMMENT",
-        "body": format!("**foxguard** found {} issue(s) in this PR", comments.len()),
+        "body": format!("{COMMENT_MARKER}\n\n**foxguard** found {} issue(s) in this PR", comments.len()),
         "comments": comments,
     });
 
@@ -149,7 +214,7 @@ pub fn post_pr_review(
 
     eprintln!(
         "Posted {} inline comment(s) on PR #{}",
-        findings.len(),
+        comments.len(),
         pr_number
     );
     Ok(())
@@ -194,6 +259,7 @@ mod tests {
     fn test_format_comment_body_includes_severity_and_rule() {
         let f = sample_finding();
         let body = format_comment_body(&f);
+        assert!(body.contains(COMMENT_MARKER));
         assert!(body.contains("**foxguard**"));
         assert!(body.contains("`CRITICAL`"));
         assert!(body.contains("`py/taint-sql-injection`"));
@@ -250,11 +316,35 @@ mod tests {
 
     #[test]
     fn test_post_pr_review_skips_empty_findings() {
-        std::env::set_var("GITHUB_TOKEN", "test");
-        std::env::set_var("GITHUB_REPOSITORY", "owner/repo");
-        let result = post_pr_review(&[], 1, None);
-        assert!(result.is_ok());
         std::env::remove_var("GITHUB_TOKEN");
         std::env::remove_var("GITHUB_REPOSITORY");
+        let result = post_pr_review(&[], 1, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_existing_foxguard_comment_ids_reads_plain_comment_array() {
+        let stdout = br#"[
+            {"id": 11, "body": "<!-- foxguard:pr-review -->\nold"},
+            {"id": 12, "body": "human comment"},
+            {"id": 13, "body": "<!-- foxguard:pr-review -->\nolder"}
+        ]"#;
+
+        let ids = existing_foxguard_comment_ids(stdout).expect("failed to parse comments");
+
+        assert_eq!(ids, vec![11, 13]);
+    }
+
+    #[test]
+    fn test_existing_foxguard_comment_ids_reads_slurped_pages() {
+        let stdout = br#"[
+            [{"id": 21, "body": "<!-- foxguard:pr-review -->\nold"}],
+            [{"id": 22, "body": "human comment"}],
+            [{"id": 23, "body": "<!-- foxguard:pr-review -->\nolder"}]
+        ]"#;
+
+        let ids = existing_foxguard_comment_ids(stdout).expect("failed to parse comments");
+
+        assert_eq!(ids, vec![21, 23]);
     }
 }

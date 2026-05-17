@@ -556,6 +556,7 @@ fn tui_diff_args(args: &TuiArgs, target: &str) -> DiffArgs {
         rules: args.rules.clone(),
         no_builtins: args.no_builtins,
         output: None,
+        github_pr: None,
         max_file_size: args.max_file_size,
     }
 }

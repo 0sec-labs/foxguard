@@ -346,6 +346,10 @@ pub struct DiffArgs {
     #[arg(long)]
     pub output: Option<String>,
 
+    /// Post findings as inline review comments on a GitHub PR
+    #[arg(long)]
+    pub github_pr: Option<u64>,
+
     /// Maximum file size in bytes to scan (default: 1 MB)
     #[arg(long, default_value_t = 1_048_576)]
     pub max_file_size: u64,

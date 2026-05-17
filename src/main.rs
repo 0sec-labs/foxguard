@@ -252,6 +252,17 @@ fn run_diff_cmd(args: &DiffArgs) -> i32 {
         }
     }
 
+    if let Some(pr_number) = result.args.github_pr {
+        let scan_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        if let Err(e) = foxguard::report::github_pr::post_pr_review(
+            &result.findings,
+            pr_number,
+            Some(&scan_root),
+        ) {
+            eprintln!("Warning: failed to post PR review: {}", e);
+        }
+    }
+
     if new_count > 0 {
         return 1;
     }
