@@ -6,8 +6,8 @@ use crate::config::{
 };
 use crate::diff::run_diff_with_coccinelle_warnings;
 use crate::engine::{
-    coccinelle, scan_directory_with_notices, scan_paths_with_root_with_notices, PathExcludeMatcher,
-    ScanResult, ScanStats,
+    coccinelle, codeql, scan_directory_with_notices, scan_paths_with_root_with_notices,
+    PathExcludeMatcher, ScanResult, ScanStats,
 };
 use crate::git::changed_files;
 use crate::rules::semgrep_compat::load_semgrep_rules;
@@ -123,6 +123,10 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
         Some(rules_path) => coccinelle::load_coccinelle_rules(Path::new(rules_path)),
         None => (Vec::new(), Vec::new()),
     };
+    let (mut codeql_rules, mut codeql_notices) = match scan.rules.as_deref() {
+        Some(rules_path) => codeql::load_codeql_rules(Path::new(rules_path)),
+        None => (Vec::new(), Vec::new()),
+    };
     if let Some(ref config) = config {
         if !config.scan.rule_options.is_empty() {
             let warnings = registry.configure_rules(&config.scan.rule_options)?;
@@ -134,11 +138,12 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
     let excludes = PathExcludeMatcher::new(&scan.exclude)?;
     let targets = collect_changed_targets(&scan.path, scan.changes.selection())?;
     let coccinelle_rule_ids = coccinelle::rule_ids(&coccinelle_rules);
+    let codeql_rule_ids = codeql::rule_ids(&codeql_rules);
 
     // In PQ mode, filter to only PQ-related rules
     let pq_enable: Vec<String>;
     let rule_filter_unknown = if scan.pq_mode {
-        pq_enable = collect_pq_rule_ids(&registry, &coccinelle_rule_ids);
+        pq_enable = collect_pq_rule_ids(&registry, &coccinelle_rule_ids, &codeql_rule_ids);
         if pq_enable.is_empty() {
             eprintln!(
                 "Warning: no PQ rules registered in this build. \
@@ -146,20 +151,29 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
             );
         }
         coccinelle::apply_rule_filter(&mut coccinelle_rules, &pq_enable, &[]);
-        registry.apply_rule_filter_with_known(&pq_enable, &[], &coccinelle_rule_ids)
+        codeql::apply_rule_filter(&mut codeql_rules, &pq_enable, &[]);
+        let external_rule_ids = external_rule_ids(&coccinelle_rule_ids, &codeql_rule_ids);
+        registry.apply_rule_filter_with_known(&pq_enable, &[], &external_rule_ids)
     } else if let Some(config) = config.as_ref() {
         coccinelle::apply_rule_filter(
             &mut coccinelle_rules,
             &config.scan.enable_rules,
             &config.scan.disable_rules,
         );
+        codeql::apply_rule_filter(
+            &mut codeql_rules,
+            &config.scan.enable_rules,
+            &config.scan.disable_rules,
+        );
+        let external_rule_ids = external_rule_ids(&coccinelle_rule_ids, &codeql_rule_ids);
         registry.apply_rule_filter_with_known(
             &config.scan.enable_rules,
             &config.scan.disable_rules,
-            &coccinelle_rule_ids,
+            &external_rule_ids,
         )
     } else {
-        registry.apply_rule_filter_with_known(&[], &[], &coccinelle_rule_ids)
+        let external_rule_ids = external_rule_ids(&coccinelle_rule_ids, &codeql_rule_ids);
+        registry.apply_rule_filter_with_known(&[], &[], &external_rule_ids)
     };
 
     let scan_started = std::time::Instant::now();
@@ -175,6 +189,7 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
         scan_directory_with_notices(&scan.path, &registry, scan.max_file_size, Some(&excludes))
     };
     notices.append(&mut coccinelle_notices);
+    notices.append(&mut codeql_notices);
 
     if !rule_filter_unknown.is_empty() {
         notices.insert(
@@ -195,6 +210,7 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
     let stats = result.stats;
     let mut findings = result.findings;
     let mut coccinelle_candidate_files = 0;
+    let mut codeql_candidate_rules = 0;
 
     if !coccinelle_rules.is_empty() {
         let coccinelle_result = if let Some(files) = targets.as_ref() {
@@ -225,6 +241,21 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
                 .then(a.rule_id.cmp(&b.rule_id))
         });
     }
+    if !codeql_rules.is_empty() {
+        let codeql_result =
+            codeql::scan_with_notices(&codeql_rules, scan.codeql_db.as_deref().map(Path::new));
+        codeql_candidate_rules = codeql_result.candidate_rules;
+        files_scanned += codeql_result.files_scanned;
+        notices.extend(codeql_result.notices);
+        findings.extend(codeql_result.findings);
+        findings.sort_by(|a, b| {
+            a.file
+                .cmp(&b.file)
+                .then(a.line.cmp(&b.line))
+                .then(a.column.cmp(&b.column))
+                .then(a.rule_id.cmp(&b.rule_id))
+        });
+    }
     let duration = scan_started.elapsed();
     append_scan_stats_notice(&mut notices, &stats);
 
@@ -234,7 +265,7 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
     // `src/main.rs`).
     crate::compliance::annotate_cnsa2_deadlines(&mut findings, &registry);
 
-    let known_rule_ids = collect_rule_ids(&registry, &coccinelle_rules);
+    let known_rule_ids = collect_rule_ids(&registry, &coccinelle_rules, &codeql_rules);
     let override_warnings =
         apply_severity_overrides(&mut findings, config.as_ref(), &known_rule_ids);
     notices.extend(override_warnings);
@@ -269,7 +300,7 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
 
     findings = suppress_with_baseline_at_root(findings, baseline.as_ref(), &identity_root);
 
-    if files_scanned == 0 && coccinelle_candidate_files == 0 {
+    if files_scanned == 0 && coccinelle_candidate_files == 0 && codeql_candidate_rules == 0 {
         if stats.files_discovered == 0 {
             let supported = if coccinelle_rules.is_empty() {
                 ".js, .ts, .py, .go, .rb, .java, .php, .rs, .cs, .swift, .kt"
@@ -416,7 +447,7 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     // Annotate CNSA 2.0 deadlines on the new findings surfaced by this diff.
     crate::compliance::annotate_cnsa2_deadlines(&mut diff_result.new_findings, &registry);
 
-    let known_rule_ids = collect_rule_ids(&registry, &coccinelle_rules);
+    let known_rule_ids = collect_rule_ids(&registry, &coccinelle_rules, &[]);
     let override_warnings = apply_severity_overrides(
         &mut diff_result.new_findings,
         config.as_ref(),
@@ -529,6 +560,7 @@ fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
         severity: args.severity,
         rules: args.rules.clone(),
         no_builtins: args.no_builtins,
+        codeql_db: None,
         changes: args.changes.clone(),
         exclude: args.exclude.clone(),
         baseline: args.baseline.clone(),
@@ -580,6 +612,7 @@ fn tui_secrets_args(args: &TuiArgs) -> SecretsArgs {
 fn collect_rule_ids(
     registry: &RuleRegistry,
     coccinelle_rules: &[coccinelle::CoccinelleRule],
+    codeql_rules: &[codeql::CodeQlRule],
 ) -> HashSet<String> {
     let mut ids: HashSet<String> = registry
         .all_rules()
@@ -587,6 +620,7 @@ fn collect_rule_ids(
         .map(|rule| rule.id().to_string())
         .collect();
     ids.extend(coccinelle_rules.iter().map(|rule| rule.id().to_string()));
+    ids.extend(codeql_rules.iter().map(|rule| rule.id().to_string()));
     ids
 }
 
@@ -600,6 +634,7 @@ fn finding_identity_root(scan_path: &Path, config: Option<&FoxguardConfig>) -> P
 fn collect_pq_rule_ids(
     registry: &RuleRegistry,
     coccinelle_rule_ids: &HashSet<String>,
+    codeql_rule_ids: &HashSet<String>,
 ) -> Vec<String> {
     let mut ids: Vec<String> = registry
         .all_rules()
@@ -613,7 +648,21 @@ fn collect_pq_rule_ids(
             ids.push(id.clone());
         }
     }
+    for id in codeql_rule_ids {
+        if is_pq_rule_id(id) && !ids.iter().any(|existing| existing == id) {
+            ids.push(id.clone());
+        }
+    }
 
+    ids
+}
+
+fn external_rule_ids(
+    coccinelle_rule_ids: &HashSet<String>,
+    codeql_rule_ids: &HashSet<String>,
+) -> HashSet<String> {
+    let mut ids = coccinelle_rule_ids.clone();
+    ids.extend(codeql_rule_ids.iter().cloned());
     ids
 }
 
@@ -701,7 +750,7 @@ mod tests {
             "kernel/non-pq-cocci".to_string(),
         ]);
 
-        let ids = collect_pq_rule_ids(&registry, &coccinelle_rule_ids);
+        let ids = collect_pq_rule_ids(&registry, &coccinelle_rule_ids, &HashSet::new());
 
         assert!(ids.contains(&"kernel/pq-vulnerable-cocci".to_string()));
         assert!(!ids.contains(&"kernel/non-pq-cocci".to_string()));

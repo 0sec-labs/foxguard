@@ -1,4 +1,5 @@
 pub mod coccinelle;
+pub mod codeql;
 pub mod parser;
 pub mod scanner;
 

@@ -358,6 +358,7 @@ fn run_init(args: &InitArgs) -> i32 {
                 format: OutputFormat::Json,
                 severity: None,
                 rules: None,
+                codeql_db: None,
                 no_builtins: false,
                 changes: ChangeModeArgs::default(),
                 exclude: Vec::new(),

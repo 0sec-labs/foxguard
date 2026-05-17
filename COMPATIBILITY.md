@@ -126,6 +126,50 @@ Execution model:
 - Findings are normalized into the same `Finding` shape used by built-in and Semgrep-compatible rules, so terminal, JSON, SARIF, CBOM, and baselines work through the existing report path.
 - If `spatch` is missing, foxguard emits one warning and skips Coccinelle rules while continuing the rest of the scan.
 
+## CodeQL bridge
+
+Rules with `engine: codeql` are loaded from the same `--rules` YAML files or directories as Semgrep-compatible rules. foxguard expects a pre-built CodeQL database and shells out to the installed `codeql` CLI:
+
+```yaml
+rules:
+  - id: kernel/codeql-dirty-frag
+    engine: codeql
+    severity: high
+    metadata:
+      cwe: CWE-362
+    message: CodeQL query matched dirty-frag behavior.
+    query: queries/dirty-frag.ql
+```
+
+Supported CodeQL rule keys:
+
+- `id`
+- `engine: codeql`
+- `message`
+- `severity` (`critical`, `high`, `medium`, `low`, plus Semgrep-style `ERROR`, `WARNING`, `INFO`)
+- `metadata.cwe`
+- `query` for a `.ql` file relative to the YAML file
+- `database` for a per-rule pre-built CodeQL database path, optionally `${FOXGUARD_CODEQL_DB}`
+
+Database selection priority is:
+
+1. rule-level `database`
+2. CLI `--codeql-db /path/to/database`
+3. environment `FOXGUARD_CODEQL_DB`
+
+Example:
+
+```bash
+foxguard --rules ./kernel-rules --codeql-db /path/to/linux.codeql .
+```
+
+Execution model:
+
+- foxguard runs `codeql database analyze <db> <query.ql> --format=sarif-latest --output <tmp>.sarif`.
+- SARIF results are normalized into the same `Finding` shape used by built-in, Semgrep-compatible, and Coccinelle rules.
+- If `codeql` is missing or no database is configured, foxguard emits a warning and skips CodeQL rules while continuing the rest of the scan.
+- `foxguard diff` does not run the CodeQL bridge yet. Accurate diffing needs a base/current database strategy rather than a single current database.
+
 ## Important limitations
 
 foxguard does **not** claim full Semgrep or OpenGrep compatibility.
