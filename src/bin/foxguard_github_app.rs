@@ -1,7 +1,7 @@
 //! foxguard-github-app — webhook receiver for the foxguard GitHub App.
 //!
 //! See `src/github_app/README.md` and the tracking issue at
-//! <https://github.com/PwnKit-Labs/foxguard/issues/246> for the design
+//! <https://github.com/0sec-labs/foxguard/issues/246> for the design
 //! discussion.
 //!
 //! This binary is intentionally scoped to the *Phase-1 foundation*
@@ -13,7 +13,7 @@
 //!
 //! Build:    `cargo build --release --features github-app --bin foxguard-github-app`
 //! Run:      `FOXGUARD_WEBHOOK_SECRET=xxx FOXGUARD_BIND=0.0.0.0:8080 foxguard-github-app`
-//! Docker:   `docker build -f Dockerfile.github-app -t foxguard/github-app .`
+//! Docker:   `docker build -f Dockerfile.github-app -t ghcr.io/0sec-labs/foxguard-github-app .`
 
 use std::net::SocketAddr;
 

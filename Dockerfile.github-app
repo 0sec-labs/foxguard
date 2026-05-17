@@ -3,12 +3,12 @@
 # stays lean. See src/github_app/README.md and issue #246.
 #
 # Build:
-#   docker build -f Dockerfile.github-app -t foxguard/github-app:latest .
+#   docker build -f Dockerfile.github-app -t ghcr.io/0sec-labs/foxguard-github-app:latest .
 #
 # Run:
 #   docker run --rm -p 8080:8080 \
 #     -e FOXGUARD_WEBHOOK_SECRET=$(openssl rand -hex 32) \
-#     foxguard/github-app:latest
+#     ghcr.io/0sec-labs/foxguard-github-app:latest
 
 FROM rust:1.83-slim AS builder
 WORKDIR /usr/src/foxguard

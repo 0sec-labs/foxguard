@@ -1,6 +1,6 @@
 # foxguard GitHub App — Phase 1 foundation
 
-Tracking issue: [PwnKit-Labs/foxguard#246](https://github.com/PwnKit-Labs/foxguard/issues/246).
+Tracking issue: [0sec-labs/foxguard#246](https://github.com/0sec-labs/foxguard/issues/246).
 
 This directory hosts the in-tree pieces of the GitHub App webhook receiver. The receiver is built behind the `github-app` feature flag so the core scanner build stays lean for users who only want the CLI:
 
@@ -11,7 +11,7 @@ cargo build --release --features github-app --bin foxguard-github-app
 
 ## What's here today (Phase 1)
 
-- `webhook.rs` — HMAC-SHA256 signature verification (`verify_signature`) and the `EventKind` router enum. 9 unit tests pin the verification contract: known-good vector, modified body, wrong secret, missing/empty/non-hex/short-length digest, trailing-whitespace tolerance, and the kind-routing map.
+- `webhook.rs` — HMAC-SHA256 signature verification (`verify_signature`) and the `EventKind` router enum. 10 unit tests pin the verification contract: known-good vector, modified body, wrong secret, missing/empty/non-hex/short-length digest, trailing-whitespace tolerance, and the kind-routing map.
 - `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, and returns `202 Accepted` for all known kinds with the actual handler bodies stubbed and clearly marked TODO.
 
 ## What's NOT here yet (Phase 2)
