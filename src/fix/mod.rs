@@ -2,7 +2,7 @@ pub mod command_injection;
 pub mod sql_injection;
 pub mod xss;
 
-use crate::engine::{detect_language, parse_file};
+use crate::engine::{detect_language, parse_path};
 use crate::Finding;
 use colored::Colorize;
 use std::collections::HashMap;
@@ -92,7 +92,7 @@ pub fn apply_all_fixes(findings: &[Finding], scan_root: &str) -> usize {
             None => continue,
         };
 
-        let tree = match parse_file(&source, language) {
+        let tree = match parse_path(&source, language, &file_path) {
             Some(t) => t,
             None => continue,
         };

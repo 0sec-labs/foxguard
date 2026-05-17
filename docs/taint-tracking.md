@@ -12,7 +12,7 @@ The taint engine answers the second, on a narrower footprint. It lets us ship ru
 
 The taint engine supports:
 
-- **Three languages**: Python, JavaScript/TypeScript, and Go, each with its own engine (`src/rules/python_taint.rs`, `src/rules/javascript_taint.rs`, `src/rules/go_taint.rs`) sharing an identical surface (`TaintSpec`, `NodeMatcher`, `TaintFinding`, `analyze_tree`). `.ts` files are parsed through tree-sitter-javascript, so the JS engine also covers TypeScript source.
+- **Three languages**: Python, JavaScript/TypeScript, and Go, each with its own engine (`src/rules/python_taint.rs`, `src/rules/javascript_taint.rs`, `src/rules/go_taint.rs`) sharing an identical surface (`TaintSpec`, `NodeMatcher`, `TaintFinding`, `analyze_tree`). `.ts` and `.tsx` files use dedicated tree-sitter TypeScript/TSX grammars, then run through the JavaScript-compatible rule and taint surface where semantics align.
 - **Intraprocedural**: each function body is analyzed independently.
 - **Flow-insensitive**: statements are processed in source order. Reassigning a tainted variable to a clean value drops the taint. Branches are not modeled — taint observed in one branch of an `if` persists through the fall-through.
 - **One level of attribute propagation**: `x.y` is tainted when `x` is tainted.

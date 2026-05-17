@@ -818,6 +818,55 @@ mod javascript {
     }
 
     #[test]
+    fn test_typescript_syntax_uses_typescript_parser() {
+        let output = foxguard_cmd_isolated()
+            .args(["tests/fixtures/vulnerable_typescript.ts", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        assert!(
+            !output.status.success(),
+            "TypeScript fixture should report eval"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("parse error"),
+            "TypeScript fixture should parse cleanly, stderr={stderr}"
+        );
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding["rule_id"].as_str() == Some("js/no-eval")),
+            "TypeScript fixture should run compatible JavaScript rules, findings={findings:?}"
+        );
+    }
+
+    #[test]
+    fn test_tsx_syntax_uses_tsx_parser() {
+        let output = foxguard_cmd_isolated()
+            .args(["tests/fixtures/vulnerable_tsx.tsx", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        assert!(!output.status.success(), "TSX fixture should report eval");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("parse error"),
+            "TSX fixture should parse cleanly, stderr={stderr}"
+        );
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding["rule_id"].as_str() == Some("js/no-eval")),
+            "TSX fixture should run compatible JavaScript rules, findings={findings:?}"
+        );
+    }
+
+    #[test]
     fn test_safe_nextjs_taint_has_no_taint_findings() {
         let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe_nextjs_taint.ts", "-f", "json"])
