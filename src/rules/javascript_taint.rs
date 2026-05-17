@@ -31,7 +31,8 @@ use super::taint_engine::{
     taint_finding_for_node, TaintState,
 };
 pub use super::taint_engine::{
-    BatchedRule, NodeMatcher, ReturnSummary, RuleFilter, TaintFinding, TaintSpec,
+    BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
+    TaintSpec,
 };
 use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
 use std::borrow::Cow;
@@ -119,8 +120,11 @@ pub fn analyze_tree_with_cross_file<'a>(
         sink_to_rules: None,
     };
     collect_summary_targets(root, source, &mut |name, func_node| {
-        let ret = summarize_function(func_node, &pass1_ctx);
-        summaries.insert(name, ret);
+        let ret = summarize_function_return(func_node, &pass1_ctx);
+        summaries.insert(
+            function_summary_key(&name, collect_param_names(func_node, source).len()),
+            ret,
+        );
     });
 
     let ctx = AnalysisContext {
@@ -182,8 +186,11 @@ pub fn analyze_tree_batched<'a>(
         };
         let mut summaries = ReturnSummary::new();
         collect_summary_targets(root, source, &mut |name, func_node| {
-            let ret = summarize_function(func_node, &pass1_ctx);
-            summaries.insert(name, ret);
+            let ret = summarize_function_return(func_node, &pass1_ctx);
+            summaries.insert(
+                function_summary_key(&name, collect_param_names(func_node, source).len()),
+                ret,
+            );
         });
 
         // Pass 2: one walk emits findings for every rule in the group.
@@ -294,6 +301,42 @@ fn summarize_function(func_node: Node<'_>, ctx: &AnalysisContext<'_>) -> Option<
     let mut return_taint: Option<String> = None;
     walk_body_for_summary(body, ctx, &mut state, &mut scratch, &mut return_taint);
     return_taint
+}
+
+fn summarize_function_return(func_node: Node<'_>, ctx: &AnalysisContext<'_>) -> ReturnTaintSummary {
+    let direct_source = summarize_function(func_node, ctx);
+    let mut summary = ReturnTaintSummary {
+        direct_source,
+        params_to_return: Vec::new(),
+    };
+
+    let empty_summary = ReturnSummary::new();
+    for (param_idx, param_name) in collect_param_names(func_node, ctx.source)
+        .into_iter()
+        .enumerate()
+    {
+        let synthetic_spec = TaintSpec {
+            sources: vec![NodeMatcher::ParamName {
+                names: vec![param_name.clone()],
+                description: format!("parameter '{}'", param_name),
+            }],
+            sinks: vec![],
+            sanitizers: ctx.spec.sanitizers.clone(),
+        };
+        let param_ctx = AnalysisContext {
+            source: ctx.source,
+            spec: &synthetic_spec,
+            aliases: ctx.aliases,
+            summaries: &empty_summary,
+            cross_file: None,
+            sink_to_rules: None,
+        };
+        if summarize_function(func_node, &param_ctx).is_some() {
+            summary.params_to_return.push(param_idx);
+        }
+    }
+
+    summary
 }
 
 fn walk_body_for_summary(
@@ -522,6 +565,11 @@ fn collect_param_names(func_node: Node<'_>, source: &str) -> Vec<String> {
                 }
                 found
             }
+            "required_parameter" | "optional_parameter" => child
+                .child_by_field_name("pattern")
+                .filter(|n| n.kind() == "identifier")
+                .map(|n| node_text(n, source))
+                .or_else(|| first_identifier_child(child, source)),
             _ => None,
         };
         if let Some(name) = param_name {
@@ -529,6 +577,25 @@ fn collect_param_names(func_node: Node<'_>, source: &str) -> Vec<String> {
         }
     }
     names
+}
+
+fn first_identifier_child<'a>(node: Node<'_>, source: &'a str) -> Option<&'a str> {
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if child.kind() == "identifier" {
+            return Some(node_text(child, source));
+        }
+    }
+    None
+}
+
+fn function_summary_key(name: &str, arity: usize) -> String {
+    format!("{name}/{arity}")
+}
+
+fn call_summary_key(name: &str, args: Node<'_>) -> String {
+    let mut cursor = args.walk();
+    function_summary_key(name, args.named_children(&mut cursor).count())
 }
 
 /// Walk the AST to find exported function declarations and their names.
@@ -1712,6 +1779,28 @@ fn expression_taint(
             return None;
         }
         if let Some(args) = expr.child_by_field_name("arguments") {
+            if let Some(func) = expr.child_by_field_name("function") {
+                if func.kind() == "identifier" {
+                    let callee = node_text(func, ctx.source);
+                    if let Some(summary) = ctx.summaries.get(&call_summary_key(callee, args)) {
+                        if let Some(desc) = &summary.direct_source {
+                            return Some((format!("{desc} (via {callee})"), expr_line));
+                        }
+                        let mut cursor = args.walk();
+                        let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+                        for &param_idx in &summary.params_to_return {
+                            if param_idx < arg_nodes.len() {
+                                if let Some((desc, src_line)) =
+                                    expression_taint(arg_nodes[param_idx], ctx, state)
+                                {
+                                    return Some((format!("{desc} (via {callee})"), src_line));
+                                }
+                            }
+                        }
+                        return None;
+                    }
+                }
+            }
             let mut cursor = args.walk();
             for arg in args.named_children(&mut cursor) {
                 if let Some(result) = expression_taint(arg, ctx, state) {
@@ -1744,8 +1833,23 @@ fn expression_taint(
         if let Some(func) = expr.child_by_field_name("function") {
             if func.kind() == "identifier" {
                 let callee = node_text(func, ctx.source);
-                if let Some(Some(desc)) = ctx.summaries.get(callee) {
-                    return Some((format!("{desc} (via {callee})"), expr_line));
+                if let Some(args) = expr.child_by_field_name("arguments") {
+                    if let Some(summary) = ctx.summaries.get(&call_summary_key(callee, args)) {
+                        if let Some(desc) = &summary.direct_source {
+                            return Some((format!("{desc} (via {callee})"), expr_line));
+                        }
+                        let mut cursor = args.walk();
+                        let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+                        for &param_idx in &summary.params_to_return {
+                            if param_idx < arg_nodes.len() {
+                                if let Some((desc, src_line)) =
+                                    expression_taint(arg_nodes[param_idx], ctx, state)
+                                {
+                                    return Some((format!("{desc} (via {callee})"), src_line));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2392,6 +2496,21 @@ function cleanHelper() {
 
 function handler() {
     document.write(cleanHelper());
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_return_is_parameter_sensitive() {
+        let src = r#"
+function choose(first, second) {
+    return second;
+}
+
+function handler(req) {
+    const clean = "static";
+    document.write(choose(req.body, clean));
 }
 "#;
         assert_eq!(run(src).len(), 0);
