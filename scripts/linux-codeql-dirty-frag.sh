@@ -14,7 +14,8 @@ jobs="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}"
 
 kernel_tree="${workdir}/linux"
 database_dir="${workdir}/linux-codeql-db"
-scratch_dir="${workdir}/scratch"
+query_pack_dir="${repo_root}/rules/kernel/dirty-frag-class/queries"
+scratch_dir="${query_pack_dir}/.scratch-${kernel_ref}"
 sarif_path="${out_dir}/dirty-frag-${kernel_ref}.sarif"
 
 log() {
@@ -54,6 +55,12 @@ require_cmd git
 require_cmd make
 require_cmd python3
 require_cmd "$codeql_bin"
+
+cleanup() {
+  rm -rf "$scratch_dir"
+}
+
+trap cleanup EXIT
 
 mkdir -p "$workdir" "$out_dir" "$scratch_dir"
 
