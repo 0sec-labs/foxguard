@@ -289,6 +289,10 @@ pub struct DiffArgs {
     #[arg(default_value = ".")]
     pub path: String,
 
+    /// Path to foxguard config file
+    #[arg(long)]
+    pub config: Option<String>,
+
     /// Output format
     #[arg(short, long, value_enum, default_value = "terminal")]
     pub format: OutputFormat,

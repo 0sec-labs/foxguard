@@ -352,15 +352,23 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
 
 pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     validate_root_path(&args.path)?;
-    let config = load_for_scan(Path::new(&args.path), None)?;
+    let config = load_for_scan(Path::new(&args.path), args.config.as_deref())?;
     let identity_root = finding_identity_root(Path::new(&args.path), config.as_ref());
     apply_scan_thresholds(config.as_ref());
-    let rules_path = args.rules.as_deref().or_else(|| {
-        config
-            .as_ref()
-            .and_then(|config| config.scan.rules.as_deref())
-    });
-    let mut registry = build_registry(args.no_builtins, rules_path)?;
+    let config_scan = config.as_ref().map(|config| &config.scan);
+    let rules_path = args
+        .rules
+        .as_deref()
+        .or_else(|| config_scan.and_then(|scan_config| scan_config.rules.as_deref()));
+    let no_builtins = args.no_builtins
+        || config_scan
+            .map(|scan_config| scan_config.no_builtins)
+            .unwrap_or(false);
+    let min_severity = args
+        .severity
+        .or_else(|| config_scan.and_then(|scan_config| scan_config.severity));
+    let min_confidence = config_scan.and_then(|scan_config| scan_config.min_confidence);
+    let mut registry = build_registry(no_builtins, rules_path)?;
     let (mut coccinelle_rules, mut coccinelle_notices) = match rules_path {
         Some(rules_path) => coccinelle::load_coccinelle_rules(Path::new(rules_path)),
         None => (Vec::new(), Vec::new()),
@@ -416,7 +424,13 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     );
     notices.extend(override_warnings);
 
-    if let Some(ref min_severity) = args.severity {
+    if let Some(min_conf) = min_confidence {
+        diff_result
+            .new_findings
+            .retain(|f| f.confidence >= min_conf);
+    }
+
+    if let Some(min_severity) = min_severity {
         let min = min_severity.to_severity();
         diff_result.new_findings.retain(|f| f.severity >= min);
     }
@@ -538,6 +552,7 @@ fn tui_diff_args(args: &TuiArgs, target: &str) -> DiffArgs {
         path: args.path.clone(),
         format: OutputFormat::Terminal,
         severity: args.severity,
+        config: args.config.clone(),
         rules: args.rules.clone(),
         no_builtins: args.no_builtins,
         output: None,

@@ -2236,6 +2236,41 @@ mod output_formats {
 mod features {
     use super::*;
 
+    fn setup_diff_repo_with_vulnerable_python() -> TempDir {
+        let repo = TempDir::new().expect("failed to create temp repo");
+        Command::new("git")
+            .args(["init"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to initialize git repo");
+        fs::write(repo.path().join("app.py"), "print('safe')\n")
+            .expect("failed to write safe Python file");
+        Command::new("git")
+            .args(["add", "app.py"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to stage safe Python file");
+        Command::new("git")
+            .args([
+                "-c",
+                "user.name=Foxguard Test",
+                "-c",
+                "user.email=foxguard@example.test",
+                "commit",
+                "-m",
+                "base",
+            ])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to commit safe Python file");
+        fs::write(
+            repo.path().join("app.py"),
+            "password = 'super-secret'\neval(input())\n",
+        )
+        .expect("failed to write vulnerable Python file");
+        repo
+    }
+
     #[test]
     fn test_invalid_path_exits_nonzero() {
         let output = foxguard_cmd_isolated()
@@ -2603,6 +2638,110 @@ rules:
         );
         let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&suppressed.stdout);
         assert_eq!(findings.len(), 0, "expected configured baseline to apply");
+    }
+
+    #[test]
+    fn test_diff_uses_explicit_config_for_rule_filtering() {
+        let repo = setup_diff_repo_with_vulnerable_python();
+        let config = write_config_file(
+            repo.path(),
+            "config/foxguard.yml",
+            "scan:\n  enable_rules:\n    - py/no-eval\n",
+        );
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([
+                "diff",
+                "HEAD",
+                ".",
+                "-f",
+                "json",
+                "--config",
+                config.to_str().expect("non-utf8 config path"),
+            ])
+            .output()
+            .expect("failed to execute foxguard diff with explicit config");
+
+        assert!(
+            !output.status.success(),
+            "diff should report the configured py/no-eval finding"
+        );
+        let findings = scan_json_findings_from_slice(&output.stdout);
+        assert!(
+            !findings.is_empty(),
+            "expected at least one configured diff finding"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding["rule_id"].as_str() == Some("py/no-eval")),
+            "diff should honor configured enable_rules, got: {:?}",
+            findings
+                .iter()
+                .map(|finding| finding["rule_id"].as_str().unwrap_or("?"))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_diff_cli_severity_overrides_config_default() {
+        let repo = setup_diff_repo_with_vulnerable_python();
+        let config = write_config_file(
+            repo.path(),
+            "config/foxguard.yml",
+            "scan:\n  enable_rules:\n    - py/no-hardcoded-secret\n  severity: critical\n",
+        );
+
+        let configured = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([
+                "diff",
+                "HEAD",
+                ".",
+                "-f",
+                "json",
+                "--config",
+                config.to_str().expect("non-utf8 config path"),
+            ])
+            .output()
+            .expect("failed to execute foxguard diff with config severity");
+        assert!(
+            configured.status.success(),
+            "configured critical severity should suppress high findings"
+        );
+        assert_eq!(
+            scan_json_findings_from_slice(&configured.stdout).len(),
+            0,
+            "expected configured severity threshold to apply"
+        );
+
+        let overridden = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([
+                "diff",
+                "HEAD",
+                ".",
+                "-f",
+                "json",
+                "--config",
+                config.to_str().expect("non-utf8 config path"),
+                "--severity",
+                "low",
+            ])
+            .output()
+            .expect("failed to execute foxguard diff with CLI severity override");
+        assert!(
+            !overridden.status.success(),
+            "CLI severity override should restore the configured rule finding"
+        );
+        let findings = scan_json_findings_from_slice(&overridden.stdout);
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding["rule_id"].as_str() == Some("py/no-hardcoded-secret")),
+            "expected CLI severity override to win over config default"
+        );
     }
 
     #[test]
