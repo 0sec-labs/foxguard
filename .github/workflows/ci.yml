@@ -159,6 +159,7 @@ jobs:
       - uses: actions/checkout@v6
       - run: bash -n action/entrypoint.sh
       - run: bash -n benchmarks/run.sh
+      - run: bash -n scripts/linux-codeql-dirty-frag.sh
       - run: bash -n scripts/release.sh
 
   readme-version-refs:

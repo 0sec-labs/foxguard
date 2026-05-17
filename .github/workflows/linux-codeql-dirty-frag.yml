@@ -1,0 +1,69 @@
+name: Linux CodeQL Dirty Frag Calibration
+
+on:
+  workflow_dispatch:
+    inputs:
+      linux_repo:
+        description: Linux repository URL
+        required: true
+        default: https://github.com/torvalds/linux.git
+      vulnerable_ref:
+        description: Vulnerable parent of the ESP shared-frag fix
+        required: true
+        default: 14acf9652e5690de3c7486c6db5fb8dafd0a32a3
+      fixed_ref:
+        description: ESP shared-frag fix commit
+        required: true
+        default: f4c50a4034e62ab75f1d5cdd191dd5f9c77fdff4
+
+jobs:
+  calibrate:
+    name: ${{ matrix.kind }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: vulnerable
+          - kind: fixed
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            flex \
+            libelf-dev \
+            libssl-dev \
+            python3 \
+            rsync
+
+      - name: Install CodeQL CLI
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/codeql-bundle.tar.gz" \
+            https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz
+          mkdir -p "$RUNNER_TEMP/codeql"
+          tar -xzf "$RUNNER_TEMP/codeql-bundle.tar.gz" -C "$RUNNER_TEMP/codeql" --strip-components=1
+          "$RUNNER_TEMP/codeql/codeql" version
+
+      - name: Build and analyze Linux CodeQL database
+        env:
+          CODEQL: ${{ runner.temp }}/codeql/codeql
+          KERNEL_REF: ${{ matrix.kind == 'vulnerable' && inputs.vulnerable_ref || inputs.fixed_ref }}
+          LINUX_REPO: ${{ inputs.linux_repo }}
+          OUT_DIR: ${{ runner.temp }}/dirty-frag-${{ matrix.kind }}
+          WORKDIR: ${{ runner.temp }}/linux-${{ matrix.kind }}
+        run: scripts/linux-codeql-dirty-frag.sh
+
+      - name: Upload calibration artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: linux-codeql-dirty-frag-${{ matrix.kind }}
+          path: ${{ runner.temp }}/dirty-frag-${{ matrix.kind }}
+          if-no-files-found: error
