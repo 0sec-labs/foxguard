@@ -1,3 +1,4 @@
+use crate::git::ChangeSelection;
 use clap::{Args, Parser, Subcommand};
 use serde::Deserialize;
 
@@ -17,6 +18,41 @@ pub enum SeverityFilter {
     Medium,
     High,
     Critical,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct ChangeModeArgs {
+    /// Scan changed files only (legacy: staged first, then unstaged/untracked)
+    #[arg(long, default_value_t = false, conflicts_with_all = ["staged", "unstaged", "all_changes"])]
+    pub changed: bool,
+
+    /// Scan staged changes only
+    #[arg(long, default_value_t = false, conflicts_with_all = ["changed", "unstaged", "all_changes"])]
+    pub staged: bool,
+
+    /// Scan unstaged tracked changes and untracked files only
+    #[arg(long, default_value_t = false, conflicts_with_all = ["changed", "staged", "all_changes"])]
+    pub unstaged: bool,
+
+    /// Scan staged, unstaged tracked, and untracked changes
+    #[arg(long = "all-changes", default_value_t = false, conflicts_with_all = ["changed", "staged", "unstaged"])]
+    pub all_changes: bool,
+}
+
+impl ChangeModeArgs {
+    pub fn selection(&self) -> Option<ChangeSelection> {
+        if self.changed {
+            Some(ChangeSelection::Legacy)
+        } else if self.staged {
+            Some(ChangeSelection::Staged)
+        } else if self.unstaged {
+            Some(ChangeSelection::Unstaged)
+        } else if self.all_changes {
+            Some(ChangeSelection::All)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Args, Debug, Clone)]
@@ -45,9 +81,8 @@ pub struct ScanArgs {
     #[arg(long, default_value_t = false)]
     pub no_builtins: bool,
 
-    /// Scan changed files only (staged first, then unstaged)
-    #[arg(long, default_value_t = false)]
-    pub changed: bool,
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
 
     /// Exclude scan-relative paths by glob or prefix (repeatable)
     #[arg(long)]
@@ -177,9 +212,8 @@ pub struct BaselineScanArgs {
     #[arg(long, default_value_t = false)]
     pub no_builtins: bool,
 
-    /// Scan changed files only (staged first, then unstaged)
-    #[arg(long, default_value_t = false)]
-    pub changed: bool,
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
 
     /// Exclude scan-relative paths by glob or prefix (repeatable)
     #[arg(long)]
@@ -246,9 +280,8 @@ pub struct SecretsArgs {
     #[arg(short, long, value_enum, default_value = "terminal")]
     pub format: OutputFormat,
 
-    /// Scan changed files only (staged first, then unstaged)
-    #[arg(long, default_value_t = false)]
-    pub changed: bool,
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
 
     /// Apply a baseline file to suppress known findings
     #[arg(long)]
@@ -340,9 +373,8 @@ pub struct TuiArgs {
     #[arg(long, default_value_t = false)]
     pub no_builtins: bool,
 
-    /// Scan changed files only (staged first, then unstaged)
-    #[arg(long, default_value_t = false)]
-    pub changed: bool,
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
 
     /// Exclude scan-relative paths by glob or prefix (repeatable)
     #[arg(long)]
@@ -393,9 +425,8 @@ pub struct PqcArgs {
     #[arg(short, long, value_enum)]
     pub severity: Option<SeverityFilter>,
 
-    /// Scan changed files only (staged first, then unstaged)
-    #[arg(long, default_value_t = false)]
-    pub changed: bool,
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
 
     /// Exclude scan-relative paths by glob or prefix (repeatable)
     #[arg(long)]
@@ -440,7 +471,7 @@ impl PqcArgs {
             severity: self.severity,
             rules: None,
             no_builtins: false,
-            changed: self.changed,
+            changes: self.changes.clone(),
             exclude: self.exclude.clone(),
             baseline: self.baseline.clone(),
             write_baseline: None,
@@ -469,7 +500,7 @@ impl BaselineScanArgs {
             severity: self.severity,
             rules: self.rules.clone(),
             no_builtins: self.no_builtins,
-            changed: self.changed,
+            changes: self.changes.clone(),
             exclude: self.exclude.clone(),
             baseline: self.baseline.clone(),
             write_baseline: self.write_baseline.clone(),

@@ -1,6 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeSelection {
+    Legacy,
+    Staged,
+    Unstaged,
+    All,
+}
+
 fn run_git(repo_root: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
@@ -16,7 +24,7 @@ fn run_git(repo_root: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-pub fn changed_files(scan_root: &Path) -> Result<Vec<PathBuf>, String> {
+pub fn changed_files(scan_root: &Path, selection: ChangeSelection) -> Result<Vec<PathBuf>, String> {
     let git_dir = if scan_root.is_dir() {
         scan_root
     } else {
@@ -29,21 +37,58 @@ pub fn changed_files(scan_root: &Path) -> Result<Vec<PathBuf>, String> {
         .canonicalize()
         .map_err(|e| format!("Failed to resolve scan root {}: {}", scan_root.display(), e))?;
 
-    let mut paths = collect_changed_paths(
-        &repo_root,
-        &scan_root,
-        &["diff", "--cached", "--name-only", "--diff-filter=ACMR"],
-    )?;
-
-    if paths.is_empty() {
-        paths = collect_changed_paths(
+    let staged = || {
+        collect_changed_paths(
             &repo_root,
             &scan_root,
-            &["diff", "--name-only", "--diff-filter=ACMR"],
-        )?;
-    }
+            &["diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+        )
+    };
+    let unstaged = || collect_unstaged_paths(&repo_root, &scan_root);
+
+    let paths = match selection {
+        ChangeSelection::Legacy => {
+            let staged = staged()?;
+            if staged.is_empty() {
+                unstaged()?
+            } else {
+                staged
+            }
+        }
+        ChangeSelection::Staged => staged()?,
+        ChangeSelection::Unstaged => unstaged()?,
+        ChangeSelection::All => {
+            let mut paths = staged()?;
+            paths.extend(unstaged()?);
+            dedupe_paths(paths)
+        }
+    };
 
     Ok(paths)
+}
+
+fn collect_unstaged_paths(repo_root: &Path, scan_root: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut paths = collect_changed_paths(
+        repo_root,
+        scan_root,
+        &["diff", "--name-only", "--diff-filter=ACMR"],
+    )?;
+    paths.extend(collect_changed_paths(
+        repo_root,
+        scan_root,
+        &["ls-files", "--others", "--exclude-standard"],
+    )?);
+    Ok(dedupe_paths(paths))
+}
+
+fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut unique = Vec::new();
+    for path in paths {
+        if !unique.contains(&path) {
+            unique.push(path);
+        }
+    }
+    unique
 }
 
 fn collect_changed_paths(

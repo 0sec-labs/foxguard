@@ -132,7 +132,7 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
         }
     }
     let excludes = PathExcludeMatcher::new(&scan.exclude)?;
-    let targets = collect_changed_targets(&scan.path, scan.changed)?;
+    let targets = collect_changed_targets(&scan.path, scan.changes.selection())?;
     let coccinelle_rule_ids = coccinelle::rule_ids(&coccinelle_rules);
 
     // In PQ mode, filter to only PQ-related rules
@@ -309,7 +309,7 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
     )?;
 
     let (mut findings, mut notices, files_scanned, duration) =
-        match collect_changed_targets(&args.path, args.changed)? {
+        match collect_changed_targets(&args.path, args.changes.selection())? {
             Some(files) => {
                 let file_count = files.len();
                 let started = std::time::Instant::now();
@@ -529,7 +529,7 @@ fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
         severity: args.severity,
         rules: args.rules.clone(),
         no_builtins: args.no_builtins,
-        changed: args.changed,
+        changes: args.changes.clone(),
         exclude: args.exclude.clone(),
         baseline: args.baseline.clone(),
         write_baseline: None,
@@ -565,7 +565,7 @@ fn tui_secrets_args(args: &TuiArgs) -> SecretsArgs {
         path: args.path.clone(),
         config: args.config.clone(),
         format: OutputFormat::Terminal,
-        changed: args.changed,
+        changes: args.changes.clone(),
         baseline: args.baseline.clone(),
         write_baseline: None,
         exclude_paths: Vec::new(),
@@ -660,14 +660,17 @@ fn is_pq_rule_id(id: &str) -> bool {
         || id == "config/dockerfile-insecure-tls-env"
 }
 
-fn collect_changed_targets(path: &str, changed: bool) -> Result<Option<Vec<PathBuf>>, String> {
-    if !changed {
+fn collect_changed_targets(
+    path: &str,
+    selection: Option<crate::git::ChangeSelection>,
+) -> Result<Option<Vec<PathBuf>>, String> {
+    let Some(selection) = selection else {
         return Ok(None);
-    }
+    };
 
     let scan_root = Path::new(path);
-    let files =
-        changed_files(scan_root).map_err(|e| format!("failed to resolve changed files: {}", e))?;
+    let files = changed_files(scan_root, selection)
+        .map_err(|e| format!("failed to resolve changed files: {}", e))?;
     Ok(Some(files))
 }
 

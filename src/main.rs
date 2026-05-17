@@ -5,8 +5,8 @@ use foxguard::app::{
 };
 use foxguard::baseline::write_baseline_at_root;
 use foxguard::cli::{
-    BaselineArgs, BaselineScanArgs, Cli, Command, DiffArgs, InitArgs, OutputFormat, PqcArgs,
-    ScanArgs, SecretsArgs, TuiArgs,
+    BaselineArgs, BaselineScanArgs, ChangeModeArgs, Cli, Command, DiffArgs, InitArgs, OutputFormat,
+    PqcArgs, ScanArgs, SecretsArgs, TuiArgs,
 };
 use foxguard::config::load_for_scan;
 use foxguard::tui::run_scan_tui;
@@ -348,7 +348,7 @@ fn run_init(args: &InitArgs) -> i32 {
                 severity: None,
                 rules: None,
                 no_builtins: false,
-                changed: false,
+                changes: ChangeModeArgs::default(),
                 exclude: Vec::new(),
                 baseline: None,
                 write_baseline: None,
@@ -374,7 +374,7 @@ fn run_init(args: &InitArgs) -> i32 {
             path: args.path.clone(),
             config: None,
             format: OutputFormat::Json,
-            changed: false,
+            changes: ChangeModeArgs::default(),
             baseline: None,
             write_baseline: Some(repo_root.join(&args.secrets_baseline).display().to_string()),
             exclude_paths: Vec::new(),

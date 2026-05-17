@@ -31,7 +31,7 @@ pub fn emit_scan_report(
                 target: JsonTargetMetadata {
                     path: &args.path,
                     kind: target_kind(&args.path),
-                    changed_only: args.changed,
+                    changed_only: args.changes.selection().is_some(),
                     files_scanned,
                     diff_base: None,
                 },
@@ -60,7 +60,7 @@ pub fn emit_secrets_report(
                 target: JsonTargetMetadata {
                     path: &args.path,
                     kind: target_kind(&args.path),
-                    changed_only: args.changed,
+                    changed_only: args.changes.selection().is_some(),
                     files_scanned,
                     diff_base: None,
                 },

@@ -2271,6 +2271,60 @@ mod features {
         repo
     }
 
+    fn setup_local_changes_repo() -> TempDir {
+        let repo = TempDir::new().expect("failed to create temp repo");
+        Command::new("git")
+            .args(["init"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to initialize git repo");
+
+        fs::write(repo.path().join("unstaged.js"), "const safe = 1;\n")
+            .expect("failed to write safe tracked fixture");
+        Command::new("git")
+            .args(["add", "unstaged.js"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to stage safe tracked fixture");
+        Command::new("git")
+            .args([
+                "-c",
+                "user.name=Foxguard Test",
+                "-c",
+                "user.email=foxguard@example.test",
+                "commit",
+                "-m",
+                "base",
+            ])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to commit base fixture");
+
+        fs::write(repo.path().join("staged.js"), "eval(userInput);\n")
+            .expect("failed to write staged fixture");
+        Command::new("git")
+            .args(["add", "staged.js"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to stage vulnerable fixture");
+
+        fs::write(repo.path().join("unstaged.js"), "eval(userInput);\n")
+            .expect("failed to write unstaged fixture");
+        fs::write(repo.path().join("untracked.js"), "eval(userInput);\n")
+            .expect("failed to write untracked fixture");
+
+        repo
+    }
+
+    fn finding_file_names(findings: &[serde_json::Value]) -> Vec<String> {
+        findings
+            .iter()
+            .filter_map(|finding| finding["file"].as_str())
+            .filter_map(|file| Path::new(file).file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .collect()
+    }
+
     #[test]
     fn test_invalid_path_exits_nonzero() {
         let output = foxguard_cmd_isolated()
@@ -3248,6 +3302,102 @@ rules:
                 .ends_with("vulnerable.js")),
             "changed mode should only scan the staged file"
         );
+    }
+
+    #[test]
+    fn test_scan_help_lists_explicit_change_modes() {
+        let output = foxguard_cmd()
+            .arg("--help")
+            .output()
+            .expect("failed to execute foxguard --help");
+
+        assert!(output.status.success(), "help should exit successfully");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for flag in ["--changed", "--staged", "--unstaged", "--all-changes"] {
+            assert!(
+                stdout.contains(flag),
+                "scan help should list explicit change mode flag {flag}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_staged_mode_scans_only_staged_changes() {
+        let repo = setup_local_changes_repo();
+
+        let output = foxguard_cmd()
+            .args(["--staged", "-f", "json", "."])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to execute foxguard --staged");
+
+        assert!(
+            !output.status.success(),
+            "staged scan should report staged findings"
+        );
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+        let files = finding_file_names(&findings);
+        assert!(
+            files.iter().all(|file| file == "staged.js"),
+            "staged mode should only scan staged.js, got {files:?}"
+        );
+    }
+
+    #[test]
+    fn test_unstaged_mode_scans_unstaged_and_untracked_changes() {
+        let repo = setup_local_changes_repo();
+
+        let output = foxguard_cmd()
+            .args(["--unstaged", "-f", "json", "."])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to execute foxguard --unstaged");
+
+        assert!(
+            !output.status.success(),
+            "unstaged scan should report local unstaged findings"
+        );
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+        let files = finding_file_names(&findings);
+        assert!(
+            files.iter().any(|file| file == "unstaged.js"),
+            "unstaged mode should scan tracked unstaged changes, got {files:?}"
+        );
+        assert!(
+            files.iter().any(|file| file == "untracked.js"),
+            "unstaged mode should scan untracked files, got {files:?}"
+        );
+        assert!(
+            files.iter().all(|file| file != "staged.js"),
+            "unstaged mode should not scan staged-only changes, got {files:?}"
+        );
+    }
+
+    #[test]
+    fn test_all_changes_mode_scans_staged_unstaged_and_untracked_changes() {
+        let repo = setup_local_changes_repo();
+
+        let output = foxguard_cmd()
+            .args(["--all-changes", "-f", "json", "."])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to execute foxguard --all-changes");
+
+        assert!(
+            !output.status.success(),
+            "all-changes scan should report local findings"
+        );
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+        let files = finding_file_names(&findings);
+        for expected in ["staged.js", "unstaged.js", "untracked.js"] {
+            assert!(
+                files.iter().any(|file| file == expected),
+                "all-changes mode should scan {expected}, got {files:?}"
+            );
+        }
     }
 
     #[test]
