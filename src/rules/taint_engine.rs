@@ -109,8 +109,18 @@ impl<'a> RuleFilter<'a> {
     }
 }
 
-/// Return-taint summary map keyed by a function's simple name.
-pub type ReturnSummary = HashMap<String, Option<String>>;
+/// Compact same-file return-taint summary keyed by function symbol.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReturnTaintSummary {
+    /// Return value is tainted by a source found inside the function body,
+    /// independent of caller arguments.
+    pub direct_source: Option<String>,
+    /// Caller argument indices that taint the return value.
+    pub params_to_return: Vec<usize>,
+}
+
+/// Return-taint summary map keyed by a function symbol.
+pub type ReturnSummary = HashMap<String, ReturnTaintSummary>;
 
 /// Inputs to the batched taint analyzer.
 pub struct BatchedRule<'a> {
