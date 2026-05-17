@@ -38,9 +38,12 @@ jobs:
             bc \
             bison \
             build-essential \
+            clang \
             flex \
             libelf-dev \
             libssl-dev \
+            lld \
+            llvm \
             python3 \
             rsync
 
@@ -62,6 +65,7 @@ jobs:
         run: scripts/linux-codeql-dirty-frag.sh
 
       - name: Upload calibration artifacts
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: linux-codeql-dirty-frag-${{ matrix.kind }}
