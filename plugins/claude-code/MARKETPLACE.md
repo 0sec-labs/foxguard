@@ -100,18 +100,19 @@ Expected results:
 `claude plugin validate plugins/claude-code` passed with Claude Code `2.1.143`.
 
 Non-interactive Claude Code smoke tests using `claude -p --plugin-dir
-plugins/claude-code` passed for:
+plugins/claude-code` passed with `foxguard 0.8.1` first on `PATH` for:
 
 - `/foxguard:setup`
 - `/foxguard:scan tests/fixtures/safe.py`
 - `/foxguard:diff-scan main`
+- `/foxguard:pq-audit tests/fixtures/safe.py`
 - `/foxguard:secrets tests/fixtures/safe.py`
 - `/foxguard:triage`
 
-`/foxguard:pq-audit tests/fixtures/safe.py` exposed an outdated local
-`foxguard 0.7.1` binary on `PATH` that lacks the `pqc` subcommand. The setup
-and PQ audit skills now explicitly detect that case and tell the user to
-upgrade rather than silently falling back to a generic scan.
+The earlier stale-binary failure mode is covered: `/foxguard:setup` verifies
+that `secrets`, `diff`, `tui`, and `pqc` are present before reporting the plugin
+ready, and `/foxguard:pq-audit tests/fixtures/safe.py` now exercises the real
+`pqc` subcommand successfully when the current binary is first on `PATH`.
 
 ## External Submission
 
