@@ -16,6 +16,7 @@
 //! Docker:   `docker build -f Dockerfile.github-app -t ghcr.io/0sec-labs/foxguard-github-app .`
 
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 
 use axum::{
     extract::State,
@@ -23,7 +24,11 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use foxguard::github_app::auth::{
+    AppCredentials, AuthError, GitHubAppAuthClient, InstallationTokenCache,
+};
 use foxguard::github_app::webhook::{verify_signature, EventKind, SignatureError};
+use serde::Deserialize;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
@@ -37,6 +42,19 @@ const MAX_BODY_BYTES: usize = 1 << 20; // 1 MiB
 #[derive(Clone)]
 struct AppState {
     webhook_secret: Vec<u8>,
+    auth: GitHubAppAuthClient,
+    installation_tokens: Arc<Mutex<InstallationTokenCache>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubWebhookPayload {
+    action: Option<String>,
+    installation: Option<GitHubInstallation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubInstallation {
+    id: u64,
 }
 
 #[tokio::main]
@@ -62,6 +80,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState {
         webhook_secret: secret.into_bytes(),
+        auth: GitHubAppAuthClient::new(AppCredentials::from_env()?)?,
+        installation_tokens: Arc::new(Mutex::new(InstallationTokenCache::new())),
     };
 
     let app = Router::new()
@@ -77,10 +97,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(bind).await?;
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("install Ctrl-C handler");
-            info!("shutdown signal received");
+            match tokio::signal::ctrl_c().await {
+                Ok(()) => {
+                    info!("shutdown signal received");
+                }
+                Err(error) => {
+                    warn!(%error, "failed to install Ctrl-C handler");
+                    std::future::pending::<()>().await;
+                }
+            }
         })
         .await?;
 
@@ -140,18 +165,61 @@ async fn webhook(
         EventKind::Ping => {
             info!(delivery, "ping received");
         }
-        EventKind::Installation => {
-            info!(
-                delivery,
-                "installation event — TODO: persist install metadata"
-            );
-        }
-        EventKind::PullRequest => {
-            info!(
-                delivery,
-                "pull_request event — TODO: clone, run foxguard, post --github-pr comment"
-            );
-        }
+        EventKind::Installation => match parse_webhook_payload(&body) {
+            Ok(payload) => {
+                if let Some(installation) = payload.installation {
+                    if payload.action.as_deref() == Some("deleted") {
+                        remove_cached_installation_token(&state, installation.id);
+                    }
+                    info!(
+                        delivery,
+                        installation_id = installation.id,
+                        action = payload.action.as_deref().unwrap_or("?"),
+                        "installation event — TODO: persist install metadata"
+                    );
+                } else {
+                    warn!(delivery, "installation event missing installation.id");
+                }
+            }
+            Err(error) => {
+                warn!(delivery, %error, "installation payload was not valid JSON");
+            }
+        },
+        EventKind::PullRequest => match parse_webhook_payload(&body) {
+            Ok(payload) => {
+                if let Some(installation) = payload.installation {
+                    let state_for_task = state.clone();
+                    let delivery = delivery.to_string();
+                    let action = payload.action.unwrap_or_else(|| "?".to_string());
+                    let installation_id = installation.id;
+                    std::mem::drop(tokio::spawn(async move {
+                        match installation_token_for(&state_for_task, installation_id).await {
+                            Ok(_) => {
+                                info!(
+                                    delivery,
+                                    installation_id,
+                                    action,
+                                    "pull_request auth ready — TODO: clone, run foxguard, post --github-pr comment"
+                                );
+                            }
+                            Err(error) => {
+                                warn!(
+                                    delivery,
+                                    installation_id,
+                                    %error,
+                                    "failed to prepare pull_request auth"
+                                );
+                            }
+                        }
+                    }));
+                } else {
+                    warn!(delivery, "pull_request event missing installation.id");
+                }
+            }
+            Err(error) => {
+                warn!(delivery, %error, "pull_request payload was not valid JSON");
+            }
+        },
         EventKind::Other => {
             // Acknowledge so GitHub doesn't retry. We log at debug
             // because a noisy install can subscribe us to events we
@@ -163,12 +231,80 @@ async fn webhook(
     StatusCode::ACCEPTED
 }
 
+fn parse_webhook_payload(body: &[u8]) -> Result<GitHubWebhookPayload, serde_json::Error> {
+    serde_json::from_slice(body)
+}
+
+async fn installation_token_for(
+    state: &AppState,
+    installation_id: u64,
+) -> Result<String, AuthError> {
+    if let Some(token) = cached_installation_token(state, installation_id) {
+        return Ok(token);
+    }
+
+    let token = state
+        .auth
+        .create_installation_token(installation_id)
+        .await?;
+    let value = token.token.clone();
+    match state.installation_tokens.lock() {
+        Ok(mut cache) => cache.remember(installation_id, token, std::time::SystemTime::now()),
+        Err(error) => {
+            warn!(%error, installation_id, "installation token cache lock poisoned");
+        }
+    }
+    Ok(value)
+}
+
+fn cached_installation_token(state: &AppState, installation_id: u64) -> Option<String> {
+    match state.installation_tokens.lock() {
+        Ok(cache) => cache
+            .lookup(installation_id, std::time::SystemTime::now())
+            .map(str::to_owned),
+        Err(error) => {
+            warn!(%error, installation_id, "installation token cache lock poisoned");
+            None
+        }
+    }
+}
+
+fn remove_cached_installation_token(state: &AppState, installation_id: u64) {
+    match state.installation_tokens.lock() {
+        Ok(mut cache) => cache.remove(installation_id),
+        Err(error) => {
+            warn!(%error, installation_id, "installation token cache lock poisoned");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    // The signature verification logic itself is exhaustively tested
-    // in `src/github_app/webhook.rs`. Routing is exercised by the
-    // axum runtime in production; pulling it into unit tests would
-    // require spinning up a tokio runtime per test for low marginal
-    // value. When the pull_request handler lands it should ship with
-    // its own integration tests against a mocked GitHub API.
+    use super::*;
+
+    #[test]
+    fn parses_installation_id_from_pull_request_payload() {
+        let payload =
+            match parse_webhook_payload(br#"{"action":"opened","installation":{"id":12345}}"#) {
+                Ok(payload) => payload,
+                Err(error) => panic!("payload should parse: {error}"),
+            };
+
+        assert_eq!(payload.action.as_deref(), Some("opened"));
+        assert_eq!(
+            payload.installation.map(|installation| installation.id),
+            Some(12345)
+        );
+    }
+
+    #[test]
+    fn parses_payload_without_installation_id() {
+        let payload = match parse_webhook_payload(br#"{"action":"synchronize"}"#) {
+            Ok(payload) => payload,
+            Err(error) => panic!("payload should parse: {error}"),
+        };
+
+        assert_eq!(payload.action.as_deref(), Some("synchronize"));
+        assert!(payload.installation.is_none());
+    }
 }
