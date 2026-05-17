@@ -51,8 +51,11 @@ fn normalize_path(path: &str, repo: &Path) -> String {
 }
 
 fn parse_foxguard_findings(output: &[u8], repo: &Path) -> Vec<NormalizedFinding> {
-    let findings: Vec<Value> =
-        serde_json::from_slice(output).expect("invalid foxguard JSON output");
+    let report: Value = serde_json::from_slice(output).expect("invalid foxguard JSON output");
+    let findings = report["findings"]
+        .as_array()
+        .cloned()
+        .expect("foxguard JSON report missing findings array");
     let mut normalized = findings
         .into_iter()
         .map(|finding| NormalizedFinding {

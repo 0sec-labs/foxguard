@@ -132,6 +132,20 @@ fn skb_inplace_skcipher_no_cow_flags_ipcomp_sibling_fixture() {
     );
 }
 
+#[test]
+fn rxrpc_verify_response_dispatch_flags_conn_event_fixture() {
+    let n = run_rule_at_path(
+        "rxrpc-verify-response-dispatch.yaml",
+        "rxrpc_conn_event_vulnerable.c",
+        "net/rxrpc/conn_event.c",
+    );
+    assert!(
+        n >= 1,
+        "expected conn_event RESPONSE dispatch fixture to be flagged, got {} findings",
+        n
+    );
+}
+
 // --- Tier 2 known-FP fixtures (negative: extra cow-gate names dominate) ---
 
 #[test]

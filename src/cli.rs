@@ -77,6 +77,10 @@ pub struct ScanArgs {
     #[arg(short, long)]
     pub quiet: bool,
 
+    /// Write machine-readable output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
+
     /// Maximum file size in bytes to scan (default: 1 MB)
     #[arg(long, default_value_t = 1_048_576)]
     pub max_file_size: u64,
@@ -140,11 +144,92 @@ pub struct InitArgs {
 #[derive(Args, Debug, Clone)]
 pub struct BaselineArgs {
     #[command(flatten)]
-    pub scan: ScanArgs,
+    pub scan: BaselineScanArgs,
 
     /// Output path for the baseline file
     #[arg(long, default_value = ".foxguard/baseline.json")]
     pub output: String,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct BaselineScanArgs {
+    /// Path to scan
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Path to foxguard config file
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: OutputFormat,
+
+    /// Minimum severity to report
+    #[arg(short, long, value_enum)]
+    pub severity: Option<SeverityFilter>,
+
+    /// Path to Semgrep YAML rule file or directory
+    #[arg(short, long)]
+    pub rules: Option<String>,
+
+    /// Disable built-in rules and run only external rules loaded via --rules
+    #[arg(long, default_value_t = false)]
+    pub no_builtins: bool,
+
+    /// Scan changed files only (staged first, then unstaged)
+    #[arg(long, default_value_t = false)]
+    pub changed: bool,
+
+    /// Exclude scan-relative paths by glob or prefix (repeatable)
+    #[arg(long)]
+    pub exclude: Vec<String>,
+
+    /// Apply a baseline file to suppress known findings
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    /// Write the current findings to a baseline file
+    #[arg(long)]
+    pub write_baseline: Option<String>,
+
+    /// Show source-to-sink dataflow traces on taint findings
+    #[arg(long, default_value_t = false)]
+    pub explain: bool,
+
+    /// Auto-fix supported taint findings (writes changes to disk)
+    #[arg(long, default_value_t = false)]
+    pub fix: bool,
+
+    /// Post findings as inline review comments on a GitHub PR
+    #[arg(long)]
+    pub github_pr: Option<u64>,
+
+    /// Suppress terminal output (exit code still reflects findings)
+    #[arg(short, long)]
+    pub quiet: bool,
+
+    /// Maximum file size in bytes to scan (default: 1 MB)
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_file_size: u64,
+
+    /// Show per-finding confidence scores in terminal output
+    #[arg(long, default_value_t = false)]
+    pub show_confidence: bool,
+
+    /// Minimum confidence (0.0–1.0) to report. Findings below this
+    /// threshold are suppressed. Defaults to 0.0 (report all).
+    #[arg(long)]
+    pub min_confidence: Option<f32>,
+
+    /// Internal: set by the `pqc` subcommand to filter to PQ rules only.
+    #[arg(hide = true, long, default_value_t = false)]
+    pub pq_mode: bool,
+
+    /// Emit CNSA 2.0 compliance annotations on crypto-related findings and
+    /// a migration-readiness summary block in terminal output (issue #241).
+    #[arg(long, default_value_t = false)]
+    pub cnsa2: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -172,6 +257,10 @@ pub struct SecretsArgs {
     /// Write the current findings to a baseline file
     #[arg(long)]
     pub write_baseline: Option<String>,
+
+    /// Write machine-readable output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
 
     /// Exclude a file or directory prefix from secrets scanning (repeatable)
     #[arg(long = "exclude-path")]
@@ -215,6 +304,10 @@ pub struct DiffArgs {
     /// Disable built-in rules and run only external rules loaded via --rules
     #[arg(long, default_value_t = false)]
     pub no_builtins: bool,
+
+    /// Write machine-readable output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
 
     /// Maximum file size in bytes to scan (default: 1 MB)
     #[arg(long, default_value_t = 1_048_576)]
@@ -320,6 +413,10 @@ pub struct PqcArgs {
     #[arg(long)]
     pub github_pr: Option<u64>,
 
+    /// Write machine-readable output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
+
     /// Apply a baseline file to suppress known findings
     #[arg(long)]
     pub baseline: Option<String>,
@@ -347,6 +444,7 @@ impl PqcArgs {
             fix: false,
             github_pr: self.github_pr,
             quiet: self.quiet,
+            output: self.output.clone(),
             max_file_size: self.max_file_size,
             show_confidence: self.show_confidence,
             min_confidence: None,
@@ -354,6 +452,33 @@ impl PqcArgs {
             // `pqc` subcommand always shows CNSA 2.0 context — that's
             // exactly the audience for that command.
             cnsa2: true,
+        }
+    }
+}
+
+impl BaselineScanArgs {
+    pub fn to_scan_args(&self) -> ScanArgs {
+        ScanArgs {
+            path: self.path.clone(),
+            config: self.config.clone(),
+            format: self.format,
+            severity: self.severity,
+            rules: self.rules.clone(),
+            no_builtins: self.no_builtins,
+            changed: self.changed,
+            exclude: self.exclude.clone(),
+            baseline: self.baseline.clone(),
+            write_baseline: self.write_baseline.clone(),
+            explain: self.explain,
+            fix: self.fix,
+            github_pr: self.github_pr,
+            quiet: self.quiet,
+            output: None,
+            max_file_size: self.max_file_size,
+            show_confidence: self.show_confidence,
+            min_confidence: self.min_confidence,
+            pq_mode: self.pq_mode,
+            cnsa2: self.cnsa2,
         }
     }
 }

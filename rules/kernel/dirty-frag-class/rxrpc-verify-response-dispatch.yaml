@@ -1,0 +1,40 @@
+# Dirty Frag class — AF_RXRPC response dispatch into an opaque verify_response
+# backend.
+#
+# net/rxrpc/conn_event.c is a confirmed advisory site, but the in-place
+# skcipher decrypt happens in the selected security backend (rxkad on v6.14),
+# not inline in the dispatcher itself. The broad skb-inplace-skcipher rule
+# therefore cannot see the crypto idiom from this file alone.
+#
+# This narrow companion rule flags the RESPONSE-case dispatch callsite so the
+# advisory-named file is not dropped from Tier 1 scans. Triage must confirm the
+# chosen backend eventually performs in-place decrypt on the skb without a
+# dominating cow/unshare gate.
+#
+# Recall caveats — shapes this rule MISSES:
+#   - renamed or wrapper-mediated verify_response dispatch.
+#   - the decrypt helper itself; that is still covered by the generic
+#     skb-inplace-skcipher-no-cow rule when scanning rxkad.c.
+#
+# Precision caveats — false-positive shapes NOT suppressed:
+#   - alternate security backends wired through verify_response that do not
+#     reach an in-place skcipher decrypt. Triage step: confirm the backend is
+#     rxkad or a structurally equivalent clone.
+rules:
+  - id: kernel/dirty-frag/rxrpc-verify-response-dispatch
+    pattern-regex: '(?ms)RXRPC_PACKET_TYPE_RESPONSE\s*:\s*[^}]*?\bconn->security->verify_response\s*\(\s*conn\s*,\s*skb\s*\)'
+    message: |
+      RXRPC RESPONSE dispatch into an opaque verify_response backend
+      (Dirty Frag class). net/rxrpc/conn_event.c reaches the vulnerable RxKAD
+      decrypt path through conn->security->verify_response(conn, skb) rather
+      than an inline crypto_skcipher_decrypt() idiom, so confirm the selected
+      backend performs in-place skb decrypt without a dominating
+      skb_cow_data / skb_unshare / skb_make_writable / pskb_expand_head gate.
+      See oss-security 2026-05-07 advisory and pwnkit issue #263.
+    severity: ERROR
+    languages: [c]
+    paths:
+      include:
+        - net/rxrpc/conn_event*.c
+    metadata:
+      cwe: "CWE-787"

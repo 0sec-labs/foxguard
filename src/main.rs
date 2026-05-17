@@ -1,12 +1,12 @@
 use clap::Parser;
 use foxguard::app::{
     execute_diff, execute_scan, execute_secrets, resolve_scan_args as resolve_app_scan_args,
-    scan_findings,
+    scan_findings_resolved,
 };
 use foxguard::baseline::write_baseline_at_root;
 use foxguard::cli::{
-    BaselineArgs, Cli, Command, DiffArgs, InitArgs, OutputFormat, PqcArgs, ScanArgs, SecretsArgs,
-    TuiArgs,
+    BaselineArgs, BaselineScanArgs, Cli, Command, DiffArgs, InitArgs, OutputFormat, PqcArgs,
+    ScanArgs, SecretsArgs, TuiArgs,
 };
 use foxguard::config::load_for_scan;
 use foxguard::tui::run_scan_tui;
@@ -60,6 +60,10 @@ fn run_scan(scan: &ScanArgs) -> i32 {
 
     match result.args.format {
         OutputFormat::Terminal => {
+            if result.args.output.is_some() {
+                eprintln!("Error: --output requires a machine-readable format");
+                return 2;
+            }
             if !result.args.quiet {
                 foxguard::report::terminal::clear_banner();
                 foxguard::report::terminal::print_findings_full(
@@ -74,9 +78,17 @@ fn run_scan(scan: &ScanArgs) -> i32 {
                 );
             }
         }
-        OutputFormat::Json => foxguard::report::json::print_json(&result.findings),
-        OutputFormat::Sarif => foxguard::report::sarif::print_sarif(&result.findings),
-        OutputFormat::Cbom => foxguard::report::cbom::print_cbom(&result.findings),
+        _ => {
+            if let Err(error) = foxguard::output::emit_scan_report(
+                &result.findings,
+                &result.args,
+                result.files_scanned,
+                result.duration,
+            ) {
+                eprintln!("Error: {}", error);
+                return 2;
+            }
+        }
     }
 
     if let Some(pr_number) = result.args.github_pr {
@@ -98,7 +110,7 @@ fn run_scan(scan: &ScanArgs) -> i32 {
 }
 
 fn run_baseline(args: &BaselineArgs) -> i32 {
-    let mut scan = match resolve_app_scan_args(&args.scan) {
+    let mut scan = match resolve_app_scan_args(&args.scan.to_scan_args()) {
         Ok(scan) => scan,
         Err(error) => {
             eprintln!("Error: {}", error);
@@ -107,8 +119,10 @@ fn run_baseline(args: &BaselineArgs) -> i32 {
     };
     scan.write_baseline = None;
     scan.baseline = None;
+    let scan_path = scan.path.clone();
+    let scan_config = scan.config.clone();
 
-    let result = match scan_findings(&scan) {
+    let result = match scan_findings_resolved(scan) {
         Ok(result) => result,
         Err(error) => {
             eprintln!("Error: {}", error);
@@ -116,7 +130,7 @@ fn run_baseline(args: &BaselineArgs) -> i32 {
         }
     };
 
-    let config = match load_for_scan(Path::new(&scan.path), scan.config.as_deref()) {
+    let config = match load_for_scan(Path::new(&scan_path), scan_config.as_deref()) {
         Ok(config) => config,
         Err(error) => {
             eprintln!("Error: {}", error);
@@ -124,7 +138,7 @@ fn run_baseline(args: &BaselineArgs) -> i32 {
         }
     };
     let identity_root = foxguard::path_identity::project_root(
-        Path::new(&scan.path),
+        Path::new(&scan_path),
         config.as_ref().map(|config| config.project_root.as_path()),
     );
 
@@ -168,15 +182,27 @@ fn run_secrets(args: &SecretsArgs) -> i32 {
 
     match result.args.format {
         OutputFormat::Terminal => {
+            if result.args.output.is_some() {
+                eprintln!("Error: --output requires a machine-readable format");
+                return 2;
+            }
             foxguard::report::terminal::print_findings(
                 &result.findings,
                 result.files_scanned,
                 result.duration,
             );
         }
-        OutputFormat::Json => foxguard::report::json::print_json(&result.findings),
-        OutputFormat::Sarif => foxguard::report::sarif::print_sarif(&result.findings),
-        OutputFormat::Cbom => foxguard::report::cbom::print_cbom(&result.findings),
+        _ => {
+            if let Err(error) = foxguard::output::emit_secrets_report(
+                &result.findings,
+                &result.args,
+                result.files_scanned,
+                result.duration,
+            ) {
+                eprintln!("Error: {}", error);
+                return 2;
+            }
+        }
     }
 
     if !result.findings.is_empty() {
@@ -203,15 +229,27 @@ fn run_diff_cmd(args: &DiffArgs) -> i32 {
 
     match result.args.format {
         OutputFormat::Terminal => {
+            if result.args.output.is_some() {
+                eprintln!("Error: --output requires a machine-readable format");
+                return 2;
+            }
             foxguard::report::terminal::print_findings(
                 &result.findings,
                 result.files_scanned,
                 result.duration,
             );
         }
-        OutputFormat::Json => foxguard::report::json::print_json(&result.findings),
-        OutputFormat::Sarif => foxguard::report::sarif::print_sarif(&result.findings),
-        OutputFormat::Cbom => foxguard::report::cbom::print_cbom(&result.findings),
+        _ => {
+            if let Err(error) = foxguard::output::emit_diff_report(
+                &result.findings,
+                &result.args,
+                result.files_scanned,
+                result.duration,
+            ) {
+                eprintln!("Error: {}", error);
+                return 2;
+            }
+        }
     }
 
     if new_count > 0 {
@@ -303,7 +341,7 @@ fn run_init(args: &InitArgs) -> i32 {
 
     if !args.no_baseline {
         let baseline_args = BaselineArgs {
-            scan: ScanArgs {
+            scan: BaselineScanArgs {
                 path: args.path.clone(),
                 config: None,
                 format: OutputFormat::Json,
@@ -342,6 +380,7 @@ fn run_init(args: &InitArgs) -> i32 {
             exclude_paths: Vec::new(),
             exclude_path_file: None,
             ignored_rules: Vec::new(),
+            output: None,
             max_file_size: 1_048_576,
         };
 

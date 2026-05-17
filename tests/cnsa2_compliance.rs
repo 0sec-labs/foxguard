@@ -24,6 +24,15 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn json_findings_from_stdout(stdout: &[u8]) -> Vec<serde_json::Value> {
+    let report: serde_json::Value =
+        serde_json::from_slice(stdout).unwrap_or_else(|e| panic!("invalid JSON output: {e}"));
+    report["findings"]
+        .as_array()
+        .cloned()
+        .expect("JSON report missing findings array")
+}
+
 // ── 1. Every real PQ-related rule produces a non-None deadline ────────────
 
 /// Exact list of rule IDs that must declare a CNSA 2.0 deadline. Hard-coded
@@ -100,9 +109,7 @@ fn scan_json_findings(target: &Path) -> Vec<serde_json::Value> {
         .output()
         .expect("foxguard should run");
     // foxguard exits 1 when findings exist — accept non-zero exit codes.
-    let text = String::from_utf8_lossy(&out.stdout);
-    serde_json::from_str::<Vec<serde_json::Value>>(&text)
-        .unwrap_or_else(|e| panic!("expected JSON array of findings, got: {text}\nerror: {e}"))
+    json_findings_from_stdout(&out.stdout)
 }
 
 #[test]
