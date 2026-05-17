@@ -97,9 +97,21 @@ Expected results:
 - Finding input exits `2` and emits a compact finding summary to stderr.
 - Both `tool_input.file_path` and `tool_input.path` are accepted.
 
-`claude plugin validate plugins/claude-code` was attempted with Claude Code
-`2.1.119`, but did not return and was stopped locally. Treat an in-session
-Claude Code smoke test as still required before submission.
+`claude plugin validate plugins/claude-code` passed with Claude Code `2.1.143`.
+
+Non-interactive Claude Code smoke tests using `claude -p --plugin-dir
+plugins/claude-code` passed for:
+
+- `/foxguard:setup`
+- `/foxguard:scan tests/fixtures/safe.py`
+- `/foxguard:diff-scan main`
+- `/foxguard:secrets tests/fixtures/safe.py`
+- `/foxguard:triage`
+
+`/foxguard:pq-audit tests/fixtures/safe.py` exposed an outdated local
+`foxguard 0.7.1` binary on `PATH` that lacks the `pqc` subcommand. The setup
+and PQ audit skills now explicitly detect that case and tell the user to
+upgrade rather than silently falling back to a generic scan.
 
 ## External Submission
 
