@@ -77,6 +77,10 @@ pub struct ScanArgs {
     #[arg(short, long)]
     pub rules: Option<String>,
 
+    /// Pre-built CodeQL database for external `engine: codeql` rules
+    #[arg(long = "codeql-db")]
+    pub codeql_db: Option<String>,
+
     /// Disable built-in rules and run only external rules loaded via --rules
     #[arg(long, default_value_t = false)]
     pub no_builtins: bool,
@@ -207,6 +211,10 @@ pub struct BaselineScanArgs {
     /// Path to Semgrep YAML rule file or directory
     #[arg(short, long)]
     pub rules: Option<String>,
+
+    /// Pre-built CodeQL database for external `engine: codeql` rules
+    #[arg(long = "codeql-db")]
+    pub codeql_db: Option<String>,
 
     /// Disable built-in rules and run only external rules loaded via --rules
     #[arg(long, default_value_t = false)]
@@ -474,6 +482,7 @@ impl PqcArgs {
             format: self.format,
             severity: self.severity,
             rules: None,
+            codeql_db: None,
             no_builtins: false,
             changes: self.changes.clone(),
             exclude: self.exclude.clone(),
@@ -503,6 +512,7 @@ impl BaselineScanArgs {
             format: self.format,
             severity: self.severity,
             rules: self.rules.clone(),
+            codeql_db: self.codeql_db.clone(),
             no_builtins: self.no_builtins,
             changes: self.changes.clone(),
             exclude: self.exclude.clone(),

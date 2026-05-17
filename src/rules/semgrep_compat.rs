@@ -1057,7 +1057,10 @@ pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
             if raw_rule
                 .get("engine")
                 .and_then(YamlValue::as_str)
-                .is_some_and(|engine| engine.eq_ignore_ascii_case("coccinelle"))
+                .is_some_and(|engine| {
+                    engine.eq_ignore_ascii_case("coccinelle")
+                        || engine.eq_ignore_ascii_case("codeql")
+                })
             {
                 continue;
             }
