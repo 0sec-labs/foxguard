@@ -7,6 +7,8 @@ pub mod diff;
 pub mod engine;
 pub mod fix;
 pub mod git;
+#[cfg(feature = "github-app")]
+pub mod github_app;
 pub mod output;
 pub mod path_identity;
 pub mod report;

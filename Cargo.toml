@@ -45,8 +45,29 @@ unicode-segmentation = "1"
 unicode-width = "0.2"
 wait-timeout = "0.2.1"
 
+# Optional deps for the GitHub App webhook receiver (gated behind the
+# `github-app` feature). Off by default so the core scanner build stays
+# lean. See src/github_app/README.md and issue #246.
+axum = { version = "0.7", default-features = false, features = ["http1", "tokio", "json", "macros"], optional = true }
+tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "signal"], optional = true }
+hmac = { version = "0.12", optional = true }
+hex = { version = "0.4", optional = true }
+tower-http = { version = "0.6", default-features = false, features = ["trace", "limit"], optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"], optional = true }
+
+[features]
+default = []
+# Builds the foxguard-github-app binary plus its dependency closure.
+github-app = ["dep:axum", "dep:tokio", "dep:hmac", "dep:hex", "dep:tower-http", "dep:tracing", "dep:tracing-subscriber"]
+
 [[bin]]
 name = "foxguard-mcp"
 path = "src/bin/foxguard_mcp.rs"
+
+[[bin]]
+name = "foxguard-github-app"
+path = "src/bin/foxguard_github_app.rs"
+required-features = ["github-app"]
 
 [dev-dependencies]
