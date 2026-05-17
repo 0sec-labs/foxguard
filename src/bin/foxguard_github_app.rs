@@ -27,6 +27,7 @@ use axum::{
 use foxguard::github_app::auth::{
     AppCredentials, AuthError, GitHubAppAuthClient, InstallationTokenCache,
 };
+use foxguard::github_app::installation_store::{InstallationMetadataInput, InstallationStore};
 use foxguard::github_app::review::GitHubReviewClient;
 use foxguard::github_app::webhook::{verify_signature, EventKind, SignatureError};
 use foxguard::report::github_pr::relative_path;
@@ -51,6 +52,7 @@ struct AppState {
     auth: GitHubAppAuthClient,
     review: GitHubReviewClient,
     installation_tokens: Arc<Mutex<InstallationTokenCache>>,
+    installations: Arc<Mutex<InstallationStore>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,11 +61,24 @@ struct GitHubWebhookPayload {
     installation: Option<GitHubInstallation>,
     pull_request: Option<GitHubPullRequest>,
     repository: Option<GitHubRepository>,
+    repositories: Option<Vec<GitHubRepositorySummary>>,
+    repositories_added: Option<Vec<GitHubRepositorySummary>>,
+    repositories_removed: Option<Vec<GitHubRepositorySummary>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct GitHubInstallation {
     id: u64,
+    account: Option<GitHubAccount>,
+    repository_selection: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubAccount {
+    id: Option<u64>,
+    login: Option<String>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +96,11 @@ struct GitHubPullRequestHead {
 #[derive(Debug, Deserialize)]
 struct GitHubRepository {
     clone_url: String,
+    full_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubRepositorySummary {
     full_name: String,
 }
 
@@ -112,6 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth: GitHubAppAuthClient::new(credentials)?,
         review,
         installation_tokens: Arc::new(Mutex::new(InstallationTokenCache::new())),
+        installations: Arc::new(Mutex::new(InstallationStore::from_env_or_default()?)),
     };
 
     let app = Router::new()
@@ -197,15 +218,23 @@ async fn webhook(
         }
         EventKind::Installation => match parse_webhook_payload(&body) {
             Ok(payload) => {
-                if let Some(installation) = payload.installation {
+                if let Some(installation) = payload.installation.as_ref() {
                     if payload.action.as_deref() == Some("deleted") {
                         remove_cached_installation_token(&state, installation.id);
                     }
+                    let persisted = match persist_installation_event(&state, &payload) {
+                        Ok(persisted) => persisted,
+                        Err(error) => {
+                            warn!(delivery, installation_id = installation.id, %error, "failed to persist installation metadata");
+                            false
+                        }
+                    };
                     info!(
                         delivery,
                         installation_id = installation.id,
                         action = payload.action.as_deref().unwrap_or("?"),
-                        "installation event — TODO: persist install metadata"
+                        persisted,
+                        "installation event processed"
                     );
                 } else {
                     warn!(delivery, "installation event missing installation.id");
@@ -277,6 +306,65 @@ async fn webhook(
 
 fn parse_webhook_payload(body: &[u8]) -> Result<GitHubWebhookPayload, serde_json::Error> {
     serde_json::from_slice(body)
+}
+
+fn persist_installation_event(
+    state: &AppState,
+    payload: &GitHubWebhookPayload,
+) -> Result<bool, String> {
+    let installation = payload
+        .installation
+        .as_ref()
+        .ok_or_else(|| "installation payload missing installation.id".to_string())?;
+    let mut store = state
+        .installations
+        .lock()
+        .map_err(|error| format!("installation store lock poisoned: {error}"))?;
+
+    match payload.action.as_deref() {
+        Some("deleted") => store
+            .remove(installation.id)
+            .map_err(|error| error.to_string()),
+        Some("added") => {
+            let repositories = repository_names(payload.repositories_added.as_deref());
+            store
+                .add_repositories(installation.id, repositories)
+                .map(|()| true)
+                .map_err(|error| error.to_string())
+        }
+        Some("removed") => {
+            let repositories = repository_names(payload.repositories_removed.as_deref());
+            store
+                .remove_repositories(installation.id, repositories)
+                .map(|()| true)
+                .map_err(|error| error.to_string())
+        }
+        _ => store
+            .upsert(InstallationMetadataInput {
+                installation_id: installation.id,
+                account_login: installation
+                    .account
+                    .as_ref()
+                    .and_then(|account| account.login.clone()),
+                account_id: installation.account.as_ref().and_then(|account| account.id),
+                account_type: installation
+                    .account
+                    .as_ref()
+                    .and_then(|account| account.kind.clone()),
+                repository_selection: installation.repository_selection.clone(),
+                repositories: repository_names(payload.repositories.as_deref()),
+            })
+            .map(|()| true)
+            .map_err(|error| error.to_string()),
+    }
+}
+
+fn repository_names(repositories: Option<&[GitHubRepositorySummary]>) -> Vec<String> {
+    repositories
+        .unwrap_or_default()
+        .iter()
+        .map(|repository| repository.full_name.clone())
+        .collect()
 }
 
 #[derive(Debug)]
@@ -644,6 +732,47 @@ mod tests {
 
         assert_eq!(payload.action.as_deref(), Some("synchronize"));
         assert!(payload.installation.is_none());
+    }
+
+    #[test]
+    fn parses_installation_metadata_payload() {
+        let payload = match parse_webhook_payload(
+            br#"{
+                "action":"created",
+                "installation":{
+                    "id":12345,
+                    "repository_selection":"selected",
+                    "account":{"id":99,"login":"octo-org","type":"Organization"}
+                },
+                "repositories":[
+                    {"full_name":"octo-org/app"},
+                    {"full_name":"octo-org/service"}
+                ]
+            }"#,
+        ) {
+            Ok(payload) => payload,
+            Err(error) => panic!("payload should parse: {error}"),
+        };
+
+        let installation = match payload.installation {
+            Some(installation) => installation,
+            None => panic!("installation should parse"),
+        };
+        let account = match installation.account {
+            Some(account) => account,
+            None => panic!("account should parse"),
+        };
+
+        assert_eq!(installation.id, 12345);
+        assert_eq!(
+            installation.repository_selection.as_deref(),
+            Some("selected")
+        );
+        assert_eq!(account.login.as_deref(), Some("octo-org"));
+        assert_eq!(
+            repository_names(payload.repositories.as_deref()),
+            vec!["octo-org/app".to_string(), "octo-org/service".to_string()]
+        );
     }
 
     #[test]

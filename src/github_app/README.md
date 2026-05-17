@@ -13,14 +13,14 @@ cargo build --release --features github-app --bin foxguard-github-app
 
 - `webhook.rs` — HMAC-SHA256 signature verification (`verify_signature`) and the `EventKind` router enum. 10 unit tests pin the verification contract: known-good vector, modified body, wrong secret, missing/empty/non-hex/short-length digest, trailing-whitespace tolerance, and the kind-routing map.
 - `auth.rs` — GitHub App JWT generation, installation-token exchange, and conservative in-memory token caching. It reads app credentials from `FOXGUARD_GITHUB_APP_ID` and either `FOXGUARD_GITHUB_PRIVATE_KEY` or an absolute `FOXGUARD_GITHUB_PRIVATE_KEY_PATH`, and keeps the outbound GitHub API base URL configurable for tests and allowlisted GitHub Enterprise hosts.
-- `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, extracts installation IDs from JSON payloads, prepares installation auth for `pull_request` deliveries, clones and scans pull-request heads in a bounded temp workspace, posts foxguard PR review comments through the installation token, clears cached tokens when installations are deleted, and returns `202 Accepted` for all known kinds.
-- `review.rs` — installation-token GitHub REST client for PR review comments. It deletes prior foxguard review comments, lists changed PR files, filters findings to files in the diff, and creates a single review using the shared CLI comment formatter.
+- `installation_store.rs` — small JSON-backed installation registry. It records account metadata and selected repositories from `installation` / `installation_repositories` webhooks so self-hosted operators can recover install state across restarts without a database dependency.
+- `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, extracts installation IDs from JSON payloads, persists installation metadata, prepares installation auth for `pull_request` deliveries, clones and scans pull-request heads in a bounded temp workspace, posts foxguard PR review comments through the installation token, clears cached tokens when installations are deleted, and returns `202 Accepted` for all known kinds.
+- `review.rs` — installation-token GitHub REST client for PR review comments. It deletes prior foxguard review comments, lists changed PR files, filters findings to commentable diff lines, and posts inline comments using the shared CLI comment formatter.
 
 ## What's NOT here yet (Phase 2)
 
 The intentional gap. Each of these is a follow-up PR so the architecture above can land cleanly first:
 
-- **`installation` handler.** Persist install metadata so we know which orgs we're serving. SQLite is fine for Phase 1; the data is small and operationally easy to back up.
 - **Check Runs API.** Inline annotations on the diff once the comment path is solid.
 
 ## Running locally
@@ -32,6 +32,8 @@ export FOXGUARD_GITHUB_PRIVATE_KEY_PATH=/path/to/private-key.pem
 # Optional for GitHub Enterprise:
 # export FOXGUARD_GITHUB_API_BASE_URL=https://github.example.com/api/v3
 # export FOXGUARD_GITHUB_ALLOWED_API_HOSTS=github.example.com
+# Optional install metadata location (defaults to ./.foxguard-github-app/installations.json):
+# export FOXGUARD_INSTALLATIONS_PATH=/var/lib/foxguard-github-app/installations.json
 export FOXGUARD_BIND=127.0.0.1:8080
 foxguard-github-app
 ```
@@ -53,8 +55,8 @@ curl -sS -X POST http://127.0.0.1:8080/webhook \
 
 ## Self-hosting
 
-A reference Dockerfile lives at the repo root: [`Dockerfile.github-app`](../../Dockerfile.github-app). It builds the binary with the `github-app` feature, drops to a non-root user, and exposes `:8080`. Operators can deploy it to anything that runs containers (Fly.io, Railway, ECS, a tiny VM); the only persistent state once the install handler lands will be the install metadata, which is fine on a single small SQLite volume.
+A reference Dockerfile lives at the repo root: [`Dockerfile.github-app`](../../Dockerfile.github-app). It builds the binary with the `github-app` feature, drops to a non-root user, and exposes `:8080`. Operators can deploy it to anything that runs containers (Fly.io, Railway, ECS, a tiny VM); the only persistent state is the install metadata JSON file, which is fine on a single small mounted volume.
 
 ## Status
 
-The receiver now covers the first useful App loop: verified webhook intake, installation-token auth, bounded PR checkout + scan, and PR review comment posting. Persistent installation metadata and Check Runs annotations are still staged follow-ups.
+The receiver now covers the first useful App loop: verified webhook intake, installation metadata persistence, installation-token auth, bounded PR checkout + scan, and PR review comment posting. Check Runs annotations are still staged follow-up work.
