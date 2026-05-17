@@ -23,6 +23,26 @@ pub mod taint_engine;
 use crate::{Finding, Language, Severity};
 use std::path::Path;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaintEngine {
+    Go,
+    JavaScript,
+    Python,
+}
+
+#[derive(Debug, Clone)]
+pub struct RegistryTaintSpec {
+    pub rule_id: &'static str,
+    pub language: Language,
+    pub engine: TaintEngine,
+    pub spec: taint_engine::TaintSpec,
+}
+
+pub struct AnalysisPlan<'a> {
+    pub ast_rules: Vec<&'a dyn Rule>,
+    pub taint_specs: Vec<RegistryTaintSpec>,
+}
+
 /// Macro to reduce boilerplate in `impl Rule for …` blocks.
 ///
 /// # Variant 1 — rules that only implement `check`:
@@ -503,6 +523,57 @@ impl RuleRegistry {
             .collect()
     }
 
+    pub fn taint_specs_for_language(&self, language: Language) -> Vec<RegistryTaintSpec> {
+        let enabled_rule_ids: std::collections::HashSet<&str> = self
+            .rules
+            .iter()
+            .filter(|rule| rule.language() == language)
+            .map(|rule| rule.id())
+            .collect();
+
+        builtin_taint_specs_for_language(language)
+            .into_iter()
+            .filter(|spec| enabled_rule_ids.contains(spec.rule_id))
+            .collect()
+    }
+
+    pub fn analysis_plan_for_path<'a>(
+        &'a self,
+        language: Language,
+        path: &Path,
+    ) -> AnalysisPlan<'a> {
+        let taint_specs = self.taint_specs_for_language(language);
+        let taint_rule_ids: std::collections::HashSet<&str> =
+            taint_specs.iter().map(|spec| spec.rule_id).collect();
+
+        let ast_rules = self
+            .rules
+            .iter()
+            .filter(|rule| {
+                rule.language() == language
+                    && rule.applies_to_path(path)
+                    && !taint_rule_ids.contains(rule.id())
+            })
+            .map(|rule| rule.as_ref())
+            .collect();
+
+        let taint_specs = taint_specs
+            .into_iter()
+            .filter(|spec| {
+                self.rules.iter().any(|rule| {
+                    rule.id() == spec.rule_id
+                        && rule.language() == language
+                        && rule.applies_to_path(path)
+                })
+            })
+            .collect();
+
+        AnalysisPlan {
+            ast_rules,
+            taint_specs,
+        }
+    }
+
     /// Apply per-rule options from config. Warns on stderr for unknown rule IDs
     /// and returns errors for invalid option values.
     pub fn configure_rules(
@@ -580,6 +651,39 @@ impl RuleRegistry {
         }
 
         unknown
+    }
+}
+
+fn builtin_taint_specs_for_language(language: Language) -> Vec<RegistryTaintSpec> {
+    match language {
+        Language::Go => go::go_taint_rule_specs()
+            .into_iter()
+            .map(|(rule_id, spec)| RegistryTaintSpec {
+                rule_id,
+                language,
+                engine: TaintEngine::Go,
+                spec,
+            })
+            .collect(),
+        Language::JavaScript => javascript::js_taint_rule_specs()
+            .into_iter()
+            .map(|(rule_id, spec)| RegistryTaintSpec {
+                rule_id,
+                language,
+                engine: TaintEngine::JavaScript,
+                spec,
+            })
+            .collect(),
+        Language::Python => python::python_taint_rule_specs()
+            .into_iter()
+            .map(|(rule_id, spec)| RegistryTaintSpec {
+                rule_id,
+                language,
+                engine: TaintEngine::Python,
+                spec,
+            })
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -669,6 +773,45 @@ mod tests {
             &["py/typo".to_string()],
         );
         assert_eq!(unknown, vec!["py/typo".to_string()]);
+    }
+
+    #[test]
+    fn registry_exposes_enabled_taint_specs() {
+        let mut registry = RuleRegistry::new();
+        let unknown = registry.apply_rule_filter(
+            &[
+                "py/taint-eval".to_string(),
+                "py/taint-sql-injection".to_string(),
+                "py/no-eval".to_string(),
+            ],
+            &[],
+        );
+        assert!(unknown.is_empty());
+
+        let specs = registry.taint_specs_for_language(Language::Python);
+        let ids: std::collections::BTreeSet<&str> = specs.iter().map(|spec| spec.rule_id).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains("py/taint-eval"));
+        assert!(ids.contains("py/taint-sql-injection"));
+        assert!(specs.iter().all(|spec| spec.language == Language::Python
+            && spec.engine == TaintEngine::Python
+            && !spec.spec.sinks.is_empty()));
+    }
+
+    #[test]
+    fn analysis_plan_splits_taint_specs_from_ast_rules() {
+        let mut registry = RuleRegistry::new();
+        let unknown = registry.apply_rule_filter(
+            &["py/taint-eval".to_string(), "py/no-eval".to_string()],
+            &[],
+        );
+        assert!(unknown.is_empty());
+
+        let plan = registry.analysis_plan_for_path(Language::Python, Path::new("app.py"));
+        assert_eq!(plan.ast_rules.len(), 1);
+        assert_eq!(plan.ast_rules[0].id(), "py/no-eval");
+        assert_eq!(plan.taint_specs.len(), 1);
+        assert_eq!(plan.taint_specs[0].rule_id, "py/taint-eval");
     }
 
     #[test]

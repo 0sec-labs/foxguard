@@ -3,7 +3,7 @@ use crate::rules::go_taint::{self, go_aliases_from_tree};
 use crate::rules::javascript_taint::{self, js_aliases_from_tree};
 use crate::rules::python_aliases::{from_tree as py_aliases_from_tree, resolve_imports_to_paths};
 use crate::rules::python_taint;
-use crate::rules::{common::AliasTable, FileContext, RuleRegistry};
+use crate::rules::{common::AliasTable, FileContext, RuleRegistry, TaintEngine};
 use crate::{Finding, Language};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
@@ -688,22 +688,23 @@ fn scan_files(
     let start = Instant::now();
     let warnings = Mutex::new(Vec::new());
 
-    let mut rules_by_lang: HashMap<Language, Vec<&dyn crate::rules::Rule>> = HashMap::new();
+    let mut taint_specs_by_lang: HashMap<Language, Vec<crate::rules::RegistryTaintSpec>> =
+        HashMap::new();
     for (_, language) in &files {
-        rules_by_lang
+        taint_specs_by_lang
             .entry(*language)
-            .or_insert_with(|| registry.rules_for_language(*language));
+            .or_insert_with(|| registry.taint_specs_for_language(*language));
     }
 
-    let has_python_taint_rules = rules_by_lang
+    let has_python_taint_rules = taint_specs_by_lang
         .get(&Language::Python)
-        .is_some_and(|rules| rules.iter().any(|rule| rule.id().contains("/taint-")));
-    let has_js_taint_rules = rules_by_lang
+        .is_some_and(|specs| !specs.is_empty());
+    let has_js_taint_rules = taint_specs_by_lang
         .get(&Language::JavaScript)
-        .is_some_and(|rules| rules.iter().any(|rule| rule.id().contains("/taint-")));
-    let has_go_taint_rules = rules_by_lang
+        .is_some_and(|specs| !specs.is_empty());
+    let has_go_taint_rules = taint_specs_by_lang
         .get(&Language::Go)
-        .is_some_and(|rules| rules.iter().any(|rule| rule.id().contains("/taint-")));
+        .is_some_and(|specs| !specs.is_empty());
     let mut prepared_files: HashMap<PathBuf, PreparedFile> = HashMap::new();
 
     // ── Pass 1: Extract cross-file taint summaries ────────────────────
@@ -726,7 +727,13 @@ fn scan_files(
 
     let (mut cross_file_summaries, has_python_cross_file): (CrossFileSummaryMap, bool) =
         if has_python_taint_rules && python_files.len() > 1 {
-            let rule_specs = crate::rules::python::python_taint_rule_specs();
+            let rule_specs: Vec<_> = taint_specs_by_lang
+                .get(&Language::Python)
+                .into_iter()
+                .flat_map(|specs| specs.iter())
+                .filter(|spec| matches!(spec.engine, TaintEngine::Python))
+                .map(|spec| (spec.rule_id, spec.spec.clone()))
+                .collect();
             let prepared_python: Vec<_> = python_files
                 .par_iter()
                 .filter_map(|(path, _)| {
@@ -778,7 +785,13 @@ fn scan_files(
     // JavaScript cross-file summaries: extract from all JS/TS files.
     let mut has_js_cross_file = false;
     if has_js_taint_rules && js_files.len() > 1 {
-        let js_rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        let js_rule_specs: Vec<_> = taint_specs_by_lang
+            .get(&Language::JavaScript)
+            .into_iter()
+            .flat_map(|specs| specs.iter())
+            .filter(|spec| matches!(spec.engine, TaintEngine::JavaScript))
+            .map(|spec| (spec.rule_id, spec.spec.clone()))
+            .collect();
         let prepared_js: Vec<_> = js_files
             .par_iter()
             .filter_map(|(path, _)| {
@@ -829,7 +842,13 @@ fn scan_files(
     // Go cross-file summaries: extract from all Go files.
     let mut has_go_cross_file = false;
     if has_go_taint_rules && go_files.len() > 1 {
-        let go_rule_specs = crate::rules::go::go_taint_rule_specs();
+        let go_rule_specs: Vec<_> = taint_specs_by_lang
+            .get(&Language::Go)
+            .into_iter()
+            .flat_map(|specs| specs.iter())
+            .filter(|spec| matches!(spec.engine, TaintEngine::Go))
+            .map(|spec| (spec.rule_id, spec.spec.clone()))
+            .collect();
         let prepared_go: Vec<_> = go_files
             .par_iter()
             .filter_map(|(path, _)| {
@@ -1007,12 +1026,13 @@ fn scan_files(
 
             let file_str = path.display().to_string();
             let relative_path = relative_scan_path(scan_root, path);
-            let Some(rules) = rules_by_lang.get(language) else {
+            let analysis_plan = registry.analysis_plan_for_path(*language, &relative_path);
+            if analysis_plan.ast_rules.is_empty() && analysis_plan.taint_specs.is_empty() {
                 return FileScanOutcome {
                     findings: Vec::new(),
                     stats: file_stats,
                 };
-            };
+            }
 
             // Per-file analysis context. Python builds an import alias table so
             // rules can resolve aliased callees (`import pickle as p; p.loads(x)`)
@@ -1129,13 +1149,11 @@ fn scan_files(
             // `crate::rules::go::run_go_taint_batched` for details.
             let enabled_go_taint_ids: std::collections::HashSet<&str> =
                 if matches!(language, Language::Go) {
-                    rules
+                    analysis_plan
+                        .taint_specs
                         .iter()
-                        .filter(|r| {
-                            crate::rules::go::is_go_taint_rule_id(r.id())
-                                && r.applies_to_path(&relative_path)
-                        })
-                        .map(|r| r.id())
+                        .filter(|spec| matches!(spec.engine, TaintEngine::Go))
+                        .map(|spec| spec.rule_id)
                         .collect()
                 } else {
                     std::collections::HashSet::new()
@@ -1154,13 +1172,11 @@ fn scan_files(
             // the Go block above — see `crate::rules::python::run_py_taint_batched`.
             let enabled_py_taint_ids: std::collections::HashSet<&str> =
                 if matches!(language, Language::Python) {
-                    rules
+                    analysis_plan
+                        .taint_specs
                         .iter()
-                        .filter(|r| {
-                            crate::rules::python::is_py_taint_rule_id(r.id())
-                                && r.applies_to_path(&relative_path)
-                        })
-                        .map(|r| r.id())
+                        .filter(|spec| matches!(spec.engine, TaintEngine::Python))
+                        .map(|spec| spec.rule_id)
                         .collect()
                 } else {
                     std::collections::HashSet::new()
@@ -1178,13 +1194,11 @@ fn scan_files(
             // above — see `crate::rules::javascript::run_js_taint_batched`.
             let enabled_js_taint_ids: std::collections::HashSet<&str> =
                 if matches!(language, Language::JavaScript) {
-                    rules
+                    analysis_plan
+                        .taint_specs
                         .iter()
-                        .filter(|r| {
-                            crate::rules::javascript::is_js_taint_rule_id(r.id())
-                                && r.applies_to_path(&relative_path)
-                        })
-                        .map(|r| r.id())
+                        .filter(|spec| matches!(spec.engine, TaintEngine::JavaScript))
+                        .map(|spec| spec.rule_id)
                         .collect()
                 } else {
                     std::collections::HashSet::new()
@@ -1198,21 +1212,7 @@ fn scan_files(
                 ));
             }
 
-            for rule in rules {
-                if !rule.applies_to_path(&relative_path) {
-                    continue;
-                }
-                // Skip rules already handled by the batched taint
-                // runners above.
-                if enabled_go_taint_ids.contains(rule.id()) {
-                    continue;
-                }
-                if enabled_py_taint_ids.contains(rule.id()) {
-                    continue;
-                }
-                if enabled_js_taint_ids.contains(rule.id()) {
-                    continue;
-                }
+            for rule in analysis_plan.ast_rules {
                 file_findings.extend(rule.check_with_context(source, tree, &ctx));
             }
 
