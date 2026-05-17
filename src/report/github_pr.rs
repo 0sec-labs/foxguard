@@ -1,7 +1,8 @@
 use crate::{Finding, Severity};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-const COMMENT_MARKER: &str = "<!-- foxguard:pr-review -->";
+pub const COMMENT_MARKER: &str = "<!-- foxguard:pr-review -->";
 
 /// Format the severity as an uppercase label for the PR comment.
 fn severity_label(severity: Severity) -> &'static str {
@@ -14,7 +15,7 @@ fn severity_label(severity: Severity) -> &'static str {
 }
 
 /// Build the markdown body for a single inline review comment.
-fn format_comment_body(finding: &Finding) -> String {
+pub fn format_comment_body(finding: &Finding) -> String {
     let cwe_suffix = finding
         .cwe
         .as_ref()
@@ -95,10 +96,12 @@ fn delete_existing_foxguard_comments(repo: &str, pr_number: u64) -> Result<usize
 ///
 /// If `scan_root` is provided, the finding's file path is stripped of that
 /// prefix so the resulting path is relative (as required by the GitHub API).
-fn relative_path(file: &str, scan_root: Option<&Path>) -> String {
+pub fn relative_path(file: &str, scan_root: Option<&Path>) -> String {
     if let Some(root) = scan_root {
         if let Ok(canonical_root) = std::fs::canonicalize(root) {
-            let file_path = Path::new(file);
+            // `file` comes from scanner findings and is canonicalized below
+            // before it is stripped against the trusted scan root.
+            let file_path = Path::new(file); // foxguard: ignore[rs/no-path-traversal]
             let canonical_file =
                 std::fs::canonicalize(file_path).unwrap_or(file_path.to_path_buf());
             if let Ok(stripped) = canonical_file.strip_prefix(&canonical_root) {
@@ -109,6 +112,61 @@ fn relative_path(file: &str, scan_root: Option<&Path>) -> String {
     // Fallback: strip leading "./" or "/" if present
     let trimmed = file.strip_prefix("./").unwrap_or(file);
     trimmed.strip_prefix('/').unwrap_or(trimmed).to_string()
+}
+
+pub fn review_comments_for_findings(
+    findings: &[Finding],
+    pr_files: &HashSet<String>,
+    scan_root: Option<&Path>,
+) -> Vec<serde_json::Value> {
+    findings
+        .iter()
+        .filter_map(|f| {
+            let path = relative_path(&f.file, scan_root);
+            if !pr_files.contains(&path) {
+                return None;
+            }
+            Some(serde_json::json!({
+                "path": path,
+                "line": f.line,
+                "side": "RIGHT",
+                "body": format_comment_body(f),
+            }))
+        })
+        .collect()
+}
+
+pub fn review_comments_for_commentable_lines(
+    findings: &[Finding],
+    commentable_lines: &HashMap<String, HashSet<usize>>,
+    scan_root: Option<&Path>,
+) -> Vec<serde_json::Value> {
+    findings
+        .iter()
+        .filter_map(|f| {
+            let path = relative_path(&f.file, scan_root);
+            if !commentable_lines
+                .get(&path)
+                .is_some_and(|lines| lines.contains(&f.line))
+            {
+                return None;
+            }
+            Some(serde_json::json!({
+                "path": path,
+                "line": f.line,
+                "side": "RIGHT",
+                "body": format_comment_body(f),
+            }))
+        })
+        .collect()
+}
+
+pub fn review_body_for_comments(comments: Vec<serde_json::Value>) -> serde_json::Value {
+    serde_json::json!({
+        "event": "COMMENT",
+        "body": format!("{COMMENT_MARKER}\n\n**foxguard** found {} issue(s) in this PR", comments.len()),
+        "comments": comments,
+    })
 }
 
 /// Post findings as inline review comments on a GitHub pull request.
@@ -154,38 +212,21 @@ pub fn post_pr_review(
         .output()
         .map_err(|e| format!("Failed to get PR files: {e}"))?;
 
-    let pr_files: std::collections::HashSet<String> = String::from_utf8_lossy(&diff_output.stdout)
+    let pr_files: HashSet<String> = String::from_utf8_lossy(&diff_output.stdout)
         .lines()
         .map(|l| l.trim().to_string())
         .collect();
 
     // Build the comments array — only for files that are in the PR diff
-    let comments: Vec<serde_json::Value> = findings
-        .iter()
-        .filter_map(|f| {
-            let path = relative_path(&f.file, scan_root);
-            if !pr_files.contains(&path) {
-                return None;
-            }
-            Some(serde_json::json!({
-                "path": path,
-                "line": f.line,
-                "side": "RIGHT",
-                "body": format_comment_body(f),
-            }))
-        })
-        .collect();
+    let comments = review_comments_for_findings(findings, &pr_files, scan_root);
 
     if comments.is_empty() {
         eprintln!("No findings in PR-changed files, skipping review");
         return Ok(());
     }
 
-    let review_body = serde_json::json!({
-        "event": "COMMENT",
-        "body": format!("{COMMENT_MARKER}\n\n**foxguard** found {} issue(s) in this PR", comments.len()),
-        "comments": comments,
-    });
+    let comment_count = comments.len();
+    let review_body = review_body_for_comments(comments);
 
     let json_str = serde_json::to_string(&review_body)
         .map_err(|e| format!("Failed to serialize review body: {e}"))?;
@@ -214,8 +255,7 @@ pub fn post_pr_review(
 
     eprintln!(
         "Posted {} inline comment(s) on PR #{}",
-        comments.len(),
-        pr_number
+        comment_count, pr_number
     );
     Ok(())
 }
@@ -330,7 +370,10 @@ mod tests {
             {"id": 13, "body": "<!-- foxguard:pr-review -->\nolder"}
         ]"#;
 
-        let ids = existing_foxguard_comment_ids(stdout).expect("failed to parse comments");
+        let ids = match existing_foxguard_comment_ids(stdout) {
+            Ok(ids) => ids,
+            Err(error) => panic!("failed to parse comments: {error}"),
+        };
 
         assert_eq!(ids, vec![11, 13]);
     }
@@ -343,7 +386,10 @@ mod tests {
             [{"id": 23, "body": "<!-- foxguard:pr-review -->\nolder"}]
         ]"#;
 
-        let ids = existing_foxguard_comment_ids(stdout).expect("failed to parse comments");
+        let ids = match existing_foxguard_comment_ids(stdout) {
+            Ok(ids) => ids,
+            Err(error) => panic!("failed to parse comments: {error}"),
+        };
 
         assert_eq!(ids, vec![21, 23]);
     }

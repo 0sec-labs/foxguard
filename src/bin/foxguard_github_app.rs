@@ -4,12 +4,9 @@
 //! <https://github.com/0sec-labs/foxguard/issues/246> for the design
 //! discussion.
 //!
-//! This binary is intentionally scoped to the *Phase-1 foundation*
-//! described in #246: receive webhook deliveries, verify the
-//! signature, route by event type, acknowledge with 202. The actual
-//! `pull_request` → clone → scan → comment pipeline is wired as a
-//! TODO and lands in a follow-up so the architecture can be reviewed
-//! in isolation first.
+//! This binary receives webhook deliveries, verifies the signature,
+//! routes supported event types, and runs the Phase-1 GitHub App loop:
+//! `pull_request` → clone → scan → PR review comments.
 //!
 //! Build:    `cargo build --release --features github-app --bin foxguard-github-app`
 //! Run:      `FOXGUARD_WEBHOOK_SECRET=xxx FOXGUARD_BIND=0.0.0.0:8080 foxguard-github-app`
@@ -30,7 +27,10 @@ use axum::{
 use foxguard::github_app::auth::{
     AppCredentials, AuthError, GitHubAppAuthClient, InstallationTokenCache,
 };
+use foxguard::github_app::review::GitHubReviewClient;
 use foxguard::github_app::webhook::{verify_signature, EventKind, SignatureError};
+use foxguard::report::github_pr::relative_path;
+use foxguard::Finding;
 use serde::Deserialize;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
@@ -49,6 +49,7 @@ const PULL_REQUEST_SCAN_TIMEOUT: Duration = Duration::from_secs(60);
 struct AppState {
     webhook_secret: Vec<u8>,
     auth: GitHubAppAuthClient,
+    review: GitHubReviewClient,
     installation_tokens: Arc<Mutex<InstallationTokenCache>>,
 }
 
@@ -57,6 +58,7 @@ struct GitHubWebhookPayload {
     action: Option<String>,
     installation: Option<GitHubInstallation>,
     pull_request: Option<GitHubPullRequest>,
+    repository: Option<GitHubRepository>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,9 +105,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "0.0.0.0:8080".to_string())
         .parse()?;
 
+    let credentials = AppCredentials::from_env()?;
+    let review = GitHubReviewClient::new(credentials.api_base_url())?;
     let state = AppState {
         webhook_secret: secret.into_bytes(),
-        auth: GitHubAppAuthClient::new(AppCredentials::from_env()?)?,
+        auth: GitHubAppAuthClient::new(credentials)?,
+        review,
         installation_tokens: Arc::new(Mutex::new(InstallationTokenCache::new())),
     };
 
@@ -218,11 +223,13 @@ async fn webhook(
                     let action = payload.action.unwrap_or_else(|| "?".to_string());
                     let installation_id = installation.id;
                     let pull_request = payload.pull_request;
+                    let repository = payload.repository;
                     std::mem::drop(tokio::spawn(async move {
                         match process_pull_request_delivery(
                             state_for_task,
                             installation_id,
                             pull_request,
+                            repository,
                         )
                         .await
                         {
@@ -233,8 +240,10 @@ async fn webhook(
                                     action,
                                     pr_number = result.pr_number,
                                     repo = result.repo,
-                                    findings = result.findings,
-                                    "pull_request scan complete — TODO: post --github-pr comment"
+                                    findings = result.findings.len(),
+                                    posted_comments = result.posted_comments,
+                                    deleted_comments = result.deleted_comments,
+                                    "pull_request scan complete and PR review updated"
                                 );
                             }
                             Err(error) => {
@@ -274,7 +283,10 @@ fn parse_webhook_payload(body: &[u8]) -> Result<GitHubWebhookPayload, serde_json
 struct PullRequestScanResult {
     pr_number: u64,
     repo: String,
-    findings: usize,
+    head_sha: String,
+    findings: Vec<Finding>,
+    posted_comments: usize,
+    deleted_comments: usize,
 }
 
 #[derive(Debug)]
@@ -287,20 +299,43 @@ async fn process_pull_request_delivery(
     state: AppState,
     installation_id: u64,
     pull_request: Option<GitHubPullRequest>,
+    repository: Option<GitHubRepository>,
 ) -> Result<PullRequestScanResult, String> {
     let pull_request =
         pull_request.ok_or_else(|| "pull_request payload missing PR data".to_string())?;
+    let repository =
+        repository.ok_or_else(|| "pull_request payload missing repository".to_string())?;
     let token = installation_token_for(&state, installation_id)
         .await
         .map_err(|error| error.to_string())?;
 
-    tokio::task::spawn_blocking(move || run_pull_request_scan(pull_request, &token))
+    let scan_token = token.clone();
+    let mut result = tokio::task::spawn_blocking(move || {
+        run_pull_request_scan(pull_request, &repository.full_name, &scan_token)
+    })
+    .await
+    .map_err(|error| format!("pull_request scan task failed: {error}"))??;
+
+    let review = state
+        .review
+        .post_pull_request_review(
+            &result.repo,
+            result.pr_number,
+            &result.head_sha,
+            &result.findings,
+            None,
+            &token,
+        )
         .await
-        .map_err(|error| format!("pull_request scan task failed: {error}"))?
+        .map_err(|error| error.to_string())?;
+    result.posted_comments = review.posted_comments;
+    result.deleted_comments = review.deleted_comments;
+    Ok(result)
 }
 
 fn run_pull_request_scan(
     pull_request: GitHubPullRequest,
+    target_repo: &str,
     installation_token: &str,
 ) -> Result<PullRequestScanResult, String> {
     let workspace =
@@ -323,11 +358,17 @@ fn run_pull_request_scan(
     }
 
     let output = run_scanner(&checkout)?;
-    let findings = parse_json_findings_count(&output)?;
+    let mut findings = parse_json_findings(&output)?;
+    for finding in &mut findings {
+        finding.file = relative_path(&finding.file, Some(&checkout));
+    }
     Ok(PullRequestScanResult {
         pr_number: pull_request.number,
-        repo: pull_request.head.repo.full_name,
+        repo: target_repo.to_string(),
+        head_sha: pull_request.head.sha,
         findings,
+        posted_comments: 0,
+        deleted_comments: 0,
     })
 }
 
@@ -473,17 +514,16 @@ fn run_command_with_timeout(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn parse_json_findings_count(output: &str) -> Result<usize, String> {
+fn parse_json_findings(output: &str) -> Result<Vec<Finding>, String> {
     let value: serde_json::Value = serde_json::from_str(output)
         .map_err(|error| format!("failed to parse foxguard JSON output: {error}"))?;
-    if let Some(findings) = value
-        .get("findings")
-        .and_then(|findings| findings.as_array())
-    {
-        return Ok(findings.len());
+    if let Some(findings) = value.get("findings") {
+        return serde_json::from_value(findings.clone())
+            .map_err(|error| format!("failed to parse foxguard findings: {error}"));
     }
-    if let Some(findings) = value.as_array() {
-        return Ok(findings.len());
+    if value.is_array() {
+        return serde_json::from_value(value)
+            .map_err(|error| format!("failed to parse foxguard findings: {error}"));
     }
     Err("foxguard JSON output did not contain findings".to_string())
 }
@@ -620,27 +660,63 @@ mod tests {
 
     #[test]
     fn rejects_clone_url_credentials() {
-        let error = validate_clone_url("https://token@github.com/0sec-labs/foxguard.git")
-            .expect_err("credentials should be rejected");
+        let error = match validate_clone_url("https://token@github.com/0sec-labs/foxguard.git") {
+            Ok(_) => panic!("credentials should be rejected"),
+            Err(error) => error,
+        };
         assert!(error.contains("credentials"));
     }
 
     #[test]
     fn rejects_unallowlisted_clone_host() {
-        let error = validate_clone_url("https://169.254.169.254/repo.git")
-            .expect_err("metadata host should be rejected");
+        let error = match validate_clone_url("https://169.254.169.254/repo.git") {
+            Ok(_) => panic!("metadata host should be rejected"),
+            Err(error) => error,
+        };
         assert!(error.contains("not allowlisted"));
     }
 
     #[test]
-    fn parses_enveloped_findings_count() {
-        let json = r#"{"findings":[{"ruleId":"x"},{"ruleId":"y"}]}"#;
-        assert_eq!(parse_json_findings_count(json), Ok(2));
+    fn parses_enveloped_findings() {
+        let json = format!(
+            r#"{{"findings":[{},{}]}}"#,
+            sample_finding_json("x"),
+            sample_finding_json("y")
+        );
+        let findings = match parse_json_findings(&json) {
+            Ok(findings) => findings,
+            Err(error) => panic!("findings should parse: {error}"),
+        };
+
+        assert_eq!(findings.len(), 2);
+        assert_eq!(findings[0].rule_id, "x");
     }
 
     #[test]
-    fn parses_legacy_findings_array_count() {
-        let json = r#"[{"ruleId":"x"}]"#;
-        assert_eq!(parse_json_findings_count(json), Ok(1));
+    fn parses_legacy_findings_array() {
+        let json = format!("[{}]", sample_finding_json("x"));
+        let findings = match parse_json_findings(&json) {
+            Ok(findings) => findings,
+            Err(error) => panic!("findings should parse: {error}"),
+        };
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "x");
+    }
+
+    fn sample_finding_json(rule_id: &str) -> String {
+        serde_json::json!({
+            "rule_id": rule_id,
+            "severity": "high",
+            "cwe": null,
+            "description": "demo finding",
+            "file": "src/lib.rs",
+            "line": 1,
+            "column": 1,
+            "end_line": 1,
+            "end_column": 5,
+            "snippet": "demo"
+        })
+        .to_string()
     }
 }
