@@ -979,6 +979,14 @@ pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
 
     if let Some(raw_rules) = raw_doc.get("rules").and_then(YamlValue::as_sequence) {
         for raw_rule in raw_rules {
+            if raw_rule
+                .get("engine")
+                .and_then(YamlValue::as_str)
+                .is_some_and(|engine| engine.eq_ignore_ascii_case("coccinelle"))
+            {
+                continue;
+            }
+
             match semgrep_taint::parse_taint_rule(raw_rule) {
                 TaintRuleParse::Compiled(r) => rules.push(Box::new(r)),
                 TaintRuleParse::Skip(msg) => eprintln!("Warning: {}", msg),

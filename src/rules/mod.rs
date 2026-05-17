@@ -541,12 +541,24 @@ impl RuleRegistry {
     /// correspond to any registered rule. Callers should surface these
     /// as a single warning so users catch typos without failing the scan.
     pub fn apply_rule_filter(&mut self, enable: &[String], disable: &[String]) -> Vec<String> {
+        self.apply_rule_filter_with_known(enable, disable, &std::collections::HashSet::new())
+    }
+
+    pub fn apply_rule_filter_with_known(
+        &mut self,
+        enable: &[String],
+        disable: &[String],
+        additional_known: &std::collections::HashSet<String>,
+    ) -> Vec<String> {
         let known: std::collections::HashSet<&str> = self.rules.iter().map(|r| r.id()).collect();
 
         let mut unknown: Vec<String> = Vec::new();
         let mut seen_unknown: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for id in enable.iter().chain(disable.iter()) {
-            if !known.contains(id.as_str()) && seen_unknown.insert(id.as_str()) {
+            if !known.contains(id.as_str())
+                && !additional_known.contains(id.as_str())
+                && seen_unknown.insert(id.as_str())
+            {
                 unknown.push(id.clone());
             }
         }

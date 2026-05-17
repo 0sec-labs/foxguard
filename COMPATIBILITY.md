@@ -1,8 +1,8 @@
 # foxguard Compatibility
 
-Fast local security guard for changed files, built-in rules, and Semgrep-compatible YAML.
+Fast local security guard for changed files, built-in rules, Semgrep-compatible YAML, and Coccinelle semantic patches.
 
-foxguard supports a focused Semgrep-compatible YAML subset for local rule loading.
+foxguard supports a focused Semgrep-compatible YAML subset for local rule loading and an additive Coccinelle bridge for C semantic patches.
 
 That supported subset is regression-tested in-repo and parity-checked in CI against the real `semgrep` CLI.
 
@@ -23,6 +23,12 @@ External-rules-only compatibility run:
 
 ```sh
 foxguard --no-builtins --rules ./rules .
+```
+
+Coccinelle-backed C rule:
+
+```sh
+foxguard --rules ./kernel-rules .
 ```
 
 Adoption baseline:
@@ -85,6 +91,40 @@ Rule loading:
 - load a single YAML file
 - load a directory recursively
 - deduplicate language aliases that map to the same foxguard parser
+
+## Coccinelle bridge
+
+Rules with `engine: coccinelle` are loaded from the same `--rules` YAML files or directories as Semgrep-compatible rules:
+
+```yaml
+rules:
+  - id: kernel/dirty-frag-inplace-crypto-no-cow
+    engine: coccinelle
+    severity: high
+    languages: [c]
+    metadata:
+      cwe: CWE-362
+    message: In-place crypto on skb data without a preceding copy-on-write gate.
+    script_path: dirty-frag-inplace-crypto-no-cow.cocci
+```
+
+Supported Coccinelle rule keys:
+
+- `id`
+- `engine: coccinelle`
+- `message`
+- `severity` (`critical`, `high`, `medium`, `low`, plus Semgrep-style `ERROR`, `WARNING`, `INFO`)
+- `languages: [c]`
+- `metadata.cwe`
+- `script` for inline SmPL
+- `script_path` for a `.cocci` file relative to the YAML file
+
+Execution model:
+
+- foxguard shells out to upstream `spatch`; whatever SmPL surface your installed `spatch` accepts is the supported SmPL surface.
+- Coccinelle currently scans `.c` and `.h` files.
+- Findings are normalized into the same `Finding` shape used by built-in and Semgrep-compatible rules, so terminal, JSON, SARIF, CBOM, and baselines work through the existing report path.
+- If `spatch` is missing, foxguard emits one warning and skips Coccinelle rules while continuing the rest of the scan.
 
 ## Important limitations
 

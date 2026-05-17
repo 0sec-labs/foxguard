@@ -192,7 +192,7 @@ impl PathExcludeMatcher {
         Ok(Self { prefixes, globset })
     }
 
-    fn is_excluded(&self, path: &Path) -> bool {
+    pub(crate) fn is_excluded(&self, path: &Path) -> bool {
         let normalized = normalize_match_path(path);
 
         self.prefixes.iter().any(|prefix| {

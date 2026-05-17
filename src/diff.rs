@@ -1,5 +1,6 @@
 use crate::engine::{
-    scan_directory_with_notices, scan_paths_with_root_with_notices, ScanResult, ScanStats,
+    coccinelle, scan_directory_with_notices, scan_paths_with_root_with_notices, ScanResult,
+    ScanStats,
 };
 use crate::rules::RuleRegistry;
 use crate::Finding;
@@ -75,6 +76,7 @@ fn scan_target_branch_files_with_warnings(
     target: &str,
     changed_files: &[PathBuf],
     registry: &RuleRegistry,
+    coccinelle_rules: &[coccinelle::CoccinelleRule],
     max_file_size: u64,
 ) -> Result<(ScanResult, Vec<String>), String> {
     let temp_dir =
@@ -117,13 +119,29 @@ fn scan_target_branch_files_with_warnings(
         ));
     }
 
-    Ok(scan_paths_with_root_with_notices(
+    let (mut result, mut warnings) = scan_paths_with_root_with_notices(
         temp_dir.path(),
         &temp_paths,
         registry,
         max_file_size,
         None,
-    ))
+    );
+
+    if !coccinelle_rules.is_empty() {
+        append_coccinelle_scan(
+            &mut result,
+            &mut warnings,
+            coccinelle::scan_paths_with_notices(
+                temp_dir.path(),
+                &temp_paths,
+                coccinelle_rules,
+                max_file_size,
+                None,
+            ),
+        );
+    }
+
+    Ok((result, warnings))
 }
 
 /// Two findings are "the same" if they share the same rule_id and snippet content.
@@ -186,6 +204,16 @@ pub fn run_diff_with_warnings(
     registry: &RuleRegistry,
     max_file_size: u64,
 ) -> Result<((ScanResult, DiffResult), Vec<String>), String> {
+    run_diff_with_coccinelle_warnings(scan_path, target, registry, &[], max_file_size)
+}
+
+pub fn run_diff_with_coccinelle_warnings(
+    scan_path: &str,
+    target: &str,
+    registry: &RuleRegistry,
+    coccinelle_rules: &[coccinelle::CoccinelleRule],
+    max_file_size: u64,
+) -> Result<((ScanResult, DiffResult), Vec<String>), String> {
     let scan_root = Path::new(scan_path);
     let repo = repo_root(scan_root)?;
 
@@ -194,8 +222,15 @@ pub fn run_diff_with_warnings(
         .map_err(|_| format!("Target ref '{}' does not exist", target))?;
 
     // Scan current working tree
-    let (current_result, mut warnings) =
+    let (mut current_result, mut warnings) =
         scan_directory_with_notices(scan_path, registry, max_file_size, None);
+    if !coccinelle_rules.is_empty() {
+        append_coccinelle_scan(
+            &mut current_result,
+            &mut warnings,
+            coccinelle::scan_path_with_notices(scan_root, coccinelle_rules, max_file_size, None),
+        );
+    }
 
     // Get changed files between target and HEAD
     let changed = changed_files_vs_target(&repo, target)?;
@@ -221,8 +256,14 @@ pub fn run_diff_with_warnings(
         ));
     }
 
-    let (base_result, base_warnings) =
-        scan_target_branch_files_with_warnings(&repo, target, &changed, registry, max_file_size)?;
+    let (base_result, base_warnings) = scan_target_branch_files_with_warnings(
+        &repo,
+        target,
+        &changed,
+        registry,
+        coccinelle_rules,
+        max_file_size,
+    )?;
     warnings.extend(base_warnings);
     let current_files_scanned = current_result.files_scanned;
     let current_stats = current_result.stats.clone();
@@ -266,6 +307,27 @@ pub fn run_diff_with_warnings(
         ),
         warnings,
     ))
+}
+
+fn append_coccinelle_scan(
+    result: &mut ScanResult,
+    warnings: &mut Vec<String>,
+    coccinelle_result: coccinelle::CoccinelleScanResult,
+) {
+    if coccinelle_result.candidate_files == 0 {
+        return;
+    }
+
+    result.files_scanned += coccinelle_result.files_scanned;
+    result.findings.extend(coccinelle_result.findings);
+    result.findings.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then(a.line.cmp(&b.line))
+            .then(a.column.cmp(&b.column))
+            .then(a.rule_id.cmp(&b.rule_id))
+    });
+    warnings.extend(coccinelle_result.notices);
 }
 
 #[cfg(test)]

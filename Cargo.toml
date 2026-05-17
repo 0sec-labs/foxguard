@@ -42,6 +42,7 @@ toml = "0.8"
 shlex = "1"
 unicode-segmentation = "1"
 unicode-width = "0.2"
+wait-timeout = "0.2.1"
 
 [[bin]]
 name = "foxguard-mcp"
