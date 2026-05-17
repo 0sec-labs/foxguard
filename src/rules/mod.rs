@@ -43,6 +43,12 @@ pub struct AnalysisPlan<'a> {
     pub taint_specs: Vec<RegistryTaintSpec>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AstAnalysisRequirement {
+    SyntaxTree,
+    FileContext,
+}
+
 /// Macro to reduce boilerplate in `impl Rule for …` blocks.
 ///
 /// # Variant 1 — rules that only implement `check`:
@@ -146,6 +152,9 @@ macro_rules! impl_rule {
             fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<$crate::Finding> {
                 self.check_with_context(source, tree, &$crate::rules::FileContext::default())
             }
+            fn ast_analysis_requirement(&self) -> $crate::rules::AstAnalysisRequirement {
+                $crate::rules::AstAnalysisRequirement::FileContext
+            }
             fn check_with_context(
                 &self,
                 $src: &str,
@@ -178,6 +187,9 @@ macro_rules! impl_rule {
             fn cnsa2_deadline(&self) -> Option<&'static str> { Some($deadline) }
             fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<$crate::Finding> {
                 self.check_with_context(source, tree, &$crate::rules::FileContext::default())
+            }
+            fn ast_analysis_requirement(&self) -> $crate::rules::AstAnalysisRequirement {
+                $crate::rules::AstAnalysisRequirement::FileContext
             }
             fn check_with_context(
                 &self,
@@ -231,6 +243,10 @@ pub trait Rule: Send + Sync {
         true
     }
     fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding>;
+
+    fn ast_analysis_requirement(&self) -> AstAnalysisRequirement {
+        AstAnalysisRequirement::SyntaxTree
+    }
 
     /// Context-aware variant. Defaults to calling `check` so every existing
     /// rule works unchanged. Rules that need the per-file context (e.g.

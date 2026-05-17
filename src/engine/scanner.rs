@@ -3,7 +3,9 @@ use crate::rules::go_taint::{self, go_aliases_from_tree};
 use crate::rules::javascript_taint::{self, js_aliases_from_tree};
 use crate::rules::python_aliases::{from_tree as py_aliases_from_tree, resolve_imports_to_paths};
 use crate::rules::python_taint;
-use crate::rules::{common::AliasTable, FileContext, RuleRegistry, TaintEngine};
+use crate::rules::{
+    common::AliasTable, AstAnalysisRequirement, FileContext, Rule, RuleRegistry, TaintEngine,
+};
 use crate::{Finding, Language};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
@@ -21,6 +23,63 @@ pub struct ScanResult {
     pub files_scanned: usize,
     pub stats: ScanStats,
     pub duration: std::time::Duration,
+}
+
+struct AstRuleBatch<'a> {
+    entries: Vec<AstRuleBatchEntry<'a>>,
+    syntax_tree_rules: usize,
+    context_rules: usize,
+}
+
+struct AstRuleBatchEntry<'a> {
+    rule: &'a dyn Rule,
+    requirement: AstAnalysisRequirement,
+}
+
+impl<'a> AstRuleBatch<'a> {
+    fn from_rules(rules: &[&'a dyn Rule]) -> Self {
+        let mut syntax_tree_rules = 0;
+        let mut context_rules = 0;
+        let entries = rules
+            .iter()
+            .map(|rule| {
+                let requirement = rule.ast_analysis_requirement();
+                match requirement {
+                    AstAnalysisRequirement::SyntaxTree => syntax_tree_rules += 1,
+                    AstAnalysisRequirement::FileContext => context_rules += 1,
+                }
+                AstRuleBatchEntry {
+                    rule: *rule,
+                    requirement,
+                }
+            })
+            .collect();
+
+        Self {
+            entries,
+            syntax_tree_rules,
+            context_rules,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn run(&self, source: &str, tree: &tree_sitter::Tree, ctx: &FileContext<'_>) -> Vec<Finding> {
+        let mut findings = Vec::with_capacity(self.syntax_tree_rules + self.context_rules);
+        for entry in &self.entries {
+            match entry.requirement {
+                AstAnalysisRequirement::SyntaxTree => {
+                    findings.extend(entry.rule.check(source, tree));
+                }
+                AstAnalysisRequirement::FileContext => {
+                    findings.extend(entry.rule.check_with_context(source, tree, ctx));
+                }
+            }
+        }
+        findings
+    }
 }
 
 /// File accounting for a scan.
@@ -1027,7 +1086,8 @@ fn scan_files(
             let file_str = path.display().to_string();
             let relative_path = relative_scan_path(scan_root, path);
             let analysis_plan = registry.analysis_plan_for_path(*language, &relative_path);
-            if analysis_plan.ast_rules.is_empty() && analysis_plan.taint_specs.is_empty() {
+            let ast_rule_batch = AstRuleBatch::from_rules(&analysis_plan.ast_rules);
+            if ast_rule_batch.is_empty() && analysis_plan.taint_specs.is_empty() {
                 return FileScanOutcome {
                     findings: Vec::new(),
                     stats: file_stats,
@@ -1212,9 +1272,7 @@ fn scan_files(
                 ));
             }
 
-            for rule in analysis_plan.ast_rules {
-                file_findings.extend(rule.check_with_context(source, tree, &ctx));
-            }
+            file_findings.extend(ast_rule_batch.run(source, tree, &ctx));
 
             for finding in &mut file_findings {
                 finding.file = file_str.clone();
@@ -1294,6 +1352,51 @@ fn normalize_match_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct CountingRule {
+        id: &'static str,
+        requirement: AstAnalysisRequirement,
+        syntax_calls: Arc<AtomicUsize>,
+        context_calls: Arc<AtomicUsize>,
+    }
+
+    impl Rule for CountingRule {
+        fn id(&self) -> &str {
+            self.id
+        }
+        fn severity(&self) -> crate::Severity {
+            crate::Severity::Low
+        }
+        fn cwe(&self) -> Option<&str> {
+            None
+        }
+        fn description(&self) -> &str {
+            "test rule"
+        }
+        fn language(&self) -> Language {
+            Language::JavaScript
+        }
+        fn ast_analysis_requirement(&self) -> AstAnalysisRequirement {
+            self.requirement
+        }
+        fn check(&self, _source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
+            self.syntax_calls.fetch_add(1, Ordering::SeqCst);
+            Vec::new()
+        }
+        fn check_with_context(
+            &self,
+            _source: &str,
+            _tree: &tree_sitter::Tree,
+            _ctx: &FileContext<'_>,
+        ) -> Vec<Finding> {
+            self.context_calls.fetch_add(1, Ordering::SeqCst);
+            Vec::new()
+        }
+    }
 
     #[test]
     fn block_comment_ignore_js() {
@@ -1355,6 +1458,34 @@ mod tests {
 
         assert!(matcher.is_excluded(Path::new("generated/foo/bar.js")));
         assert!(!matcher.is_excluded(Path::new("generated/foo/bar.ts")));
+    }
+
+    #[test]
+    fn ast_rule_batch_dispatches_by_analysis_requirement() {
+        let syntax_calls = Arc::new(AtomicUsize::new(0));
+        let context_calls = Arc::new(AtomicUsize::new(0));
+        let syntax_rule = CountingRule {
+            id: "test/syntax",
+            requirement: AstAnalysisRequirement::SyntaxTree,
+            syntax_calls: Arc::clone(&syntax_calls),
+            context_calls: Arc::clone(&context_calls),
+        };
+        let context_rule = CountingRule {
+            id: "test/context",
+            requirement: AstAnalysisRequirement::FileContext,
+            syntax_calls: Arc::clone(&syntax_calls),
+            context_calls: Arc::clone(&context_calls),
+        };
+        let rules: Vec<&dyn Rule> = vec![&syntax_rule, &context_rule];
+        let batch = AstRuleBatch::from_rules(&rules);
+        let source = "const value = 1;\n";
+        let tree = super::super::parser::parse_file(source, Language::JavaScript).expect("parse");
+
+        let findings = batch.run(source, &tree, &FileContext::default());
+
+        assert!(findings.is_empty());
+        assert_eq!(syntax_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(context_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]

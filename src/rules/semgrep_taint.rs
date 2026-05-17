@@ -267,6 +267,10 @@ impl Rule for SemgrepTaintRule {
         self.check_with_context(source, tree, &FileContext::default())
     }
 
+    fn ast_analysis_requirement(&self) -> crate::rules::AstAnalysisRequirement {
+        crate::rules::AstAnalysisRequirement::FileContext
+    }
+
     fn check_with_context(
         &self,
         source: &str,
