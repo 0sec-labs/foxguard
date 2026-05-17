@@ -12,13 +12,14 @@ cargo build --release --features github-app --bin foxguard-github-app
 ## What's here today (Phase 1)
 
 - `webhook.rs` — HMAC-SHA256 signature verification (`verify_signature`) and the `EventKind` router enum. 10 unit tests pin the verification contract: known-good vector, modified body, wrong secret, missing/empty/non-hex/short-length digest, trailing-whitespace tolerance, and the kind-routing map.
+- `auth.rs` — GitHub App JWT generation plus installation-token exchange. It reads app credentials from `FOXGUARD_GITHUB_APP_ID` and either `FOXGUARD_GITHUB_PRIVATE_KEY` or an absolute `FOXGUARD_GITHUB_PRIVATE_KEY_PATH`, and keeps the outbound GitHub API base URL configurable for tests and allowlisted GitHub Enterprise hosts.
 - `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, and returns `202 Accepted` for all known kinds with the actual handler bodies stubbed and clearly marked TODO.
 
 ## What's NOT here yet (Phase 2)
 
 The intentional gap. Each of these is a follow-up PR so the architecture above can land cleanly first:
 
-- **JWT-based App→installation auth.** Generate the App JWT from the `.pem` private key, exchange it for an installation token via the GitHub API, cache the token until expiry. Crate dep: `jsonwebtoken`.
+- **Auth wiring and token cache.** The auth client exists; the event handlers still need to call it and cache installation tokens until expiry.
 - **`pull_request` handler.** Clone the head ref into a sandboxed temp dir, run `foxguard scan` with a 60s timeout and a 1 GB repo cap, post the existing `--github-pr` output as a PR comment.
 - **`installation` handler.** Persist install metadata so we know which orgs we're serving. SQLite is fine for Phase 1; the data is small and operationally easy to back up.
 - **Check Runs API.** Inline annotations on the diff once the comment path is solid.
@@ -27,6 +28,11 @@ The intentional gap. Each of these is a follow-up PR so the architecture above c
 
 ```sh
 export FOXGUARD_WEBHOOK_SECRET=$(openssl rand -hex 32)
+export FOXGUARD_GITHUB_APP_ID=12345
+export FOXGUARD_GITHUB_PRIVATE_KEY_PATH=/path/to/private-key.pem
+# Optional for GitHub Enterprise:
+# export FOXGUARD_GITHUB_API_BASE_URL=https://github.example.com/api/v3
+# export FOXGUARD_GITHUB_ALLOWED_API_HOSTS=github.example.com
 export FOXGUARD_BIND=127.0.0.1:8080
 foxguard-github-app
 ```
