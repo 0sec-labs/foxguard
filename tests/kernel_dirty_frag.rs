@@ -9,6 +9,7 @@
 //! - upstream ESP patch f4c50a4034e62ab75f1d5cdd191dd5f9c77fdff4
 //! - pwnkit issue #263 (foxguard-first integration approach)
 
+use foxguard::engine::codeql::parse_codeql_file;
 use foxguard::engine::parser::parse_file;
 use foxguard::rules::semgrep_compat::parse_semgrep_file;
 use foxguard::Language;
@@ -216,6 +217,24 @@ fn dirty_frag_rules_ignore_crypto_template_wrapper_fixture() {
             "expected {rule_yaml} to ignore crypto template-wrapper fixture, got {n} findings"
         );
     }
+}
+
+#[test]
+fn esp_shared_frag_decrypt_guard_codeql_rule_parses() {
+    let (rules, notices) =
+        parse_codeql_file(&Path::new(RULES_DIR).join("esp-shared-frag-decrypt-guard-codeql.yaml"))
+            .expect("CodeQL rule parses cleanly");
+
+    assert!(
+        notices.is_empty(),
+        "expected no CodeQL parse notices, got {notices:?}"
+    );
+    assert_eq!(rules.len(), 1, "expected one CodeQL rule");
+    assert_eq!(
+        rules[0].id,
+        "kernel/dirty-frag/esp-shared-frag-decrypt-guard-codeql"
+    );
+    assert_eq!(rules[0].cwe.as_deref(), Some("CWE-787"));
 }
 
 #[test]

@@ -1,0 +1,21 @@
+# Dirty Frag class - ESP AEAD decrypt without shared-frag guard.
+#
+# This CodeQL companion rule calibrates the upstream Linux fix for
+# f4c50a4034e62ab75f1d5cdd191dd5f9c77fdff4. The vulnerable parent has
+# crypto_aead_decrypt() in esp_input()/esp6_input() without checking
+# skb_has_shared_frag(); the fixed commit extends the skip_cow gate with
+# !skb_has_shared_frag(skb).
+#
+# The query is intentionally narrow: it proves the real ESP regression shape
+# before broader MSG_SPLICE_PAGES taint modeling is added.
+rules:
+  - id: kernel/dirty-frag/esp-shared-frag-decrypt-guard-codeql
+    engine: codeql
+    message: |
+      ESP decrypt reaches crypto_aead_decrypt without an skb_has_shared_frag
+      guard in the same function. Shared MSG_SPLICE_PAGES frags can be
+      decrypted in place unless ESP copy-on-write also checks shared frags.
+    severity: ERROR
+    query: queries/kernel/dirty-frag-esp-shared-frag-decrypt-guard.ql
+    metadata:
+      cwe: "CWE-787"
