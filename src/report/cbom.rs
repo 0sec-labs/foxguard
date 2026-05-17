@@ -14,6 +14,19 @@ struct CryptoProps {
     protocol_type: Option<&'static str>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct DependencyIdentity {
+    package_manager: &'static str,
+    context: &'static str,
+    name: String,
+}
+
+struct DependencyOccurrence {
+    identity: DependencyIdentity,
+    version_text: Option<String>,
+    finding: Finding,
+}
+
 fn crypto_props(algo: &str) -> CryptoProps {
     match algo {
         "RSA" => CryptoProps {
@@ -63,21 +76,126 @@ fn crypto_props(algo: &str) -> CryptoProps {
     }
 }
 
+fn dependency_identity(finding: &Finding) -> Option<DependencyIdentity> {
+    let name = finding.dep_name.as_ref()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+
+    let (package_manager, context) = if finding.rule_id.starts_with("manifest/cargo-") {
+        ("cargo", "lockfile")
+    } else if finding.rule_id.starts_with("manifest/pip-") {
+        ("pip", "manifest")
+    } else {
+        ("unknown", "manifest")
+    };
+
+    Some(DependencyIdentity {
+        package_manager,
+        context,
+        name: normalize_dependency_name(package_manager, name),
+    })
+}
+
+fn normalize_dependency_name(package_manager: &str, name: &str) -> String {
+    match package_manager {
+        "pip" => name.to_ascii_lowercase().replace(['_', '.'], "-"),
+        _ => name.to_ascii_lowercase(),
+    }
+}
+
+fn dependency_bom_ref(identity: &DependencyIdentity) -> String {
+    format!(
+        "dependency:{}:{}",
+        identity.package_manager,
+        identity.name.replace([' ', '/', ':'], "-")
+    )
+}
+
+fn version_text(finding: &Finding) -> Option<String> {
+    let snippet = finding.snippet.trim();
+
+    if finding.rule_id.starts_with("manifest/cargo-") {
+        for line in snippet.lines() {
+            let line = line.trim();
+            if let Some(value) = line
+                .strip_prefix("version")
+                .and_then(|s| s.trim_start().strip_prefix('='))
+            {
+                let value = value.trim().trim_matches('"');
+                if !value.is_empty() {
+                    return Some(value.to_string());
+                }
+            }
+        }
+        return None;
+    }
+
+    if finding.rule_id.starts_with("manifest/pip-") {
+        let dep_name = finding.dep_name.as_deref()?;
+        let before_marker = snippet.split(';').next().unwrap_or(snippet).trim();
+        let tail = before_marker
+            .strip_prefix(dep_name)
+            .or_else(|| {
+                before_marker
+                    .get(..dep_name.len())
+                    .filter(|prefix| prefix.eq_ignore_ascii_case(dep_name))
+                    .map(|_| &before_marker[dep_name.len()..])
+            })
+            .unwrap_or("");
+        let tail = tail.trim();
+        if !tail.is_empty() {
+            return Some(tail.to_string());
+        }
+    }
+
+    None
+}
+
+fn dependency_occurrence(finding: &Finding) -> Option<DependencyOccurrence> {
+    let identity = dependency_identity(finding)?;
+    Some(DependencyOccurrence {
+        version_text: version_text(finding),
+        finding: finding.clone(),
+        identity,
+    })
+}
+
+fn occurrence_json(
+    f: &Finding,
+    dependency: Option<(&DependencyIdentity, &str, Option<&str>)>,
+) -> serde_json::Value {
+    let mut occurrence = json!({
+        "location": format!("{}:{}:{}", f.file, f.line, f.column),
+        "additionalContext": f.snippet.trim()
+    });
+
+    if let Some((identity, bom_ref, version_text)) = dependency {
+        occurrence["dependencyRef"] = json!(bom_ref);
+        occurrence["source"] = json!({
+            "file": f.file,
+            "packageManager": identity.package_manager,
+            "context": identity.context
+        });
+        occurrence["dependency"] = json!({
+            "name": identity.name,
+            "packageManager": identity.package_manager
+        });
+        if let Some(version_text) = version_text {
+            occurrence["versionText"] = json!(version_text);
+        }
+    }
+
+    occurrence
+}
+
 fn build_component(
     algo: &str,
     bom_ref: &str,
     findings: &[&Finding],
     props: &CryptoProps,
 ) -> serde_json::Value {
-    let occurrences: Vec<_> = findings
-        .iter()
-        .map(|f| {
-            json!({
-                "location": format!("{}:{}:{}", f.file, f.line, f.column),
-                "additionalContext": f.snippet.trim()
-            })
-        })
-        .collect();
+    let occurrences: Vec<_> = findings.iter().map(|f| occurrence_json(f, None)).collect();
 
     let mut crypto_properties = json!({ "assetType": props.asset_type });
 
@@ -105,6 +223,61 @@ fn build_component(
             "occurrences": occurrences
         }
     })
+}
+
+fn build_dependency_component(
+    identity: &DependencyIdentity,
+    bom_ref: &str,
+    occurrences: &[DependencyOccurrence],
+) -> serde_json::Value {
+    let mut version_texts: Vec<&str> = occurrences
+        .iter()
+        .filter_map(|occ| occ.version_text.as_deref())
+        .collect();
+    version_texts.sort_unstable();
+    version_texts.dedup();
+
+    let evidence: Vec<_> = occurrences
+        .iter()
+        .map(|occ| {
+            occurrence_json(
+                &occ.finding,
+                Some((identity, bom_ref, occ.version_text.as_deref())),
+            )
+        })
+        .collect();
+
+    let mut component = json!({
+        "type": "library",
+        "bom-ref": bom_ref,
+        "name": identity.name,
+        "properties": [
+            {
+                "name": "foxguard:package-manager",
+                "value": identity.package_manager
+            },
+            {
+                "name": "foxguard:dependency-context",
+                "value": identity.context
+            }
+        ],
+        "evidence": {
+            "occurrences": evidence
+        }
+    });
+
+    if !version_texts.is_empty() {
+        component["version"] = json!(version_texts.join(", "));
+        component["properties"]
+            .as_array_mut()
+            .expect("properties is an array")
+            .push(json!({
+                "name": "foxguard:version-texts",
+                "value": version_texts.join(", ")
+            }));
+    }
+
+    component
 }
 
 fn build_vulnerability(algo: &str, bom_ref: &str, findings: &[&Finding]) -> serde_json::Value {
@@ -234,9 +407,17 @@ fn deterministic_uuid(data: &str) -> String {
 pub fn build_cbom(findings: &[Finding]) -> (serde_json::Value, bool) {
     // Group findings by crypto_algorithm
     let mut groups: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
+    let mut dependency_groups: BTreeMap<DependencyIdentity, Vec<DependencyOccurrence>> =
+        BTreeMap::new();
     for f in findings {
         if let Some(algo) = &f.crypto_algorithm {
             groups.entry(algo.clone()).or_default().push(f);
+            if let Some(occurrence) = dependency_occurrence(f) {
+                dependency_groups
+                    .entry(occurrence.identity.clone())
+                    .or_default()
+                    .push(occurrence);
+            }
         }
     }
 
@@ -251,6 +432,11 @@ pub fn build_cbom(findings: &[Finding]) -> (serde_json::Value, bool) {
 
         components.push(build_component(algo, &bom_ref, group_findings, &props));
         vulnerabilities.push(build_vulnerability(algo, &bom_ref, group_findings));
+    }
+
+    for (identity, occurrences) in &dependency_groups {
+        let bom_ref = dependency_bom_ref(identity);
+        components.push(build_dependency_component(identity, &bom_ref, occurrences));
     }
 
     let components_json = serde_json::to_string(&components).unwrap_or_default();
@@ -336,6 +522,15 @@ mod tests {
             cnsa2_deadline: None,
             dep_name: None,
         }
+    }
+
+    fn make_dependency_finding(dep_name: &str, file: &str, line: usize, snippet: &str) -> Finding {
+        let mut finding = make_crypto_finding("RSA", file, line);
+        finding.rule_id = "manifest/pip-pq-vulnerable-dep".to_string();
+        finding.description = format!("Package `{dep_name}` uses RSA (PQ-vulnerable)");
+        finding.snippet = snippet.to_string();
+        finding.dep_name = Some(dep_name.to_string());
+        finding
     }
 
     #[test]
@@ -520,6 +715,63 @@ mod tests {
             assert_eq!(ratings[0]["severity"], "high");
             assert!(vuln["affects"][0]["ref"].is_string());
             assert!(vuln["cwes"].is_array());
+        }
+    }
+
+    #[test]
+    fn cbom_models_dependency_identity_and_occurrences_separately() {
+        let findings = vec![
+            make_dependency_finding(
+                "python-rsa",
+                "services/api/requirements.txt",
+                3,
+                "python-rsa==4.9",
+            ),
+            make_dependency_finding(
+                "python_rsa",
+                "services/worker/requirements.txt",
+                8,
+                "python_rsa>=4.8",
+            ),
+        ];
+
+        let (cbom, _) = build_cbom(&findings);
+        let components = cbom["components"]
+            .as_array()
+            .expect("components is an array");
+
+        let dependency_components: Vec<_> = components
+            .iter()
+            .filter(|component| component["type"] == "library")
+            .collect();
+        assert_eq!(
+            dependency_components.len(),
+            1,
+            "normalized pip dependency identity should group duplicate evidence"
+        );
+
+        let dependency = dependency_components[0];
+        assert_eq!(dependency["name"], "python-rsa");
+        assert_eq!(dependency["bom-ref"], "dependency:pip:python-rsa");
+        assert_eq!(dependency["version"], "==4.9, >=4.8");
+
+        let occurrences = dependency["evidence"]["occurrences"]
+            .as_array()
+            .expect("dependency component carries occurrence evidence");
+        assert_eq!(occurrences.len(), 2);
+
+        let locations: std::collections::BTreeSet<&str> = occurrences
+            .iter()
+            .map(|occ| occ["location"].as_str().unwrap())
+            .collect();
+        assert!(locations.contains("services/api/requirements.txt:3:1"));
+        assert!(locations.contains("services/worker/requirements.txt:8:1"));
+
+        for occurrence in occurrences {
+            assert_eq!(occurrence["dependencyRef"], "dependency:pip:python-rsa");
+            assert_eq!(occurrence["dependency"]["packageManager"], "pip");
+            assert_eq!(occurrence["source"]["context"], "manifest");
+            assert!(occurrence["versionText"].is_string());
         }
     }
 }
