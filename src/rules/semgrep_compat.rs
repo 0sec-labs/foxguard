@@ -6,6 +6,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::fmt;
 use std::path::Path;
 
 // ─── YAML Schema ────────────────────────────────────────────────────────────
@@ -122,7 +123,7 @@ pub struct SemgrepRule {
 #[derive(Debug, Clone)]
 pub enum PatternMatcher {
     /// Single pattern
-    Single(String),
+    Single(CompiledAstPattern),
     /// Regex match against source text
     Regex(Regex),
     /// Match any of these patterns (OR)
@@ -131,16 +132,33 @@ pub enum PatternMatcher {
     Combined {
         positives: Vec<PatternMatcher>,
         negatives: Vec<NegativeMatcher>,
-        inside: Option<String>,
-        not_inside: Option<String>,
+        inside: Option<CompiledAstPattern>,
+        not_inside: Option<CompiledAstPattern>,
         metavariable_regexes: Vec<MetavariableRegexConstraint>,
     },
 }
 
 #[derive(Debug, Clone)]
 pub enum NegativeMatcher {
-    Pattern(String),
+    Pattern(CompiledAstPattern),
     Regex(Regex),
+}
+
+#[derive(Clone)]
+pub struct CompiledAstPattern {
+    source: String,
+    tree: Option<tree_sitter::Tree>,
+    selector_kind: Option<String>,
+}
+
+impl fmt::Debug for CompiledAstPattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CompiledAstPattern")
+            .field("source", &self.source)
+            .field("compiled", &self.tree.is_some())
+            .field("selector_kind", &self.selector_kind)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -183,7 +201,7 @@ impl Rule for SemgrepRule {
         let root = tree.root_node();
 
         // Collect all matching nodes
-        let matches = match_pattern_in_tree(&self.matcher, root, source, self.lang);
+        let matches = match_pattern_in_tree(&self.matcher, root, source);
 
         for matched_node_range in matches {
             findings.push(Finding {
@@ -265,6 +283,27 @@ impl MetavariableRegexConstraint {
     }
 }
 
+impl CompiledAstPattern {
+    fn new(source: String, lang: Language) -> Self {
+        let tree = parse_file(&source, lang);
+        let selector_kind = tree
+            .as_ref()
+            .and_then(|tree| first_meaningful_node(tree.root_node(), &source))
+            .and_then(|node| selector_kind_for_pattern(node, &source));
+
+        Self {
+            source,
+            tree,
+            selector_kind,
+        }
+    }
+
+    fn pattern_node(&self) -> Option<tree_sitter::Node<'_>> {
+        let tree = self.tree.as_ref()?;
+        first_meaningful_node(tree.root_node(), &self.source)
+    }
+}
+
 // ─── Pattern Matching Engine ────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -285,15 +324,14 @@ fn match_pattern_in_tree(
     matcher: &PatternMatcher,
     root: tree_sitter::Node,
     source: &str,
-    lang: Language,
 ) -> MatchResult {
     match matcher {
-        PatternMatcher::Single(pat) => match_single_pattern(pat, root, source, lang),
+        PatternMatcher::Single(pat) => match_single_pattern(pat, root, source),
         PatternMatcher::Regex(regex) => match_regex_pattern(regex, source),
         PatternMatcher::Either(matchers) => {
             let mut results = Vec::new();
             for matcher in matchers {
-                results.extend(match_pattern_in_tree(matcher, root, source, lang));
+                results.extend(match_pattern_in_tree(matcher, root, source));
             }
             results.sort_by_key(|r| (r.start_byte, r.end_byte));
             results.dedup_by_key(|r| (r.start_byte, r.end_byte));
@@ -308,7 +346,7 @@ fn match_pattern_in_tree(
         } => {
             // If we have an inside pattern, only search within matching contexts
             let search_roots = if let Some(inside_pat) = inside {
-                let inside_matches = match_single_pattern(inside_pat, root, source, lang);
+                let inside_matches = match_single_pattern(inside_pat, root, source);
                 inside_matches
                     .iter()
                     .map(|m| (m.start_byte, m.end_byte))
@@ -318,7 +356,7 @@ fn match_pattern_in_tree(
             };
 
             let excluded_roots = if let Some(not_inside_pat) = not_inside {
-                let excluded_matches = match_single_pattern(not_inside_pat, root, source, lang);
+                let excluded_matches = match_single_pattern(not_inside_pat, root, source);
                 excluded_matches
                     .iter()
                     .map(|m| (m.start_byte, m.end_byte))
@@ -330,7 +368,7 @@ fn match_pattern_in_tree(
             // Find all positive matches
             let mut candidates: Option<Vec<MatchRange>> = None;
             for pos in positives {
-                let matches = match_pattern_in_tree(pos, root, source, lang);
+                let matches = match_pattern_in_tree(pos, root, source);
                 candidates = Some(match candidates {
                     None => matches,
                     Some(prev) => intersect_match_sets(prev, matches),
@@ -341,7 +379,7 @@ fn match_pattern_in_tree(
 
             // Filter out negative matches
             for neg in negatives {
-                let neg_matches = match_negative_pattern(neg, root, source, lang);
+                let neg_matches = match_negative_pattern(neg, root, source);
                 results.retain(|r| !neg_matches.iter().any(|n| ranges_overlap(r, n)));
             }
 
@@ -373,24 +411,13 @@ fn match_pattern_in_tree(
 
 /// Match a single pattern string against every node in the tree.
 fn match_single_pattern(
-    pattern: &str,
+    pattern: &CompiledAstPattern,
     root: tree_sitter::Node,
     source: &str,
-    lang: Language,
 ) -> MatchResult {
     let mut results = Vec::new();
 
-    // Parse the pattern as source code to get a pattern AST
-    let pattern_tree = match parse_file(pattern, lang) {
-        Some(t) => t,
-        None => return results,
-    };
-
-    let pat_root = pattern_tree.root_node();
-    // Find the first meaningful child of the pattern (skip module/program wrapper)
-    let pat_node = first_meaningful_node(pat_root, pattern);
-
-    let Some(pat_node) = pat_node else {
+    let Some(pat_node) = pattern.pattern_node() else {
         return results;
     };
 
@@ -448,35 +475,60 @@ fn first_meaningful_node<'a>(
     Some(node)
 }
 
+fn selector_kind_for_pattern(node: tree_sitter::Node<'_>, source: &str) -> Option<String> {
+    let text = &source[node.byte_range()];
+    let trimmed = text.trim();
+    if is_metavar(trimmed) || trimmed == "..." {
+        return None;
+    }
+
+    Some(node.kind().to_string())
+}
+
+fn selector_allows_node(selector_kind: Option<&str>, node: tree_sitter::Node<'_>) -> bool {
+    match selector_kind {
+        None => true,
+        Some(kind) => {
+            node.kind() == kind
+                // Preserve the older wrapper-leniency path in `match_node`;
+                // single-child wrappers may still match their child.
+                || node.named_child_count() == 1
+                || node.child_count() == 1
+        }
+    }
+}
+
 fn walk_and_match(
     node: tree_sitter::Node,
     source: &str,
     pat_node: tree_sitter::Node,
-    pat_source: &str,
+    pattern: &CompiledAstPattern,
     results: &mut MatchResult,
 ) {
-    let mut bindings = HashMap::new();
-    if match_node(node, source, pat_node, pat_source, &mut bindings) {
-        let start = node.start_position();
-        let end = node.end_position();
-        results.push(MatchRange {
-            start_byte: node.start_byte(),
-            end_byte: node.end_byte(),
-            line: start.row + 1,
-            column: start.column + 1,
-            end_line: end.row + 1,
-            end_column: end.column + 1,
-            snippet: get_source_line(source, node.start_byte()),
-            bindings,
-        });
-        // Don't recurse into children of a matched node to avoid duplicates
-        return;
+    if selector_allows_node(pattern.selector_kind.as_deref(), node) {
+        let mut bindings = HashMap::new();
+        if match_node(node, source, pat_node, &pattern.source, &mut bindings) {
+            let start = node.start_position();
+            let end = node.end_position();
+            results.push(MatchRange {
+                start_byte: node.start_byte(),
+                end_byte: node.end_byte(),
+                line: start.row + 1,
+                column: start.column + 1,
+                end_line: end.row + 1,
+                end_column: end.column + 1,
+                snippet: get_source_line(source, node.start_byte()),
+                bindings,
+            });
+            // Don't recurse into children of a matched node to avoid duplicates
+            return;
+        }
     }
 
     // Recurse into children
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk_and_match(child, source, pat_node, pat_source, results);
+        walk_and_match(child, source, pat_node, pattern, results);
     }
 }
 
@@ -785,10 +837,9 @@ fn match_negative_pattern(
     negative: &NegativeMatcher,
     root: tree_sitter::Node,
     source: &str,
-    lang: Language,
 ) -> MatchResult {
     match negative {
-        NegativeMatcher::Pattern(pattern) => match_single_pattern(pattern, root, source, lang),
+        NegativeMatcher::Pattern(pattern) => match_single_pattern(pattern, root, source),
         NegativeMatcher::Regex(regex) => match_regex_pattern(regex, source),
     }
 }
@@ -820,7 +871,7 @@ fn map_language(lang_str: &str) -> Option<Language> {
     }
 }
 
-fn build_matcher(yaml: &SemgrepRuleYaml) -> Result<PatternMatcher, String> {
+fn build_matcher(yaml: &SemgrepRuleYaml, lang: Language) -> Result<PatternMatcher, String> {
     // Combined patterns (AND)
     if let Some(ref clauses) = yaml.patterns {
         let mut positives = Vec::new();
@@ -831,25 +882,31 @@ fn build_matcher(yaml: &SemgrepRuleYaml) -> Result<PatternMatcher, String> {
 
         for clause in clauses {
             if let Some(ref p) = clause.pattern {
-                positives.push(PatternMatcher::Single(p.clone()));
+                positives.push(PatternMatcher::Single(CompiledAstPattern::new(
+                    p.clone(),
+                    lang,
+                )));
             }
             if let Some(ref regex) = clause.pattern_regex {
                 positives.push(PatternMatcher::Regex(compile_regex(regex)?));
             }
             if let Some(ref pn) = clause.pattern_not {
-                negatives.push(NegativeMatcher::Pattern(pn.clone()));
+                negatives.push(NegativeMatcher::Pattern(CompiledAstPattern::new(
+                    pn.clone(),
+                    lang,
+                )));
             }
             if let Some(ref regex) = clause.pattern_not_regex {
                 negatives.push(NegativeMatcher::Regex(compile_regex(regex)?));
             }
             if let Some(ref pi) = clause.pattern_inside {
-                inside = Some(pi.clone());
+                inside = Some(CompiledAstPattern::new(pi.clone(), lang));
             }
             if let Some(ref pni) = clause.pattern_not_inside {
-                not_inside = Some(pni.clone());
+                not_inside = Some(CompiledAstPattern::new(pni.clone(), lang));
             }
             if let Some(ref pe) = clause.pattern_either {
-                let matchers = build_either_matchers(pe)?;
+                let matchers = build_either_matchers(pe, lang)?;
                 positives.push(PatternMatcher::Either(matchers));
             }
             if let Some(ref mr) = clause.metavariable_regex {
@@ -870,16 +927,22 @@ fn build_matcher(yaml: &SemgrepRuleYaml) -> Result<PatternMatcher, String> {
     let mut negatives = Vec::new();
 
     if let Some(ref pat) = yaml.pattern {
-        positives.push(PatternMatcher::Single(pat.clone()));
+        positives.push(PatternMatcher::Single(CompiledAstPattern::new(
+            pat.clone(),
+            lang,
+        )));
     }
     if let Some(ref regex) = yaml.pattern_regex {
         positives.push(PatternMatcher::Regex(compile_regex(regex)?));
     }
     if let Some(ref either) = yaml.pattern_either {
-        positives.push(PatternMatcher::Either(build_either_matchers(either)?));
+        positives.push(PatternMatcher::Either(build_either_matchers(either, lang)?));
     }
     if let Some(ref pat) = yaml.pattern_not {
-        negatives.push(NegativeMatcher::Pattern(pat.clone()));
+        negatives.push(NegativeMatcher::Pattern(CompiledAstPattern::new(
+            pat.clone(),
+            lang,
+        )));
     }
     if let Some(ref regex) = yaml.pattern_not_regex {
         negatives.push(NegativeMatcher::Regex(compile_regex(regex)?));
@@ -897,8 +960,14 @@ fn build_matcher(yaml: &SemgrepRuleYaml) -> Result<PatternMatcher, String> {
         return Ok(PatternMatcher::Combined {
             positives,
             negatives,
-            inside: yaml.pattern_inside.clone(),
-            not_inside: yaml.pattern_not_inside.clone(),
+            inside: yaml
+                .pattern_inside
+                .as_ref()
+                .map(|pattern| CompiledAstPattern::new(pattern.clone(), lang)),
+            not_inside: yaml
+                .pattern_not_inside
+                .as_ref()
+                .map(|pattern| CompiledAstPattern::new(pattern.clone(), lang)),
             metavariable_regexes: Vec::new(),
         });
     }
@@ -907,12 +976,18 @@ fn build_matcher(yaml: &SemgrepRuleYaml) -> Result<PatternMatcher, String> {
     Ok(PatternMatcher::Either(Vec::new()))
 }
 
-fn build_either_matchers(entries: &[PatternEntry]) -> Result<Vec<PatternMatcher>, String> {
+fn build_either_matchers(
+    entries: &[PatternEntry],
+    lang: Language,
+) -> Result<Vec<PatternMatcher>, String> {
     let mut matchers = Vec::new();
 
     for entry in entries {
         if let Some(ref pattern) = entry.pattern {
-            matchers.push(PatternMatcher::Single(pattern.clone()));
+            matchers.push(PatternMatcher::Single(CompiledAstPattern::new(
+                pattern.clone(),
+                lang,
+            )));
         }
         if let Some(ref regex) = entry.pattern_regex {
             matchers.push(PatternMatcher::Regex(compile_regex(regex)?));
@@ -1012,7 +1087,6 @@ pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
     for yaml_rule in semgrep_file.rules {
         let cwe = extract_cwe(&yaml_rule);
         let severity = map_severity(&yaml_rule.severity);
-        let matcher = build_matcher(&yaml_rule)?;
         let path_filter = PathFilter::from_yaml(yaml_rule.paths.as_ref())?;
 
         let mut mapped_languages = Vec::new();
@@ -1025,13 +1099,14 @@ pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
         }
 
         for lang in mapped_languages {
+            let matcher = build_matcher(&yaml_rule, lang)?;
             rules.push(Box::new(SemgrepRule {
                 id: format!("semgrep/{}", yaml_rule.id),
                 message: yaml_rule.message.clone(),
                 severity,
                 lang,
                 cwe: cwe.clone(),
-                matcher: matcher.clone(),
+                matcher,
                 path_filter: path_filter.clone(),
             }));
         }
@@ -1099,6 +1174,28 @@ rules:
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].id(), "semgrep/test-eval");
         assert_eq!(rules[0].severity(), Severity::Critical);
+    }
+
+    #[test]
+    fn ast_patterns_are_compiled_during_rule_load() {
+        let yaml = r#"
+rules:
+  - id: test-eval
+    pattern: eval(...)
+    message: Do not use eval
+    severity: ERROR
+    languages: [python]
+"#;
+        let parsed: SemgrepFile = serde_yaml::from_str(yaml).unwrap();
+        let matcher = build_matcher(&parsed.rules[0], Language::Python).unwrap();
+
+        match matcher {
+            PatternMatcher::Single(pattern) => {
+                assert!(pattern.tree.is_some());
+                assert_eq!(pattern.selector_kind.as_deref(), Some("call"));
+            }
+            other => panic!("expected single compiled AST pattern, got {other:?}"),
+        }
     }
 
     #[test]
