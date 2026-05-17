@@ -805,7 +805,9 @@ fn map_severity(s: &SemgrepSeverity) -> Severity {
 
 fn map_language(lang_str: &str) -> Option<Language> {
     match lang_str.to_lowercase().as_str() {
-        "javascript" | "js" | "typescript" | "ts" | "jsx" | "tsx" => Some(Language::JavaScript),
+        "javascript" | "js" | "jsx" => Some(Language::JavaScript),
+        "typescript" | "ts" => Some(Language::TypeScript),
+        "tsx" => Some(Language::Tsx),
         "python" | "py" => Some(Language::Python),
         "go" | "golang" => Some(Language::Go),
         "ruby" | "rb" => Some(Language::Ruby),
@@ -1126,12 +1128,28 @@ rules:
     pattern: res.send("Hello World")
     message: Exact Express response send call
     severity: WARNING
-    languages: [javascript, typescript]
+    languages: [javascript, js]
 "#;
         let f = make_yaml(yaml);
         let rules = parse_semgrep_file(f.path()).unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].language(), Language::JavaScript);
+    }
+
+    #[test]
+    fn test_typescript_language_maps_to_typescript_parser() {
+        let yaml = r#"
+rules:
+  - id: ts-send
+    pattern: res.send("Hello World")
+    message: Exact Express response send call
+    severity: WARNING
+    languages: [typescript]
+"#;
+        let f = make_yaml(yaml);
+        let rules = parse_semgrep_file(f.path()).unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].language(), Language::TypeScript);
     }
 
     #[test]

@@ -82,7 +82,8 @@ Taint rules (`mode: taint`):
 
 Language mapping:
 
-- JavaScript / TypeScript
+- JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`)
+- TypeScript (`.ts`, `.mts`, `.cts`) and TSX (`.tsx`) use dedicated tree-sitter grammars and reuse compatible JavaScript rule IDs where the AST surface aligns
 - Python
 - Go
 

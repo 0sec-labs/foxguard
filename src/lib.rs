@@ -40,6 +40,8 @@ impl std::fmt::Display for Severity {
 #[serde(rename_all = "lowercase")]
 pub enum Language {
     JavaScript,
+    TypeScript,
+    Tsx,
     Python,
     Go,
     Ruby,
@@ -57,10 +59,21 @@ pub enum Language {
     Manifest,
 }
 
+impl Language {
+    pub fn is_javascript_family(self) -> bool {
+        matches!(
+            self,
+            Language::JavaScript | Language::TypeScript | Language::Tsx
+        )
+    }
+}
+
 impl std::fmt::Display for Language {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Language::JavaScript => write!(f, "javascript"),
+            Language::TypeScript => write!(f, "typescript"),
+            Language::Tsx => write!(f, "tsx"),
             Language::Python => write!(f, "python"),
             Language::Go => write!(f, "go"),
             Language::Ruby => write!(f, "ruby"),

@@ -283,7 +283,7 @@ impl Rule for SemgrepTaintRule {
                     .map(TaintFindingView::from_python)
                     .collect()
             }
-            Language::JavaScript => {
+            language if language.is_javascript_family() => {
                 let spec = to_js_spec(&self.spec);
                 javascript_taint::analyze_tree(
                     tree.root_node(),
@@ -380,8 +380,16 @@ pub fn parse_taint_rule(yaml: &YamlValue) -> TaintRuleParse {
                         detected = Some(Language::Python);
                         break;
                     }
-                    "javascript" | "js" | "typescript" | "ts" => {
+                    "javascript" | "js" => {
                         detected = Some(Language::JavaScript);
+                        break;
+                    }
+                    "typescript" | "ts" => {
+                        detected = Some(Language::TypeScript);
+                        break;
+                    }
+                    "tsx" => {
+                        detected = Some(Language::Tsx);
                         break;
                     }
                     "go" | "golang" => {
@@ -878,7 +886,7 @@ pattern-sinks: [{pattern: eval($X)}]
     }
 
     #[test]
-    fn taint_rule_with_typescript_language_compiles_as_javascript() {
+    fn taint_rule_with_typescript_language_compiles() {
         let yaml = r#"
 id: ts-taint
 mode: taint
@@ -890,7 +898,7 @@ pattern-sinks: [{pattern: eval($X)}]
 "#;
         let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
-            TaintRuleParse::Compiled(r) => assert_eq!(r.lang, Language::JavaScript),
+            TaintRuleParse::Compiled(r) => assert_eq!(r.lang, Language::TypeScript),
             TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
             TaintRuleParse::NotTaint => panic!("expected taint rule"),
         }

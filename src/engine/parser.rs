@@ -6,6 +6,8 @@ pub fn parse_file(source: &str, language: Language) -> Option<tree_sitter::Tree>
 
     let ts_language = match language {
         Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+        Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
         Language::Python => tree_sitter_python::LANGUAGE.into(),
         Language::Go => tree_sitter_go::LANGUAGE.into(),
         Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
@@ -25,4 +27,35 @@ pub fn parse_file(source: &str, language: Language) -> Option<tree_sitter::Tree>
 
     parser.set_language(&ts_language).ok()?;
     parser.parse(source, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_typescript_without_javascript_recovery_errors() {
+        let source = r#"
+type RequestLike = { body: { name: string } };
+
+export function render(request: RequestLike): string {
+    return request.body.name;
+}
+"#;
+        let tree = parse_file(source, Language::TypeScript).expect("failed to parse TypeScript");
+        assert!(!tree.root_node().has_error());
+    }
+
+    #[test]
+    fn parses_tsx_without_javascript_recovery_errors() {
+        let source = r#"
+type Props = { title: string };
+
+export function Card({ title }: Props) {
+    return <section data-kind="card">{title}</section>;
+}
+"#;
+        let tree = parse_file(source, Language::Tsx).expect("failed to parse TSX");
+        assert!(!tree.root_node().has_error());
+    }
 }

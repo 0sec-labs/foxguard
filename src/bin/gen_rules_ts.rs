@@ -35,6 +35,8 @@ const LANGUAGE_ORDER: &[Language] = &[
 fn language_slug(language: Language) -> &'static str {
     match language {
         Language::JavaScript => "js",
+        Language::TypeScript => "ts",
+        Language::Tsx => "tsx",
         Language::Python => "py",
         Language::Go => "go",
         Language::Ruby => "rb",
@@ -56,6 +58,8 @@ fn language_slug(language: Language) -> &'static str {
 fn language_display_name(language: Language) -> &'static str {
     match language {
         Language::JavaScript => "JavaScript / TypeScript",
+        Language::TypeScript => "TypeScript",
+        Language::Tsx => "TSX",
         Language::Python => "Python",
         Language::Go => "Go",
         Language::Ruby => "Ruby",
@@ -77,6 +81,8 @@ fn language_display_name(language: Language) -> &'static str {
 fn language_array_name(language: Language) -> &'static str {
     match language {
         Language::JavaScript => "jsRules",
+        Language::TypeScript => "tsRules",
+        Language::Tsx => "tsxRules",
         Language::Python => "pyRules",
         Language::Go => "goRules",
         Language::Ruby => "rubyRules",

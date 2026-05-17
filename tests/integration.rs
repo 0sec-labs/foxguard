@@ -837,6 +837,48 @@ mod javascript {
         );
     }
 
+    #[test]
+    fn test_vulnerable_tsx_taint_catches_flow() {
+        let output = foxguard_cmd_isolated()
+            .args(["tests/fixtures/vulnerable_tsx_taint.tsx", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        assert!(!output.status.success());
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+
+        let n = findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some("js/taint-xss-innerhtml"))
+            .count();
+        assert_eq!(
+            n, 1,
+            "js/taint-xss-innerhtml should fire once on vulnerable_tsx_taint.tsx, got {} findings: {:?}",
+            n, findings
+        );
+    }
+
+    #[test]
+    fn test_safe_tsx_taint_has_no_taint_findings() {
+        let output = foxguard_cmd_isolated()
+            .args(["tests/fixtures/safe_tsx_taint.tsx", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+
+        let n = findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some("js/taint-xss-innerhtml"))
+            .count();
+        assert_eq!(
+            n, 0,
+            "js/taint-xss-innerhtml should not fire on safe_tsx_taint.tsx, got {} findings",
+            n
+        );
+    }
+
     /// Issue #32 — Hono taint sources. `c` is intentionally NOT a ParamName
     /// matcher; the engine must pick up `c.req.query(...)` / `c.req.param(...)`
     /// through the explicit `Call` matchers.

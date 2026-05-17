@@ -498,7 +498,7 @@ impl RuleRegistry {
     pub fn rules_for_language(&self, language: Language) -> Vec<&dyn Rule> {
         self.rules
             .iter()
-            .filter(|r| r.language() == language)
+            .filter(|r| rule_language_applies_to(r.language(), language))
             .map(|r| r.as_ref())
             .collect()
     }
@@ -581,6 +581,13 @@ impl RuleRegistry {
 
         unknown
     }
+}
+
+fn rule_language_applies_to(rule_language: Language, target_language: Language) -> bool {
+    rule_language == target_language
+        || (target_language == Language::TypeScript && rule_language == Language::JavaScript)
+        || (target_language == Language::Tsx
+            && matches!(rule_language, Language::JavaScript | Language::TypeScript))
 }
 
 #[cfg(test)]

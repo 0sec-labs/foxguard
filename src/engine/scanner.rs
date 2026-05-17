@@ -278,7 +278,9 @@ pub fn detect_language(path: &Path) -> Option<Language> {
     }
 
     match path.extension()?.to_str()? {
-        "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => Some(Language::JavaScript),
+        "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
+        "ts" | "mts" | "cts" => Some(Language::TypeScript),
+        "tsx" => Some(Language::Tsx),
         "py" | "pyw" => Some(Language::Python),
         "go" => Some(Language::Go),
         "rb" | "rake" | "gemspec" => Some(Language::Ruby),
@@ -607,16 +609,17 @@ fn parse_inline_ignore(line: &str, language: Language) -> Option<(bool, InlineIg
     }
 
     // Fallback: block comment /* foxguard: ignore */ — only for languages with /* */ syntax
-    if matches!(
-        language,
-        Language::JavaScript
-            | Language::Go
-            | Language::Java
-            | Language::Rust
-            | Language::CSharp
-            | Language::Swift
-            | Language::Php
-    ) {
+    if language.is_javascript_family()
+        || matches!(
+            language,
+            Language::Go
+                | Language::Java
+                | Language::Rust
+                | Language::CSharp
+                | Language::Swift
+                | Language::Php
+        )
+    {
         if let Some(result) = parse_block_comment_ignore(line) {
             return Some(result);
         }
@@ -644,10 +647,10 @@ fn is_comment_only_line(trimmed_line: &str, language: Language) -> bool {
 
 fn comment_markers(language: Language) -> &'static [&'static str] {
     match language {
+        Language::JavaScript | Language::TypeScript | Language::Tsx => &["//"],
         Language::Python | Language::Ruby => &["#"],
         Language::Php => &["//", "#"],
-        Language::JavaScript
-        | Language::Go
+        Language::Go
         | Language::Java
         | Language::Rust
         | Language::CSharp
@@ -698,9 +701,9 @@ fn scan_files(
     let has_python_taint_rules = rules_by_lang
         .get(&Language::Python)
         .is_some_and(|rules| rules.iter().any(|rule| rule.id().contains("/taint-")));
-    let has_js_taint_rules = rules_by_lang
-        .get(&Language::JavaScript)
-        .is_some_and(|rules| rules.iter().any(|rule| rule.id().contains("/taint-")));
+    let has_js_taint_rules = rules_by_lang.iter().any(|(language, rules)| {
+        language.is_javascript_family() && rules.iter().any(|rule| rule.id().contains("/taint-"))
+    });
     let has_go_taint_rules = rules_by_lang
         .get(&Language::Go)
         .is_some_and(|rules| rules.iter().any(|rule| rule.id().contains("/taint-")));
@@ -720,9 +723,15 @@ fn scan_files(
     }
     let python_files: Vec<_> = files_by_lang.remove(&Language::Python).unwrap_or_default();
     let go_files: Vec<_> = files_by_lang.remove(&Language::Go).unwrap_or_default();
-    let js_files: Vec<_> = files_by_lang
+    let mut js_files: Vec<_> = files_by_lang
         .remove(&Language::JavaScript)
         .unwrap_or_default();
+    js_files.extend(
+        files_by_lang
+            .remove(&Language::TypeScript)
+            .unwrap_or_default(),
+    );
+    js_files.extend(files_by_lang.remove(&Language::Tsx).unwrap_or_default());
 
     let (mut cross_file_summaries, has_python_cross_file): (CrossFileSummaryMap, bool) =
         if has_python_taint_rules && python_files.len() > 1 {
@@ -781,7 +790,7 @@ fn scan_files(
         let js_rule_specs = crate::rules::javascript::js_taint_rule_specs();
         let prepared_js: Vec<_> = js_files
             .par_iter()
-            .filter_map(|(path, _)| {
+            .filter_map(|(path, language)| {
                 if std::fs::metadata(path).ok()?.len() > max_file_size {
                     return None;
                 }
@@ -789,10 +798,8 @@ fn scan_files(
                 if is_minified(&source) {
                     return None;
                 }
-                let tree = super::parser::parse_file(&source, Language::JavaScript)?;
-                if treats_tree_errors_as_parse_failures(Language::JavaScript, path)
-                    && tree.root_node().has_error()
-                {
+                let tree = super::parser::parse_file(&source, *language)?;
+                if treats_tree_errors_as_parse_failures(*language) && tree.root_node().has_error() {
                     return None;
                 }
                 let aliases = js_aliases_from_tree(&source, &tree);
@@ -972,7 +979,7 @@ fn scan_files(
 
             let owned_tree;
             let tree = if let Some(prepared) = prepared {
-                if treats_tree_errors_as_parse_failures(*language, path)
+                if treats_tree_errors_as_parse_failures(*language)
                     && prepared.tree.root_node().has_error()
                 {
                     warnings.lock().expect("lock poisoned").push(format!(
@@ -990,7 +997,7 @@ fn scan_files(
                     ));
                     return FileScanOutcome::skipped(ScanSkipReason::ParseError);
                 };
-                if treats_tree_errors_as_parse_failures(*language, path)
+                if treats_tree_errors_as_parse_failures(*language)
                     && parsed_tree.root_node().has_error()
                 {
                     warnings.lock().expect("lock poisoned").push(format!(
@@ -1029,7 +1036,7 @@ fn scan_files(
                 None
             };
             let owned_javascript_aliases;
-            let javascript_aliases = if matches!(language, Language::JavaScript) {
+            let javascript_aliases = if language.is_javascript_family() {
                 if let Some(prepared) = prepared {
                     Some(&prepared.aliases)
                 } else {
@@ -1069,9 +1076,7 @@ fn scan_files(
                 };
 
             // Build JavaScript import-to-path map for cross-file resolution.
-            let javascript_import_paths = if has_js_cross_file
-                && matches!(language, Language::JavaScript)
-            {
+            let javascript_import_paths = if has_js_cross_file && language.is_javascript_family() {
                 let mut imports = javascript_taint::resolve_js_imports_to_paths(source, tree, path);
                 let canonical: HashMap<String, PathBuf> = imports
                     .drain()
@@ -1177,7 +1182,7 @@ fn scan_files(
             // JavaScript taint rules: same batched approach as Go/Python
             // above — see `crate::rules::javascript::run_js_taint_batched`.
             let enabled_js_taint_ids: std::collections::HashSet<&str> =
-                if matches!(language, Language::JavaScript) {
+                if language.is_javascript_family() {
                     rules
                         .iter()
                         .filter(|r| {
@@ -1257,22 +1262,14 @@ fn resolve_canonical_path(lookup: &HashMap<PathBuf, PathBuf>, path: &Path) -> Pa
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn treats_tree_errors_as_parse_failures(language: Language, path: &Path) -> bool {
-    match language {
-        Language::JavaScript => !is_typescript_path(path),
+fn treats_tree_errors_as_parse_failures(language: Language) -> bool {
+    !matches!(
+        language,
         Language::NginxConf
-        | Language::ApacheConf
-        | Language::HAProxyConf
-        | Language::Dockerfile
-        | Language::Manifest => false,
-        _ => true,
-    }
-}
-
-fn is_typescript_path(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|extension| extension.to_str()),
-        Some("ts" | "tsx" | "mts" | "cts")
+            | Language::ApacheConf
+            | Language::HAProxyConf
+            | Language::Dockerfile
+            | Language::Manifest
     )
 }
 
@@ -1363,6 +1360,27 @@ mod tests {
 
         assert!(matcher.is_excluded(Path::new("generated/foo/bar.js")));
         assert!(!matcher.is_excluded(Path::new("generated/foo/bar.ts")));
+    }
+
+    #[test]
+    fn detect_language_distinguishes_javascript_typescript_and_tsx() {
+        assert_eq!(
+            detect_language(Path::new("app.js")),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language(Path::new("app.jsx")),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language(Path::new("app.ts")),
+            Some(Language::TypeScript)
+        );
+        assert_eq!(
+            detect_language(Path::new("app.mts")),
+            Some(Language::TypeScript)
+        );
+        assert_eq!(detect_language(Path::new("app.tsx")), Some(Language::Tsx));
     }
 
     #[test]
