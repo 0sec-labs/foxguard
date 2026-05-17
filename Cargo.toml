@@ -13,6 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 clap = { version = "4", features = ["derive"] }
 tree-sitter = "0.25"
 tree-sitter-javascript = "0.23"
+tree-sitter-typescript = "0.23"
 tree-sitter-python = "0.23"
 tree-sitter-go = "0.23"
 tree-sitter-ruby = "0.23"

@@ -789,7 +789,7 @@ fn scan_files(
                 if is_minified(&source) {
                     return None;
                 }
-                let tree = super::parser::parse_file(&source, Language::JavaScript)?;
+                let tree = super::parser::parse_path(&source, Language::JavaScript, path)?;
                 if treats_tree_errors_as_parse_failures(Language::JavaScript, path)
                     && tree.root_node().has_error()
                 {
@@ -983,7 +983,7 @@ fn scan_files(
                 }
                 &prepared.tree
             } else {
-                let Some(parsed_tree) = super::parser::parse_file(source, *language) else {
+                let Some(parsed_tree) = super::parser::parse_path(source, *language, path) else {
                     warnings.lock().expect("lock poisoned").push(format!(
                         "warning: skipping {} (parser could not build a syntax tree)",
                         path.display()
@@ -1257,22 +1257,14 @@ fn resolve_canonical_path(lookup: &HashMap<PathBuf, PathBuf>, path: &Path) -> Pa
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn treats_tree_errors_as_parse_failures(language: Language, path: &Path) -> bool {
-    match language {
-        Language::JavaScript => !is_typescript_path(path),
+fn treats_tree_errors_as_parse_failures(language: Language, _path: &Path) -> bool {
+    !matches!(
+        language,
         Language::NginxConf
-        | Language::ApacheConf
-        | Language::HAProxyConf
-        | Language::Dockerfile
-        | Language::Manifest => false,
-        _ => true,
-    }
-}
-
-fn is_typescript_path(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|extension| extension.to_str()),
-        Some("ts" | "tsx" | "mts" | "cts")
+            | Language::ApacheConf
+            | Language::HAProxyConf
+            | Language::Dockerfile
+            | Language::Manifest
     )
 }
 
