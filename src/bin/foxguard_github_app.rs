@@ -16,7 +16,10 @@
 //! Docker:   `docker build -f Dockerfile.github-app -t ghcr.io/0sec-labs/foxguard-github-app .`
 
 use std::net::SocketAddr;
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::{
     extract::State,
@@ -33,11 +36,14 @@ use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
+use wait_timeout::ChildExt;
 
 /// Hard cap on incoming webhook body size. GitHub's largest legitimate
 /// `pull_request` payload sits around 200 KB; 1 MiB leaves comfortable
 /// headroom while making it cheap to reject anything weaponised.
 const MAX_BODY_BYTES: usize = 1 << 20; // 1 MiB
+const MAX_REPO_BYTES: u64 = 1_000_000_000; // 1 GB
+const PULL_REQUEST_SCAN_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
 struct AppState {
@@ -50,11 +56,30 @@ struct AppState {
 struct GitHubWebhookPayload {
     action: Option<String>,
     installation: Option<GitHubInstallation>,
+    pull_request: Option<GitHubPullRequest>,
 }
 
 #[derive(Debug, Deserialize)]
 struct GitHubInstallation {
     id: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubPullRequest {
+    number: u64,
+    head: GitHubPullRequestHead,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubPullRequestHead {
+    sha: String,
+    repo: GitHubRepository,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubRepository {
+    clone_url: String,
+    full_name: String,
 }
 
 #[tokio::main]
@@ -192,14 +217,24 @@ async fn webhook(
                     let delivery = delivery.to_string();
                     let action = payload.action.unwrap_or_else(|| "?".to_string());
                     let installation_id = installation.id;
+                    let pull_request = payload.pull_request;
                     std::mem::drop(tokio::spawn(async move {
-                        match installation_token_for(&state_for_task, installation_id).await {
-                            Ok(_) => {
+                        match process_pull_request_delivery(
+                            state_for_task,
+                            installation_id,
+                            pull_request,
+                        )
+                        .await
+                        {
+                            Ok(result) => {
                                 info!(
                                     delivery,
                                     installation_id,
                                     action,
-                                    "pull_request auth ready — TODO: clone, run foxguard, post --github-pr comment"
+                                    pr_number = result.pr_number,
+                                    repo = result.repo,
+                                    findings = result.findings,
+                                    "pull_request scan complete — TODO: post --github-pr comment"
                                 );
                             }
                             Err(error) => {
@@ -233,6 +268,248 @@ async fn webhook(
 
 fn parse_webhook_payload(body: &[u8]) -> Result<GitHubWebhookPayload, serde_json::Error> {
     serde_json::from_slice(body)
+}
+
+#[derive(Debug)]
+struct PullRequestScanResult {
+    pr_number: u64,
+    repo: String,
+    findings: usize,
+}
+
+#[derive(Debug)]
+struct CloneTarget {
+    url: String,
+    auth_header_key: String,
+}
+
+async fn process_pull_request_delivery(
+    state: AppState,
+    installation_id: u64,
+    pull_request: Option<GitHubPullRequest>,
+) -> Result<PullRequestScanResult, String> {
+    let pull_request =
+        pull_request.ok_or_else(|| "pull_request payload missing PR data".to_string())?;
+    let token = installation_token_for(&state, installation_id)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    tokio::task::spawn_blocking(move || run_pull_request_scan(pull_request, &token))
+        .await
+        .map_err(|error| format!("pull_request scan task failed: {error}"))?
+}
+
+fn run_pull_request_scan(
+    pull_request: GitHubPullRequest,
+    installation_token: &str,
+) -> Result<PullRequestScanResult, String> {
+    let workspace =
+        tempfile::tempdir().map_err(|error| format!("failed to create scan workspace: {error}"))?;
+    let checkout = workspace.path().join("repo");
+    let clone_target = validate_clone_url(&pull_request.head.repo.clone_url)?;
+
+    git_clone_head(
+        &clone_target,
+        &pull_request.head.sha,
+        installation_token,
+        &checkout,
+    )?;
+    let repo_size = directory_size(&checkout)?;
+    if repo_size > MAX_REPO_BYTES {
+        return Err(format!(
+            "scan skipped: repository checkout is {} bytes, above {} byte cap",
+            repo_size, MAX_REPO_BYTES
+        ));
+    }
+
+    let output = run_scanner(&checkout)?;
+    let findings = parse_json_findings_count(&output)?;
+    Ok(PullRequestScanResult {
+        pr_number: pull_request.number,
+        repo: pull_request.head.repo.full_name,
+        findings,
+    })
+}
+
+fn validate_clone_url(clone_url: &str) -> Result<CloneTarget, String> {
+    let url = reqwest::Url::parse(clone_url)
+        .map_err(|error| format!("invalid repository clone_url: {error}"))?;
+    if url.scheme() != "https" {
+        return Err("repository clone_url must use https".to_string());
+    }
+    if url.username() != "" || url.password().is_some() {
+        return Err("repository clone_url must not contain credentials".to_string());
+    }
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| "repository clone_url host is required".to_string())?;
+    if !is_allowed_github_host(host) {
+        return Err(format!(
+            "repository clone_url host {host} is not allowlisted"
+        ));
+    }
+
+    Ok(CloneTarget {
+        url: url.to_string(),
+        auth_header_key: format!("http.https://{host}/.extraheader"),
+    })
+}
+
+fn is_allowed_github_host(host: &str) -> bool {
+    host == "github.com"
+        || std::env::var("FOXGUARD_GITHUB_ALLOWED_API_HOSTS")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .any(|allowed| allowed.eq_ignore_ascii_case(host))
+}
+
+fn git_clone_head(
+    clone_target: &CloneTarget,
+    head_sha: &str,
+    installation_token: &str,
+    checkout: &Path,
+) -> Result<(), String> {
+    run_git(
+        &[
+            "clone",
+            "--filter=blob:none",
+            "--no-checkout",
+            &clone_target.url,
+            checkout
+                .to_str()
+                .ok_or_else(|| "checkout path is not valid UTF-8".to_string())?,
+        ],
+        &clone_target.auth_header_key,
+        installation_token,
+        None,
+    )?;
+    run_git(
+        &["fetch", "origin", head_sha, "--depth=1"],
+        &clone_target.auth_header_key,
+        installation_token,
+        Some(checkout),
+    )?;
+    run_git(
+        &["checkout", "--detach", head_sha],
+        &clone_target.auth_header_key,
+        installation_token,
+        Some(checkout),
+    )
+}
+
+fn run_git(
+    args: &[&str],
+    auth_header_key: &str,
+    installation_token: &str,
+    current_dir: Option<&Path>,
+) -> Result<(), String> {
+    let mut command = Command::new("git");
+    command
+        .args(args)
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", auth_header_key)
+        .env(
+            "GIT_CONFIG_VALUE_0",
+            format!("AUTHORIZATION: bearer {installation_token}"),
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(current_dir) = current_dir {
+        command.current_dir(current_dir);
+    }
+    run_command_with_timeout(command, PULL_REQUEST_SCAN_TIMEOUT, "git").map(|_| ())
+}
+
+fn run_scanner(checkout: &Path) -> Result<String, String> {
+    let mut command = Command::new("foxguard");
+    command
+        .arg(checkout)
+        .arg("--format")
+        .arg("json")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    run_command_with_timeout(command, PULL_REQUEST_SCAN_TIMEOUT, "foxguard")
+}
+
+fn run_command_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+    label: &str,
+) -> Result<String, String> {
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("failed to run {label}: {error}"))?;
+    let status = match child
+        .wait_timeout(timeout)
+        .map_err(|error| format!("failed to wait for {label}: {error}"))?
+    {
+        Some(status) => status,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("{label} timed out after {}s", timeout.as_secs()));
+        }
+    };
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("failed to collect {label} output: {error}"))?;
+    if !status.success() && label != "foxguard" {
+        return Err(format!(
+            "{label} failed with {status}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    if label == "foxguard" && !matches!(status.code(), Some(0) | Some(1)) {
+        return Err(format!(
+            "{label} failed with {status}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn parse_json_findings_count(output: &str) -> Result<usize, String> {
+    let value: serde_json::Value = serde_json::from_str(output)
+        .map_err(|error| format!("failed to parse foxguard JSON output: {error}"))?;
+    if let Some(findings) = value
+        .get("findings")
+        .and_then(|findings| findings.as_array())
+    {
+        return Ok(findings.len());
+    }
+    if let Some(findings) = value.as_array() {
+        return Ok(findings.len());
+    }
+    Err("foxguard JSON output did not contain findings".to_string())
+}
+
+fn directory_size(path: &Path) -> Result<u64, String> {
+    fn visit(path: &Path, total: &mut u64) -> Result<(), String> {
+        for entry in std::fs::read_dir(path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?
+        {
+            let entry =
+                entry.map_err(|error| format!("failed to read directory entry: {error}"))?;
+            let metadata = entry
+                .metadata()
+                .map_err(|error| format!("failed to stat {}: {error}", entry.path().display()))?;
+            if metadata.is_dir() {
+                visit(&entry.path(), total)?;
+            } else {
+                *total = total.saturating_add(metadata.len());
+            }
+        }
+        Ok(())
+    }
+
+    let mut total = 0;
+    visit(path, &mut total)?;
+    Ok(total)
 }
 
 async fn installation_token_for(
@@ -284,17 +561,38 @@ mod tests {
 
     #[test]
     fn parses_installation_id_from_pull_request_payload() {
-        let payload =
-            match parse_webhook_payload(br#"{"action":"opened","installation":{"id":12345}}"#) {
-                Ok(payload) => payload,
-                Err(error) => panic!("payload should parse: {error}"),
-            };
+        let payload = match parse_webhook_payload(
+            br#"{
+                "action":"opened",
+                "installation":{"id":12345},
+                "pull_request":{
+                    "number":7,
+                    "head":{
+                        "sha":"0123456789abcdef",
+                        "repo":{
+                            "clone_url":"https://github.com/0sec-labs/foxguard.git",
+                            "full_name":"0sec-labs/foxguard"
+                        }
+                    }
+                }
+            }"#,
+        ) {
+            Ok(payload) => payload,
+            Err(error) => panic!("payload should parse: {error}"),
+        };
 
         assert_eq!(payload.action.as_deref(), Some("opened"));
         assert_eq!(
             payload.installation.map(|installation| installation.id),
             Some(12345)
         );
+        let pull_request = match payload.pull_request {
+            Some(pull_request) => pull_request,
+            None => panic!("pull_request should parse"),
+        };
+        assert_eq!(pull_request.number, 7);
+        assert_eq!(pull_request.head.sha, "0123456789abcdef");
+        assert_eq!(pull_request.head.repo.full_name, "0sec-labs/foxguard");
     }
 
     #[test]
@@ -306,5 +604,43 @@ mod tests {
 
         assert_eq!(payload.action.as_deref(), Some("synchronize"));
         assert!(payload.installation.is_none());
+    }
+
+    #[test]
+    fn validates_https_github_clone_url() {
+        assert_eq!(
+            validate_clone_url("https://github.com/0sec-labs/foxguard.git")
+                .map(|target| (target.url, target.auth_header_key)),
+            Ok((
+                "https://github.com/0sec-labs/foxguard.git".to_string(),
+                "http.https://github.com/.extraheader".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_clone_url_credentials() {
+        let error = validate_clone_url("https://token@github.com/0sec-labs/foxguard.git")
+            .expect_err("credentials should be rejected");
+        assert!(error.contains("credentials"));
+    }
+
+    #[test]
+    fn rejects_unallowlisted_clone_host() {
+        let error = validate_clone_url("https://169.254.169.254/repo.git")
+            .expect_err("metadata host should be rejected");
+        assert!(error.contains("not allowlisted"));
+    }
+
+    #[test]
+    fn parses_enveloped_findings_count() {
+        let json = r#"{"findings":[{"ruleId":"x"},{"ruleId":"y"}]}"#;
+        assert_eq!(parse_json_findings_count(json), Ok(2));
+    }
+
+    #[test]
+    fn parses_legacy_findings_array_count() {
+        let json = r#"[{"ruleId":"x"}]"#;
+        assert_eq!(parse_json_findings_count(json), Ok(1));
     }
 }
