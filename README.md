@@ -2,7 +2,7 @@
   <img src="assets/logo.png" width="96" alt="foxguard logo" />
 </p>
 
-<h1 align="center">𓃥 foxguard 𓃦</h1>
+<h1 align="center">foxguard</h1>
 
 <p align="center">
   <strong>Fast local security scanning in a single Rust binary.</strong>
@@ -16,7 +16,7 @@
 
 <p align="center">
   <a href="https://github.com/0sec-labs/foxguard/actions/workflows/ci.yml"><img src="https://github.com/0sec-labs/foxguard/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://github.com/0sec-labs/foxguard"><img src="https://img.shields.io/badge/foxguard-clean-3fb950?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSI+PHBhdGggZD0iTTggOEwyMCAyOEwzMiAyMEw0NCAyOEw1NiA4TDUyIDMyTDQ0IDQ0TDM2IDUySDI4TDIwIDQ0TDEyIDMyTDggOFoiIGZpbGw9IiNGNTlFMEIiIGZpbGwtb3BhY2l0eT0iMC4zIiBzdHJva2U9IiNGNTlFMEIiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjI0IiBjeT0iMzIiIHI9IjIuNSIgZmlsbD0iI0Y1OUUwQiIvPjxjaXJjbGUgY3g9IjQwIiBjeT0iMzIiIHI9IjIuNSIgZmlsbD0iI0Y1OUUwQiIvPjwvc3ZnPg==" alt="foxguard: clean" /></a>
+  <a href="https://github.com/0sec-labs/foxguard"><img src="https://img.shields.io/badge/foxguard-clean-3fb950" alt="foxguard: clean" /></a>
   <a href="https://crates.io/crates/foxguard"><img src="https://img.shields.io/crates/v/foxguard?color=d97706&label=crates.io" alt="crates.io" /></a>
   <a href="https://www.npmjs.com/package/foxguard"><img src="https://img.shields.io/npm/v/foxguard?color=d97706&label=npm" alt="npm" /></a>
   <a href="https://github.com/0sec-labs/foxguard/stargazers"><img src="https://img.shields.io/github/stars/0sec-labs/foxguard?style=flat&color=e3b341&logo=github" alt="GitHub stars" /></a>
