@@ -35,13 +35,19 @@ That verifies the `foxguard` binary is available and explains the active hook se
 
 ## Hook Behavior
 
-The auto-scan hook reads the Claude Code hook JSON from stdin, extracts `tool_input.file_path` or `tool_input.path`, and runs:
+The auto-scan hook reads the Claude Code hook JSON from stdin, extracts the
+edited path from `tool_input.file_path`, `tool_input.path`,
+`tool_input.notebook_path`, `tool_response.filePath`, or
+`tool_response.file_path`, and runs:
 
 ```sh
 foxguard --format json --severity medium <edited-file>
 ```
 
 If findings are present, the hook exits `2` and prints a compact finding summary to stderr. Missing binaries, unreadable files, invalid hook input, and clean scans exit `0` so plugin machinery does not block Claude by itself.
+
+The hook uses `jq` to parse Claude Code's hook JSON. Run `/foxguard:setup` after
+loading the plugin to verify both `jq` and the active `foxguard` binary.
 
 Tune the threshold with:
 

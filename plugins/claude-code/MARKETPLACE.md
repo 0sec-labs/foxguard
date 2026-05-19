@@ -77,6 +77,8 @@ Suggested demo checklist:
 The hook was validated directly with:
 
 ```sh
+jq --version
+
 printf '{"tool_input":{"file_path":"tests/fixtures/safe.py"}}' \
   | plugins/claude-code/scripts/scan-edited-file.sh
 
@@ -86,18 +88,34 @@ printf '{"tool_input":{"file_path":"tests/fixtures/vulnerable.py"}}' \
 printf '{"tool_input":{"path":"tests/fixtures/vulnerable.py"}}' \
   | plugins/claude-code/scripts/scan-edited-file.sh
 
+printf '{"tool_input":{"notebook_path":"tests/fixtures/safe.py"}}' \
+  | plugins/claude-code/scripts/scan-edited-file.sh
+
+printf '{"tool_response":{"filePath":"tests/fixtures/safe.py"}}' \
+  | plugins/claude-code/scripts/scan-edited-file.sh
+
+printf '{"tool_response":{"file_path":"tests/fixtures/safe.py"}}' \
+  | plugins/claude-code/scripts/scan-edited-file.sh
+
 printf '{"tool_input":{"file_path":"/does/not/exist.py"}}' \
   | plugins/claude-code/scripts/scan-edited-file.sh
 ```
 
 Expected results:
 
+- `jq --version` succeeds.
 - Clean supported files exit `0` and stay silent.
 - Missing files exit `0` and stay silent.
 - Finding input exits `2` and emits a compact finding summary to stderr.
-- Both `tool_input.file_path` and `tool_input.path` are accepted.
+- Edited path extraction accepts `tool_input.file_path`, `tool_input.path`,
+  `tool_input.notebook_path`, `tool_response.filePath`, and
+  `tool_response.file_path`.
+- Scanner JSON parsing accepts the current `schema_version` object with a
+  `findings` array.
 
 `claude plugin validate plugins/claude-code` passed with Claude Code `2.1.143`.
+Older local Claude Code builds have been observed hanging during validation;
+`2.1.143` is the known-good version for the current submission notes.
 
 Non-interactive Claude Code smoke tests using `claude -p --plugin-dir
 plugins/claude-code` passed with `foxguard 0.8.1` first on `PATH` for:
