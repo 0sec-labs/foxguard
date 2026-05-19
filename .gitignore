@@ -28,3 +28,4 @@ benchmarks/results*.md
 .terminalizer-bin/
 assets/terminalizer/
 assets/foxguard-terminalizer*.gif
+www/public/foxguard-logo.png
