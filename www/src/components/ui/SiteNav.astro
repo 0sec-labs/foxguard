@@ -10,11 +10,7 @@ const { backLink, backLabel } = Astro.props;
 <nav class="flex items-center justify-between py-4">
   <div class="flex items-center gap-2.5">
     <a href={backLink || "/"} class="flex items-center gap-2.5 text-noir-400 hover:text-noir-100 transition-colors no-underline">
-      <svg class="w-7 h-7" viewBox="0 0 64 64" fill="none">
-        <path d="M8 8L20 28L32 20L44 28L56 8L52 32L44 44L36 52H28L20 44L12 32L8 8Z" fill="#F59E0B" fill-opacity="0.15" stroke="#F59E0B" stroke-width="2" stroke-linejoin="round"/>
-        <circle cx="24" cy="32" r="2.5" fill="#F59E0B"/>
-        <circle cx="40" cy="32" r="2.5" fill="#F59E0B"/>
-      </svg>
+      <img src="/foxguard-logo.png" alt="" class="h-7 w-7 object-contain" loading="eager" decoding="async" />
       <span class="font-heading text-noir-50 text-lg">fox<span class="text-fox-light">guard</span></span>
       {backLabel && <span class="text-noir-600 text-sm">/ {backLabel}</span>}
     </a>

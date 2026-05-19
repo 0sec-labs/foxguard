@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" width="80" alt="foxguard logo" />
+  <img src="assets/logo.png" width="96" alt="foxguard logo" />
 </p>
 
 <h1 align="center">𓃥 foxguard 𓃦</h1>
