@@ -77,6 +77,8 @@ Suggested demo checklist:
 The hook was validated directly with:
 
 ```sh
+jq --version
+
 printf '{"tool_input":{"file_path":"tests/fixtures/safe.py"}}' \
   | plugins/claude-code/scripts/scan-edited-file.sh
 
@@ -98,6 +100,7 @@ printf '{"tool_input":{"file_path":"/does/not/exist.py"}}' \
 
 Expected results:
 
+- `jq --version` succeeds.
 - Clean supported files exit `0` and stay silent.
 - Missing files exit `0` and stay silent.
 - Finding input exits `2` and emits a compact finding summary to stderr.

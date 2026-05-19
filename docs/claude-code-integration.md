@@ -46,6 +46,9 @@ foxguard --format json --severity medium <edited-file>
 
 If findings are present, the hook exits `2` and prints a compact finding summary to stderr. Missing binaries, unreadable files, invalid hook input, and clean scans exit `0` so plugin machinery does not block Claude by itself.
 
+The hook uses `jq` to parse Claude Code's hook JSON. Run `/foxguard:setup` after
+loading the plugin to verify both `jq` and the active `foxguard` binary.
+
 Tune the threshold with:
 
 ```sh

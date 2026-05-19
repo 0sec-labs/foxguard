@@ -38,6 +38,9 @@ cargo install foxguard
 
 Verify with `foxguard --version`.
 
+The PostToolUse hook also needs `jq` to parse Claude Code's hook JSON. Run
+`jq --version` or use `/foxguard:setup` after loading the plugin to verify it.
+
 ### 2. Install the plugin
 
 Until the plugin is published to a marketplace, load it directly from this repo:
@@ -102,7 +105,7 @@ plugins/claude-code/
 ## Notes
 
 - The hook intentionally never blocks Claude on its own machinery: missing binary, parse errors, or unreadable inputs all exit `0`. Only real findings exit `2`.
-- The hook calls `foxguard` from `PATH` first, then falls back to `npx --yes foxguard`. If neither is available it stays silent — run `/foxguard:setup` to fix that.
+- The hook calls `foxguard` from `PATH` first, then falls back to `npx --yes foxguard`. It uses `jq` to parse Claude Code's hook JSON. If either dependency is unavailable it stays silent — run `/foxguard:setup` to fix that.
 - `--severity medium` is the default cutoff. Drop to `low` for stricter coverage; raise to `high` for noisier projects.
 - foxguard's exit codes: `0` clean, `1` findings, `2` error. The hook checks for findings via the JSON, not the exit code, so a piped error doesn't trigger a false alarm.
 - This package is scoped to Claude Code. Broader agent or editor integration
