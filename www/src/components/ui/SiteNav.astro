@@ -8,15 +8,37 @@ const { backLink, backLabel } = Astro.props;
 ---
 
 <nav class="flex items-center justify-between py-4">
-  <a href={backLink || "/"} class="flex items-center gap-2.5 text-noir-400 hover:text-noir-100 transition-colors no-underline">
-    <svg class="w-7 h-7" viewBox="0 0 64 64" fill="none">
-      <path d="M8 8L20 28L32 20L44 28L56 8L52 32L44 44L36 52H28L20 44L12 32L8 8Z" fill="#F59E0B" fill-opacity="0.15" stroke="#F59E0B" stroke-width="2" stroke-linejoin="round"/>
-      <circle cx="24" cy="32" r="2.5" fill="#F59E0B"/>
-      <circle cx="40" cy="32" r="2.5" fill="#F59E0B"/>
-    </svg>
-    <span class="font-heading text-noir-50 text-lg">fox<span class="text-fox-light">guard</span></span>
-    {backLabel && <span class="text-noir-600 text-sm">/ {backLabel}</span>}
-  </a>
+  <div class="flex items-center gap-2.5">
+    <a href={backLink || "/"} class="flex items-center gap-2.5 text-noir-400 hover:text-noir-100 transition-colors no-underline">
+      <svg class="w-7 h-7" viewBox="0 0 64 64" fill="none">
+        <path d="M8 8L20 28L32 20L44 28L56 8L52 32L44 44L36 52H28L20 44L12 32L8 8Z" fill="#F59E0B" fill-opacity="0.15" stroke="#F59E0B" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="24" cy="32" r="2.5" fill="#F59E0B"/>
+        <circle cx="40" cy="32" r="2.5" fill="#F59E0B"/>
+      </svg>
+      <span class="font-heading text-noir-50 text-lg">fox<span class="text-fox-light">guard</span></span>
+      {backLabel && <span class="text-noir-600 text-sm">/ {backLabel}</span>}
+    </a>
+    <a
+      href="https://0sec.ai"
+      target="_blank"
+      rel="noopener"
+      aria-label="0sec"
+      class="hidden sm:inline-flex items-baseline gap-1 border-l border-noir-800 pl-2 text-[11px] font-medium text-noir-500 hover:text-noir-300 transition-colors no-underline"
+    >
+      <span>by</span>
+      <span class="osec-wm osec-wm-tail-slashed text-noir-300" aria-label="0sec">
+        <span class="osec-wm-stage">
+          <span class="osec-wm-mark">0</span>
+          <span class="osec-wm-tail">
+            <span class="osec-wm-prey">s</span>
+            <span class="osec-wm-prey">e</span>
+            <span class="osec-wm-prey">c</span>
+          </span>
+          <span class="osec-wm-bar" aria-hidden="true"></span>
+        </span>
+      </span>
+    </a>
+  </div>
 
   <div class="flex items-center gap-5 text-sm">
     <a href="/#rules" class="hidden sm:block text-noir-500 hover:text-noir-100 transition-colors no-underline">Rules</a>
@@ -114,3 +136,58 @@ const { backLink, backLabel } = Astro.props;
     </script>
   </div>
 </nav>
+
+<style>
+  /* 0sec provenance mark.
+     Mirrors @0cloud/ui's OsecWordmark DOM plus CloudWordmark's
+     "slash through 0 while tail stays visible" static state. */
+  .osec-wm {
+    display: inline-block;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.05em;
+    line-height: 1;
+  }
+
+  .osec-wm-stage {
+    position: relative;
+    display: inline-flex;
+    align-items: baseline;
+    line-height: 1;
+  }
+
+  .osec-wm-mark {
+    position: relative;
+    z-index: 3;
+    display: inline-block;
+  }
+
+  .osec-wm-tail {
+    position: relative;
+    display: inline-flex;
+    overflow: hidden;
+    vertical-align: baseline;
+    white-space: nowrap;
+    max-width: 1.8em;
+  }
+
+  .osec-wm-prey {
+    position: relative;
+    z-index: 1;
+    display: inline-block;
+    opacity: 1;
+  }
+
+  .osec-wm-bar {
+    position: absolute;
+    z-index: 4;
+    left: 0;
+    top: 0.085em;
+    width: 0.11em;
+    height: 0.85em;
+    background: #DC2626;
+    transform: translateX(0.32em) rotate(15deg);
+    transform-origin: center;
+    pointer-events: none;
+  }
+</style>
