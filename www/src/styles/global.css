@@ -30,9 +30,9 @@
   --color-sage-light: #10B981;
 
   /* Typography */
-  --font-heading: 'Bricolage Grotesque', system-ui, sans-serif;
-  --font-mono: 'Martian Mono', ui-monospace, monospace;
-  --font-body: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-heading: 'Outfit Variable', 'Inter Variable', system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-body: 'Inter Variable', system-ui, sans-serif;
 
   /* Shadows */
   --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.08);

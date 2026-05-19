@@ -1,4 +1,7 @@
 ---
+import '@fontsource-variable/inter';
+import '@fontsource-variable/outfit';
+
 interface Props {
   title: string;
   description?: string;
@@ -38,12 +41,12 @@ const { title, description = 'A security scanner as fast as a linter, written in
       "description": description,
       "url": "https://foxguard.dev",
       "author": { "@type": "Organization", "name": "0sec Labs", "url": "https://github.com/0sec-labs" },
-      "license": "https://opensource.org/licenses/MIT",
+      "license": [
+        "https://opensource.org/licenses/MIT",
+        "https://www.apache.org/licenses/LICENSE-2.0"
+      ],
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
     })} />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Martian+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <title>{title}</title>
   </head>
   <body class="site-shell bg-noir-950 text-noir-300 font-body antialiased min-h-screen">

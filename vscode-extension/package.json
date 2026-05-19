@@ -4,7 +4,7 @@
   "description": "A security scanner as fast as a linter, written in Rust.",
   "version": "0.8.1",
   "publisher": "peaktwilight",
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/0sec-labs/foxguard.git"

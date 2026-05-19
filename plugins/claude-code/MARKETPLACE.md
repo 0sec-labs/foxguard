@@ -54,7 +54,7 @@ https://foxguard.dev
 License:
 
 ```text
-MIT
+MIT OR Apache-2.0
 ```
 
 Suggested categories:

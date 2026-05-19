@@ -125,4 +125,4 @@ The full plugin (this directory) is the right choice if you want the proactive P
 
 ## License
 
-MIT — same as foxguard.
+MIT OR Apache-2.0 — same as foxguard.
