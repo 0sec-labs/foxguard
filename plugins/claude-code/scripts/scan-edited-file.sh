@@ -35,7 +35,7 @@ fi
 
 min_severity="${FOXGUARD_HOOK_SEVERITY:-medium}"
 
-scan_output=$("${fg[@]}" --format json --severity "$min_severity" "$file_path" 2>/dev/null) || true
+scan_output=$("${fg[@]}" --format json --severity "$min_severity" -- "$file_path" 2>/dev/null) || true
 
 [ -z "$scan_output" ] && exit 0
 

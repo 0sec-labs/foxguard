@@ -94,6 +94,9 @@ printf '{"tool_input":{"notebook_path":"tests/fixtures/safe.py"}}' \
 printf '{"tool_response":{"filePath":"tests/fixtures/safe.py"}}' \
   | plugins/claude-code/scripts/scan-edited-file.sh
 
+printf '{"tool_response":{"file_path":"tests/fixtures/safe.py"}}' \
+  | plugins/claude-code/scripts/scan-edited-file.sh
+
 printf '{"tool_input":{"file_path":"/does/not/exist.py"}}' \
   | plugins/claude-code/scripts/scan-edited-file.sh
 ```
