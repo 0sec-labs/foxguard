@@ -950,6 +950,8 @@ mod tests {
 
     #[test]
     fn redact_git_error_strips_bearer_token() {
+        // Synthetic token literal used solely to verify redact_git_error scrubs it.
+        // foxguard: ignore[rs/no-hardcoded-secret]
         let token = "ghs_supersecret_token_value";
         let raw = format!(
             "git failed with exit status: 128: fatal: unable to access: \
@@ -966,6 +968,8 @@ mod tests {
 
     #[test]
     fn redact_git_error_handles_timeout_messages() {
+        // Synthetic token literal used solely to exercise redact_git_error's timeout path.
+        // foxguard: ignore[rs/no-hardcoded-secret]
         let token = "ghs_anothertoken";
         let raw = "git timed out after 60s".to_string();
         // Timeout path has no auth content; output is unchanged but
@@ -976,6 +980,8 @@ mod tests {
 
     #[test]
     fn redact_git_error_redacts_token_even_without_authorization_header() {
+        // Synthetic token literal used solely to verify redact_git_error scrubs tokens outside the auth header.
+        // foxguard: ignore[rs/no-hardcoded-secret]
         let token = "ghs_tokenwithoutheader";
         let raw = format!("fatal: could not read from remote: cred={token} ok");
         let redacted = redact_git_error(&raw, token);
