@@ -11,6 +11,12 @@
 # chosen backend eventually performs in-place decrypt on the skb without a
 # dominating cow/unshare gate.
 #
+# Severity rationale: this rule by itself does NOT detect a write primitive —
+# it only confirms the advisory-named file routes into a backend that may
+# contain one. Reported as WARNING (severity calibration per #215) to keep
+# ERROR-level findings reserved for confirmed write primitives flagged by
+# skb-inplace-skcipher-no-cow on the backend implementation file (rxkad.c).
+#
 # Recall caveats — shapes this rule MISSES:
 #   - renamed or wrapper-mediated verify_response dispatch.
 #   - the decrypt helper itself; that is still covered by the generic
@@ -25,16 +31,29 @@ rules:
     pattern-regex: '(?ms)RXRPC_PACKET_TYPE_RESPONSE\s*:\s*[^}]*?\bconn->security->verify_response\s*\(\s*conn\s*,\s*skb\s*\)'
     message: |
       RXRPC RESPONSE dispatch into an opaque verify_response backend
-      (Dirty Frag class). net/rxrpc/conn_event.c reaches the vulnerable RxKAD
-      decrypt path through conn->security->verify_response(conn, skb) rather
-      than an inline crypto_skcipher_decrypt() idiom, so confirm the selected
-      backend performs in-place skb decrypt without a dominating
-      skb_cow_data / skb_unshare / skb_make_writable / pskb_expand_head gate.
-      See oss-security 2026-05-07 advisory and pwnkit issue #263.
-    severity: ERROR
+      (Dirty Frag class — triage funnel, not a confirmed write primitive).
+      net/rxrpc/conn_event.c reaches the vulnerable RxKAD decrypt path
+      through conn->security->verify_response(conn, skb) rather than an
+      inline crypto_skcipher_decrypt() idiom, so this rule only signals
+      that the advisory-named file routes here.
+
+      Triage: confirm the selected backend (rxkad on v6.14, or a
+      structurally equivalent RxGK clone) performs in-place skb decrypt
+      WITHOUT a dominating skb_cow_data / skb_unshare / skb_make_writable /
+      pskb_expand_head gate. If confirmed, the actual write primitive will
+      also be flagged by kernel/dirty-frag/skb-inplace-skcipher-no-cow
+      when scanning the backend implementation.
+
+      See oss-security 2026-05-07 advisory (Hyunwoo Kim @v4bel) and pwnkit
+      issue #263.
+    severity: WARNING
     languages: [c]
     paths:
       include:
         - net/rxrpc/conn_event*.c
     metadata:
       cwe: "CWE-787"
+      references:
+        - "https://www.openwall.com/lists/oss-security/2026/05/07/8"
+        - "https://github.com/V4bel/dirtyfrag/blob/master/assets/write-up.md"
+        - "https://github.com/0sec-labs/pwnkit/issues/263"

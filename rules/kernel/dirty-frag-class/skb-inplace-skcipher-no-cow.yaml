@@ -48,10 +48,17 @@ rules:
     pattern-not-regex: '(?s)\b(?:skb_cow_data|skb_cow|__skb_cow|skb_copy|skb_copy_expand|skb_unshare|skb_make_writable|pskb_expand_head)\s*\([^}]*?skcipher_request_set_crypt\s*\([^}]*?crypto_skcipher_decrypt\s*\('
     message: |
       In-place skcipher decrypt on skb without a dominating cow/unshare gate
-      (Dirty Frag class). Verify skb_cow_data / skb_unshare / skb_make_writable /
-      pskb_expand_head is reached on the unsafe path before
-      skcipher_request_set_crypt(req, sg, sg, ...) + crypto_skcipher_decrypt(req).
-      See oss-security 2026-05-07 advisory and pwnkit issue #263.
+      (Dirty Frag class).
+
+      Remediation: ensure one of skb_cow_data / skb_unshare /
+      skb_make_writable / pskb_expand_head is reached on the unsafe path
+      before skcipher_request_set_crypt(req, sg, sg, ...) +
+      crypto_skcipher_decrypt(req). For RxKAD-style handlers, extend the
+      cow gate with a data_len / non-linear shared-frag check so
+      MSG_SPLICE_PAGES-pinned pages cannot reach the in-place decrypt.
+
+      See oss-security 2026-05-07 advisory (Hyunwoo Kim @v4bel) and pwnkit
+      issue #263.
     severity: ERROR
     languages: [c]
     paths:
@@ -59,3 +66,7 @@ rules:
         - crypto/**
     metadata:
       cwe: "CWE-787"
+      references:
+        - "https://www.openwall.com/lists/oss-security/2026/05/07/8"
+        - "https://github.com/V4bel/dirtyfrag/blob/master/assets/write-up.md"
+        - "https://github.com/0sec-labs/pwnkit/issues/263"
