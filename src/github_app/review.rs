@@ -275,18 +275,28 @@ impl GitHubReviewClient {
             // URL construction is restricted to a validated GitHub API base URL
             // plus endpoints built from validated repository path segments.
             let request = self.http.get(url); // foxguard: ignore[rs/no-ssrf]
-            let mut page_items = request
+            let response = request
                 .bearer_auth(installation_token)
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
                 .send()
                 .await?
-                .error_for_status()?
-                .json::<Vec<T>>()
-                .await?;
-            let is_last_page = page_items.len() < PAGE_SIZE;
+                .error_for_status()?;
+            // GitHub uses RFC 5988 link-header pagination; the absence of a
+            // `rel="next"` link is the only reliable terminator. Page size
+            // can be smaller than PAGE_SIZE while another page still exists
+            // (e.g. comments deleted mid-pagination, or GitHub trimming a
+            // page near a rate-limit boundary), so we MUST NOT rely on item
+            // count to detect the last page — that would silently drop
+            // data.
+            let has_next_page = response
+                .headers()
+                .get(reqwest::header::LINK)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(link_header_has_next);
+            let mut page_items = response.json::<Vec<T>>().await?;
             items.append(&mut page_items);
-            if is_last_page {
+            if !has_next_page {
                 return Ok(items);
             }
             page += 1;
@@ -367,6 +377,43 @@ struct PullRequestComment {
 struct PullRequestFile {
     filename: String,
     patch: Option<String>,
+}
+
+/// Parse an RFC 5988 `Link` header and return `true` if any link entry
+/// is tagged `rel="next"`.
+///
+/// GitHub returns pagination as a comma-separated list of links, each
+/// of the form `<URL>; rel="next"` (other rels include `prev`, `first`,
+/// `last`). Quotes around the rel value are optional per the RFC, so
+/// both `rel="next"` and `rel=next` must be accepted. The URL itself
+/// is ignored — the caller already knows what page number to ask for.
+///
+/// This is intentionally a tolerant string-based parser rather than a
+/// full RFC 5988 implementation: GitHub's emitted form is stable and we
+/// only need to answer "is there a next page?".
+fn link_header_has_next(header_value: &str) -> bool {
+    for entry in header_value.split(',') {
+        let mut parts = entry.split(';').map(str::trim);
+        // Skip the URL part; we only care about parameters.
+        if parts.next().is_none() {
+            continue;
+        }
+        for parameter in parts {
+            let Some((name, value)) = parameter.split_once('=') else {
+                continue;
+            };
+            if !name.trim().eq_ignore_ascii_case("rel") {
+                continue;
+            }
+            let rel = value.trim().trim_matches('"');
+            // GitHub may emit a space-separated list of rel values per
+            // RFC 5988 (e.g. `rel="next prev"`), so check each token.
+            if rel.split_ascii_whitespace().any(|token| token == "next") {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn commentable_lines_from_patch(patch: Option<&str>) -> Option<HashSet<usize>> {
@@ -618,5 +665,216 @@ mod tests {
 
         assert!(summary.contains("60 issue(s)"));
         assert!(summary.contains("Showing the first 50"));
+    }
+
+    #[test]
+    fn link_header_has_next_detects_quoted_rel_next() {
+        let header = "<https://api.github.com/repositories/1/issues?page=2>; rel=\"next\", \
+                      <https://api.github.com/repositories/1/issues?page=5>; rel=\"last\"";
+        assert!(link_header_has_next(header));
+    }
+
+    #[test]
+    fn link_header_has_next_detects_unquoted_rel_next() {
+        // RFC 5988 makes quoting optional. GitHub always quotes today,
+        // but the parser shouldn't trust that to stay true.
+        let header = "<https://api.github.com/repos/o/r/pulls/1/comments?page=2>; rel=next";
+        assert!(link_header_has_next(header));
+    }
+
+    #[test]
+    fn link_header_has_next_handles_multi_token_rel() {
+        // Per RFC 5988 a rel value may contain space-separated tokens.
+        let header = "<https://api.github.com/x?page=2>; rel=\"next prev\"";
+        assert!(link_header_has_next(header));
+    }
+
+    #[test]
+    fn link_header_has_next_rejects_last_page() {
+        // Last page typically has only `prev` and `first` rels.
+        let header = "<https://api.github.com/x?page=4>; rel=\"prev\", \
+                      <https://api.github.com/x?page=1>; rel=\"first\"";
+        assert!(!link_header_has_next(header));
+    }
+
+    #[test]
+    fn link_header_has_next_rejects_empty_and_garbage() {
+        assert!(!link_header_has_next(""));
+        assert!(!link_header_has_next("not a link header"));
+        assert!(!link_header_has_next("<https://x>; rel=\"nextish\""));
+    }
+
+    // Minimal blocking HTTP/1.1 mock server used by `paginated_get`
+    // tests. It is deliberately not a general server: every request is
+    // answered by `responses` in order, regardless of method or path.
+    // Returns the bound URL once the server has accepted its listening
+    // port, so the caller can build a client against it.
+    fn spawn_mock_server(
+        responses: Vec<(reqwest::StatusCode, Option<String>, String)>,
+    ) -> (String, std::thread::JoinHandle<usize>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = match TcpListener::bind("127.0.0.1:0") {
+            Ok(listener) => listener,
+            Err(error) => panic!("mock server should bind: {error}"),
+        };
+        let port = match listener.local_addr() {
+            Ok(addr) => addr.port(),
+            Err(error) => panic!("mock server should report port: {error}"),
+        };
+        let url = format!("http://127.0.0.1:{port}/");
+
+        let handle = std::thread::spawn(move || {
+            let mut served = 0;
+            for (status, link, body) in responses {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(pair) => pair,
+                    Err(_) => return served,
+                };
+                let mut buffer = [0u8; 8192];
+                // We only need to drain enough of the request to unblock the
+                // client. A single read is sufficient for these small
+                // synthetic requests; reqwest sends the full request in one
+                // packet over loopback.
+                let _ = stream.read(&mut buffer);
+
+                let link_header = link
+                    .map(|value| format!("Link: {value}\r\n"))
+                    .unwrap_or_default();
+                let response = format!(
+                    "HTTP/1.1 {} OK\r\n\
+                     Content-Type: application/json\r\n\
+                     Content-Length: {}\r\n\
+                     {link_header}\
+                     Connection: close\r\n\
+                     \r\n\
+                     {body}",
+                    status.as_u16(),
+                    body.len(),
+                );
+                if stream.write_all(response.as_bytes()).is_err() {
+                    return served;
+                }
+                let _ = stream.flush();
+                served += 1;
+            }
+            served
+        });
+
+        (url, handle)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn paginated_get_follows_link_header_through_short_page() {
+        // Three pages: a full 100-item first page, a *short* 30-item
+        // second page that still has a `rel="next"` link, and a final
+        // page with no Link header. The previous size-based terminator
+        // would have stopped after page 2 and silently dropped page 3.
+        let page_one: Vec<u64> = (1..=100).collect();
+        let page_two: Vec<u64> = (101..=130).collect();
+        let page_three: Vec<u64> = (131..=140).collect();
+        let responses = vec![
+            (
+                reqwest::StatusCode::OK,
+                Some(
+                    "<http://example/x?page=2>; rel=\"next\", \
+                     <http://example/x?page=3>; rel=\"last\""
+                        .to_string(),
+                ),
+                serde_json::to_string(&page_one).expect("serialize page one"),
+            ),
+            (
+                reqwest::StatusCode::OK,
+                // Short page but `rel="next"` says there's more. This
+                // is the case the old `len() < PAGE_SIZE` check missed.
+                Some(
+                    "<http://example/x?page=3>; rel=\"next\", \
+                     <http://example/x?page=1>; rel=\"first\""
+                        .to_string(),
+                ),
+                serde_json::to_string(&page_two).expect("serialize page two"),
+            ),
+            (
+                reqwest::StatusCode::OK,
+                // No Link header at all = terminal page.
+                None,
+                serde_json::to_string(&page_three).expect("serialize page three"),
+            ),
+        ];
+
+        let (url, handle) = spawn_mock_server(responses);
+        let client = match GitHubReviewClient::new(&url) {
+            Ok(client) => client,
+            Err(error) => panic!("client should build: {error}"),
+        };
+
+        let items: Vec<u64> = match client.paginated_get("items", "test-token").await {
+            Ok(items) => items,
+            Err(error) => panic!("paginated_get should succeed: {error}"),
+        };
+
+        let mut expected: Vec<u64> = (1..=100).collect();
+        expected.extend(101..=130);
+        expected.extend(131..=140);
+        assert_eq!(items, expected);
+        let served = handle.join().expect("server thread should join");
+        assert_eq!(served, 3, "client should issue exactly three requests");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn paginated_get_stops_when_link_header_omits_next() {
+        // Single-page response with no Link header at all: behaves like
+        // the small-collection path.
+        let page: Vec<u64> = (1..=5).collect();
+        let responses = vec![(
+            reqwest::StatusCode::OK,
+            None,
+            serde_json::to_string(&page).expect("serialize page"),
+        )];
+
+        let (url, handle) = spawn_mock_server(responses);
+        let client = match GitHubReviewClient::new(&url) {
+            Ok(client) => client,
+            Err(error) => panic!("client should build: {error}"),
+        };
+
+        let items: Vec<u64> = match client.paginated_get("items", "test-token").await {
+            Ok(items) => items,
+            Err(error) => panic!("paginated_get should succeed: {error}"),
+        };
+
+        assert_eq!(items, page);
+        let served = handle.join().expect("server thread should join");
+        assert_eq!(served, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn paginated_get_stops_when_full_page_has_no_next_rel() {
+        // Edge case: a page is exactly PAGE_SIZE items but the server
+        // signals there is no next page. The old size-based check would
+        // have requested another page (likely 404 or empty); the
+        // header-based check stops correctly.
+        let page: Vec<u64> = (1..=100).collect();
+        let responses = vec![(
+            reqwest::StatusCode::OK,
+            Some("<http://example/x?page=1>; rel=\"first\"".to_string()),
+            serde_json::to_string(&page).expect("serialize page"),
+        )];
+
+        let (url, handle) = spawn_mock_server(responses);
+        let client = match GitHubReviewClient::new(&url) {
+            Ok(client) => client,
+            Err(error) => panic!("client should build: {error}"),
+        };
+
+        let items: Vec<u64> = match client.paginated_get("items", "test-token").await {
+            Ok(items) => items,
+            Err(error) => panic!("paginated_get should succeed: {error}"),
+        };
+
+        assert_eq!(items, page);
+        let served = handle.join().expect("server thread should join");
+        assert_eq!(served, 1, "client should not request a second page");
     }
 }
