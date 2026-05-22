@@ -21,7 +21,20 @@ cargo build --release --features github-app --bin foxguard-github-app
 
 The intentional gap. Each of these is a follow-up PR so the architecture above can land cleanly first:
 
-- **App registration.** Create the production GitHub App, wire the real install URL into the landing page, and verify the requested permissions include pull request review comments plus check runs.
+- **App registration.** Create the production GitHub App under the `0sec-labs` org and wire the real install URL into the landing page (`www/src/pages/github.astro`, PR #299). The App must request exactly the permissions and webhook events the receiver consumes today — anything less will fail at runtime, anything more is over-scoped:
+
+  **Repository permissions**
+  - `contents: read` — used by `git clone --filter=blob:none` of the PR head (`src/bin/foxguard_github_app.rs`).
+  - `pull_requests: read` — used to list PR files and existing comments (`src/github_app/review.rs`, `GET /repos/{owner}/{repo}/pulls/{n}/files`, `GET /repos/{owner}/{repo}/pulls/{n}/comments`).
+  - `pull_requests: write` — used to post and delete foxguard review comments (`POST` / `DELETE /repos/{owner}/{repo}/pulls/comments/{id}`).
+  - `checks: write` — used to create the `foxguard` check run with annotations (`POST /repos/{owner}/{repo}/check-runs`).
+
+  **Subscribed events**
+  - `pull_request` — triggers the clone + scan + comment + check-run loop.
+  - `installation` — keeps `installation_store.rs` in sync when the App is installed, suspended, or uninstalled (also clears the cached installation token on deletion).
+  - `installation_repositories` — keeps the registry in sync when a user adds or removes repos from an existing installation.
+
+  `ping` is delivered automatically by GitHub at webhook setup; the receiver handles it but it is not a subscribable event.
 
 ## Running locally
 
