@@ -12,6 +12,7 @@
 //! Run:      `FOXGUARD_WEBHOOK_SECRET=xxx FOXGUARD_BIND=0.0.0.0:8080 foxguard-github-app`
 //! Docker:   `docker build -f Dockerfile.github-app -t ghcr.io/0sec-labs/foxguard-github-app .`
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -25,7 +26,7 @@ use axum::{
     Router,
 };
 use foxguard::github_app::auth::{
-    AppCredentials, AuthError, GitHubAppAuthClient, InstallationTokenCache,
+    AppCredentials, AuthError, GitHubAppAuthClient, InstallationToken, InstallationTokenCache,
 };
 use foxguard::github_app::installation_store::{InstallationMetadataInput, InstallationStore};
 use foxguard::github_app::review::GitHubReviewClient;
@@ -51,7 +52,17 @@ struct AppState {
     webhook_secret: Vec<u8>,
     auth: GitHubAppAuthClient,
     review: GitHubReviewClient,
-    installation_tokens: Arc<Mutex<InstallationTokenCache>>,
+    /// Cached installation tokens keyed by installation id. Uses a
+    /// `tokio::sync::Mutex` so contention while we wait on a GitHub
+    /// API round-trip doesn't block the runtime, and so we cannot
+    /// silently poison the cache on a panic.
+    installation_tokens: Arc<tokio::sync::Mutex<InstallationTokenCache>>,
+    /// Per-installation locks that serialize concurrent token
+    /// refreshes for the same installation. Without this, two
+    /// simultaneous webhooks for the same installation both miss the
+    /// cache and both hit GitHub's `access_tokens` endpoint, wasting
+    /// API quota.
+    installation_token_locks: Arc<tokio::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
     installations: Arc<Mutex<InstallationStore>>,
 }
 
@@ -131,7 +142,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         webhook_secret: secret.into_bytes(),
         auth: GitHubAppAuthClient::new(credentials)?,
         review,
-        installation_tokens: Arc::new(Mutex::new(InstallationTokenCache::new())),
+        installation_tokens: Arc::new(tokio::sync::Mutex::new(InstallationTokenCache::new())),
+        installation_token_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         installations: Arc::new(Mutex::new(InstallationStore::from_env_or_default()?)),
     };
 
@@ -220,7 +232,7 @@ async fn webhook(
             Ok(payload) => {
                 if let Some(installation) = payload.installation.as_ref() {
                     if payload.action.as_deref() == Some("deleted") {
-                        remove_cached_installation_token(&state, installation.id);
+                        remove_cached_installation_token(&state, installation.id).await;
                     }
                     let persisted = match persist_installation_event(&state, &payload) {
                         Ok(persisted) => persisted,
@@ -569,7 +581,40 @@ fn run_git(
     if let Some(current_dir) = current_dir {
         command.current_dir(current_dir);
     }
-    run_command_with_timeout(command, PULL_REQUEST_SCAN_TIMEOUT, "git").map(|_| ())
+    run_command_with_timeout(command, PULL_REQUEST_SCAN_TIMEOUT, "git")
+        .map(|_| ())
+        .map_err(|error| redact_git_error(&error, installation_token))
+}
+
+/// Strip the installation token (and any line that names the
+/// `AUTHORIZATION` header) from a git error string before we let it
+/// propagate into logs. Some git versions can echo the configured
+/// extraheader on protocol failures; without this scrub the bearer
+/// token lands in stderr and from there into the structured logs.
+fn redact_git_error(error: &str, installation_token: &str) -> String {
+    const REDACTED: &str = "<redacted>";
+    let mut redacted = if installation_token.is_empty() {
+        error.to_string()
+    } else {
+        error.replace(installation_token, REDACTED)
+    };
+    if redacted
+        .lines()
+        .any(|line| line.to_ascii_uppercase().contains("AUTHORIZATION:"))
+    {
+        redacted = redacted
+            .lines()
+            .map(|line| {
+                if line.to_ascii_uppercase().contains("AUTHORIZATION:") {
+                    REDACTED
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    redacted
 }
 
 fn run_scanner(checkout: &Path) -> Result<String, String> {
@@ -664,43 +709,77 @@ async fn installation_token_for(
     state: &AppState,
     installation_id: u64,
 ) -> Result<String, AuthError> {
-    if let Some(token) = cached_installation_token(state, installation_id) {
+    installation_token_with_fetch(
+        &state.installation_tokens,
+        &state.installation_token_locks,
+        installation_id,
+        || state.auth.create_installation_token(installation_id),
+    )
+    .await
+}
+
+/// Core serialization logic for token refreshes, extracted so it can
+/// be exercised by tests without standing up a full GitHub auth
+/// client. Concurrent callers for the same `installation_id` go
+/// through a per-installation lock and re-check the cache inside
+/// that lock, so only the first caller actually invokes `fetch`.
+async fn installation_token_with_fetch<F, Fut>(
+    tokens: &tokio::sync::Mutex<InstallationTokenCache>,
+    locks: &tokio::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>,
+    installation_id: u64,
+    fetch: F,
+) -> Result<String, AuthError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<InstallationToken, AuthError>>,
+{
+    // Fast path: another task may have already populated the cache.
+    if let Some(token) = tokens
+        .lock()
+        .await
+        .lookup(installation_id, std::time::SystemTime::now())
+        .map(str::to_owned)
+    {
         return Ok(token);
     }
 
-    let token = state
-        .auth
-        .create_installation_token(installation_id)
-        .await?;
-    let value = token.token.clone();
-    match state.installation_tokens.lock() {
-        Ok(mut cache) => cache.remember(installation_id, token, std::time::SystemTime::now()),
-        Err(error) => {
-            warn!(%error, installation_id, "installation token cache lock poisoned");
-        }
+    // Slow path: take a per-installation lock so that concurrent
+    // webhooks for the same installation only call GitHub's
+    // `access_tokens` endpoint once. We hold the lock across the
+    // GitHub round-trip, so other waiters re-check the cache
+    // afterwards and reuse the freshly-stored token.
+    let installation_lock = {
+        let mut map = locks.lock().await;
+        map.entry(installation_id)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
+    let _fetch_guard = installation_lock.lock().await;
+
+    if let Some(token) = tokens
+        .lock()
+        .await
+        .lookup(installation_id, std::time::SystemTime::now())
+        .map(str::to_owned)
+    {
+        return Ok(token);
     }
+
+    let token = fetch().await?;
+    let value = token.token.clone();
+    tokens
+        .lock()
+        .await
+        .remember(installation_id, token, std::time::SystemTime::now());
     Ok(value)
 }
 
-fn cached_installation_token(state: &AppState, installation_id: u64) -> Option<String> {
-    match state.installation_tokens.lock() {
-        Ok(cache) => cache
-            .lookup(installation_id, std::time::SystemTime::now())
-            .map(str::to_owned),
-        Err(error) => {
-            warn!(%error, installation_id, "installation token cache lock poisoned");
-            None
-        }
-    }
-}
-
-fn remove_cached_installation_token(state: &AppState, installation_id: u64) {
-    match state.installation_tokens.lock() {
-        Ok(mut cache) => cache.remove(installation_id),
-        Err(error) => {
-            warn!(%error, installation_id, "installation token cache lock poisoned");
-        }
-    }
+async fn remove_cached_installation_token(state: &AppState, installation_id: u64) {
+    state
+        .installation_tokens
+        .lock()
+        .await
+        .remove(installation_id);
 }
 
 #[cfg(test)]
@@ -867,5 +946,138 @@ mod tests {
             "snippet": "demo"
         })
         .to_string()
+    }
+
+    #[test]
+    fn redact_git_error_strips_bearer_token() {
+        let token = "ghs_supersecret_token_value";
+        let raw = format!(
+            "git failed with exit status: 128: fatal: unable to access: \
+             header AUTHORIZATION: bearer {token}"
+        );
+        let redacted = redact_git_error(&raw, token);
+        assert!(!redacted.contains(token), "token leaked: {redacted}");
+        assert!(
+            !redacted.to_ascii_uppercase().contains("AUTHORIZATION:"),
+            "authorization line leaked: {redacted}"
+        );
+        assert!(redacted.contains("<redacted>"));
+    }
+
+    #[test]
+    fn redact_git_error_handles_timeout_messages() {
+        let token = "ghs_anothertoken";
+        let raw = "git timed out after 60s".to_string();
+        // Timeout path has no auth content; output is unchanged but
+        // the function must still be safe to call.
+        let redacted = redact_git_error(&raw, token);
+        assert_eq!(redacted, raw);
+    }
+
+    #[test]
+    fn redact_git_error_redacts_token_even_without_authorization_header() {
+        let token = "ghs_tokenwithoutheader";
+        let raw = format!("fatal: could not read from remote: cred={token} ok");
+        let redacted = redact_git_error(&raw, token);
+        assert!(!redacted.contains(token));
+        assert!(redacted.contains("<redacted>"));
+    }
+
+    #[test]
+    fn redact_git_error_is_noop_with_empty_token() {
+        let raw = "git failed: nothing sensitive here";
+        let redacted = redact_git_error(raw, "");
+        assert_eq!(redacted, raw);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn installation_token_with_fetch_dedupes_concurrent_calls() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let tokens = Arc::new(tokio::sync::Mutex::new(InstallationTokenCache::new()));
+        let locks: Arc<tokio::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>> =
+            Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        let fetch_count = Arc::new(AtomicUsize::new(0));
+
+        // Fire eight concurrent callers for the same installation.
+        // Without per-installation serialization every caller would
+        // miss the cache and call `fetch`; with it, only the first
+        // does and the rest receive the cached token.
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let tokens = Arc::clone(&tokens);
+            let locks = Arc::clone(&locks);
+            let fetch_count = Arc::clone(&fetch_count);
+            handles.push(tokio::spawn(async move {
+                installation_token_with_fetch(&tokens, &locks, 42, move || {
+                    let fetch_count = Arc::clone(&fetch_count);
+                    async move {
+                        // Yield so concurrent waiters all park on the
+                        // per-installation lock before this resolves.
+                        tokio::time::sleep(Duration::from_millis(25)).await;
+                        fetch_count.fetch_add(1, Ordering::SeqCst);
+                        Ok(InstallationToken {
+                            token: "deduped-token".to_string(),
+                            expires_at: "2099-01-01T00:00:00Z".to_string(),
+                        })
+                    }
+                })
+                .await
+            }));
+        }
+
+        for handle in handles {
+            let token = match handle.await {
+                Ok(result) => result.expect("token fetch should succeed"),
+                Err(error) => panic!("task panicked: {error}"),
+            };
+            assert_eq!(token, "deduped-token");
+        }
+        assert_eq!(
+            fetch_count.load(Ordering::SeqCst),
+            1,
+            "fetch should only execute once for a single installation"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn installation_token_with_fetch_does_not_serialize_distinct_installations() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let tokens = Arc::new(tokio::sync::Mutex::new(InstallationTokenCache::new()));
+        let locks: Arc<tokio::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>> =
+            Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        let fetch_count = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = Vec::new();
+        for installation_id in 1..=4 {
+            let tokens = Arc::clone(&tokens);
+            let locks = Arc::clone(&locks);
+            let fetch_count = Arc::clone(&fetch_count);
+            handles.push(tokio::spawn(async move {
+                installation_token_with_fetch(&tokens, &locks, installation_id, move || {
+                    let fetch_count = Arc::clone(&fetch_count);
+                    async move {
+                        fetch_count.fetch_add(1, Ordering::SeqCst);
+                        Ok(InstallationToken {
+                            token: format!("token-{installation_id}"),
+                            expires_at: "2099-01-01T00:00:00Z".to_string(),
+                        })
+                    }
+                })
+                .await
+            }));
+        }
+
+        for handle in handles {
+            match handle.await {
+                Ok(result) => {
+                    let _ = result.expect("token fetch should succeed");
+                }
+                Err(error) => panic!("task panicked: {error}"),
+            }
+        }
+        // Each installation gets exactly one fetch.
+        assert_eq!(fetch_count.load(Ordering::SeqCst), 4);
     }
 }
