@@ -286,3 +286,52 @@ fn scatterwalk_authencesn_exception_flags_memcpy_to_sglist_fixture() {
         "expected authencesn exception rule to flag memcpy_to_sglist STORE at crypto/authencesn.c, got {n} findings"
     );
 }
+
+/// End-to-end proof that the bundled dirty-frag YAML pack fires by default
+/// — i.e. `foxguard scan <fixture>` without any `--rules <path>` flag still
+/// produces a finding. Before this change, the kernel pack was on disk in
+/// `rules/` but invisible to the CLI unless the user passed
+/// `--rules rules/kernel/dirty-frag-class/`. After embedding, the pack
+/// ships inside the binary and registers alongside the Rust rules in
+/// `RuleRegistry::new()`.
+#[test]
+fn bundled_kernel_rule_fires_without_rules_flag() {
+    use std::process::Command;
+
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let fixture = std::path::Path::new(manifest_dir)
+        .join("tests/fixtures/kernel/dirty-frag/skcipher_no_cow_vulnerable.c");
+    assert!(fixture.exists(), "fixture missing at {}", fixture.display());
+
+    // `--config /dev/null` isolates from any repo `.foxguard.yml` that
+    // might filter rules. We deliberately do NOT pass `--rules`. (`scan`
+    // is the default subcommand; PATH is the trailing positional arg.)
+    let output = Command::new(env!("CARGO_BIN_EXE_foxguard"))
+        .args([
+            "--config",
+            "/dev/null",
+            "--format",
+            "json",
+            fixture.to_str().expect("fixture path is UTF-8"),
+        ])
+        .output()
+        .expect("failed to spawn foxguard binary");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let report: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("invalid JSON output: {e}\n{stdout}"));
+    let findings = report["findings"]
+        .as_array()
+        .expect("JSON report missing findings array");
+
+    let bundled_hit = findings.iter().any(|f| {
+        f["rule_id"]
+            .as_str()
+            .is_some_and(|id| id == "semgrep/kernel/dirty-frag/skb-inplace-skcipher-no-cow")
+    });
+    assert!(
+        bundled_hit,
+        "expected bundled rule to fire on positive fixture without --rules. findings: {}",
+        serde_json::to_string_pretty(findings).unwrap_or_default()
+    );
+}

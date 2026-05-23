@@ -1037,17 +1037,28 @@ fn extract_cwe(yaml: &SemgrepRuleYaml) -> Option<String> {
 
 /// Parse a single Semgrep YAML file into foxguard rules.
 pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
-    use crate::rules::semgrep_taint::{self, TaintRuleParse};
-    use serde_yaml::Value as YamlValue;
-
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    parse_semgrep_str(&content, &path.display().to_string())
+}
+
+/// Parse a Semgrep YAML document (passed as an in-memory string) into
+/// foxguard rules.
+///
+/// This sibling of [`parse_semgrep_file`] exists so the registry can load
+/// bundled rule packs embedded into the binary at compile time
+/// (`include_dir!` blobs have no filesystem path). `source_label` is used
+/// purely for error messages — pass the embedded path or any human-readable
+/// identifier.
+pub fn parse_semgrep_str(content: &str, source_label: &str) -> Result<Vec<Box<dyn Rule>>, String> {
+    use crate::rules::semgrep_taint::{self, TaintRuleParse};
+    use serde_yaml::Value as YamlValue;
 
     // First pass: parse as an untyped Value so we can detect `mode: taint`
     // rules and route them to the taint bridge without breaking the strict
     // `SemgrepRuleYaml` schema used for pattern rules.
-    let raw_doc: YamlValue = serde_yaml::from_str(&content)
-        .map_err(|e| format!("Failed to parse YAML {}: {}", path.display(), e))?;
+    let raw_doc: YamlValue = serde_yaml::from_str(content)
+        .map_err(|e| format!("Failed to parse YAML {}: {}", source_label, e))?;
 
     let mut rules: Vec<Box<dyn Rule>> = Vec::new();
     let mut pattern_rule_nodes: Vec<YamlValue> = Vec::new();
@@ -1085,7 +1096,7 @@ pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
         m
     });
     let semgrep_file: SemgrepFile = serde_yaml::from_value(pattern_file)
-        .map_err(|e| format!("Failed to parse YAML {}: {}", path.display(), e))?;
+        .map_err(|e| format!("Failed to parse YAML {}: {}", source_label, e))?;
 
     for yaml_rule in semgrep_file.rules {
         let cwe = extract_cwe(&yaml_rule);
@@ -1148,6 +1159,53 @@ pub fn load_semgrep_rules(path: &Path) -> Vec<Box<dyn Rule>> {
     }
 
     rules
+}
+
+/// Load all Semgrep YAML rules from an embedded [`include_dir::Dir`] tree.
+///
+/// Used for the rule packs that ship inside the `foxguard` binary
+/// (currently `rules/kernel/dirty-frag-class/`). Walks the tree
+/// recursively, picks up every `.yaml` / `.yml` file, and parses each as a
+/// Semgrep document. CodeQL-engine rules are skipped inside
+/// `parse_semgrep_str` (handled by the separate CodeQL bridge), so it is
+/// safe to pass mixed packs.
+pub fn load_semgrep_rules_from_embedded(dir: &include_dir::Dir<'_>) -> Vec<Box<dyn Rule>> {
+    let mut rules = Vec::new();
+    walk_embedded_dir(dir, &mut rules);
+    rules
+}
+
+fn walk_embedded_dir(dir: &include_dir::Dir<'_>, rules: &mut Vec<Box<dyn Rule>>) {
+    for file in dir.files() {
+        let path = file.path();
+        let ext = path.extension().and_then(|s| s.to_str());
+        if !matches!(ext, Some("yaml" | "yml")) {
+            continue;
+        }
+        let Some(content) = file.contents_utf8() else {
+            eprintln!(
+                "Warning: embedded rule {} is not valid UTF-8, skipping",
+                path.display()
+            );
+            continue;
+        };
+        let label = format!("<bundled:{}>", path.display());
+        match parse_semgrep_str(content, &label) {
+            Ok(r) => rules.extend(r),
+            Err(e) => eprintln!("Warning: {e}"),
+        }
+    }
+    for subdir in dir.dirs() {
+        // `queries/` subtrees hold CodeQL `.ql` files plus `qlpack.yml` /
+        // `codeql-pack.lock.yml` pack metadata. Those `.yml` files match
+        // our extension filter but are NOT Semgrep rules — they belong to
+        // the CodeQL bridge. Skip the whole subtree so we don't print
+        // spurious parse warnings at startup.
+        if subdir.path().file_name().and_then(|s| s.to_str()) == Some("queries") {
+            continue;
+        }
+        walk_embedded_dir(subdir, rules);
+    }
 }
 
 #[cfg(test)]

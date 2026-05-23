@@ -23,6 +23,17 @@ pub mod taint_engine;
 use crate::{Finding, Language, Severity};
 use std::path::Path;
 
+/// YAML rule packs that ship inside the `foxguard` binary.
+///
+/// These are loaded by [`RuleRegistry::new`] on the same footing as the
+/// hand-written Rust rules: no CLI flag required. The `queries/` subtrees
+/// hold CodeQL `.ql` files and pack lockfiles that have nothing to do with
+/// Semgrep matching, so they are skipped at load time (see
+/// `walk_embedded_dir` in `semgrep_compat.rs`).
+///
+/// See `rules/README.md` for the on-disk layout.
+static BUNDLED_RULES: include_dir::Dir<'_> = include_dir::include_dir!("$CARGO_MANIFEST_DIR/rules");
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaintEngine {
     Go,
@@ -517,6 +528,17 @@ impl RuleRegistry {
         registry.register(Box::new(manifest::CargoLockPqCrypto));
         registry.register(Box::new(manifest::RequirementsTxtPqCrypto));
 
+        // Register bundled YAML rule packs (currently the kernel
+        // dirty-frag-class pack). These ship inside the binary via the
+        // `include_dir!` blob above; they are treated as built-in rules so
+        // `--no-builtins` suppresses them too. Users who want the kernel
+        // pack but not the Rust rules can lean on `--rules <path>` against
+        // an external clone — `--no-builtins` means "no foxguard-shipped
+        // rules at all".
+        for rule in semgrep_compat::load_semgrep_rules_from_embedded(&BUNDLED_RULES) {
+            registry.register(rule);
+        }
+
         registry
     }
 
@@ -855,5 +877,55 @@ mod tests {
         let opts = std::collections::HashMap::new();
         let warnings = registry.configure_rules(&opts).unwrap();
         assert!(warnings.is_empty());
+    }
+
+    /// Proves the kernel dirty-frag YAML pack is loaded by default — i.e.
+    /// without the user passing `--rules rules/kernel/dirty-frag-class/`.
+    /// Before this change the pack only fired when explicitly opted into;
+    /// now it ships inside the binary via `include_dir!` and registers on
+    /// the same `RuleRegistry::new()` call as the Rust rules.
+    ///
+    /// The CodeQL-engine rule
+    /// (`kernel/dirty-frag/esp-shared-frag-decrypt-guard-codeql`) is
+    /// intentionally skipped by the Semgrep loader — Agent B's CodeQL
+    /// bridge owns that one.
+    #[test]
+    fn bundled_kernel_dirty_frag_rules_load_by_default() {
+        let registry = RuleRegistry::new();
+        let ids: std::collections::HashSet<&str> = registry.rules.iter().map(|r| r.id()).collect();
+
+        // Five Semgrep-engine rules in the pack (the sixth is CodeQL).
+        let expected = [
+            "semgrep/kernel/dirty-frag/skb-inplace-skcipher-no-cow",
+            "semgrep/kernel/dirty-frag/skb-inplace-aead-no-cow",
+            "semgrep/kernel/dirty-frag/scatterwalk-store-on-shared-sgl",
+            "semgrep/kernel/dirty-frag/scatterwalk-store-on-shared-sgl-authencesn",
+            "semgrep/kernel/dirty-frag/rxrpc-verify-response-dispatch",
+        ];
+        for id in expected {
+            assert!(
+                ids.contains(id),
+                "expected bundled rule {} to be registered by default, got: {:?}",
+                id,
+                ids.iter()
+                    .filter(|i| i.starts_with("semgrep/kernel"))
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        // CodeQL-engine rule must NOT be picked up by the Semgrep loader.
+        assert!(
+            !ids.contains("semgrep/kernel/dirty-frag/esp-shared-frag-decrypt-guard-codeql"),
+            "CodeQL rule leaked into the Semgrep registry"
+        );
+    }
+
+    /// `--no-builtins` must suppress the bundled YAML pack too, not just
+    /// the Rust rules. This is the explicit design decision documented in
+    /// `build_registry` in `src/app.rs`.
+    #[test]
+    fn empty_registry_does_not_load_bundled_rules() {
+        let registry = RuleRegistry::empty();
+        assert!(registry.rules.is_empty());
     }
 }

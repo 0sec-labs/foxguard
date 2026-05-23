@@ -669,12 +669,21 @@ fn external_rule_ids(
 fn build_registry(no_builtins: bool, rules: Option<&str>) -> Result<RuleRegistry, String> {
     validate_rules_path(rules)?;
 
+    // `RuleRegistry::new()` registers both the hand-written Rust rules and
+    // the bundled YAML rule packs (currently `rules/kernel/dirty-frag-class/`)
+    // embedded into the binary at compile time. `--no-builtins` therefore
+    // suppresses BOTH sources — anyone passing it gets nothing unless they
+    // also pass `--rules <path>`. We deliberately do not expose a separate
+    // `--no-bundled-rules` flag: there is no current use case for "Rust core
+    // only, no shipped YAML". Add one only when someone hits that need.
     let mut registry = if no_builtins {
         RuleRegistry::empty()
     } else {
         RuleRegistry::new()
     };
 
+    // `--rules <path>` still loads additional external packs on top of the
+    // bundled set; semantics unchanged.
     if let Some(rules_path) = rules {
         let semgrep_rules = load_semgrep_rules(Path::new(rules_path));
         for rule in semgrep_rules {
