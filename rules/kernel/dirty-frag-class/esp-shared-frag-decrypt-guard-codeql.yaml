@@ -15,7 +15,18 @@ rules:
       ESP decrypt reaches crypto_aead_decrypt without an skb_has_shared_frag
       guard in the same function. Shared MSG_SPLICE_PAGES frags can be
       decrypted in place unless ESP copy-on-write also checks shared frags.
+
+      Remediation: extend the skip_cow gate in esp_input / esp6_input with
+      `!skb_has_shared_frag(skb)`, matching upstream commit
+      f4c50a4034e62ab75f1d5cdd191dd5f9c77fdff4.
+
+      See oss-security 2026-05-07 advisory (Hyunwoo Kim @v4bel).
     severity: ERROR
     query: queries/kernel/dirty-frag-esp-shared-frag-decrypt-guard.ql
     metadata:
       cwe: "CWE-787"
+      references:
+        - "https://www.openwall.com/lists/oss-security/2026/05/07/8"
+        - "https://github.com/V4bel/dirtyfrag/blob/master/assets/write-up.md"
+        - "https://github.com/0sec-labs/pwnkit/issues/263"
+        - "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=f4c50a4034e62ab75f1d5cdd191dd5f9c77fdff4"

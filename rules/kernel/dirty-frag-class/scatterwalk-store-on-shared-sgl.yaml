@@ -1,23 +1,28 @@
-# Dirty Frag class — scatterwalk_map_and_copy STORE on AEAD-shared SGL.
+# Dirty Frag class — scatterwalk_map_and_copy / memcpy_to_sglist STORE on
+# AEAD-shared SGL.
 #
-# Pattern: scatterwalk_map_and_copy(..., dst, off, len, /*out=*/1) where dst
-# is part of an in-place AEAD request set up earlier in the same function via
-# aead_request_set_crypt(req, sg, sg, ...). This is the secondary STORE
-# primitive used by Copy Fail / Dirty Frag-style authenc clones. The confirmed
-# crypto/authencesn.c advisory site is handled by the narrower authencesn
-# exception rule because this broad rule excludes crypto/** template wrappers.
+# Pattern: scatterwalk_map_and_copy(..., dst, off, len, /*out=*/1) — or the
+# newer memcpy_to_sglist(dst, off, src, len) helper introduced in upstream
+# crypto/ — where dst is part of an in-place AEAD request set up earlier in
+# the same function via aead_request_set_crypt(req, sg, sg, ...). This is
+# the secondary STORE primitive used by Copy Fail / Dirty Frag-style authenc
+# clones. The confirmed crypto/authencesn.c advisory site is handled by the
+# narrower authencesn exception rule because this broad rule excludes
+# crypto/** template wrappers.
 #
 # Tier 1 sibling sites this rule also catches (see
-# scatterwalk_authenc_store_vulnerable.c):
+# scatterwalk_authenc_store_vulnerable.c, scatterwalk_memcpy_to_sglist_vulnerable.c):
 #   - any non-crypto-path authenc clone that mirrors the STORE primitive
+#   - modern Linux authenc clones that migrated to memcpy_to_sglist
 #
 # Recall caveats — shapes this rule MISSES:
-#   - the STORE done via memcpy_to_sglist or sg_pcopy_to_buffer instead of
-#     scatterwalk_map_and_copy — distinct primitives that need their own
-#     positive regex (deferred to follow-up).
+#   - the STORE done via sg_pcopy_to_buffer instead of
+#     scatterwalk_map_and_copy / memcpy_to_sglist — a distinct primitive
+#     that needs its own positive regex (deferred to follow-up).
 #   - cross-function setup (set_crypt in caller, STORE in callee).
-#   - calls where the `out` argument is a named constant (e.g.
-#     `SCATTERWALK_STORE`) instead of literal `1`.
+#   - calls where the `out` argument of scatterwalk_map_and_copy is a named
+#     constant (e.g. `SCATTERWALK_STORE`) instead of literal `1`. The
+#     mainline kernel uses the literal so this is informational.
 #
 # Precision caveats — false-positive shapes NOT suppressed:
 #   - in-place AEAD setup followed by a STORE that DOES happen after a
@@ -34,18 +39,27 @@
 rules:
   - id: kernel/dirty-frag/scatterwalk-store-on-shared-sgl
     # Positive: aead_request_set_crypt(...) is followed (within the same
-    # function body) by scatterwalk_map_and_copy(..., out=1). Rust regex has
-    # no backreferences, so we cannot require arg2 == arg3 of set_crypt to
-    # confirm the SGL is shared; manual triage / CodeQL confirms aliasing.
-    pattern-regex: '(?ms)^\s*aead_request_set_crypt\s*\([^}]*?scatterwalk_map_and_copy\s*\([^,]+,[^,]+,[^,]+,[^,]+,\s*1\s*\)'
+    # function body) by either scatterwalk_map_and_copy(..., out=1) or the
+    # newer memcpy_to_sglist(...) helper. Rust regex has no backreferences,
+    # so we cannot require arg2 == arg3 of set_crypt to confirm the SGL is
+    # shared; manual triage / CodeQL confirms aliasing.
+    pattern-regex: '(?ms)^\s*aead_request_set_crypt\s*\([^}]*?(?:scatterwalk_map_and_copy\s*\([^,]+,[^,]+,[^,]+,[^,]+,\s*1\s*\)|\bmemcpy_to_sglist\s*\()'
     message: |
-      scatterwalk_map_and_copy STORE (out=1) on an in-place AEAD scatterlist
-      (Dirty Frag class). The destination scatterlist is shared with the
-      attacker-controllable source SGL via aead_request_set_crypt(req, sg, sg, ...);
-      a 4-byte STORE lands in caller-pinned memory regardless of AEAD auth
-      result. The confirmed crypto/authencesn.c site is covered by the
+      scatterwalk_map_and_copy STORE (out=1) or memcpy_to_sglist on an
+      in-place AEAD scatterlist (Dirty Frag class). The destination
+      scatterlist is shared with the attacker-controllable source SGL via
+      aead_request_set_crypt(req, sg, sg, ...); the STORE lands in
+      caller-pinned memory regardless of AEAD auth result.
+
+      Remediation: gate the in-place authenc decrypt with skb_cow_data (or
+      equivalent: skb_unshare, skb_make_writable, pskb_expand_head) on the
+      same path BEFORE aead_request_set_crypt, or ensure the STORE target
+      SGL is not aliased with the AEAD source. The confirmed
+      crypto/authencesn.c site is covered by the
       scatterwalk-store-on-shared-sgl-authencesn exception rule.
-      See oss-security 2026-05-07 advisory and pwnkit issue #263.
+
+      See oss-security 2026-05-07 advisory (Hyunwoo Kim @v4bel) and pwnkit
+      issue #263.
     severity: ERROR
     languages: [c]
     paths:
@@ -53,3 +67,7 @@ rules:
         - crypto/**
     metadata:
       cwe: "CWE-787"
+      references:
+        - "https://www.openwall.com/lists/oss-security/2026/05/07/8"
+        - "https://github.com/V4bel/dirtyfrag/blob/master/assets/write-up.md"
+        - "https://github.com/0sec-labs/pwnkit/issues/263"

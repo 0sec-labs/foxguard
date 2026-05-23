@@ -249,3 +249,40 @@ fn scatterwalk_store_on_shared_sgl_ignores_inplace_read_fixture() {
         n
     );
 }
+
+#[test]
+fn scatterwalk_store_on_shared_sgl_flags_memcpy_to_sglist_fixture() {
+    let n = run_rule(
+        "scatterwalk-store-on-shared-sgl.yaml",
+        "scatterwalk_memcpy_to_sglist_vulnerable.c",
+    );
+    assert!(
+        n >= 1,
+        "expected memcpy_to_sglist STORE on in-place AEAD SGL to be flagged, got {n} findings"
+    );
+}
+
+#[test]
+fn scatterwalk_store_on_shared_sgl_ignores_memcpy_from_sglist_fixture() {
+    let n = run_rule(
+        "scatterwalk-store-on-shared-sgl.yaml",
+        "scatterwalk_memcpy_from_sglist_safe.c",
+    );
+    assert_eq!(
+        n, 0,
+        "expected memcpy_from_sglist READ-back on in-place AEAD SGL to be unflagged, got {n} findings"
+    );
+}
+
+#[test]
+fn scatterwalk_authencesn_exception_flags_memcpy_to_sglist_fixture() {
+    let n = run_rule_at_path(
+        "scatterwalk-store-on-shared-sgl-authencesn.yaml",
+        "scatterwalk_memcpy_to_sglist_vulnerable.c",
+        "crypto/authencesn.c",
+    );
+    assert!(
+        n >= 1,
+        "expected authencesn exception rule to flag memcpy_to_sglist STORE at crypto/authencesn.c, got {n} findings"
+    );
+}

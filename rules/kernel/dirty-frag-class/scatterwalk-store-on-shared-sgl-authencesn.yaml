@@ -1,18 +1,28 @@
-# Dirty Frag class — authencesn exception for scatterwalk STORE on shared SGL.
+# Dirty Frag class — authencesn exception for scatterwalk / memcpy_to_sglist
+# STORE on shared SGL.
 #
 # The broad Dirty Frag rules exclude crypto/** because most hits there are
 # AEAD/skcipher template wrappers with no skb-frag bug-class semantics.
 # crypto/authencesn.c is the named exception: it is a confirmed advisory site
-# for the scatterwalk_map_and_copy STORE primitive.
+# for the scatterwalk_map_and_copy STORE primitive (and its memcpy_to_sglist
+# successor in newer kernels).
 rules:
   - id: kernel/dirty-frag/scatterwalk-store-on-shared-sgl-authencesn
-    pattern-regex: '(?ms)^\s*aead_request_set_crypt\s*\([^}]*?scatterwalk_map_and_copy\s*\([^,]+,[^,]+,[^,]+,[^,]+,\s*1\s*\)'
+    pattern-regex: '(?ms)^\s*aead_request_set_crypt\s*\([^}]*?(?:scatterwalk_map_and_copy\s*\([^,]+,[^,]+,[^,]+,[^,]+,\s*1\s*\)|\bmemcpy_to_sglist\s*\()'
     message: |
-      scatterwalk_map_and_copy STORE (out=1) on the authencesn in-place AEAD
-      scatterlist (Dirty Frag class). crypto/authencesn.c is intentionally
-      included even though broader crypto template wrappers are excluded.
-      Verify the destination scatterlist aliases attacker-controllable input
-      before AEAD auth rejects the message.
+      scatterwalk_map_and_copy STORE (out=1) or memcpy_to_sglist on the
+      authencesn in-place AEAD scatterlist (Dirty Frag class).
+      crypto/authencesn.c is intentionally included even though broader
+      crypto template wrappers are excluded.
+
+      Remediation: verify the destination scatterlist aliases
+      attacker-controllable input before AEAD auth rejects the message,
+      then hoist the STORE to land in a private buffer that is only
+      spliced back into the shared SGL AFTER the AEAD authenticator
+      validates.
+
+      See oss-security 2026-05-07 advisory (Hyunwoo Kim @v4bel) and pwnkit
+      issue #263.
     severity: ERROR
     languages: [c]
     paths:
@@ -20,3 +30,7 @@ rules:
         - crypto/authencesn*.c
     metadata:
       cwe: "CWE-787"
+      references:
+        - "https://www.openwall.com/lists/oss-security/2026/05/07/8"
+        - "https://github.com/V4bel/dirtyfrag/blob/master/assets/write-up.md"
+        - "https://github.com/0sec-labs/pwnkit/issues/263"
