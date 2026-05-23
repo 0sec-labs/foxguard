@@ -44,6 +44,77 @@ from typing import Iterable
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PARITY_DIR = Path(__file__).resolve().parent
 DEFAULT_FOXGUARD = REPO_ROOT / "target" / "release" / "foxguard"
+DEFAULT_ALIASES = PARITY_DIR / "aliases.toml"
+
+
+# ---------------------------------------------------------------------------
+# alias map loading
+#
+# aliases.toml maps a foxguard rule_id to a set of equivalent Semgrep
+# registry rule IDs. The harness uses this to compute family parity across
+# scanners whose rule IDs diverge lexically — `py/no-eval` and Semgrep's
+# `python.lang.security.audit.eval-detected.eval-detected` would otherwise
+# never collapse to the same family key.
+
+
+@dataclass
+class AliasMap:
+    """foxguard rule_id <-> Semgrep rule_id equivalence map.
+
+    Built from `aliases.toml`. Stores both directions so we can normalize a
+    finding from either scanner into a canonical "family" set in O(1).
+    """
+
+    fox_to_sem: dict[str, frozenset[str]] = field(default_factory=dict)
+    sem_to_fox: dict[str, frozenset[str]] = field(default_factory=dict)
+
+    @classmethod
+    def load(cls, path: Path) -> "AliasMap":
+        if not path.exists():
+            return cls()
+        with path.open("rb") as fh:
+            data = tomllib.load(fh)
+        m = cls()
+        fox_acc: dict[str, set[str]] = {}
+        sem_acc: dict[str, set[str]] = {}
+        for entry in data.get("alias", []):
+            fox = entry.get("foxguard")
+            sem_ids = entry.get("semgrep", [])
+            if not fox or not sem_ids:
+                continue
+            fox_acc.setdefault(fox, set()).update(sem_ids)
+            for sem in sem_ids:
+                sem_acc.setdefault(sem, set()).add(fox)
+        m.fox_to_sem = {k: frozenset(v) for k, v in fox_acc.items()}
+        m.sem_to_fox = {k: frozenset(v) for k, v in sem_acc.items()}
+        return m
+
+    def __len__(self) -> int:
+        return len(self.fox_to_sem)
+
+    def has_foxguard(self, rule_id: str) -> bool:
+        return rule_id in self.fox_to_sem
+
+    def has_semgrep(self, rule_id: str) -> bool:
+        return rule_id in self.sem_to_fox
+
+    def family_keys_for(self, scanner: str, rule_id: str) -> frozenset[str]:
+        """Return the canonical alias family keys this rule belongs to.
+
+        For a foxguard rule the canonical key is its own rule_id; for a Semgrep
+        rule the canonical keys are the set of foxguard rule_ids it aliases to
+        (so the same Semgrep finding can satisfy multiple foxguard families).
+
+        If the rule has no entry in the alias map we return an empty set —
+        callers fall back to the lexical `rule_family` heuristic.
+        """
+        if scanner == "foxguard":
+            if rule_id in self.fox_to_sem:
+                return frozenset({rule_id})
+            return frozenset()
+        if scanner == "semgrep":
+            return self.sem_to_fox.get(rule_id, frozenset())
+        return frozenset()
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +226,21 @@ class Finding:
     def family_key(self) -> tuple[str, int, str]:
         return (self.file, self.line, self.rule_family)
 
+    def aliased_family_keys(self, aliases: "AliasMap") -> set[tuple[str, int, str]]:
+        """Family keys for this finding, expanded via the alias map.
+
+        For mapped foxguard findings the canonical family is the foxguard rule
+        ID. For mapped Semgrep findings the canonical families are the aliased
+        foxguard rule IDs. Unmapped findings fall back to the older lexical
+        `rule_family` heuristic.
+        """
+        if self.scanner == "foxguard":
+            if aliases.has_foxguard(self.rule_id):
+                return {(self.file, self.line, self.rule_id)}
+        elif fox_ids := aliases.family_keys_for("semgrep", self.rule_id):
+            return {(self.file, self.line, fox_id) for fox_id in fox_ids}
+        return {self.family_key()}
+
 
 def _normalize_path(path: str, repo_root: Path) -> str:
     p = Path(path)
@@ -167,6 +253,13 @@ def _normalize_path(path: str, repo_root: Path) -> str:
         return path.replace("\\", "/").lstrip("./")
     s = str(p).replace("\\", "/")
     return s[2:] if s.startswith("./") else s
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def parse_foxguard(output: bytes, repo_root: Path) -> list[Finding]:
@@ -228,9 +321,8 @@ class RepoResult:
     semgrep_error: str = ""
     skipped_reason: str = ""
 
-    def family_parity(self) -> dict:
-        fox_keys = {f.family_key() for f in self.foxguard}
-        sem_keys = {f.family_key() for f in self.semgrep}
+    def family_parity(self, aliases: AliasMap) -> dict:
+        fox_keys, sem_keys = self.family_key_sets(aliases)
         shared = fox_keys & sem_keys
         fox_only = fox_keys - sem_keys
         sem_only = sem_keys - fox_keys
@@ -243,6 +335,24 @@ class RepoResult:
             "union": len(union),
             "rate": rate,
         }
+
+    def family_key_sets(
+        self, aliases: AliasMap
+    ) -> tuple[set[tuple[str, int, str]], set[tuple[str, int, str]]]:
+        fox_keys = {
+            key for finding in self.foxguard for key in finding.aliased_family_keys(aliases)
+        }
+        sem_keys: set[tuple[str, int, str]] = set()
+        for finding in self.semgrep:
+            keys = finding.aliased_family_keys(aliases)
+            # Several foxguard rules may intentionally alias to the same
+            # Semgrep rule (e.g. syntactic and taint variants). If one of those
+            # families is present at the same site, count the Semgrep finding
+            # against the present family rather than also creating false
+            # semgrep-only rows for the sibling aliases.
+            matching_keys = keys & fox_keys
+            sem_keys.update(matching_keys or keys)
+        return fox_keys, sem_keys
 
     def site_parity(self) -> dict:
         # Looser: do both tools flag this (file, line) at all?
@@ -400,7 +510,29 @@ def _top_n_findings(findings: Iterable[Finding], n: int = 10) -> list[Finding]:
     return out
 
 
-def write_repo_report(result: RepoResult, out_path: Path) -> None:
+def _finding_key_map(
+    findings: Iterable[Finding], aliases: AliasMap
+) -> dict[tuple[str, int, str], Finding]:
+    out: dict[tuple[str, int, str], Finding] = {}
+    for finding in findings:
+        for key in finding.aliased_family_keys(aliases):
+            out.setdefault(key, finding)
+    return out
+
+
+def _semgrep_finding_key_map(
+    result: RepoResult, aliases: AliasMap
+) -> dict[tuple[str, int, str], Finding]:
+    fox_keys, _ = result.family_key_sets(aliases)
+    out: dict[tuple[str, int, str], Finding] = {}
+    for finding in result.semgrep:
+        keys = finding.aliased_family_keys(aliases)
+        for key in keys & fox_keys or keys:
+            out.setdefault(key, finding)
+    return out
+
+
+def write_repo_report(result: RepoResult, out_path: Path, aliases: AliasMap) -> None:
     e = result.entry
     lines: list[str] = []
     lines.append(f"# Parity report: {e.name}")
@@ -438,22 +570,22 @@ def write_repo_report(result: RepoResult, out_path: Path) -> None:
         lines.append(f"> semgrep error: {result.semgrep_error}")
         lines.append("")
 
-    fam = result.family_parity()
+    fam = result.family_parity(aliases)
     site = result.site_parity()
     lines.append("## Parity")
     lines.append("")
     lines.append("| Metric | Shared | foxguard-only | semgrep-only | Union | Rate |")
     lines.append("|--------|-------:|--------------:|-------------:|------:|-----:|")
     lines.append(
-        f"| by `(file, line, rule_family)` | {fam['shared']} | {fam['foxguard_only']} | {fam['semgrep_only']} | {fam['union']} | {fam['rate']:.1%} |"
+        f"| by `(file, line, rule_family)` + aliases | {fam['shared']} | {fam['foxguard_only']} | {fam['semgrep_only']} | {fam['union']} | {fam['rate']:.1%} |"
     )
     lines.append(
         f"| by `(file, line)` | {site['shared']} | {site['foxguard_only']} | {site['semgrep_only']} | {site['union']} | {site['rate']:.1%} |"
     )
     lines.append("")
 
-    fox_keys = {f.family_key(): f for f in result.foxguard}
-    sem_keys = {f.family_key(): f for f in result.semgrep}
+    fox_keys = _finding_key_map(result.foxguard, aliases)
+    sem_keys = _semgrep_finding_key_map(result, aliases)
     fox_only_findings = [fox_keys[k] for k in fox_keys.keys() - sem_keys.keys()]
     sem_only_findings = [sem_keys[k] for k in sem_keys.keys() - fox_keys.keys()]
 
@@ -485,16 +617,15 @@ def write_repo_report(result: RepoResult, out_path: Path) -> None:
         lines.append("_None._")
     lines.append("")
 
-    # Per-rule-family parity
-    fams = set(f.rule_family for f in result.foxguard) | set(
-        f.rule_family for f in result.semgrep
-    )
+    # Per-rule-family parity after alias expansion.
+    fox_family_keys, sem_family_keys = result.family_key_sets(aliases)
+    fams = {key[2] for key in fox_family_keys} | {key[2] for key in sem_family_keys}
     fam_rows: list[tuple[str, int, int, float]] = []
     for fam_name in fams:
         if not fam_name:
             continue
-        fox_n = sum(1 for f in result.foxguard if f.rule_family == fam_name)
-        sem_n = sum(1 for f in result.semgrep if f.rule_family == fam_name)
+        fox_n = sum(1 for key in fox_family_keys if key[2] == fam_name)
+        sem_n = sum(1 for key in sem_family_keys if key[2] == fam_name)
         denom = max(fox_n, sem_n)
         rate = min(fox_n, sem_n) / denom if denom else 0.0
         fam_rows.append((fam_name, fox_n, sem_n, rate))
@@ -511,11 +642,11 @@ def write_repo_report(result: RepoResult, out_path: Path) -> None:
     out_path.write_text("\n".join(lines) + "\n")
 
 
-def write_summary(results: list[RepoResult], out_path: Path) -> dict:
+def write_summary(results: list[RepoResult], out_path: Path, aliases: AliasMap) -> dict:
     lines: list[str] = []
     lines.append("# Real-repo Semgrep parity — summary")
     lines.append("")
-    lines.append("Generated by `benchmarks/parity/run.sh` (issue #376).")
+    lines.append("Generated by `benchmarks/parity/run.sh` (issues #376, #386).")
     lines.append("")
     lines.append(
         "Each row aggregates findings from one pinned OSS repo. "
@@ -523,7 +654,11 @@ def write_summary(results: list[RepoResult], out_path: Path) -> dict:
     )
     lines.append("")
     lines.append(
-        "| Repo | Language | foxguard | semgrep | Shared (family) | foxguard-only | semgrep-only | Family parity | Site parity |"
+        f"Alias map: `{DEFAULT_ALIASES.relative_to(REPO_ROOT)}` ({len(aliases)} foxguard families)."
+    )
+    lines.append("")
+    lines.append(
+        "| Repo | Language | foxguard | semgrep | Shared (family+alias) | foxguard-only | semgrep-only | Family parity | Site parity |"
     )
     lines.append(
         "|------|----------|---------:|--------:|----------------:|--------------:|-------------:|--------------:|------------:|"
@@ -531,7 +666,7 @@ def write_summary(results: list[RepoResult], out_path: Path) -> dict:
 
     agg_shared = agg_fox_only = agg_sem_only = agg_union = 0
     agg_site_shared = agg_site_union = 0
-    snapshot: dict = {"repos": {}, "aggregate": {}}
+    snapshot: dict = {"repos": {}, "aggregate": {}, "aliases": {"foxguard_families": len(aliases)}}
 
     for r in results:
         if r.skipped_reason:
@@ -540,7 +675,7 @@ def write_summary(results: list[RepoResult], out_path: Path) -> dict:
             )
             snapshot["repos"][r.entry.name] = {"skipped": r.skipped_reason}
             continue
-        fam = r.family_parity()
+        fam = r.family_parity(aliases)
         site = r.site_parity()
         lines.append(
             f"| {r.entry.name} | {r.entry.language} | {len(r.foxguard)} | {len(r.semgrep)} | "
@@ -576,10 +711,10 @@ def write_summary(results: list[RepoResult], out_path: Path) -> dict:
     )
     lines.append("")
     lines.append(
-        "Family parity collapses rule IDs to their last semantic token, so a "
-        "foxguard `py/no-eval` matches Semgrep `python.lang.security.audit.eval-detected.eval-detected`. "
+        "Family parity compares `(file, line, rule_family)` keys after applying "
+        "`benchmarks/parity/aliases.toml` plus the lexical fallback heuristic. "
         "Site parity ignores rule IDs entirely and just asks whether both scanners "
-        "flagged the same `(file, line)`. Site parity is always >= family parity."
+        "flagged the same `(file, line)`."
     )
     lines.append("")
 
@@ -629,6 +764,12 @@ def parse_args() -> argparse.Namespace:
         help="foxguard binary (default: target/release/foxguard)",
     )
     p.add_argument(
+        "--aliases",
+        type=Path,
+        default=DEFAULT_ALIASES,
+        help="foxguard<->Semgrep alias map (default: benchmarks/parity/aliases.toml)",
+    )
+    p.add_argument(
         "--semgrep",
         type=str,
         default=os.environ.get("SEMGREP", ""),
@@ -660,6 +801,7 @@ def main() -> int:
         return 2
 
     entries, _meta = load_manifest(args.manifest)
+    aliases = AliasMap.load(args.aliases)
     if args.only:
         wanted = {s.strip() for s in args.only.split(",") if s.strip()}
         entries = [e for e in entries if e.name in wanted]
@@ -690,6 +832,7 @@ def main() -> int:
     print(f"workdir: {workdir}")
     print(f"foxguard: {args.foxguard}")
     print(f"semgrep:  {semgrep_bin or '(missing)'}")
+    print(f"aliases:  {args.aliases} ({len(aliases)} foxguard families)")
     print("")
 
     results: list[RepoResult] = []
@@ -749,8 +892,8 @@ def main() -> int:
                 result.semgrep_error = "semgrep not installed"
 
             report_path = args.out / f"report-{entry.name}.md"
-            write_repo_report(result, report_path)
-            print(f"  wrote {report_path.relative_to(REPO_ROOT)}")
+            write_repo_report(result, report_path, aliases)
+            print(f"  wrote {_display_path(report_path)}")
             results.append(result)
     finally:
         if cleanup_workdir:
@@ -760,8 +903,8 @@ def main() -> int:
     # clobber the canonical multi-repo summary.md.
     summary_name = "summary.md" if not args.only else f"summary-{args.only.replace(',', '_')}.md"
     summary_path = args.out / summary_name
-    snapshot = write_summary(results, summary_path)
-    print(f"\nwrote {summary_path.relative_to(REPO_ROOT)}")
+    snapshot = write_summary(results, summary_path, aliases)
+    print(f"\nwrote {_display_path(summary_path)}")
 
     expected_path = PARITY_DIR / "expected.json"
     if args.update_snapshot:

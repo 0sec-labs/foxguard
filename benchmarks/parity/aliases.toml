@@ -1,0 +1,642 @@
+# foxguard <-> Semgrep rule alias map.
+#
+# Each [[alias]] entry maps a single foxguard rule ID to one or more Semgrep
+# registry rule IDs that detect the same vulnerability class. The parity
+# harness (parity.py) uses this to compute family parity across scanners
+# whose rule IDs diverge lexically.
+#
+# Authoring rules:
+#   1. Only add an alias if the two scanners genuinely detect the same defect
+#      class (same CWE, same fix). Lexical similarity is not enough — review
+#      both rule sources before adding.
+#   2. Each Semgrep ID listed must be the FULL dotted registry ID exactly as
+#      Semgrep emits it (typically `<lang>.<framework>.security.<category>.<slug>.<slug>`).
+#      Semgrep duplicates the leaf token in some rules; keep the trailing dup.
+#   3. Cite the Semgrep registry source in `notes` (https://semgrep.dev/r/<id>).
+#      For multi-ID aliases (e.g. weak-crypto's MD5/SHA1 split) cite each rule.
+#   4. Do not invent aliases speculatively. If the harness has never surfaced
+#      a pairing and you can't point at a Semgrep registry rule that matches
+#      the foxguard rule's intent 1:1, leave it out. Inventing aliases
+#      pollutes the parity contract.
+#
+# See benchmarks/parity/README.md ("Alias map") for the full workflow.
+
+# ---------------------------------------------------------------------------
+# Python
+
+[[alias]]
+foxguard = "py/no-eval"
+semgrep = [
+  "python.lang.security.audit.eval-detected.eval-detected",
+  "python.lang.security.audit.exec-detected.exec-detected",
+]
+notes = """Both flag eval()/exec() with potentially-untrusted input.
+Registry: https://semgrep.dev/r/python.lang.security.audit.eval-detected.eval-detected
+Registry: https://semgrep.dev/r/python.lang.security.audit.exec-detected.exec-detected"""
+
+[[alias]]
+foxguard = "py/taint-eval"
+semgrep = [
+  "python.lang.security.audit.eval-detected.eval-detected",
+  "python.lang.security.audit.exec-detected.exec-detected",
+  "python.lang.security.audit.dangerous-system-call.dangerous-system-call-audit",
+]
+notes = """Taint-flow into eval/exec. Semgrep's eval/exec rules are syntactic-only
+but cover the same finding class. Confirmed by harness site match on
+flask/cli.py:1029.
+Registry: https://semgrep.dev/r/python.lang.security.audit.eval-detected.eval-detected"""
+
+[[alias]]
+foxguard = "py/no-weak-crypto"
+semgrep = [
+  "python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1",
+  "python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-md5",
+  "python.cryptography.security.insecure-hash-algorithm-sha1.insecure-hash-algorithm-sha1",
+  "python.cryptography.security.insecure-hash-algorithm-md5.insecure-hash-algorithm-md5",
+]
+notes = """Weak-hash detection. Harness site match on flask/sessions.py:295 confirms
+the p/python pairing. Both `lang.security` and `cryptography.security` namespaces
+ship in the Semgrep registry; we list both because different rulesets surface
+different variants. CWE-327.
+Registry: https://semgrep.dev/r/python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
+Registry: https://semgrep.dev/r/python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-md5"""
+
+[[alias]]
+foxguard = "py/no-path-traversal"
+semgrep = [
+  "python.lang.security.audit.path-traversal.path-traversal-open.path-traversal-open",
+  "python.lang.security.audit.path-traversal.path-traversal-join.path-traversal-join",
+  "python.flask.security.audit.send-file-tainted.send-file-tainted",
+]
+notes = """Path-traversal via open()/os.path.join()/flask send_file with dynamic input.
+CWE-22.
+Registry: https://semgrep.dev/r/python.lang.security.audit.path-traversal.path-traversal-open.path-traversal-open
+Registry: https://semgrep.dev/r/python.lang.security.audit.path-traversal.path-traversal-join.path-traversal-join"""
+
+[[alias]]
+foxguard = "py/no-sql-injection"
+semgrep = [
+  "python.lang.security.audit.formatted-sql-query.formatted-sql-query",
+  "python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query",
+  "python.django.security.audit.raw-query.raw-query",
+]
+notes = """Dynamic SQL construction (f-string / % / +) reaching execute().
+CWE-89.
+Registry: https://semgrep.dev/r/python.lang.security.audit.formatted-sql-query.formatted-sql-query
+Registry: https://semgrep.dev/r/python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query"""
+
+[[alias]]
+foxguard = "py/taint-sql-injection"
+semgrep = [
+  "python.lang.security.audit.formatted-sql-query.formatted-sql-query",
+  "python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query",
+  "python.django.security.audit.raw-query.raw-query",
+]
+notes = """Taint-flow variant of the same defect class as py/no-sql-injection.
+Registry: https://semgrep.dev/r/python.lang.security.audit.formatted-sql-query.formatted-sql-query"""
+
+[[alias]]
+foxguard = "py/no-command-injection"
+semgrep = [
+  "python.lang.security.audit.dangerous-subprocess-use.dangerous-subprocess-use",
+  "python.lang.security.audit.subprocess-shell-true.subprocess-shell-true",
+  "python.lang.security.audit.dangerous-system-call.dangerous-system-call-audit",
+  "python.lang.security.audit.dangerous-os-exec.dangerous-os-exec",
+]
+notes = """subprocess(..., shell=True) / os.system / os.exec* with dynamic input.
+CWE-78.
+Registry: https://semgrep.dev/r/python.lang.security.audit.dangerous-subprocess-use.dangerous-subprocess-use
+Registry: https://semgrep.dev/r/python.lang.security.audit.subprocess-shell-true.subprocess-shell-true"""
+
+[[alias]]
+foxguard = "py/taint-command-injection"
+semgrep = [
+  "python.lang.security.audit.dangerous-subprocess-use.dangerous-subprocess-use",
+  "python.lang.security.audit.subprocess-shell-true.subprocess-shell-true",
+]
+notes = """Taint-flow variant of py/no-command-injection.
+Registry: https://semgrep.dev/r/python.lang.security.audit.subprocess-shell-true.subprocess-shell-true"""
+
+[[alias]]
+foxguard = "py/no-pickle"
+semgrep = [
+  "python.lang.security.deserialization.pickle.avoid-pickle",
+  "python.lang.security.audit.dangerous-pickle-use.dangerous-pickle-use",
+]
+notes = """pickle.load(s) on untrusted input → RCE. CWE-502.
+Registry: https://semgrep.dev/r/python.lang.security.deserialization.pickle.avoid-pickle"""
+
+[[alias]]
+foxguard = "py/taint-pickle-deserialization"
+semgrep = [
+  "python.lang.security.deserialization.pickle.avoid-pickle",
+]
+notes = """Taint-flow variant of py/no-pickle.
+Registry: https://semgrep.dev/r/python.lang.security.deserialization.pickle.avoid-pickle"""
+
+[[alias]]
+foxguard = "py/no-yaml-load"
+semgrep = [
+  "python.lang.security.deserialization.avoid-pyyaml-load.avoid-pyyaml-load",
+]
+notes = """yaml.load() without SafeLoader → arbitrary object instantiation.
+CWE-502.
+Registry: https://semgrep.dev/r/python.lang.security.deserialization.avoid-pyyaml-load.avoid-pyyaml-load"""
+
+[[alias]]
+foxguard = "py/taint-yaml-load"
+semgrep = [
+  "python.lang.security.deserialization.avoid-pyyaml-load.avoid-pyyaml-load",
+]
+notes = """Taint-flow variant of py/no-yaml-load.
+Registry: https://semgrep.dev/r/python.lang.security.deserialization.avoid-pyyaml-load.avoid-pyyaml-load"""
+
+[[alias]]
+foxguard = "py/no-hardcoded-secret"
+semgrep = [
+  "generic.secrets.security.detected-generic-secret.detected-generic-secret",
+  "python.lang.security.audit.hardcoded-password-default-argument.hardcoded-password-default-argument",
+]
+notes = """Hardcoded credential / API token. CWE-798.
+Registry: https://semgrep.dev/r/generic.secrets.security.detected-generic-secret.detected-generic-secret"""
+
+[[alias]]
+foxguard = "py/no-ssrf"
+semgrep = [
+  "python.requests.security.disabled-cert-validation.disabled-cert-validation",
+  "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected",
+]
+notes = """requests/urllib with attacker-controlled URL. CWE-918.
+Registry: https://semgrep.dev/r/python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected"""
+
+[[alias]]
+foxguard = "py/taint-ssrf"
+semgrep = [
+  "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected",
+]
+notes = """Taint-flow variant of py/no-ssrf.
+Registry: https://semgrep.dev/r/python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected"""
+
+[[alias]]
+foxguard = "py/no-open-redirect"
+semgrep = [
+  "python.flask.security.unescaped-template-extension.unescaped-template-extension",
+  "python.flask.security.open-redirect.open-redirect",
+]
+notes = """redirect() with attacker-controlled target. CWE-601.
+Registry: https://semgrep.dev/r/python.flask.security.open-redirect.open-redirect"""
+
+[[alias]]
+foxguard = "py/no-debug-true"
+semgrep = [
+  "python.flask.security.audit.app-run-param-config.avoid_app_run_with_bad_host",
+  "python.django.security.audit.django-debug-enabled.django-debug-enabled",
+]
+notes = """Web framework left in debug mode in production code.
+Registry: https://semgrep.dev/r/python.django.security.audit.django-debug-enabled.django-debug-enabled"""
+
+[[alias]]
+foxguard = "py/taint-ssti"
+semgrep = [
+  "python.flask.security.audit.render-template-string.render-template-string",
+  "python.jinja2.security.audit.autoescape-disabled.autoescape-disabled",
+]
+notes = """Template injection via Jinja2/render_template_string. CWE-1336.
+Registry: https://semgrep.dev/r/python.flask.security.audit.render-template-string.render-template-string"""
+
+[[alias]]
+foxguard = "py/taint-xxe"
+semgrep = [
+  "python.lang.security.audit.xxe.lxml-in-pyver-gt-py36.lxml-in-pyver-gt-py36",
+  "python.lang.security.audit.xxe.xmlsax-external-entity.xmlsax-external-entity",
+]
+notes = """XML external-entity expansion via lxml/xml.sax with default parser config. CWE-611.
+Registry: https://semgrep.dev/r/python.lang.security.audit.xxe.lxml-in-pyver-gt-py36.lxml-in-pyver-gt-py36"""
+
+# ---------------------------------------------------------------------------
+# JavaScript / TypeScript
+
+[[alias]]
+foxguard = "js/no-eval"
+semgrep = [
+  "javascript.lang.security.audit.eval-detected.eval-detected",
+  "javascript.lang.security.audit.code-string-concat.code-string-concat",
+]
+notes = """eval()/Function() with potentially-tainted input. Harness site match
+on juice-shop/userProfile.ts:62 confirms code-string-concat pairing.
+Registry: https://semgrep.dev/r/javascript.lang.security.audit.code-string-concat.code-string-concat"""
+
+[[alias]]
+foxguard = "js/taint-eval"
+semgrep = [
+  "javascript.lang.security.audit.eval-detected.eval-detected",
+  "javascript.lang.security.audit.code-string-concat.code-string-concat",
+]
+notes = """Taint-flow variant of js/no-eval. Harness site match on
+juice-shop/userProfile.ts:62 confirms.
+Registry: https://semgrep.dev/r/javascript.lang.security.audit.code-string-concat.code-string-concat"""
+
+[[alias]]
+foxguard = "js/no-path-traversal"
+semgrep = [
+  "javascript.express.security.audit.express-res-sendfile.express-res-sendfile",
+  "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
+]
+notes = """sendFile()/readFile() with dynamic path. Harness site matches on
+juice-shop/{fileServer,keyServer,logfileServer,quarantineServer}.ts confirm
+the express-res-sendfile pairing. CWE-22 / CWE-73.
+Registry: https://semgrep.dev/r/javascript.express.security.audit.express-res-sendfile.express-res-sendfile"""
+
+[[alias]]
+foxguard = "js/no-sql-injection"
+semgrep = [
+  "javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection",
+  "javascript.lang.security.audit.tainted-sql-string.tainted-sql-string",
+]
+notes = """Template-literal / concatenated SQL reaching query(). Harness site matches
+on juice-shop/{login,search}.ts confirm sequelize-injection-express pairing. CWE-89.
+Registry: https://semgrep.dev/r/javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection"""
+
+[[alias]]
+foxguard = "js/taint-sql-injection"
+semgrep = [
+  "javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection",
+  "javascript.lang.security.audit.tainted-sql-string.tainted-sql-string",
+]
+notes = """Taint-flow variant of js/no-sql-injection. Harness site matches on
+juice-shop/{login,search}.ts confirm.
+Registry: https://semgrep.dev/r/javascript.sequelize.security.audit.sequelize-injection-express.express-sequelize-injection"""
+
+[[alias]]
+foxguard = "js/no-open-redirect"
+semgrep = [
+  "javascript.express.security.audit.express-open-redirect.express-open-redirect",
+]
+notes = """res.redirect() with attacker-controlled URL. CWE-601.
+Registry: https://semgrep.dev/r/javascript.express.security.audit.express-open-redirect.express-open-redirect"""
+
+[[alias]]
+foxguard = "js/no-xss-innerhtml"
+semgrep = [
+  "javascript.express.security.injection.raw-html-format.raw-html-format",
+  "javascript.browser.security.insecure-document-method.insecure-document-method",
+]
+notes = """innerHTML / document.write / raw HTML construction with dynamic input. CWE-79.
+Registry: https://semgrep.dev/r/javascript.express.security.injection.raw-html-format.raw-html-format"""
+
+[[alias]]
+foxguard = "js/taint-xss-innerhtml"
+semgrep = [
+  "javascript.express.security.injection.raw-html-format.raw-html-format",
+  "javascript.browser.security.insecure-document-method.insecure-document-method",
+]
+notes = """Taint-flow variant of js/no-xss-innerhtml.
+Registry: https://semgrep.dev/r/javascript.express.security.injection.raw-html-format.raw-html-format"""
+
+[[alias]]
+foxguard = "js/no-command-injection"
+semgrep = [
+  "javascript.lang.security.detect-child-process.detect-child-process",
+  "javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename",
+]
+notes = """child_process.exec() / spawn() with shell-true and dynamic input. CWE-78.
+Registry: https://semgrep.dev/r/javascript.lang.security.detect-child-process.detect-child-process"""
+
+[[alias]]
+foxguard = "js/taint-command-injection"
+semgrep = [
+  "javascript.lang.security.detect-child-process.detect-child-process",
+]
+notes = """Taint-flow variant of js/no-command-injection.
+Registry: https://semgrep.dev/r/javascript.lang.security.detect-child-process.detect-child-process"""
+
+[[alias]]
+foxguard = "js/no-weak-crypto"
+semgrep = [
+  "javascript.lang.security.audit.md5-used-as-password.md5-used-as-password",
+  "javascript.lang.security.audit.detect-crypto-randomness.detect-crypto-randomness",
+]
+notes = """MD5/SHA1 used for password hashing or Math.random() used for crypto. CWE-327 / CWE-338.
+Registry: https://semgrep.dev/r/javascript.lang.security.audit.md5-used-as-password.md5-used-as-password
+Registry: https://semgrep.dev/r/javascript.lang.security.audit.detect-crypto-randomness.detect-crypto-randomness"""
+
+[[alias]]
+foxguard = "js/no-hardcoded-secret"
+semgrep = [
+  "generic.secrets.security.detected-generic-secret.detected-generic-secret",
+  "javascript.lang.security.audit.hardcoded-jwt-secret.hardcoded-jwt-secret",
+]
+notes = """Hardcoded credential / API key / JWT secret. CWE-798.
+Registry: https://semgrep.dev/r/javascript.lang.security.audit.hardcoded-jwt-secret.hardcoded-jwt-secret"""
+
+[[alias]]
+foxguard = "js/no-ssrf"
+semgrep = [
+  "javascript.lang.security.audit.detect-non-literal-fs-filename.detect-non-literal-fs-filename",
+  "javascript.express.security.audit.express-ssrf.express-ssrf",
+]
+notes = """fetch()/http.get() with attacker-controlled URL. CWE-918.
+Registry: https://semgrep.dev/r/javascript.express.security.audit.express-ssrf.express-ssrf"""
+
+[[alias]]
+foxguard = "js/taint-ssrf"
+semgrep = [
+  "javascript.express.security.audit.express-ssrf.express-ssrf",
+]
+notes = """Taint-flow variant of js/no-ssrf.
+Registry: https://semgrep.dev/r/javascript.express.security.audit.express-ssrf.express-ssrf"""
+
+[[alias]]
+foxguard = "js/no-unsafe-deserialization"
+semgrep = [
+  "javascript.lang.security.audit.prototype-pollution-loop.prototype-pollution-loop",
+  "javascript.lang.security.audit.unserialize-use.unserialize-use",
+]
+notes = """node-serialize / unserialize with untrusted JSON → RCE. CWE-502.
+Registry: https://semgrep.dev/r/javascript.lang.security.audit.unserialize-use.unserialize-use"""
+
+[[alias]]
+foxguard = "js/no-prototype-pollution"
+semgrep = [
+  "javascript.lang.security.audit.prototype-pollution-loop.prototype-pollution-loop",
+  "javascript.lang.security.audit.prototype-pollution-assignment.prototype-pollution-assignment",
+]
+notes = """Object.assign / merge / set on attacker-controlled key path. CWE-1321.
+Registry: https://semgrep.dev/r/javascript.lang.security.audit.prototype-pollution-loop.prototype-pollution-loop"""
+
+[[alias]]
+foxguard = "js/no-document-write"
+semgrep = [
+  "javascript.browser.security.insecure-document-method.insecure-document-method",
+]
+notes = """document.write() with dynamic content → DOM XSS. CWE-79.
+Registry: https://semgrep.dev/r/javascript.browser.security.insecure-document-method.insecure-document-method"""
+
+# ---------------------------------------------------------------------------
+# Go
+
+[[alias]]
+foxguard = "go/no-path-traversal"
+semgrep = [
+  "go.lang.security.audit.path-traversal.path-traversal-file-open.path-traversal-file-open",
+  "go.lang.security.audit.path-traversal.path-traversal-attr.path-traversal-attr",
+]
+notes = """os.Open / filepath.Join with tainted input. CWE-22.
+Registry: https://semgrep.dev/r/go.lang.security.audit.path-traversal.path-traversal-file-open.path-traversal-file-open
+Registry: https://semgrep.dev/r/go.lang.security.audit.path-traversal.path-traversal-attr.path-traversal-attr"""
+
+[[alias]]
+foxguard = "go/taint-path-traversal"
+semgrep = [
+  "go.lang.security.audit.path-traversal.path-traversal-file-open.path-traversal-file-open",
+  "go.lang.security.audit.path-traversal.path-traversal-attr.path-traversal-attr",
+]
+notes = """Taint-flow variant of go/no-path-traversal.
+Registry: https://semgrep.dev/r/go.lang.security.audit.path-traversal.path-traversal-attr.path-traversal-attr"""
+
+[[alias]]
+foxguard = "go/no-sql-injection"
+semgrep = [
+  "go.lang.security.audit.database.string-formatted-query.string-formatted-query",
+  "go.lang.security.audit.database.sqli.gorm-sqli.gorm-sqli",
+]
+notes = """fmt.Sprintf'd or +-concatenated SQL reaching db.Query/Exec. CWE-89.
+Registry: https://semgrep.dev/r/go.lang.security.audit.database.string-formatted-query.string-formatted-query"""
+
+[[alias]]
+foxguard = "go/taint-sql-injection"
+semgrep = [
+  "go.lang.security.audit.database.string-formatted-query.string-formatted-query",
+  "go.lang.security.audit.database.sqli.gorm-sqli.gorm-sqli",
+]
+notes = """Taint-flow variant of go/no-sql-injection.
+Registry: https://semgrep.dev/r/go.lang.security.audit.database.string-formatted-query.string-formatted-query"""
+
+[[alias]]
+foxguard = "go/no-command-injection"
+semgrep = [
+  "go.lang.security.audit.dangerous-exec-command.dangerous-exec-command",
+  "go.lang.security.audit.dangerous-syscall-exec.dangerous-syscall-exec",
+]
+notes = """exec.Command / syscall.Exec with tainted args. CWE-78.
+Registry: https://semgrep.dev/r/go.lang.security.audit.dangerous-exec-command.dangerous-exec-command"""
+
+[[alias]]
+foxguard = "go/taint-command-injection"
+semgrep = [
+  "go.lang.security.audit.dangerous-exec-command.dangerous-exec-command",
+  "go.lang.security.audit.dangerous-syscall-exec.dangerous-syscall-exec",
+]
+notes = """Taint-flow variant of go/no-command-injection.
+Registry: https://semgrep.dev/r/go.lang.security.audit.dangerous-exec-command.dangerous-exec-command"""
+
+[[alias]]
+foxguard = "go/no-ssrf"
+semgrep = [
+  "go.lang.security.audit.net.http-server-tainted-url-host.http-server-tainted-url-host",
+]
+notes = """http.Get / http.NewRequest with attacker-controlled URL. CWE-918.
+Registry: https://semgrep.dev/r/go.lang.security.audit.net.http-server-tainted-url-host.http-server-tainted-url-host"""
+
+[[alias]]
+foxguard = "go/taint-ssrf"
+semgrep = [
+  "go.lang.security.audit.net.http-server-tainted-url-host.http-server-tainted-url-host",
+]
+notes = """Taint-flow variant of go/no-ssrf.
+Registry: https://semgrep.dev/r/go.lang.security.audit.net.http-server-tainted-url-host.http-server-tainted-url-host"""
+
+[[alias]]
+foxguard = "go/no-weak-crypto"
+semgrep = [
+  "go.lang.security.audit.crypto.use_of_weak_crypto.use-of-md5",
+  "go.lang.security.audit.crypto.use_of_weak_crypto.use-of-sha1",
+  "go.lang.security.audit.crypto.math_random.math-random-used",
+]
+notes = """crypto/md5, crypto/sha1, math/rand used in security context. CWE-327 / CWE-338.
+Registry: https://semgrep.dev/r/go.lang.security.audit.crypto.use_of_weak_crypto.use-of-md5
+Registry: https://semgrep.dev/r/go.lang.security.audit.crypto.math_random.math-random-used"""
+
+[[alias]]
+foxguard = "go/no-hardcoded-secret"
+semgrep = [
+  "generic.secrets.security.detected-generic-secret.detected-generic-secret",
+  "go.lang.security.audit.hardcoded-credentials.hardcoded-credentials",
+]
+notes = """Hardcoded credential / API token. CWE-798.
+Registry: https://semgrep.dev/r/generic.secrets.security.detected-generic-secret.detected-generic-secret"""
+
+[[alias]]
+foxguard = "go/no-unsafe-deserialization"
+semgrep = [
+  "go.lang.security.audit.dangerous-gob-decoder.dangerous-gob-decoder",
+  "go.lang.security.audit.dangerous-decode-json.dangerous-decode-json",
+]
+notes = """encoding/gob and unbounded encoding/json reaching trusted code paths. CWE-502.
+Registry: https://semgrep.dev/r/go.lang.security.audit.dangerous-gob-decoder.dangerous-gob-decoder"""
+
+# ---------------------------------------------------------------------------
+# Java / Kotlin
+
+[[alias]]
+foxguard = "java/no-sql-injection"
+semgrep = [
+  "java.lang.security.audit.formatted-sql-string.formatted-sql-string",
+  "java.lang.security.audit.tainted-sql-from-http-request.tainted-sql-from-http-request",
+]
+notes = """JDBC Statement with concatenated SQL. CWE-89.
+Registry: https://semgrep.dev/r/java.lang.security.audit.formatted-sql-string.formatted-sql-string"""
+
+[[alias]]
+foxguard = "java/no-command-injection"
+semgrep = [
+  "java.lang.security.audit.command-injection-formatted-runtime-call.command-injection-formatted-runtime-call",
+  "java.lang.security.audit.dangerous-exec.dangerous-exec",
+]
+notes = """Runtime.exec() / ProcessBuilder with concatenated/tainted args. CWE-78.
+Registry: https://semgrep.dev/r/java.lang.security.audit.command-injection-formatted-runtime-call.command-injection-formatted-runtime-call"""
+
+[[alias]]
+foxguard = "java/no-path-traversal"
+semgrep = [
+  "java.lang.security.audit.tainted-file-path.tainted-file-path",
+  "java.servlets.security.tainted-file-path.tainted-file-path",
+]
+notes = """new File(...) / FileInputStream with HTTP-tainted path. CWE-22.
+Registry: https://semgrep.dev/r/java.lang.security.audit.tainted-file-path.tainted-file-path"""
+
+[[alias]]
+foxguard = "java/no-weak-crypto"
+semgrep = [
+  "java.lang.security.audit.crypto.weak-hash.use-of-md5",
+  "java.lang.security.audit.crypto.weak-hash.use-of-sha1",
+  "java.lang.security.audit.crypto.des-is-deprecated.des-is-deprecated",
+]
+notes = """MessageDigest.getInstance("MD5") or DES cipher. CWE-327.
+Registry: https://semgrep.dev/r/java.lang.security.audit.crypto.weak-hash.use-of-md5
+Registry: https://semgrep.dev/r/java.lang.security.audit.crypto.des-is-deprecated.des-is-deprecated"""
+
+[[alias]]
+foxguard = "java/no-xxe"
+semgrep = [
+  "java.lang.security.audit.xxe.documentbuilderfactory-disallow-doctype-decl-missing.documentbuilderfactory-disallow-doctype-decl-missing",
+  "java.lang.security.audit.xxe.saxparserfactory-disallow-doctype-decl-missing.saxparserfactory-disallow-doctype-decl-missing",
+]
+notes = """XML parsers configured without disabling external entities. CWE-611.
+Registry: https://semgrep.dev/r/java.lang.security.audit.xxe.documentbuilderfactory-disallow-doctype-decl-missing.documentbuilderfactory-disallow-doctype-decl-missing"""
+
+[[alias]]
+foxguard = "java/no-xss"
+semgrep = [
+  "java.servlets.security.tainted-xss-from-http-servlet.tainted-xss-from-http-servlet",
+  "java.spring.security.audit.xss.spring-mvc-tainted-xss-from-http-servlet.spring-mvc-tainted-xss-from-http-servlet",
+]
+notes = """HttpServletResponse.getWriter().write(tainted). CWE-79.
+Registry: https://semgrep.dev/r/java.servlets.security.tainted-xss-from-http-servlet.tainted-xss-from-http-servlet"""
+
+[[alias]]
+foxguard = "java/no-unsafe-deserialization"
+semgrep = [
+  "java.lang.security.audit.object-deserialization.object-deserialization",
+]
+notes = """ObjectInputStream.readObject() on untrusted bytes. CWE-502.
+Registry: https://semgrep.dev/r/java.lang.security.audit.object-deserialization.object-deserialization"""
+
+[[alias]]
+foxguard = "java/no-hardcoded-secret"
+semgrep = [
+  "generic.secrets.security.detected-generic-secret.detected-generic-secret",
+  "java.lang.security.audit.hardcoded-jwt-key.hardcoded-jwt-key",
+]
+notes = """Hardcoded credential / JWT signing key. CWE-798.
+Registry: https://semgrep.dev/r/generic.secrets.security.detected-generic-secret.detected-generic-secret"""
+
+[[alias]]
+foxguard = "java/no-ssrf"
+semgrep = [
+  "java.lang.security.audit.ssrf.tainted-url-host.tainted-url-host",
+]
+notes = """URL/URI constructed from tainted input then fetched. CWE-918.
+Registry: https://semgrep.dev/r/java.lang.security.audit.ssrf.tainted-url-host.tainted-url-host"""
+
+[[alias]]
+foxguard = "kt/taint-sql-injection"
+semgrep = [
+  "java.lang.security.audit.formatted-sql-string.formatted-sql-string",
+  "java.lang.security.audit.tainted-sql-from-http-request.tainted-sql-from-http-request",
+]
+notes = """Kotlin runs on the JVM and Semgrep's p/kotlin reuses java.* rules for
+JDBC patterns. CWE-89.
+Registry: https://semgrep.dev/r/java.lang.security.audit.formatted-sql-string.formatted-sql-string"""
+
+[[alias]]
+foxguard = "kt/taint-command-injection"
+semgrep = [
+  "java.lang.security.audit.command-injection-formatted-runtime-call.command-injection-formatted-runtime-call",
+  "java.lang.security.audit.dangerous-exec.dangerous-exec",
+]
+notes = """Kotlin → JVM Runtime.exec / ProcessBuilder. CWE-78.
+Registry: https://semgrep.dev/r/java.lang.security.audit.command-injection-formatted-runtime-call.command-injection-formatted-runtime-call"""
+
+[[alias]]
+foxguard = "kt/taint-ssrf"
+semgrep = [
+  "java.lang.security.audit.ssrf.tainted-url-host.tainted-url-host",
+]
+notes = """Kotlin → JVM SSRF.
+Registry: https://semgrep.dev/r/java.lang.security.audit.ssrf.tainted-url-host.tainted-url-host"""
+
+# ---------------------------------------------------------------------------
+# Secrets (cross-language). Semgrep ships a single generic secret rule plus
+# provider-specific rules; we map each foxguard secret-* rule to the generic
+# one (highest-confidence overlap) plus the matching provider rule where one
+# exists in the registry.
+
+[[alias]]
+foxguard = "secret/aws-access-key-id"
+semgrep = [
+  "generic.secrets.security.detected-aws-account-id.detected-aws-account-id",
+  "generic.secrets.security.detected-aws-access-key-id-value.detected-aws-access-key-id-value",
+]
+notes = """AWS access key ID in source. CWE-798.
+Registry: https://semgrep.dev/r/generic.secrets.security.detected-aws-access-key-id-value.detected-aws-access-key-id-value"""
+
+[[alias]]
+foxguard = "secret/aws-secret-access-key"
+semgrep = [
+  "generic.secrets.security.detected-aws-secret-access-key.detected-aws-secret-access-key",
+]
+notes = """AWS secret access key in source. CWE-798.
+Registry: https://semgrep.dev/r/generic.secrets.security.detected-aws-secret-access-key.detected-aws-secret-access-key"""
+
+[[alias]]
+foxguard = "secret/github-token"
+semgrep = [
+  "generic.secrets.security.detected-github-token.detected-github-token",
+]
+notes = """GitHub personal/fine-grained access token in source. CWE-798.
+Registry: https://semgrep.dev/r/generic.secrets.security.detected-github-token.detected-github-token"""
+
+[[alias]]
+foxguard = "secret/slack-token"
+semgrep = [
+  "generic.secrets.security.detected-slack-token.detected-slack-token",
+]
+notes = """Slack bot/user/webhook token in source. CWE-798.
+Registry: https://semgrep.dev/r/generic.secrets.security.detected-slack-token.detected-slack-token"""
+
+[[alias]]
+foxguard = "secret/stripe-live-key"
+semgrep = [
+  "generic.secrets.security.detected-stripe-api-key.detected-stripe-api-key",
+]
+notes = """Stripe live (sk_live_) API key in source. CWE-798.
+Registry: https://semgrep.dev/r/generic.secrets.security.detected-stripe-api-key.detected-stripe-api-key"""
+
+[[alias]]
+foxguard = "secret/private-key"
+semgrep = [
+  "generic.secrets.security.detected-private-key.detected-private-key",
+]
+notes = """Private key (PEM / OpenSSH) in source. CWE-798.
+Registry: https://semgrep.dev/r/generic.secrets.security.detected-private-key.detected-private-key"""
