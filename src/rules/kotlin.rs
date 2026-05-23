@@ -756,589 +756,174 @@ impl_rule! {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Lightweight intra-procedural taint analysis for Kotlin (Ktor + Spring Boot)
+// Kotlin taint rules
 // ═══════════════════════════════════════════════════════════════════════════
+//
+// The three `kt/taint-*-injection` rules below consume the shared taint
+// engine in `crate::rules::kotlin_taint` rather than a bespoke harness.
+// Each rule's `check()` looks up the rule's declarative `TaintSpec` from
+// `kotlin_taint::kotlin_taint_rule_specs()`, hands it to
+// `kotlin_taint::analyze_tree`, and maps returned `TaintFinding`s onto
+// the project's `Finding` type — the same shape Go/JS/Python taint
+// rules use. Per-rule message formatters and metadata live here; the
+// engine and the shared sources/sinks live in `kotlin_taint.rs`.
+//
+// The scanner skips the rule's `check()` when the same rule id is
+// registered as a `RegistryTaintSpec` via
+// `builtin_taint_specs_for_language`, and runs the batched dispatcher
+// `run_kt_taint_batched` instead. The `check()` path is kept working
+// so unit tests that construct a Rule struct directly continue to
+// function.
 
-use std::collections::HashSet;
+use crate::rules::common::get_source_line;
+use crate::rules::kotlin_taint;
 
-/// Describes a taint source matched inside a function body.
-struct TaintSource {
-    /// Variable name the source is assigned to (if any).
-    var_name: Option<String>,
-    /// Human-readable description for findings.
-    description: String,
-    /// 1-indexed line where the source was found.
-    line: usize,
-}
-
-/// Describes a taint sink match.
-struct TaintSink {
-    /// The sink call node (for location).
-    start_byte: usize,
-    end_byte: usize,
-    line: usize,
-    /// Human-readable description.
-    description: String,
-}
-
-/// Collect Ktor/Spring Boot taint source variables inside a function body.
-///
-/// Recognizes:
-///   - `call.receiveText()`
-///   - `call.receive<T>()`
-///   - `request.queryParameters[...]`
-///   - `request.header(...)`
-///   - `call.request.queryParameters[...]`
-///   - `call.request.header(...)`
-///   - Function parameters annotated with `@RequestParam`, `@RequestBody`,
-///     `@PathVariable`, `@RequestHeader`
-fn collect_sources(node: tree_sitter::Node, src: &str) -> Vec<TaintSource> {
-    let mut sources = Vec::new();
-
-    // 1) Walk for Ktor call.receive / request.queryParameters / request.header
-    walk_tree(node, src, &mut |n, s| {
-        // property_declaration or variable assignment: val x = <source>
-        if n.kind() == "property_declaration" {
-            let var = extract_property_var_name(n, s);
-            let initializer = extract_property_initializer(n);
-            if let (Some(var_name), Some(init)) = (var, initializer) {
-                if let Some(desc) = classify_source_expr(init, s) {
-                    sources.push(TaintSource {
-                        var_name: Some(var_name),
-                        description: desc,
-                        line: n.start_position().row + 1,
-                    });
-                }
-            }
-        }
-        // assignment: x = <source>
-        if n.kind() == "assignment" {
-            if let (Some(left), Some(right)) =
-                (n.child(0), n.child(n.child_count().saturating_sub(1)))
-            {
-                let left_text = &s[left.byte_range()];
-                if left.kind() == "simple_identifier" {
-                    if let Some(desc) = classify_source_expr(right, s) {
-                        sources.push(TaintSource {
-                            var_name: Some(left_text.to_string()),
-                            description: desc,
-                            line: n.start_position().row + 1,
-                        });
-                    }
-                }
-            }
-        }
-    });
-
-    // 2) Scan for Spring annotation-based sources on function parameters.
-    // Look for function_declaration children that have parameter nodes with annotations.
-    walk_tree(node, src, &mut |n, s| {
-        if n.kind() == "function_declaration" {
-            collect_spring_param_sources(n, s, &mut sources);
-        }
-    });
-
-    sources
-}
-
-/// Classify whether a node is a taint source expression.
-/// Returns a description string if it is, None otherwise.
-fn classify_source_expr(node: tree_sitter::Node, src: &str) -> Option<String> {
-    let text = &src[node.byte_range()];
-
-    // call.receiveText(), call.receive<...>()
-    if node.kind() == "call_expression" {
-        if let Some(method) = call_method_name(node, src) {
-            if method == "receiveText" || method == "receive" {
-                if let Some(recv) = call_receiver_text(node, src) {
-                    if recv.contains("call") {
-                        return Some(format!("{}.{}()", recv, method));
-                    }
-                }
-            }
-            // request.header("...")
-            if method == "header" || method == "queryParameter" {
-                if let Some(recv) = call_receiver_text(node, src) {
-                    if recv.contains("request") || recv.contains("call") {
-                        return Some(format!("{}.{}()", recv, method));
-                    }
-                }
-            }
-        }
-    }
-
-    // request.queryParameters["x"] — indexing_expression
-    if (node.kind() == "indexing_expression"
-        || text.contains("queryParameters[")
-        || text.contains("parameters["))
-        && (text.contains("request") || text.contains("call"))
-        && (text.contains("queryParameters")
-            || text.contains("parameters[")
-            || text.contains("header"))
-    {
-        return Some(text.to_string());
-    }
-
-    None
-}
-
-/// Extract the variable name from a `property_declaration`.
-fn extract_property_var_name(node: tree_sitter::Node, src: &str) -> Option<String> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "variable_declaration" {
-            let mut c2 = child.walk();
-            for gc in child.children(&mut c2) {
-                if gc.kind() == "simple_identifier" {
-                    return Some(src[gc.byte_range()].to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Extract the initializer expression from a `property_declaration`.
-fn extract_property_initializer(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
-    // The initializer comes after the `=` token.
-    let count = node.child_count();
-    if count < 3 {
-        return None;
-    }
-    // Walk backwards: the initializer is the last non-trivial child.
-    // Look for a child after `=`.
-    let mut found_eq = false;
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if found_eq && child.kind() != "=" {
-            return Some(child);
-        }
-        if child.kind() == "=" {
-            found_eq = true;
-        }
-    }
-    None
-}
-
-/// Collect Spring annotation-based parameter sources from a function declaration.
-///
-/// In Kotlin's tree-sitter grammar, `function_value_parameters` children are:
-///   `parameter_modifiers` (containing `@RequestParam` etc.), then `parameter`
-///   (containing the name and type). They are siblings, not nested.
-fn collect_spring_param_sources(
-    func_node: tree_sitter::Node,
-    src: &str,
-    sources: &mut Vec<TaintSource>,
-) {
-    let spring_annotations = [
-        "RequestParam",
-        "RequestBody",
-        "PathVariable",
-        "RequestHeader",
-    ];
-
-    let mut cursor = func_node.walk();
-    for child in func_node.children(&mut cursor) {
-        if child.kind() == "function_value_parameters" {
-            // Walk children: parameter_modifiers precedes its parameter.
-            let mut c2 = child.walk();
-            let children: Vec<_> = child.children(&mut c2).collect();
-            let mut pending_annotation: Option<&str> = None;
-
-            for ch in &children {
-                if ch.kind() == "parameter_modifiers" {
-                    let mod_text = &src[ch.byte_range()];
-                    for ann in &spring_annotations {
-                        if mod_text.contains(ann) {
-                            pending_annotation = Some(ann);
-                            break;
-                        }
-                    }
-                } else if ch.kind() == "parameter" {
-                    if let Some(ann) = pending_annotation.take() {
-                        // Extract parameter name: first simple_identifier child.
-                        let mut c3 = ch.walk();
-                        for pc in ch.children(&mut c3) {
-                            if pc.kind() == "simple_identifier" {
-                                let name = &src[pc.byte_range()];
-                                sources.push(TaintSource {
-                                    var_name: Some(name.to_string()),
-                                    description: format!("@{} parameter '{}'", ann, name),
-                                    line: ch.start_position().row + 1,
-                                });
-                                break;
-                            }
-                        }
-                    }
-                    pending_annotation = None;
-                } else {
-                    // Reset on any other node (e.g., comma, parens)
-                    if ch.kind() != "," && ch.kind() != "(" && ch.kind() != ")" {
-                        pending_annotation = None;
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Build the set of tainted variable names by starting from sources and
-/// propagating through simple assignments and string concatenation.
-fn build_tainted_set(
-    node: tree_sitter::Node,
-    src: &str,
-    sources: &[TaintSource],
-) -> HashSet<String> {
-    let mut tainted: HashSet<String> = HashSet::new();
-
-    // Seed with source variable names.
-    for s in sources {
-        if let Some(ref name) = s.var_name {
-            tainted.insert(name.clone());
-        }
-    }
-
-    if tainted.is_empty() {
-        return tainted;
-    }
-
-    // Propagate through assignments: val y = x, val z = x + "...", val w = "..." + x
-    // Do two passes to handle transitive assignments.
-    for _ in 0..2 {
-        walk_tree(node, src, &mut |n, s| {
-            if n.kind() == "property_declaration" {
-                let var = extract_property_var_name(n, s);
-                let init = extract_property_initializer(n);
-                if let (Some(var_name), Some(init_node)) = (var, init) {
-                    if !tainted.contains(&var_name) && expr_uses_tainted(init_node, s, &tainted) {
-                        tainted.insert(var_name);
-                    }
-                }
-            }
-            if n.kind() == "assignment" {
-                if let (Some(left), Some(right)) =
-                    (n.child(0), n.child(n.child_count().saturating_sub(1)))
-                {
-                    if left.kind() == "simple_identifier" {
-                        let left_text = s[left.byte_range()].to_string();
-                        if !tainted.contains(&left_text) && expr_uses_tainted(right, s, &tainted) {
-                            tainted.insert(left_text);
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    tainted
-}
-
-/// Check if an expression node references any tainted variable.
-fn expr_uses_tainted(node: tree_sitter::Node, src: &str, tainted: &HashSet<String>) -> bool {
-    if node.kind() == "simple_identifier" {
-        let name = &src[node.byte_range()];
-        return tainted.contains(name);
-    }
-    // String template: "...${tainted}..."
-    if node.kind() == "string_literal" {
-        let text = &src[node.byte_range()];
-        for t in tainted {
-            if text.contains(&format!("${{{}}}", t)) || text.contains(&format!("${}", t)) {
-                return true;
-            }
-        }
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if expr_uses_tainted(child, src, tainted) {
-            return true;
-        }
-    }
-    false
-}
-
-/// A specification for a Kotlin taint rule.
-struct KtTaintSpec {
-    /// Functions to find sinks. Returns (description, start_byte, end_byte, line) tuples.
-    sink_finder: fn(tree_sitter::Node, &str, &HashSet<String>) -> Vec<TaintSink>,
-}
-
-/// Run lightweight taint analysis for a Kotlin taint rule.
-fn run_kt_taint(
-    rule_id: &str,
+/// Per-rule metadata for Kotlin taint findings: how to format the
+/// message and which fix hint to attach. Mirrors `GoTaintRuleMeta`.
+struct KtTaintRuleMeta<'a> {
+    rule_id: &'a str,
     severity: Severity,
-    cwe: Option<&str>,
+    cwe: Option<&'a str>,
+    fix_suggestion: Option<&'a str>,
+    format_description: fn(&str, &str) -> String,
+}
+
+fn kt_taint_sql_injection_desc(src: &str, sink: &str) -> String {
+    format!(
+        "{} flows to {} — use parameterized queries to prevent SQL injection",
+        src, sink
+    )
+}
+
+fn kt_taint_command_injection_desc(src: &str, sink: &str) -> String {
+    format!(
+        "{} flows to {} — avoid passing untrusted input to OS commands",
+        src, sink
+    )
+}
+
+fn kt_taint_ssrf_desc(src: &str, sink: &str) -> String {
+    format!(
+        "{} flows to {} — validate and allowlist target hosts to prevent SSRF",
+        src, sink
+    )
+}
+
+fn kt_taint_meta(rule_id: &str) -> Option<KtTaintRuleMeta<'static>> {
+    match rule_id {
+        "kt/taint-sql-injection" => Some(KtTaintRuleMeta {
+            rule_id: "kt/taint-sql-injection",
+            severity: Severity::Critical,
+            cwe: Some("CWE-89"),
+            fix_suggestion: None,
+            format_description: kt_taint_sql_injection_desc,
+        }),
+        "kt/taint-command-injection" => Some(KtTaintRuleMeta {
+            rule_id: "kt/taint-command-injection",
+            severity: Severity::Critical,
+            cwe: Some("CWE-78"),
+            fix_suggestion: None,
+            format_description: kt_taint_command_injection_desc,
+        }),
+        "kt/taint-ssrf" => Some(KtTaintRuleMeta {
+            rule_id: "kt/taint-ssrf",
+            severity: Severity::High,
+            cwe: Some("CWE-918"),
+            fix_suggestion: None,
+            format_description: kt_taint_ssrf_desc,
+        }),
+        _ => None,
+    }
+}
+
+/// Map a single `TaintFinding` from the Kotlin engine onto a `Finding`,
+/// using the rule's metadata. Preserves the field shape produced by the
+/// pre-refactor bespoke harness (confidence = `default_confidence()`,
+/// `taint_hops = None`, no fix suggestion, byte offsets blank).
+fn map_kt_taint_finding(
+    meta: &KtTaintRuleMeta<'_>,
+    source: &str,
+    finding: kotlin_taint::TaintFinding,
+) -> Finding {
+    Finding {
+        rule_id: meta.rule_id.to_string(),
+        severity: meta.severity,
+        cwe: meta.cwe.map(|s| s.to_string()),
+        description: (meta.format_description)(
+            &finding.source_description,
+            &finding.sink_description,
+        ),
+        file: String::new(),
+        line: finding.sink_line,
+        column: finding.sink_column,
+        end_line: finding.sink_end_line,
+        end_column: finding.sink_end_column,
+        snippet: get_source_line(source, finding.sink_start_byte),
+        source_line: if finding.source_line == 0 {
+            None
+        } else {
+            Some(finding.source_line)
+        },
+        source_description: Some(finding.source_description),
+        sink_line: Some(finding.sink_line),
+        sink_description: Some(finding.sink_description),
+        fix_suggestion: meta.fix_suggestion.map(|s| s.to_string()),
+        sink_start_byte: None,
+        sink_end_byte: None,
+        confidence: crate::default_confidence(),
+        taint_hops: None,
+        tags: vec![],
+        crypto_algorithm: None,
+        cnsa2_deadline: None,
+        dep_name: None,
+    }
+}
+
+/// Run every enabled Kotlin taint rule over `tree` in a single dispatch
+/// loop and return per-rule `Finding`s.
+///
+/// Mirrors the shape of `run_go_taint_batched` /
+/// `run_py_taint_batched` / `run_js_taint_batched`. There is no
+/// per-group sanitizer batching today because the three Kotlin taint
+/// rules share the (empty) sanitizer set; we still iterate per rule so
+/// each can attach its own message and severity.
+pub fn run_kt_taint_batched(
     source: &str,
     tree: &tree_sitter::Tree,
-    spec: &KtTaintSpec,
-    message_fn: fn(&str, &str) -> String,
+    enabled_rule_ids: &std::collections::HashSet<&str>,
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
-    let root = tree.root_node();
-
-    // Analyze each function body separately.
-    walk_tree(root, source, &mut |node, _src| {
-        if node.kind() == "function_declaration" || node.kind() == "lambda_literal" {
-            // Find the function body.
-            let body = find_function_body(node);
-            let scope = body.unwrap_or(node);
-
-            // Collect sources from both the function node (for Spring
-            // annotations on parameters) and the body (for Ktor call.*).
-            let mut sources = collect_sources(scope, source);
-            // For function_declaration, also check annotations on params.
-            if node.kind() == "function_declaration" {
-                collect_spring_param_sources(node, source, &mut sources);
-            }
-            if sources.is_empty() {
-                return;
-            }
-
-            let tainted = build_tainted_set(scope, source, &sources);
-            if tainted.is_empty() {
-                return;
-            }
-
-            let sinks = (spec.sink_finder)(scope, source, &tainted);
-            for sink in sinks {
-                // Find the best matching source description.
-                let source_desc = sources
-                    .first()
-                    .map(|s| s.description.as_str())
-                    .unwrap_or("user input");
-                let source_line = sources.first().map(|s| s.line);
-
-                let msg = message_fn(source_desc, &sink.description);
-
-                let start_byte = sink.start_byte.min(source.len());
-                let end_byte = sink.end_byte.min(source.len());
-                let line = source[..start_byte].bytes().filter(|b| *b == b'\n').count() + 1;
-                let line_start = source[..start_byte].rfind('\n').map_or(0, |idx| idx + 1);
-                let column = source[line_start..start_byte].chars().count() + 1;
-                let end_line = source[..end_byte].bytes().filter(|b| *b == b'\n').count() + 1;
-                let end_line_start = source[..end_byte].rfind('\n').map_or(0, |idx| idx + 1);
-                let end_column = source[end_line_start..end_byte].chars().count() + 1;
-
-                findings.push(Finding {
-                    rule_id: rule_id.to_string(),
-                    severity,
-                    cwe: cwe.map(|s| s.to_string()),
-                    description: msg,
-                    file: String::new(),
-                    line,
-                    column,
-                    end_line,
-                    end_column,
-                    snippet: crate::rules::common::get_source_line(source, start_byte),
-                    source_line,
-                    source_description: Some(source_desc.to_string()),
-                    sink_line: Some(sink.line),
-                    sink_description: Some(sink.description.clone()),
-                    fix_suggestion: None,
-                    sink_start_byte: None,
-                    sink_end_byte: None,
-                    confidence: crate::default_confidence(),
-                    taint_hops: None,
-                    tags: vec![],
-                    crypto_algorithm: None,
-                    cnsa2_deadline: None,
-                    dep_name: None,
-                });
-            }
+    for (rule_id, spec) in kotlin_taint::kotlin_taint_rule_specs() {
+        if !enabled_rule_ids.contains(rule_id) {
+            continue;
         }
-    });
-
+        let Some(meta) = kt_taint_meta(rule_id) else {
+            continue;
+        };
+        let raw = kotlin_taint::analyze_tree(tree.root_node(), source, &spec, None);
+        for finding in raw {
+            findings.push(map_kt_taint_finding(&meta, source, finding));
+        }
+    }
     findings
 }
 
-/// Find the body node of a function declaration.
-#[allow(clippy::manual_find)]
-fn find_function_body(func_node: tree_sitter::Node) -> Option<tree_sitter::Node> {
-    let mut cursor = func_node.walk();
-    for child in func_node.children(&mut cursor) {
-        if child.kind() == "function_body" {
-            return Some(child);
-        }
-    }
-    None
-}
-
-// ─── Sink finders ────────────────────────────────────────────────────────
-
-/// SQL injection sinks: executeQuery, execute, createQuery, prepareStatement, rawQuery, execSQL
-/// with tainted arguments (via concat, interpolation, or direct variable).
-fn find_sql_sinks(node: tree_sitter::Node, src: &str, tainted: &HashSet<String>) -> Vec<TaintSink> {
-    let mut sinks = Vec::new();
-    let sql_methods = [
-        "executeQuery",
-        "execute",
-        "createQuery",
-        "createNativeQuery",
-        "rawQuery",
-        "execSQL",
-        "prepareStatement",
-    ];
-
-    walk_tree(node, src, &mut |n, s| {
-        if n.kind() == "call_expression" {
-            if let Some(name) = call_method_name(n, s) {
-                if sql_methods.contains(&name) {
-                    if let Some(args) = call_arguments(n) {
-                        if expr_uses_tainted(args, s, tainted) {
-                            sinks.push(TaintSink {
-                                start_byte: n.start_byte(),
-                                end_byte: n.end_byte(),
-                                line: n.start_position().row + 1,
-                                description: format!("{}() with tainted argument", name),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    });
-    sinks
-}
-
-/// Command injection sinks: Runtime.exec, ProcessBuilder with tainted args.
-fn find_command_sinks(
-    node: tree_sitter::Node,
-    src: &str,
-    tainted: &HashSet<String>,
-) -> Vec<TaintSink> {
-    let mut sinks = Vec::new();
-
-    walk_tree(node, src, &mut |n, s| {
-        if n.kind() == "call_expression" {
-            // Runtime.getRuntime().exec(tainted)
-            if let Some(name) = call_method_name(n, s) {
-                if name == "exec" {
-                    if let Some(receiver) = call_receiver_text(n, s) {
-                        if receiver.contains("getRuntime") || receiver.contains("Runtime") {
-                            if let Some(args) = call_arguments(n) {
-                                if expr_uses_tainted(args, s, tainted) {
-                                    sinks.push(TaintSink {
-                                        start_byte: n.start_byte(),
-                                        end_byte: n.end_byte(),
-                                        line: n.start_position().row + 1,
-                                        description: "Runtime.exec() with tainted argument"
-                                            .to_string(),
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ProcessBuilder(tainted)
-            if let Some(ctor) = call_constructor_name(n, s) {
-                if ctor == "ProcessBuilder" {
-                    if let Some(args) = call_arguments(n) {
-                        if expr_uses_tainted(args, s, tainted) {
-                            sinks.push(TaintSink {
-                                start_byte: n.start_byte(),
-                                end_byte: n.end_byte(),
-                                line: n.start_position().row + 1,
-                                description: "ProcessBuilder() with tainted argument".to_string(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    });
-    sinks
-}
-
-/// SSRF sinks: URL(), HttpClient.get(), OkHttpClient calls, Fuel.get() with tainted URLs.
-fn find_ssrf_sinks(
-    node: tree_sitter::Node,
-    src: &str,
-    tainted: &HashSet<String>,
-) -> Vec<TaintSink> {
-    let mut sinks = Vec::new();
-
-    walk_tree(node, src, &mut |n, s| {
-        if n.kind() == "call_expression" {
-            // URL(tainted), URI(tainted)
-            if let Some(ctor) = call_constructor_name(n, s) {
-                if ctor == "URL" || ctor == "URI" {
-                    if let Some(args) = call_arguments(n) {
-                        if expr_uses_tainted(args, s, tainted) {
-                            sinks.push(TaintSink {
-                                start_byte: n.start_byte(),
-                                end_byte: n.end_byte(),
-                                line: n.start_position().row + 1,
-                                description: format!("{}() with tainted argument", ctor),
-                            });
-                        }
-                    }
-                }
-            }
-
-            // HttpClient/OkHttpClient/Fuel method calls: get, post, request, newCall, url
-            if let Some(name) = call_method_name(n, s) {
-                let http_methods = ["get", "post", "put", "delete", "request", "newCall", "url"];
-                if http_methods.contains(&name) {
-                    if let Some(receiver) = call_receiver_text(n, s) {
-                        if receiver.contains("client")
-                            || receiver.contains("Client")
-                            || receiver.contains("http")
-                            || receiver.contains("Http")
-                            || receiver.contains("Fuel")
-                            || receiver.contains("restTemplate")
-                            || receiver.contains("RestTemplate")
-                        {
-                            if let Some(args) = call_arguments(n) {
-                                if expr_uses_tainted(args, s, tainted) {
-                                    sinks.push(TaintSink {
-                                        start_byte: n.start_byte(),
-                                        end_byte: n.end_byte(),
-                                        line: n.start_position().row + 1,
-                                        description: format!(
-                                            "{}.{}() with tainted argument",
-                                            receiver, name
-                                        ),
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // RestTemplate getForObject/getForEntity/postForObject/exchange
-                let rest_methods = [
-                    "getForObject",
-                    "getForEntity",
-                    "postForObject",
-                    "postForEntity",
-                    "exchange",
-                ];
-                if rest_methods.contains(&name) {
-                    if let Some(args) = call_arguments(n) {
-                        if expr_uses_tainted(args, s, tainted) {
-                            sinks.push(TaintSink {
-                                start_byte: n.start_byte(),
-                                end_byte: n.end_byte(),
-                                line: n.start_position().row + 1,
-                                description: format!("{}() with tainted URL", name),
-                            });
-                        }
-                    }
-                }
-            }
-
-            // Fuel.get(tainted) — Fuel is a constructor-style call
-            if let Some(ctor) = call_constructor_name(n, s) {
-                if ctor == "Fuel" {
-                    // Check if there's a chained .get() call
-                    // This is handled by the method name matching above
-                }
-            }
-        }
-    });
-    sinks
+/// Run a single Kotlin taint rule over a tree. Used by the rule
+/// structs' `check()` path for direct unit tests. The scanner uses
+/// [`run_kt_taint_batched`] to avoid double-dispatch.
+fn run_kt_taint_single(
+    rule_id: &str,
+    source: &str,
+    tree: &tree_sitter::Tree,
+    spec: &kotlin_taint::TaintSpec,
+) -> Vec<Finding> {
+    let Some(meta) = kt_taint_meta(rule_id) else {
+        return Vec::new();
+    };
+    let raw = kotlin_taint::analyze_tree(tree.root_node(), source, spec, None);
+    raw.into_iter()
+        .map(|t| map_kt_taint_finding(&meta, source, t))
+        .collect()
 }
 
 // ─── Rule 11: kt/taint-sql-injection ────────────────────────────────────
@@ -1353,24 +938,12 @@ impl_rule! {
     description = "Untrusted input from Ktor/Spring handler reaches SQL query sink",
     language = Language::Kotlin,
     fn check(_self, source, tree) {
-
-        run_kt_taint(
-            _self.id(),
-            _self.severity(),
-            _self.cwe(),
-            source,
-            tree,
-            &KtTaintSpec {
-                sink_finder: find_sql_sinks,
-            },
-            |src_desc, sink_desc| {
-                format!(
-                    "{} flows to {} — use parameterized queries to prevent SQL injection",
-                    src_desc, sink_desc
-                )
-            },
-        )
-
+        let spec = kotlin_taint::kotlin_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_kt_taint_single(_self.id(), source, tree, &spec)
     }
 }
 
@@ -1386,24 +959,12 @@ impl_rule! {
     description = "Untrusted input from Ktor/Spring handler reaches command execution sink",
     language = Language::Kotlin,
     fn check(_self, source, tree) {
-
-        run_kt_taint(
-            _self.id(),
-            _self.severity(),
-            _self.cwe(),
-            source,
-            tree,
-            &KtTaintSpec {
-                sink_finder: find_command_sinks,
-            },
-            |src_desc, sink_desc| {
-                format!(
-                    "{} flows to {} — avoid passing untrusted input to OS commands",
-                    src_desc, sink_desc
-                )
-            },
-        )
-
+        let spec = kotlin_taint::kotlin_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_kt_taint_single(_self.id(), source, tree, &spec)
     }
 }
 
@@ -1419,24 +980,12 @@ impl_rule! {
     description = "Untrusted input from Ktor/Spring handler reaches HTTP/URL sink",
     language = Language::Kotlin,
     fn check(_self, source, tree) {
-
-        run_kt_taint(
-            _self.id(),
-            _self.severity(),
-            _self.cwe(),
-            source,
-            tree,
-            &KtTaintSpec {
-                sink_finder: find_ssrf_sinks,
-            },
-            |src_desc, sink_desc| {
-                format!(
-                    "{} flows to {} — validate and allowlist target hosts to prevent SSRF",
-                    src_desc, sink_desc
-                )
-            },
-        )
-
+        let spec = kotlin_taint::kotlin_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_kt_taint_single(_self.id(), source, tree, &spec)
     }
 }
 
