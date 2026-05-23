@@ -104,10 +104,14 @@ const pyRules: Rule[] = [
 ];
 
 const goRules: Rule[] = [
+  { id: 'go/cookie-missing-httponly', cwe: 'CWE-1004', desc: 'http.Cookie missing HttpOnly flag', severity: 'medium' },
+  { id: 'go/cookie-missing-secure', cwe: 'CWE-614', desc: 'http.Cookie missing Secure flag', severity: 'medium' },
   { id: 'go/gin-no-trusted-proxies', cwe: 'CWE-346', desc: 'Gin engine created without SetTrustedProxies configuration', severity: 'medium' },
   { id: 'go/insecure-tls-skip-verify', cwe: 'CWE-295', desc: 'TLS certificate verification disabled with InsecureSkipVerify', severity: 'high' },
   { id: 'go/jwt-hardcoded-secret', cwe: 'CWE-798', desc: 'JWT key function uses a hardcoded secret', severity: 'high' },
   { id: 'go/jwt-no-verify', cwe: 'CWE-347', desc: 'JWT parsed without signature verification', severity: 'critical' },
+  { id: 'go/math-random-used', cwe: 'CWE-338', desc: 'math/rand is not cryptographically secure', severity: 'medium' },
+  { id: 'go/missing-ssl-minversion', cwe: 'CWE-326', desc: 'tls.Config is missing an explicit MinVersion', severity: 'medium' },
   { id: 'go/net-http-no-timeout', cwe: 'CWE-400', desc: 'http.ListenAndServe without timeout configuration enables slowloris attacks', severity: 'medium' },
   { id: 'go/no-command-injection', cwe: 'CWE-78', desc: 'Potential command injection via exec.Command with dynamic input', severity: 'critical' },
   { id: 'go/no-hardcoded-secret', cwe: 'CWE-798', desc: 'Hardcoded secret or credential detected', severity: 'high' },

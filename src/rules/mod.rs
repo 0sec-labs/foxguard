@@ -456,6 +456,10 @@ impl RuleRegistry {
         registry.register(Box::new(go::PqVulnerableCrypto));
         registry.register(Box::new(go::NoSsrf));
         registry.register(Box::new(go::InsecureTlsSkipVerify));
+        registry.register(Box::new(go::MissingSslMinVersion));
+        registry.register(Box::new(go::CookieMissingSecure));
+        registry.register(Box::new(go::CookieMissingHttpOnly));
+        registry.register(Box::new(go::MathRandomUsed));
         registry.register(Box::new(go::GinNoTrustedProxies));
         registry.register(Box::new(go::NetHttpNoTimeout));
         registry.register(Box::new(go::TaintCommandInjection));
