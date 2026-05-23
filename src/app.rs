@@ -242,8 +242,11 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
         });
     }
     if !codeql_rules.is_empty() {
-        let codeql_result =
-            codeql::scan_with_notices(&codeql_rules, scan.codeql_db.as_deref().map(Path::new));
+        let codeql_result = codeql::scan_with_notices_for_target(
+            &codeql_rules,
+            scan.codeql_db.as_deref().map(Path::new),
+            Some(Path::new(&scan.path)),
+        );
         codeql_candidate_rules = codeql_result.candidate_rules;
         files_scanned += codeql_result.files_scanned;
         notices.extend(codeql_result.notices);

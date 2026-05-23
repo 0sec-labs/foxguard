@@ -2,12 +2,13 @@ use crate::{Finding, Severity};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use serde_yaml::Value as YamlValue;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
+use tempfile::TempDir;
 use wait_timeout::ChildExt;
 
 #[derive(Debug, Clone)]
@@ -81,6 +82,10 @@ impl<'de> Deserialize<'de> for FlexibleSeverity {
 impl CodeQlRule {
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub fn query_path(&self) -> &Path {
+        &self.query
     }
 }
 
@@ -205,6 +210,27 @@ pub fn parse_codeql_file(path: &Path) -> Result<(Vec<CodeQlRule>, Vec<String>), 
 }
 
 pub fn scan_with_notices(rules: &[CodeQlRule], cli_database: Option<&Path>) -> CodeQlScanResult {
+    scan_with_notices_for_target(rules, cli_database, None)
+}
+
+/// Run loaded CodeQL rules against the provided target.
+///
+/// Database selection order (per rule):
+/// 1. The rule's explicit `database` field.
+/// 2. `cli_database` (from `--codeql-db`).
+/// 3. `FOXGUARD_CODEQL_DB` environment variable.
+/// 4. If `codeql` is on PATH and `scan_target` is set, an ephemeral database
+///    is created via `codeql database create --language=<lang> --source-root=
+///    <scan_target>` and reused for every rule that needs the same language.
+///    Temp DBs auto-clean when the function returns.
+///
+/// If `codeql` is absent, all CodeQL rules are skipped with a single notice
+/// — the rest of the scan continues.
+pub fn scan_with_notices_for_target(
+    rules: &[CodeQlRule],
+    cli_database: Option<&Path>,
+    scan_target: Option<&Path>,
+) -> CodeQlScanResult {
     let candidate_rules = rules.len();
     if rules.is_empty() {
         return CodeQlScanResult {
@@ -217,20 +243,71 @@ pub fn scan_with_notices(rules: &[CodeQlRule], cli_database: Option<&Path>) -> C
 
     let mut findings = Vec::new();
     let mut notices = Vec::new();
-    let mut scanned_databases = HashSet::new();
-    let runnable_rules: Vec<(&CodeQlRule, PathBuf)> = rules
-        .iter()
-        .filter_map(|rule| match rule_database(rule, cli_database) {
-            Some(database) => Some((rule, database)),
+
+    // Resolve a database for every rule, falling back to an auto-built DB
+    // when neither rule-level, CLI, nor env values are available. We probe
+    // for `codeql` lazily to avoid forking when no auto-DB would be built.
+    let codeql_available = probe_codeql();
+    let auto_db_allowed = scan_target.is_some() && codeql_available.is_ok();
+    let mut auto_databases: HashMap<String, TempDir> = HashMap::new();
+    let mut runnable_rules: Vec<(&CodeQlRule, PathBuf)> = Vec::new();
+
+    for rule in rules {
+        if let Some(database) = explicit_rule_database(rule, cli_database) {
+            runnable_rules.push((rule, database));
+            continue;
+        }
+
+        if !auto_db_allowed {
+            // Preserve the original notice when we can't auto-build a DB so
+            // existing users with no scan-target plumbing still see a clear
+            // pointer at --codeql-db / FOXGUARD_CODEQL_DB.
+            notices.push(format!(
+                "Warning: CodeQL rule '{}' skipped: no database configured; set rule database, --codeql-db, or FOXGUARD_CODEQL_DB",
+                rule.id
+            ));
+            continue;
+        }
+
+        let scan_target = scan_target.expect("checked by auto_db_allowed");
+        let language = match infer_query_language(rule, scan_target) {
+            Some(language) => language,
             None => {
                 notices.push(format!(
-                    "Warning: CodeQL rule '{}' skipped: no database configured; set rule database, --codeql-db, or FOXGUARD_CODEQL_DB",
-                    rule.id
+                    "Warning: CodeQL rule '{}' skipped: could not infer query language; add an `import <lang>` line to {} or set --codeql-db",
+                    rule.id,
+                    rule.query.display()
                 ));
-                None
+                continue;
             }
-        })
-        .collect();
+        };
+
+        // Build at most one DB per language, reused across rules.
+        if !auto_databases.contains_key(&language) {
+            match build_auto_database(scan_target, &language) {
+                Ok(tempdir) => {
+                    auto_databases.insert(language.clone(), tempdir);
+                }
+                Err(error) => {
+                    notices.push(format!(
+                        "Warning: CodeQL rule '{}' skipped: failed to auto-build {} database for {}: {}",
+                        rule.id,
+                        language,
+                        scan_target.display(),
+                        error
+                    ));
+                    continue;
+                }
+            }
+        }
+
+        let database = auto_databases
+            .get(&language)
+            .expect("just inserted")
+            .path()
+            .join("db");
+        runnable_rules.push((rule, database));
+    }
 
     if runnable_rules.is_empty() {
         return CodeQlScanResult {
@@ -241,7 +318,10 @@ pub fn scan_with_notices(rules: &[CodeQlRule], cli_database: Option<&Path>) -> C
         };
     }
 
-    if let Err(error) = probe_codeql() {
+    if let Err(error) = codeql_available {
+        // Some rules had explicit databases but codeql itself is missing —
+        // we still skip them with a clear message instead of silently
+        // pretending success.
         return CodeQlScanResult {
             findings: Vec::new(),
             files_scanned: 0,
@@ -253,6 +333,7 @@ pub fn scan_with_notices(rules: &[CodeQlRule], cli_database: Option<&Path>) -> C
         };
     }
 
+    let mut scanned_databases = HashSet::new();
     for (rule, database) in runnable_rules {
         match run_codeql_database_analyze(database.as_path(), &rule.query) {
             Ok(sarif) => {
@@ -274,12 +355,15 @@ pub fn scan_with_notices(rules: &[CodeQlRule], cli_database: Option<&Path>) -> C
             .then(a.rule_id.cmp(&b.rule_id))
     });
 
-    CodeQlScanResult {
+    let result = CodeQlScanResult {
         findings,
         files_scanned: scanned_databases.len(),
         candidate_rules,
         notices,
-    }
+    };
+    // `auto_databases` drops here, cleaning up the temp DBs we built.
+    drop(auto_databases);
+    result
 }
 
 fn run_codeql_database_analyze(database: &Path, query: &Path) -> Result<String, String> {
@@ -428,11 +512,157 @@ fn finding_from_sarif_result(rule: &CodeQlRule, result: &JsonValue) -> Option<Fi
     })
 }
 
-fn rule_database(rule: &CodeQlRule, cli_database: Option<&Path>) -> Option<PathBuf> {
+/// Resolve a pre-existing database for the rule — rule-level field, then
+/// `--codeql-db`, then `FOXGUARD_CODEQL_DB`. Returns `None` when none of those
+/// are set; callers may then decide whether to auto-build one.
+fn explicit_rule_database(rule: &CodeQlRule, cli_database: Option<&Path>) -> Option<PathBuf> {
     rule.database
         .clone()
         .or_else(|| cli_database.map(Path::to_path_buf))
         .or_else(|| std::env::var("FOXGUARD_CODEQL_DB").ok().map(PathBuf::from))
+}
+
+/// Best-effort detection of the CodeQL language family a query targets.
+///
+/// Priority:
+/// 1. Top-level `import <lang>` in the `.ql` file (handles `cpp`, `python`,
+///    `javascript`, `java`, `go`, `csharp`, `ruby`, `swift`).
+/// 2. Source-root fallback: pick the language family with the most matching
+///    files in `scan_target`. Used when the query imports a library qlpack
+///    that doesn't start with the language name.
+fn infer_query_language(rule: &CodeQlRule, scan_target: &Path) -> Option<String> {
+    if let Some(language) = language_from_query_imports(&rule.query) {
+        return Some(language);
+    }
+    language_from_source_root(scan_target)
+}
+
+fn language_from_query_imports(query: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(query).ok()?;
+    for raw in content.lines() {
+        let line = raw.trim();
+        let Some(rest) = line.strip_prefix("import ") else {
+            continue;
+        };
+        let token = rest
+            .split(|c: char| c.is_whitespace() || c == '/' || c == '.' || c == ';')
+            .next()
+            .unwrap_or("")
+            .trim();
+        let language = match token {
+            "cpp" => "cpp",
+            "python" => "python",
+            "javascript" => "javascript",
+            "java" => "java",
+            "go" => "go",
+            "csharp" => "csharp",
+            "ruby" => "ruby",
+            "swift" => "swift",
+            _ => continue,
+        };
+        return Some(language.to_string());
+    }
+    None
+}
+
+fn language_from_source_root(scan_target: &Path) -> Option<String> {
+    let mut counts: HashMap<&'static str, usize> = HashMap::new();
+    let walker = walkdir::WalkDir::new(scan_target)
+        .max_depth(6)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file());
+    for entry in walker {
+        let ext = match entry.path().extension().and_then(|e| e.to_str()) {
+            Some(ext) => ext.to_ascii_lowercase(),
+            None => continue,
+        };
+        let language = match ext.as_str() {
+            "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" => "cpp",
+            "py" => "python",
+            "js" | "jsx" | "ts" | "tsx" => "javascript",
+            "java" => "java",
+            "go" => "go",
+            "cs" => "csharp",
+            "rb" => "ruby",
+            "swift" => "swift",
+            _ => continue,
+        };
+        *counts.entry(language).or_insert(0) += 1;
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(language, _)| language.to_string())
+}
+
+/// Drive `codeql database create` against the scan target, returning a
+/// `TempDir` whose `path().join("db")` is the resulting database. Dropping
+/// the returned handle removes the temp tree.
+fn build_auto_database(scan_target: &Path, language: &str) -> Result<TempDir, String> {
+    let parent = TempDir::new().map_err(|e| format!("failed to create codeql temp dir: {}", e))?;
+    let db_path = parent.path().join("db");
+    let mut language_arg = OsString::from("--language=");
+    language_arg.push(language);
+    let mut source_arg = OsString::from("--source-root=");
+    source_arg.push(scan_target.as_os_str());
+
+    let timeout = codeql_create_timeout();
+    let mut child = Command::new("codeql")
+        .arg("database")
+        .arg("create")
+        .arg(&db_path)
+        .arg(language_arg)
+        .arg(source_arg)
+        .arg("--overwrite")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to spawn codeql: {}", e))?;
+
+    let status = match child
+        .wait_timeout(timeout)
+        .map_err(|e| format!("failed to wait for codeql: {}", e))?
+    {
+        Some(status) => status,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "codeql database create timed out after {}s",
+                timeout.as_secs()
+            ));
+        }
+    };
+
+    let mut stdout = Vec::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        pipe.read_to_end(&mut stdout).ok();
+    }
+    let mut stderr = Vec::new();
+    if let Some(mut pipe) = child.stderr.take() {
+        pipe.read_to_end(&mut stderr).ok();
+    }
+
+    if !status.success() {
+        let message = process_message(&stdout, &stderr);
+        return if message.is_empty() {
+            Err("codeql database create exited without output".to_string())
+        } else {
+            Err(message)
+        };
+    }
+
+    Ok(parent)
+}
+
+fn codeql_create_timeout() -> Duration {
+    let secs = std::env::var("FOXGUARD_CODEQL_CREATE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .unwrap_or(900);
+    Duration::from_secs(secs)
 }
 
 fn resolve_database_value(value: &str) -> Option<String> {
@@ -624,6 +854,139 @@ rules:
         assert_eq!(result.candidate_rules, 1);
         assert_eq!(result.notices.len(), 1);
         assert!(result.notices[0].contains("no database configured"));
+    }
+
+    #[test]
+    fn auto_db_skipped_cleanly_when_codeql_absent() {
+        // Force PATH to a directory that definitely does not contain a
+        // `codeql` binary, then exercise the auto-DB path. We expect the
+        // legacy "no database configured" notice (same as missing-target),
+        // not a crash.
+        let empty_path = TempDir::new().expect("tempdir for empty PATH");
+        let scan_target = TempDir::new().expect("tempdir for scan target");
+
+        let prev_path = std::env::var_os("PATH");
+        // Safety: the test process is single-threaded for env mutation; we
+        // restore the original PATH before returning. If a future test
+        // parallelism change makes this flaky, move to a serial-test crate.
+        std::env::set_var("PATH", empty_path.path());
+        let prev_db = std::env::var_os("FOXGUARD_CODEQL_DB");
+        std::env::remove_var("FOXGUARD_CODEQL_DB");
+
+        let result = scan_with_notices_for_target(&[sample_rule()], None, Some(scan_target.path()));
+
+        // Restore env before asserting so a failure doesn't poison sibling
+        // tests.
+        match prev_path {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
+        if let Some(value) = prev_db {
+            std::env::set_var("FOXGUARD_CODEQL_DB", value);
+        }
+
+        assert!(result.findings.is_empty());
+        assert_eq!(result.candidate_rules, 1);
+        assert_eq!(result.notices.len(), 1);
+        // When codeql is absent we fall back to the legacy "configure a DB"
+        // notice — auto-build isn't possible, so the user is pointed at the
+        // explicit-DB flags.
+        assert!(
+            result.notices[0].contains("no database configured"),
+            "expected legacy notice, got: {}",
+            result.notices[0]
+        );
+    }
+
+    #[test]
+    fn infers_cpp_from_query_import() {
+        let mut file = NamedTempFile::new().expect("temp .ql");
+        file.write_all(
+            br#"/**
+ * @id cpp/foo
+ */
+import cpp
+
+from Function f
+select f
+"#,
+        )
+        .unwrap();
+        let language = language_from_query_imports(file.path());
+        assert_eq!(language.as_deref(), Some("cpp"));
+    }
+
+    #[test]
+    fn infers_python_from_query_import() {
+        let mut file = NamedTempFile::new().expect("temp .ql");
+        file.write_all(b"import python\nfrom Foo f select f\n")
+            .unwrap();
+        let language = language_from_query_imports(file.path());
+        assert_eq!(language.as_deref(), Some("python"));
+    }
+
+    #[test]
+    fn infers_cpp_from_source_root_extensions() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("a.c"), "int main(){}\n").unwrap();
+        std::fs::write(dir.path().join("b.h"), "#define X 1\n").unwrap();
+        std::fs::write(dir.path().join("readme.md"), "ignored").unwrap();
+        let language = language_from_source_root(dir.path());
+        assert_eq!(language.as_deref(), Some("cpp"));
+    }
+
+    /// End-to-end auto-DB run. Requires `codeql` on PATH plus the
+    /// `codeql/cpp-all` library pack installed; CI runners don't have these
+    /// so it stays `#[ignore]`'d. Run locally with:
+    ///   cargo test --test-threads=1 -- --ignored codeql_auto_database_runs_end_to_end
+    #[test]
+    #[ignore = "requires codeql CLI and cpp-all qlpack on host"]
+    fn codeql_auto_database_runs_end_to_end() {
+        if probe_codeql().is_err() {
+            eprintln!("codeql not on PATH — nothing to verify");
+            return;
+        }
+        let source = TempDir::new().expect("source tempdir");
+        std::fs::write(
+            source.path().join("main.c"),
+            "int main(void) { return 0; }\n",
+        )
+        .unwrap();
+
+        let query_dir = TempDir::new().expect("query tempdir");
+        let query_path = query_dir.path().join("trivial.ql");
+        std::fs::write(
+            &query_path,
+            r#"/**
+ * @name Trivial
+ * @id cpp/trivial
+ * @kind problem
+ * @problem.severity warning
+ */
+import cpp
+
+from Function f
+where f.hasName("main")
+select f, "found main"
+"#,
+        )
+        .unwrap();
+
+        let rule = CodeQlRule {
+            id: "test/trivial".to_string(),
+            message: "trivial".to_string(),
+            severity: Severity::Medium,
+            cwe: None,
+            query: query_path,
+            database: None,
+        };
+
+        let result = scan_with_notices_for_target(&[rule], None, Some(source.path()));
+        assert!(
+            !result.findings.is_empty() || result.notices.is_empty(),
+            "expected findings or zero notices, got notices: {:?}",
+            result.notices
+        );
     }
 
     #[test]

@@ -77,7 +77,9 @@ pub struct ScanArgs {
     #[arg(short, long)]
     pub rules: Option<String>,
 
-    /// Pre-built CodeQL database for external `engine: codeql` rules
+    /// Pre-built CodeQL database for external `engine: codeql` rules.
+    /// When omitted, foxguard auto-builds an ephemeral database against the
+    /// scan target if the `codeql` CLI is on PATH.
     #[arg(long = "codeql-db")]
     pub codeql_db: Option<String>,
 
@@ -212,7 +214,9 @@ pub struct BaselineScanArgs {
     #[arg(short, long)]
     pub rules: Option<String>,
 
-    /// Pre-built CodeQL database for external `engine: codeql` rules
+    /// Pre-built CodeQL database for external `engine: codeql` rules.
+    /// When omitted, foxguard auto-builds an ephemeral database against the
+    /// scan target if the `codeql` CLI is on PATH.
     #[arg(long = "codeql-db")]
     pub codeql_db: Option<String>,
 
