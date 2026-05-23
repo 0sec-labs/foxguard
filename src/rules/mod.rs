@@ -35,6 +35,13 @@ use std::path::Path;
 /// See `rules/README.md` for the on-disk layout.
 static BUNDLED_RULES: include_dir::Dir<'_> = include_dir::include_dir!("$CARGO_MANIFEST_DIR/rules");
 
+/// Languages with built-in taint specs wired into the scanner.
+///
+/// Taint support is intentionally narrower than syntax-only AST rules: each
+/// language here has source/sink specs plus scanner dispatch in
+/// `builtin_taint_specs_for_language` and `engine/scanner.rs`. When adding a
+/// new taint-backed language, start with `docs/taint-tracking.md` so the
+/// engine choice, source model, and sanitizer behavior stay consistent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaintEngine {
     Go,
