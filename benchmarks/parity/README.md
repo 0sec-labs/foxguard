@@ -67,14 +67,40 @@ The harness reports two numbers per repo:
 - **Site parity** = `|sites_both| / |sites_either|`, where a "site" is `(file, line)`.
   Did both tools flag the same code location at all? Ignores rule IDs entirely.
 - **Family parity** = `|matches_both| / |matches_either|`, where a "match" is
-  `(file, line, rule_family)`. `rule_family` is the rule_id with namespace
-  prefixes stripped — so foxguard's `py/no-eval` and Semgrep's
-  `python.lang.security.audit.eval-detected.eval-detected` both collapse to
-  their leaf token. In practice the leaves still don't always match (`no-eval`
-  vs `eval-detected`), so site parity is usually the more honest number.
+  `(file, line, rule_family)`. The harness first applies `aliases.toml`, then
+  falls back to namespace-stripped lexical families for unmapped rules. For
+  example, Semgrep's
+  `python.lang.security.audit.eval-detected.eval-detected` can map directly to
+  foxguard's `py/no-eval` even though their leaf tokens differ.
 
 Family parity is the stricter metric and is what we'd want to track over time.
 Site parity is the looser "do we even notice this code?" metric.
+
+### Alias map
+
+`aliases.toml` maps foxguard rule IDs to the full Semgrep registry IDs that
+detect the same defect class. The harness applies this map before computing
+family parity, while keeping the older lexical `rule_family` fallback for
+rules that are not mapped yet.
+
+Use it when Semgrep and foxguard agree semantically but use different rule IDs,
+for example `py/no-eval` vs
+`python.lang.security.audit.eval-detected.eval-detected`. Each alias entry
+should cite the Semgrep registry rule in `notes` and should only be added after
+reviewing that the two rules describe the same CWE/fix, not just a similar
+name.
+
+```toml
+[[alias]]
+foxguard = "py/no-eval"
+semgrep = [
+  "python.lang.security.audit.eval-detected.eval-detected",
+]
+notes = "Registry: https://semgrep.dev/r/python.lang.security.audit.eval-detected.eval-detected"
+```
+
+Pass `--aliases path/to/aliases.toml` to test an alternate map. If the file is
+missing, the harness falls back to lexical family parity only.
 
 ### Top 10 lists
 
@@ -83,8 +109,8 @@ Each per-repo report shows:
 - Top 10 foxguard-only findings — could be differentiation (foxguard catches
   something Semgrep doesn't) or could be false positives. Triage required.
 - Top 10 semgrep-only findings — straight-up coverage gaps to triage.
-- Per-rule-family counts — useful for spotting "I have a rule for X but Semgrep
-  is also flagging X with a different leaf token".
+- Per-rule-family counts after alias expansion — useful for spotting "I have a
+  rule for X but Semgrep is also flagging X with a different family".
 
 ## Snapshot tracking
 
@@ -125,11 +151,10 @@ are too slow + flaky to gate every push on. The intent is:
 
 ## Known limitations
 
-- **Rule-family normalization is heuristic.** Real-world rule IDs diverge
-  semantically more than lexically. `no-weak-crypto` vs
-  `insecure-hash-algorithm-sha1` is the same finding semantically but doesn't
-  collapse to the same family token. Site parity covers most of these cases;
-  for the rest, eyeballing the per-rule-family table is currently required.
+- **Rule-family normalization is still partial.** `aliases.toml` covers the
+  high-signal foxguard/Semgrep pairs known today, then falls back to the older
+  lexical heuristic. New Semgrep rules or foxguard rule IDs still need explicit
+  alias review before family parity fully reflects them.
 - **Semgrep version drift.** `repos.toml` declares an expected Semgrep version
   but the harness does not enforce it. We rely on the CI-side pin from #374.
 - **No Rust coverage yet.** `libssh-rs` is in the manifest but `skip = true`
@@ -139,10 +164,7 @@ are too slow + flaky to gate every push on. The intent is:
 
 1. **Nightly parity workflow.** GitHub Action that runs this on a cron,
    uploads reports as artifacts, and opens an issue on >5 pp parity drop.
-2. **Rule-family mapping table.** Maintain an explicit `foxguard_id -> semgrep_id`
-   alias map so semantically-equivalent rules collapse for parity even when
-   their lexical leaves diverge (`no-weak-crypto` vs `insecure-hash-algorithm-sha1`).
-3. **Rust corpus.** Once foxguard's Rust rule set is wider, unskip `libssh-rs`
+2. **Rust corpus.** Once foxguard's Rust rule set is wider, unskip `libssh-rs`
    and add a second Rust target.
-4. **`semgrep_version` enforcement.** Honor the version pin in `repos.toml` —
+3. **`semgrep_version` enforcement.** Honor the version pin in `repos.toml` —
    warn or skip when the local Semgrep is older/newer than expected.
