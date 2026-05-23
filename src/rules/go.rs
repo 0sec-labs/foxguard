@@ -12,6 +12,64 @@ use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
 use regex::Regex;
 
+fn go_composite_literal_type_text<'a>(
+    node: tree_sitter::Node<'_>,
+    source: &'a str,
+) -> Option<&'a str> {
+    if node.kind() != "composite_literal" {
+        return None;
+    }
+    let type_node = node.child_by_field_name("type")?;
+    Some(&source[type_node.byte_range()])
+}
+
+fn go_import_locals_for_path(
+    source: &str,
+    tree: &tree_sitter::Tree,
+    import_path: &str,
+) -> Vec<String> {
+    let mut locals = Vec::new();
+
+    walk_tree(tree.root_node(), source, &mut |node, src| {
+        if node.kind() != "import_spec" {
+            return;
+        }
+
+        let Some(path_node) = node.child_by_field_name("path") else {
+            return;
+        };
+        let raw_path = &src[path_node.byte_range()];
+        let normalized_path = raw_path.trim_matches(|c: char| c == '"' || c == '`');
+        if normalized_path != import_path {
+            return;
+        }
+
+        let local = match node.child_by_field_name("name") {
+            Some(name_node) if name_node.kind() == "package_identifier" => {
+                Some(src[name_node.byte_range()].to_string())
+            }
+            Some(name_node)
+                if name_node.kind() == "dot" || name_node.kind() == "blank_identifier" =>
+            {
+                None
+            }
+            _ => Some(
+                import_path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(import_path)
+                    .to_string(),
+            ),
+        };
+
+        if let Some(local) = local {
+            locals.push(local);
+        }
+    });
+
+    locals
+}
+
 // ─── Rule 1: no-sql-injection ───────────────────────────────────────────────
 
 pub struct NoSqlInjection;
@@ -605,6 +663,235 @@ impl_rule! {
                 matched.end(),
             ));
         }
+
+        findings
+
+    }
+}
+
+// ─── Rule: missing-ssl-minversion ─────────────────────────────────────────
+
+pub struct MissingSslMinVersion;
+
+impl_rule! {
+    MissingSslMinVersion,
+    id = "go/missing-ssl-minversion",
+    severity = Severity::Medium,
+    cwe = Some("CWE-326"),
+    description = "tls.Config is missing an explicit MinVersion",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+            Some(go_aliases_from_tree(source, tree))
+        } else {
+            None
+        };
+        let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+        let min_version_re = Regex::new(r"\bMinVersion\s*:")
+            .expect("static Go TLS MinVersion regex should compile");
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            let Some(type_text) = go_composite_literal_type_text(node, src) else {
+                return;
+            };
+            let resolved_type = match aliases {
+                Some(a) => a.resolve(type_text),
+                None => std::borrow::Cow::Borrowed(type_text),
+            };
+            if resolved_type.as_ref() != "tls.Config" {
+                return;
+            }
+
+            let literal_text = &src[node.byte_range()];
+            if min_version_re.is_match(literal_text) {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "tls.Config without MinVersion permits legacy TLS versions — set MinVersion to tls.VersionTLS12 or higher",
+                node,
+                src,
+            ));
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule: cookie-missing-secure ──────────────────────────────────────────
+
+pub struct CookieMissingSecure;
+
+impl_rule! {
+    CookieMissingSecure,
+    id = "go/cookie-missing-secure",
+    severity = Severity::Medium,
+    cwe = Some("CWE-614"),
+    description = "http.Cookie missing Secure flag",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+            Some(go_aliases_from_tree(source, tree))
+        } else {
+            None
+        };
+        let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+        let secure_field_re = Regex::new(r"\bSecure\s*:")
+            .expect("static Go cookie Secure field regex should compile");
+        let secure_false_re = Regex::new(r"\bSecure\s*:\s*false\b")
+            .expect("static Go cookie Secure false regex should compile");
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            let Some(type_text) = go_composite_literal_type_text(node, src) else {
+                return;
+            };
+            let resolved_type = match aliases {
+                Some(a) => a.resolve(type_text),
+                None => std::borrow::Cow::Borrowed(type_text),
+            };
+            if resolved_type.as_ref() != "http.Cookie" {
+                return;
+            }
+
+            let literal_text = &src[node.byte_range()];
+            if secure_field_re.is_match(literal_text) && !secure_false_re.is_match(literal_text) {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "http.Cookie missing Secure: true — cookies may be sent over plaintext HTTP",
+                node,
+                src,
+            ));
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule: cookie-missing-httponly ────────────────────────────────────────
+
+pub struct CookieMissingHttpOnly;
+
+impl_rule! {
+    CookieMissingHttpOnly,
+    id = "go/cookie-missing-httponly",
+    severity = Severity::Medium,
+    cwe = Some("CWE-1004"),
+    description = "http.Cookie missing HttpOnly flag",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+            Some(go_aliases_from_tree(source, tree))
+        } else {
+            None
+        };
+        let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+        let http_only_field_re = Regex::new(r"\bHttpOnly\s*:")
+            .expect("static Go cookie HttpOnly field regex should compile");
+        let http_only_false_re = Regex::new(r"\bHttpOnly\s*:\s*false\b")
+            .expect("static Go cookie HttpOnly false regex should compile");
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            let Some(type_text) = go_composite_literal_type_text(node, src) else {
+                return;
+            };
+            let resolved_type = match aliases {
+                Some(a) => a.resolve(type_text),
+                None => std::borrow::Cow::Borrowed(type_text),
+            };
+            if resolved_type.as_ref() != "http.Cookie" {
+                return;
+            }
+
+            let literal_text = &src[node.byte_range()];
+            if http_only_field_re.is_match(literal_text)
+                && !http_only_false_re.is_match(literal_text)
+            {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "http.Cookie missing HttpOnly: true — client-side scripts can read the cookie",
+                node,
+                src,
+            ));
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule: math-random-used ───────────────────────────────────────────────
+
+pub struct MathRandomUsed;
+
+impl_rule! {
+    MathRandomUsed,
+    id = "go/math-random-used",
+    severity = Severity::Medium,
+    cwe = Some("CWE-338"),
+    description = "math/rand is not cryptographically secure",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let math_rand_locals = go_import_locals_for_path(source, tree, "math/rand");
+        if math_rand_locals.is_empty() {
+            return Vec::new();
+        }
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            if func.kind() != "selector_expression" {
+                return;
+            }
+
+            let func_text = &src[func.byte_range()];
+            let Some((root, _)) = func_text.split_once('.') else {
+                return;
+            };
+            if !math_rand_locals.iter().any(|local| local == root) {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "math/rand is predictable — use crypto/rand for security-sensitive randomness",
+                node,
+                src,
+            ));
+        });
 
         findings
 

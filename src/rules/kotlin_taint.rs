@@ -494,7 +494,7 @@ fn collect_param_sources(
                             description: format!("@{} parameter '{}'", ann, name),
                             line: ch.start_position().row + 1,
                         });
-                    } else if bare_names.iter().any(|n| *n == name) {
+                    } else if bare_names.contains(&name) {
                         out.push(TaintSource {
                             var_name: Some(name.to_string()),
                             description: format!("parameter '{}'", name),
@@ -606,32 +606,26 @@ fn find_sinks(
         for matcher in &spec.sinks {
             match matcher {
                 NodeMatcher::MethodName {
-                    method: m,
+                    method: expected,
                     description,
-                } => {
-                    if let Some(name) = method {
-                        if name == m {
-                            sinks.push(TaintSink {
-                                start_byte: n.start_byte(),
-                                end_byte: n.end_byte(),
-                                description: description.clone(),
-                            });
-                            return;
-                        }
-                    }
+                } if method == Some(expected.as_str()) => {
+                    sinks.push(TaintSink {
+                        start_byte: n.start_byte(),
+                        end_byte: n.end_byte(),
+                        description: description.clone(),
+                    });
+                    return;
                 }
                 NodeMatcher::Call {
                     canonical,
                     description,
-                } => {
-                    if match_kotlin_sink_call(canonical, receiver, method, ctor) {
-                        sinks.push(TaintSink {
-                            start_byte: n.start_byte(),
-                            end_byte: n.end_byte(),
-                            description: description.clone(),
-                        });
-                        return;
-                    }
+                } if match_kotlin_sink_call(canonical, receiver, method, ctor) => {
+                    sinks.push(TaintSink {
+                        start_byte: n.start_byte(),
+                        end_byte: n.end_byte(),
+                        description: description.clone(),
+                    });
+                    return;
                 }
                 _ => {}
             }
@@ -746,12 +740,10 @@ fn extract_property_initializer(node: Node<'_>) -> Option<Node<'_>> {
 /// Body node of a `function_declaration` / `lambda_literal`, if any.
 fn find_function_body(func_node: Node<'_>) -> Option<Node<'_>> {
     let mut cursor = func_node.walk();
-    for child in func_node.children(&mut cursor) {
-        if child.kind() == "function_body" {
-            return Some(child);
-        }
-    }
-    None
+    let body = func_node
+        .children(&mut cursor)
+        .find(|child| child.kind() == "function_body");
+    body
 }
 
 /// Convert a byte offset into the source to a `(line, column)` pair,

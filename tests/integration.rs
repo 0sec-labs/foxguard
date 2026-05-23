@@ -1009,8 +1009,8 @@ mod go {
 
         assert_eq!(
             findings.len(),
-            20,
-            "vulnerable.go should have 20 findings, got {}",
+            24,
+            "vulnerable.go should have 24 findings, got {}",
             findings.len()
         );
 
@@ -1026,6 +1026,10 @@ mod go {
             "go/no-weak-crypto",
             "go/no-ssrf",
             "go/insecure-tls-skip-verify",
+            "go/missing-ssl-minversion",
+            "go/cookie-missing-secure",
+            "go/cookie-missing-httponly",
+            "go/math-random-used",
             "go/net-http-no-timeout",
             "go/no-unsafe-deserialization",
             "go/jwt-no-verify",

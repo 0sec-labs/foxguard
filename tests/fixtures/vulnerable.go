@@ -10,6 +10,7 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"fmt"
+	mathrand "math/rand"
 	"net/http"
 	"os/exec"
 )
@@ -41,31 +42,41 @@ func vulnerable() {
 	// 8. go/net-http-no-timeout (Medium)
 	http.ListenAndServe(":8080", nil)
 
-	// 9. go/insecure-tls-skip-verify (High)
+	// 9. go/insecure-tls-skip-verify (High) + go/missing-ssl-minversion (Medium)
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 
-	// 10. go/no-unsafe-deserialization — gob.NewDecoder (High)
+	// 10. go/cookie-missing-secure (Medium)
+	http.SetCookie(w, &http.Cookie{Name: "sid", Value: userInput, HttpOnly: true})
+
+	// 11. go/cookie-missing-httponly (Medium)
+	http.SetCookie(w, &http.Cookie{Name: "prefs", Value: userInput, Secure: true})
+
+	// 12. go/math-random-used (Medium)
+	insecureCode := mathrand.Intn(1000000)
+
+	// 13. go/no-unsafe-deserialization — gob.NewDecoder (High)
 	dec := gob.NewDecoder(conn)
 
-	// 11. go/no-unsafe-deserialization — yaml.Unmarshal into interface{} (High)
+	// 14. go/no-unsafe-deserialization — yaml.Unmarshal into interface{} (High)
 	var out interface{}
 	yaml.Unmarshal(data, new(interface{}))
 
-	// 12. go/jwt-no-verify — jwt.ParseUnverified (Critical)
+	// 15. go/jwt-no-verify — jwt.ParseUnverified (Critical)
 	jwt.ParseUnverified(tokenStr, &jwt.StandardClaims{})
 
-	// 13. go/jwt-no-verify — jwt.Parse with nil key function (Critical)
+	// 16. go/jwt-no-verify — jwt.Parse with nil key function (Critical)
 	jwt.Parse(tokenStr, nil)
 
-	// 14. go/jwt-hardcoded-secret (High)
+	// 17. go/jwt-hardcoded-secret (High)
 	jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) { return []byte("my-secret-key"), nil })
 
 	_ = query1
 	_ = query2
 	_ = apiKey
 	_ = transport
+	_ = insecureCode
 	_ = dec
 }
 

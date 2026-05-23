@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"database/sql"
@@ -26,6 +27,14 @@ func safeOperations(db *sql.DB) {
 
 	// Safe: TLS verification remains enabled
 	_ = &tls.Config{MinVersion: tls.VersionTLS12}
+
+	// Safe: cookie has transport and script protections enabled
+	http.SetCookie(w, &http.Cookie{Name: "sid", Value: "ok", Secure: true, HttpOnly: true})
+
+	// Safe: cryptographic randomness
+	token := make([]byte, 16)
+	rand.Read(token)
+	_ = token
 
 	// Safe: environment variable for secrets
 	fmt.Println("Application started")
