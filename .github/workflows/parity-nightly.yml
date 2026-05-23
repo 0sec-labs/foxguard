@@ -1,0 +1,298 @@
+name: Parity Nightly
+
+# Nightly run of the Semgrep<->foxguard parity harness. Informational only:
+# uploads the report artifact and opens a GitHub issue if family parity drops
+# beyond DRIFT_THRESHOLD_PP percentage points against benchmarks/parity/expected.json.
+#
+# The pinned Semgrep version is derived from .github/workflows/ci.yml so there is a
+# single source of truth (search for `pip install semgrep==` in that file).
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+env:
+  DRIFT_THRESHOLD_PP: "5"
+
+jobs:
+  parity:
+    name: Run parity harness
+    runs-on: ubuntu-latest
+    outputs:
+      run_date: ${{ steps.meta.outputs.run_date }}
+      artifact_name: ${{ steps.meta.outputs.artifact_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compute run metadata
+        id: meta
+        run: |
+          run_date=$(date -u +'%Y-%m-%d')
+          echo "run_date=${run_date}" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=parity-report-${run_date}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract pinned Semgrep version from ci.yml
+        id: semgrep_version
+        # Single source of truth: ci.yml's `pip install semgrep==X.Y.Z` line is the
+        # authoritative pin. Failing loudly if the line moves keeps us honest.
+        run: |
+          ci_file=".github/workflows/ci.yml"
+          version=$(grep -oE 'semgrep==[0-9]+\.[0-9]+\.[0-9]+' "$ci_file" | head -1 | sed 's/semgrep==//')
+          if [ -z "$version" ]; then
+            echo "::error::could not find 'pip install semgrep==X.Y.Z' in $ci_file"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Pinned Semgrep version: ${version}"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache cargo build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-parity-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-parity-
+            ${{ runner.os }}-cargo-build-
+
+      - name: Cache parity corpus clones
+        uses: actions/cache@v4
+        with:
+          path: benchmarks/parity/clones
+          key: parity-clones-${{ hashFiles('benchmarks/parity/repos.toml') }}
+          restore-keys: |
+            parity-clones-
+
+      - name: Install Semgrep
+        run: pip install "semgrep==${{ steps.semgrep_version.outputs.version }}"
+
+      - name: Build foxguard (release)
+        run: cargo build --release
+
+      - name: Run parity harness
+        env:
+          KEEP_CLONES: "1"
+        run: ./benchmarks/parity/run.sh
+
+      - name: Upload parity report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: benchmarks/parity/results/
+          if-no-files-found: error
+          retention-days: 30
+
+  drift-alert:
+    name: Detect parity drift
+    needs: parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download parity artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.parity.outputs.artifact_name }}
+          path: benchmarks/parity/results/
+
+      - name: Compare aggregate + per-repo family parity vs expected.json
+        id: drift
+        env:
+          DRIFT_THRESHOLD_PP: ${{ env.DRIFT_THRESHOLD_PP }}
+          RUN_DATE: ${{ needs.parity.outputs.run_date }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, sys
+
+          threshold_pp = float(os.environ["DRIFT_THRESHOLD_PP"])
+          run_date = os.environ["RUN_DATE"]
+          run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+
+          expected_path = pathlib.Path("benchmarks/parity/expected.json")
+          results_dir = pathlib.Path("benchmarks/parity/results")
+
+          # Reconstruct the snapshot from the artifact. parity.py writes summary.md but
+          # not a machine-readable snapshot to disk; we rebuild it from the per-repo
+          # reports' parity numbers by re-parsing summary.md aggregate line and the
+          # known structure. Easier: parse summary.md aggregate + just trust per-repo
+          # report numbers via the family_parity table.
+          summary_md = (results_dir / "summary.md").read_text()
+
+          # The summary table rows look like:
+          # | repo | language | fox | sem | shared | fox_only | sem_only | family% | site% |
+          # And aggregate line: **Aggregate family parity:** 14.8% (8 shared / 54 union)
+          import re
+          current_repos = {}
+          for line in summary_md.splitlines():
+              # skipped row: "| name | lang | _skipped: ..._ | ..."
+              if line.startswith("| ") and "_skipped:" in line:
+                  cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                  if cells:
+                      current_repos[cells[0]] = {"skipped": True}
+                  continue
+              m = re.match(r"^\|\s+([^|]+?)\s+\|\s+([^|]+?)\s+\|\s+(\d+)\s+\|\s+(\d+)\s+\|\s+(\d+)\s+\|\s+(\d+)\s+\|\s+(\d+)\s+\|\s+([\d.]+)%\s+\|\s+([\d.]+)%\s+\|", line)
+              if m:
+                  name = m.group(1)
+                  if name in ("Repo", "------"):
+                      continue
+                  current_repos[name] = {
+                      "family_rate": float(m.group(8)) / 100.0,
+                  }
+
+          agg_match = re.search(r"Aggregate family parity:\*\*\s+([\d.]+)%", summary_md)
+          if not agg_match:
+              print("::error::could not parse aggregate family parity from summary.md")
+              sys.exit(1)
+          current_aggregate = float(agg_match.group(1)) / 100.0
+
+          expected = json.loads(expected_path.read_text())
+          expected_aggregate = float(expected["aggregate"]["family_rate"])
+
+          regressions = []  # list of dicts: {scope, name, prior, current, delta_pp}
+
+          delta_pp = (current_aggregate - expected_aggregate) * 100
+          if -delta_pp > threshold_pp:
+              regressions.append({
+                  "scope": "aggregate",
+                  "name": "(all repos)",
+                  "prior": expected_aggregate,
+                  "current": current_aggregate,
+                  "delta_pp": delta_pp,
+              })
+
+          for name, exp_data in expected.get("repos", {}).items():
+              if "skipped" in exp_data:
+                  continue
+              prior = float(exp_data.get("family", {}).get("rate", 0.0))
+              cur = current_repos.get(name)
+              if not cur or cur.get("skipped"):
+                  # If a previously-tracked repo is now skipped or missing, treat as
+                  # a regression worth flagging — it means parity is no longer measured.
+                  regressions.append({
+                      "scope": "repo",
+                      "name": name,
+                      "prior": prior,
+                      "current": 0.0,
+                      "delta_pp": -prior * 100,
+                      "note": "repo missing from current run",
+                  })
+                  continue
+              cur_rate = cur["family_rate"]
+              repo_delta_pp = (cur_rate - prior) * 100
+              if -repo_delta_pp > threshold_pp:
+                  regressions.append({
+                      "scope": "repo",
+                      "name": name,
+                      "prior": prior,
+                      "current": cur_rate,
+                      "delta_pp": repo_delta_pp,
+                  })
+
+          out = pathlib.Path(os.environ["GITHUB_OUTPUT"])
+          with out.open("a") as fh:
+              if regressions:
+                  worst = min(r["delta_pp"] for r in regressions)
+                  worst_abs = abs(worst)
+                  fh.write(f"regressed=true\n")
+                  fh.write(f"worst_pp={worst_abs:.1f}\n")
+                  fh.write(f"title=parity: family parity dropped {worst_abs:.1f}pp on {run_date}\n")
+                  body_lines = [
+                      f"Automated parity drift alert from the nightly workflow.",
+                      "",
+                      f"- **Date (UTC):** {run_date}",
+                      f"- **Threshold:** {threshold_pp:.0f}pp",
+                      f"- **Workflow run:** {run_url}",
+                      "",
+                      "## Regressions",
+                      "",
+                      "| Scope | Name | Prior | Current | Delta |",
+                      "|-------|------|------:|--------:|------:|",
+                  ]
+                  for r in regressions:
+                      note = f" ({r['note']})" if r.get("note") else ""
+                      body_lines.append(
+                          f"| {r['scope']} | `{r['name']}`{note} | {r['prior']:.1%} | {r['current']:.1%} | {r['delta_pp']:+.1f}pp |"
+                      )
+                  body_lines += [
+                      "",
+                      "## Next steps",
+                      "",
+                      "1. Pull the workflow artifact for the full per-repo reports.",
+                      "2. Inspect the top-of-summary regressing rule families.",
+                      "3. If the drift is intentional (e.g. rule was retired), bump `benchmarks/parity/expected.json` via PR.",
+                      "",
+                      "_Filed by `.github/workflows/parity-nightly.yml`._",
+                  ]
+                  body = "\n".join(body_lines)
+                  # Encode body via heredoc-safe delimiter for $GITHUB_OUTPUT multiline.
+                  fh.write("body<<PARITY_BODY_EOF\n")
+                  fh.write(body + "\n")
+                  fh.write("PARITY_BODY_EOF\n")
+                  print(f"::warning::parity regressed by {worst_abs:.1f}pp (threshold {threshold_pp:.0f}pp)")
+              else:
+                  fh.write("regressed=false\n")
+                  print(f"parity within threshold: aggregate {current_aggregate:.1%} vs expected {expected_aggregate:.1%}")
+          PY
+
+      - name: Check for existing recent drift issue
+        if: steps.drift.outputs.regressed == 'true'
+        id: dedupe
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Dedupe window: don't open a second issue if one with our title prefix was
+          # opened in the last 24h. gh issue list --search uses GitHub search syntax.
+          since=$(python3 -c "import datetime; print((datetime.datetime.utcnow() - datetime.timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+          existing=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --search "parity: family parity dropped in:title created:>=${since}" \
+            --json number,title,createdAt \
+            --limit 5)
+          echo "Recent matching issues: $existing"
+          count=$(echo "$existing" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+          if [ "$count" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Found $count open parity drift issue(s) from the last 24h. Skipping issue creation."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open drift issue
+        if: steps.drift.outputs.regressed == 'true' && steps.dedupe.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_TITLE: ${{ steps.drift.outputs.title }}
+          ISSUE_BODY: ${{ steps.drift.outputs.body }}
+        run: |
+          # Labels: only those that exist in the repo (verified via `gh label list`).
+          # `regression` does not exist; closest analogue is `bug`. `benchmarking`
+          # tags it for the parity-harness backlog filter.
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$ISSUE_TITLE" \
+            --body "$ISSUE_BODY" \
+            --label "enhancement" \
+            --label "bug" \
+            --label "benchmarking"
