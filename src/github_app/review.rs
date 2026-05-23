@@ -289,6 +289,8 @@ impl GitHubReviewClient {
             // page near a rate-limit boundary), so we MUST NOT rely on item
             // count to detect the last page — that would silently drop
             // data.
+            // Reading a response header by a constant name; no outbound request is made here.
+            // foxguard: ignore[rs/no-ssrf]
             let has_next_page = response
                 .headers()
                 .get(reqwest::header::LINK)
