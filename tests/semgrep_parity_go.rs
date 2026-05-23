@@ -7,22 +7,13 @@
 //! gracefully when `semgrep` is not on PATH so the suite remains green in
 //! restricted environments.
 //!
-//! ## Go-specific caveat
+//! ## Go-specific caveat (resolved by #390)
 //!
-//! tree-sitter-go rejects Semgrep micro-syntax (`$X`, `...`) at top level
-//! because Go requires a `package` clause before any other declaration.
-//! This produces parse-error nodes in foxguard's pattern AST, which the
-//! current matcher cannot drill into. As a result, three of the six
-//! micro-patterns (`pattern-inside`, `pattern-not-inside`,
-//! `metavariable-regex`) cannot be reliably parity-tested against Go
-//! today — their behavior diverges silently when the pattern AST fails
-//! to parse. Those tests are marked `#[ignore]` with explanatory comments
-//! and tracked in a follow-up issue.
-//!
-//! The three remaining tests (`pattern-either`, `pattern-regex` +
-//! `pattern-not-regex`, `paths.include/exclude`) work end-to-end via
-//! foxguard's pattern-regex path, which is language-agnostic and matches
-//! Semgrep byte-for-byte.
+//! tree-sitter-go rejects Semgrep micro-syntax (`$X`, `...`) because Go
+//! requires parser-valid identifiers/arguments and a `package` clause
+//! before declarations. foxguard rewrites those Semgrep tokens to internal
+//! Go-valid placeholders before AST matching, so all six micro-patterns
+//! parity-test cleanly against Go.
 
 use serde_json::Value;
 use std::fs;
@@ -226,18 +217,14 @@ rules:
 }
 
 #[test]
-#[ignore = "foxguard cannot AST-match Go patterns; tree-sitter-go rejects Semgrep micro-syntax at top level (see issue tracking Go AST parity)"]
 fn test_parity_binary_operator_and_metavariable_regex() {
     if skip_if_semgrep_missing() {
         return;
     }
 
     // `metavariable-regex` requires foxguard to AST-bind `$VAR`. For Go,
-    // the pattern parses with a `source_file -> ERROR` wrapper because
-    // tree-sitter-go demands a `package` clause first, so the binding
-    // never fires. Semgrep handles this case via its own AST engine,
-    // producing a divergence foxguard cannot reach without an upstream
-    // fix.
+    // foxguard rewrites Semgrep metavariables to parser-valid placeholders
+    // and binds them back to their original `$VAR` names (see #390).
     let repo = TempDir::new().expect("failed to create temp dir");
     let rules = write_file(
         repo.path(),
@@ -265,16 +252,14 @@ rules:
 }
 
 #[test]
-#[ignore = "foxguard cannot AST-match Go patterns; see test_parity_binary_operator_and_metavariable_regex for context"]
 fn test_parity_pattern_inside() {
     if skip_if_semgrep_missing() {
         return;
     }
 
     // `pattern-inside` requires foxguard to AST-match the enclosing Go
-    // function declaration; the pattern parses as ERROR (tree-sitter-go
-    // refuses bare declarations), so foxguard silently skips the inside
-    // filter and over-reports.
+    // function declaration; foxguard rewrites Semgrep ellipses to internal
+    // placeholders before parsing (see #390) so the inside filter applies.
     let repo = TempDir::new().expect("failed to create temp dir");
     let rules = write_file(
         repo.path(),
@@ -303,14 +288,13 @@ rules:
 }
 
 #[test]
-#[ignore = "foxguard cannot AST-match Go patterns; see test_parity_binary_operator_and_metavariable_regex for context"]
 fn test_parity_pattern_not_inside() {
     if skip_if_semgrep_missing() {
         return;
     }
 
     // `pattern-not-inside` has the same AST-matching constraint as
-    // `pattern-inside`. Tracked in the Go AST parity follow-up.
+    // `pattern-inside`; resolved by the Go placeholder rewrite in #390.
     let repo = TempDir::new().expect("failed to create temp dir");
     let rules = write_file(
         repo.path(),
