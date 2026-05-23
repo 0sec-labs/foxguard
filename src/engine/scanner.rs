@@ -1272,6 +1272,31 @@ fn scan_files(
                 ));
             }
 
+            // Kotlin taint rules: dispatched the same way as the other
+            // language engines via `run_kt_taint_batched`. The Kotlin
+            // engine doesn't share Pass 1 summaries (it's intra-function
+            // only and has no cross-file work yet), but the dispatcher
+            // routes all enabled Kotlin taint rules through a single
+            // entry point for parity.
+            let enabled_kt_taint_ids: std::collections::HashSet<&str> =
+                if matches!(language, Language::Kotlin) {
+                    analysis_plan
+                        .taint_specs
+                        .iter()
+                        .filter(|spec| matches!(spec.engine, TaintEngine::Kotlin))
+                        .map(|spec| spec.rule_id)
+                        .collect()
+                } else {
+                    std::collections::HashSet::new()
+                };
+            if !enabled_kt_taint_ids.is_empty() {
+                file_findings.extend(crate::rules::kotlin::run_kt_taint_batched(
+                    source,
+                    tree,
+                    &enabled_kt_taint_ids,
+                ));
+            }
+
             file_findings.extend(ast_rule_batch.run(source, tree, &ctx));
 
             for finding in &mut file_findings {

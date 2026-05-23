@@ -8,6 +8,7 @@ pub mod java;
 pub mod javascript;
 pub mod javascript_taint;
 pub mod kotlin;
+pub mod kotlin_taint;
 pub mod manifest;
 pub mod php;
 pub mod python;
@@ -38,6 +39,7 @@ static BUNDLED_RULES: include_dir::Dir<'_> = include_dir::include_dir!("$CARGO_M
 pub enum TaintEngine {
     Go,
     JavaScript,
+    Kotlin,
     Python,
 }
 
@@ -718,6 +720,15 @@ fn builtin_taint_specs_for_language(language: Language) -> Vec<RegistryTaintSpec
                 rule_id,
                 language,
                 engine: TaintEngine::Python,
+                spec,
+            })
+            .collect(),
+        Language::Kotlin => kotlin_taint::kotlin_taint_rule_specs()
+            .into_iter()
+            .map(|(rule_id, spec)| RegistryTaintSpec {
+                rule_id,
+                language,
+                engine: TaintEngine::Kotlin,
                 spec,
             })
             .collect(),
