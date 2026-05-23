@@ -156,10 +156,15 @@ Database selection priority is:
 1. rule-level `database`
 2. CLI `--codeql-db /path/to/database`
 3. environment `FOXGUARD_CODEQL_DB`
+4. **Auto-build**: if `codeql` is on PATH and none of the above are set, foxguard creates an ephemeral database scoped to the scan target via `codeql database create --language=<lang> --source-root=<target> --overwrite`. The temp DB is cleaned up when the scan exits. Query language is inferred from the top-level `import <lang>` line in the `.ql` file, falling back to source-root file extensions.
 
 Example:
 
 ```bash
+# Auto-build path (codeql on PATH, no DB flag):
+foxguard --rules ./kernel-rules /path/to/linux
+
+# Manual DB path (still supported):
 foxguard --rules ./kernel-rules --codeql-db /path/to/linux.codeql .
 ```
 
@@ -167,7 +172,8 @@ Execution model:
 
 - foxguard runs `codeql database analyze <db> <query.ql> --format=sarif-latest --output <tmp>.sarif`.
 - SARIF results are normalized into the same `Finding` shape used by built-in, Semgrep-compatible, and Coccinelle rules.
-- If `codeql` is missing or no database is configured, foxguard emits a warning and skips CodeQL rules while continuing the rest of the scan.
+- If `codeql` is missing from PATH, foxguard emits a single warning and skips CodeQL rules while continuing the rest of the scan.
+- If `codeql database create` fails (e.g. no compilable source under the scan target, or the qlpack language family isn't installed), foxguard emits a per-rule warning and continues. Set `FOXGUARD_CODEQL_CREATE_TIMEOUT_SECS` to override the default 15-minute build timeout.
 - `foxguard diff` does not run the CodeQL bridge yet. Accurate diffing needs a base/current database strategy rather than a single current database.
 
 ## Important limitations

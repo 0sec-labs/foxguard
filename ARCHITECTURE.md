@@ -12,7 +12,7 @@ There are two rule surfaces, and the distinction matters.
 
 `rules/kernel/dirty-frag-class/` is the first such pack: a maintainer-curated, domain-specific bundle of Semgrep-shaped YAML rules calibrated against a single Linux kernel bug class (ESP/AEAD shared-fragment regressions, scatterwalk store hazards, RxRPC dispatch). It is versioned alongside the repo but stays out of the default scan. Future packs (other kernel classes, vendor-specific compliance) belong under `rules/<area>/<class>/` and follow the same opt-in load path. There is no duplication between Rust and YAML rules — they are different layers with different review bars.
 
-The `queries/` subfolder under `dirty-frag-class/` holds CodeQL `.ql` queries and a `qlpack.yml`. The Semgrep loader skips rules with `engine: codeql` (`src/rules/semgrep_compat.rs:1057-1066`); these queries are static reference material today, not wired into the default runtime. The separate CodeQL driver in `src/engine/codeql.rs` shells out to `codeql` and requires an explicit `--codeql-db`.
+The `queries/` subfolder under `dirty-frag-class/` holds CodeQL `.ql` queries and a `qlpack.yml`. The Semgrep loader skips rules with `engine: codeql` (`src/rules/semgrep_compat.rs:1057-1066`); the separate CodeQL driver in `src/engine/codeql.rs` shells out to `codeql`. When `codeql` is on PATH, the driver auto-creates an ephemeral database scoped to the scan target via `codeql database create --language=<lang> --source-root=<target>` and runs the loaded `.ql` queries against it. Explicit `--codeql-db` and `FOXGUARD_CODEQL_DB` still take precedence; they're the right escape hatch for users with a pre-built DB.
 
 ## Engine
 
