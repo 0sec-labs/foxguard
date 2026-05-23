@@ -94,6 +94,14 @@ pub enum AstAnalysisRequirement {
 ///     }
 /// }
 /// ```
+///
+/// Optional declarative metadata:
+///   * `cnsa2_deadline = "YYYY"` — sets [`Rule::cnsa2_deadline`] for
+///     quantum-related rules.
+///   * `applies_to_filename = "NAME"` — restricts the rule to files whose
+///     basename equals `NAME` (e.g. `"Cargo.lock"`, `"requirements.txt"`).
+///     Useful for manifest/lockfile rules that parse the source themselves
+///     rather than relying on tree-sitter.
 #[macro_export]
 macro_rules! impl_rule {
     // ── Variant 1: check only ──────────────────────────────────────────────
@@ -137,6 +145,42 @@ macro_rules! impl_rule {
             fn description(&self) -> &str { $desc }
             fn language(&self) -> $crate::Language { $lang }
             fn cnsa2_deadline(&self) -> Option<&'static str> { Some($deadline) }
+            fn check(&self, $src: &str, $tree: &tree_sitter::Tree) -> Vec<$crate::Finding> {
+                let $self_ = self;
+                $($check_body)*
+            }
+        }
+    };
+
+    // ── Variant 1c: check only, with cnsa2_deadline + applies_to_filename ──
+    //
+    // For rules that only fire on files with a specific basename (e.g.
+    // `Cargo.lock`, `requirements.txt`). The check body typically ignores
+    // the `tree` argument and parses `source` itself with a format-specific
+    // parser (TOML, line-oriented, …). Use this arm instead of writing the
+    // trait impl by hand so metadata (cwe, severity, cnsa2_deadline) stays
+    // declarative and consistent with every other rule.
+    (
+        $struct:ty,
+        id = $id:expr,
+        severity = $sev:expr,
+        cwe = $cwe:expr,
+        description = $desc:expr,
+        language = $lang:expr,
+        cnsa2_deadline = $deadline:expr,
+        applies_to_filename = $filename:expr,
+        fn check($self_:ident, $src:ident, $tree:ident) { $($check_body:tt)* }
+    ) => {
+        impl $crate::rules::Rule for $struct {
+            fn id(&self) -> &str { $id }
+            fn severity(&self) -> $crate::Severity { $sev }
+            fn cwe(&self) -> Option<&str> { $cwe }
+            fn description(&self) -> &str { $desc }
+            fn language(&self) -> $crate::Language { $lang }
+            fn cnsa2_deadline(&self) -> Option<&'static str> { Some($deadline) }
+            fn applies_to_path(&self, path: &std::path::Path) -> bool {
+                path.file_name().and_then(|f| f.to_str()) == Some($filename)
+            }
             fn check(&self, $src: &str, $tree: &tree_sitter::Tree) -> Vec<$crate::Finding> {
                 let $self_ = self;
                 $($check_body)*
