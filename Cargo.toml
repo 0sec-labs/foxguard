@@ -44,6 +44,7 @@ shlex = "1"
 unicode-segmentation = "1"
 unicode-width = "0.2"
 wait-timeout = "0.2.1"
+include_dir = "0.7"
 
 # Optional deps for the GitHub App webhook receiver (gated behind the
 # `github-app` feature). Off by default so the core scanner build stays
