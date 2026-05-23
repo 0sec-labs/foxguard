@@ -1,0 +1,101 @@
+{
+  "aggregate": {
+    "family_rate": 0.0,
+    "foxguard_only": 55,
+    "semgrep_only": 15,
+    "shared": 0,
+    "site_rate": 0.1481,
+    "site_shared": 8,
+    "site_union": 54,
+    "union": 70
+  },
+  "repos": {
+    "echo": {
+      "family": {
+        "foxguard_only": 13,
+        "rate": 0.0,
+        "semgrep_only": 5,
+        "shared": 0,
+        "union": 18
+      },
+      "foxguard_duration_s": 0.381,
+      "foxguard_findings": 13,
+      "ref": "98ca08e7dd64075b858e758d6693bf9799340756",
+      "semgrep_duration_s": 3.439,
+      "semgrep_findings": 5,
+      "site": {
+        "foxguard_only": 13,
+        "rate": 0.0,
+        "semgrep_only": 4,
+        "shared": 0,
+        "union": 17
+      }
+    },
+    "express": {
+      "family": {
+        "foxguard_only": 2,
+        "rate": 0.0,
+        "semgrep_only": 0,
+        "shared": 0,
+        "union": 2
+      },
+      "foxguard_duration_s": 0.061,
+      "foxguard_findings": 2,
+      "ref": "1faf228935aa0a13111f92c28ee795be64ce3f0f",
+      "semgrep_duration_s": 4.132,
+      "semgrep_findings": 0,
+      "site": {
+        "foxguard_only": 2,
+        "rate": 0.0,
+        "semgrep_only": 0,
+        "shared": 0,
+        "union": 2
+      }
+    },
+    "flask": {
+      "family": {
+        "foxguard_only": 14,
+        "rate": 0.0,
+        "semgrep_only": 1,
+        "shared": 0,
+        "union": 15
+      },
+      "foxguard_duration_s": 0.216,
+      "foxguard_findings": 14,
+      "ref": "2efaec117637fa51c6c53588899002def7eee37a",
+      "semgrep_duration_s": 4.986,
+      "semgrep_findings": 1,
+      "site": {
+        "foxguard_only": 12,
+        "rate": 0.07692307692307693,
+        "semgrep_only": 0,
+        "shared": 1,
+        "union": 13
+      }
+    },
+    "juice-shop": {
+      "family": {
+        "foxguard_only": 26,
+        "rate": 0.0,
+        "semgrep_only": 9,
+        "shared": 0,
+        "union": 35
+      },
+      "foxguard_duration_s": 0.215,
+      "foxguard_findings": 26,
+      "ref": "7d55c6776a3c27c243bbaa0fa7aabe8efc23d56b",
+      "semgrep_duration_s": 6.053,
+      "semgrep_findings": 9,
+      "site": {
+        "foxguard_only": 13,
+        "rate": 0.3181818181818182,
+        "semgrep_only": 2,
+        "shared": 7,
+        "union": 22
+      }
+    },
+    "libssh-rs": {
+      "skipped": "marked skip=true in manifest"
+    }
+  }
+}
