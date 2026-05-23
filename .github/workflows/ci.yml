@@ -105,8 +105,14 @@ jobs:
       - name: Install semgrep
         # Pin Semgrep to a known version so parity-test drift comes from foxguard changes, not upstream behavior changes. Bump deliberately via PR + parity-test run.
         run: pip install semgrep==1.163.0
-      - name: Run Semgrep parity suite
+      - name: Run Semgrep parity suite (Python)
         run: cargo test --test semgrep_parity
+      - name: Run Semgrep parity suite (JavaScript)
+        run: cargo test --test semgrep_parity_javascript
+      - name: Run Semgrep parity suite (Go)
+        run: cargo test --test semgrep_parity_go
+      - name: Run Semgrep parity suite (Java)
+        run: cargo test --test semgrep_parity_java
 
   website:
     name: Website Build
