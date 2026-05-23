@@ -103,7 +103,8 @@ jobs:
           key: ubuntu-cargo-semgrep-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ubuntu-cargo-semgrep-
       - name: Install semgrep
-        run: pip install semgrep
+        # Pin Semgrep to a known version so parity-test drift comes from foxguard changes, not upstream behavior changes. Bump deliberately via PR + parity-test run.
+        run: pip install semgrep==1.163.0
       - name: Run Semgrep parity suite
         run: cargo test --test semgrep_parity
 
