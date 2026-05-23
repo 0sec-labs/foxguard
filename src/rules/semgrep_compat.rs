@@ -9,6 +9,11 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
+const RESERVED_RULE_ID_NAMESPACES: &[&str] = &[
+    "py", "js", "go", "java", "php", "ruby", "cs", "csharp", "swift", "kotlin", "rs", "rust",
+    "config", "manifest",
+];
+
 // ─── YAML Schema ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -1134,6 +1139,28 @@ fn extract_cwe(yaml: &SemgrepRuleYaml) -> Option<String> {
     }
 }
 
+fn reserved_rule_namespace(rule_id: &str) -> Option<&'static str> {
+    let (namespace, _) = rule_id.split_once('/')?;
+    RESERVED_RULE_ID_NAMESPACES
+        .iter()
+        .copied()
+        .find(|reserved| *reserved == namespace)
+}
+
+fn validate_semgrep_rule_id(rule_id: &str, source_label: &str) -> Result<(), String> {
+    let Some(namespace) = reserved_rule_namespace(rule_id) else {
+        return Ok(());
+    };
+
+    Err(format!(
+        "Rule id '{}' in {} uses reserved namespace '{}/'. YAML rule packs must use a pack-specific namespace such as 'kernel/dirty-frag/...' or 'acme/security/...'. Reserved namespaces: {}",
+        rule_id,
+        source_label,
+        namespace,
+        RESERVED_RULE_ID_NAMESPACES.join(", ")
+    ))
+}
+
 /// Parse a single Semgrep YAML file into foxguard rules.
 pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
     let content = std::fs::read_to_string(path)
@@ -1164,6 +1191,10 @@ pub fn parse_semgrep_str(content: &str, source_label: &str) -> Result<Vec<Box<dy
 
     if let Some(raw_rules) = raw_doc.get("rules").and_then(YamlValue::as_sequence) {
         for raw_rule in raw_rules {
+            if let Some(rule_id) = raw_rule.get("id").and_then(YamlValue::as_str) {
+                validate_semgrep_rule_id(rule_id, source_label)?;
+            }
+
             if raw_rule
                 .get("engine")
                 .and_then(YamlValue::as_str)
@@ -1334,6 +1365,34 @@ rules:
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].id(), "semgrep/test-eval");
         assert_eq!(rules[0].severity(), Severity::Critical);
+    }
+
+    #[test]
+    fn test_reserved_rule_id_namespace_is_rejected() {
+        let yaml = r#"
+rules:
+  - id: py/custom-eval
+    pattern: eval(...)
+    message: Do not use eval
+    severity: ERROR
+    languages: [python]
+"#;
+
+        let err = match parse_semgrep_str(yaml, "org-pack.yml") {
+            Ok(_) => panic!("reserved rule namespace should be rejected"),
+            Err(err) => err,
+        };
+        assert!(err.contains("py/custom-eval"));
+        assert!(err.contains("reserved namespace 'py/'"));
+        assert!(err.contains("org-pack.yml"));
+    }
+
+    #[test]
+    fn test_reserved_rule_id_alias_namespaces_are_rejected() {
+        for namespace in ["cs", "csharp", "rs", "rust"] {
+            let rule_id = format!("{namespace}/custom-rule");
+            assert_eq!(reserved_rule_namespace(&rule_id), Some(namespace));
+        }
     }
 
     #[test]

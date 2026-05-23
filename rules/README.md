@@ -18,6 +18,8 @@ Plain `foxguard <target>` therefore runs the kernel/dirty-frag-class pack today 
 foxguard --rules /path/to/org-rules ./target/
 ```
 
+External rule IDs must use a pack-specific namespace, such as `acme/security/no-unsafe-call`. The built-in namespaces are reserved and rejected at load time: `py/`, `js/`, `go/`, `java/`, `php/`, `ruby/`, `cs/`, `csharp/`, `swift/`, `kotlin/`, `rs/`, `rust/`, `config/`, and `manifest/`.
+
 ## Layout convention
 
 ```
@@ -37,7 +39,8 @@ rules/<area>/<class>/
 ## Adding a new pack
 
 1. Pick a path under `rules/<area>/<class>/`. Reuse an existing `<area>` if one fits; otherwise add a new top-level folder.
-2. Write Semgrep-compat YAML (`pattern-regex`, `pattern-not-regex`, `paths.include` / `paths.exclude`, `languages`, `severity`, `metadata.cwe`, `metadata.references`). Any rule under `kernel/dirty-frag-class/` shows the shape the loader accepts.
-3. Add calibration tests in `tests/<area>_<class>.rs` that drive `parse_semgrep_file` against positive and negative fixtures. Use [`tests/kernel_dirty_frag.rs`](../tests/kernel_dirty_frag.rs) as the template — it loads each YAML, parses fixtures with tree-sitter-c, and asserts finding counts.
+2. Pick rule IDs under a pack-specific namespace, for example `kernel/dirty-frag/<rule-name>`. Do not use reserved built-in namespaces such as `py/`, `go/`, `rs/`, `config/`, or `manifest/`.
+3. Write Semgrep-compat YAML (`pattern-regex`, `pattern-not-regex`, `paths.include` / `paths.exclude`, `languages`, `severity`, `metadata.cwe`, `metadata.references`). Any rule under `kernel/dirty-frag-class/` shows the shape the loader accepts.
+4. Add calibration tests in `tests/<area>_<class>.rs` that drive `parse_semgrep_file` against positive and negative fixtures. Use [`tests/kernel_dirty_frag.rs`](../tests/kernel_dirty_frag.rs) as the template — it loads each YAML, parses fixtures with tree-sitter-c, and asserts finding counts.
 
 Files placed under `rules/` are picked up automatically on the next `cargo build` — `include_dir!` re-snapshots the tree at compile time. No edit to `RuleRegistry::new()` is required for new YAML packs.

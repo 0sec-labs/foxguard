@@ -19,6 +19,8 @@ The Rust registry is the single source of truth for rule metadata. `www/src/data
 
 Use a YAML rule pack under `rules/<area>/<class>/` if the detection is Semgrep-shaped — `pattern-regex` / `pattern-not-regex` with `paths.include` / `paths.exclude`, scoped to a specific bug class or vendor corpus. Drop the YAML in place and rebuild; `include_dir!` snapshots `rules/` at compile time and `RuleRegistry::new()` registers it alongside the Rust core. See [`rules/README.md`](./rules/README.md) for the layout and calibration-test convention.
 
+YAML rule IDs must use a pack-specific namespace, for example `kernel/dirty-frag/<rule-name>` or `acme/security/<rule-name>`. Do not use reserved built-in namespaces: `py/`, `js/`, `go/`, `java/`, `php/`, `ruby/`, `cs/`, `csharp/`, `swift/`, `kotlin/`, `rs/`, `rust/`, `config/`, or `manifest/`.
+
 Add a Rust rule (per the steps above) when the detection needs cross-file taint, custom Rust types or traits, or non-trivial AST analysis that the Semgrep-compat surface can't express.
 
 ## Adding a language
