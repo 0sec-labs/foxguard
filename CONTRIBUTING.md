@@ -15,6 +15,12 @@ The `impl_rule!` macro (defined in `src/rules/mod.rs`) eliminates boilerplate â€
 
 The Rust registry is the single source of truth for rule metadata. `www/src/data/rules.ts` is generated from it by `src/bin/gen_rules_ts.rs` and must not be hand-edited. The `rule-inventory-check` CI job and the `rule_inventory` cargo test both fail if the committed file drifts from the generator output.
 
+### Rust vs YAML rule packs
+
+Use a YAML rule pack under `rules/<area>/<class>/` if the detection is Semgrep-shaped â€” `pattern-regex` / `pattern-not-regex` with `paths.include` / `paths.exclude`, scoped to a specific bug class or vendor corpus. Drop the YAML in place and rebuild; `include_dir!` snapshots `rules/` at compile time and `RuleRegistry::new()` registers it alongside the Rust core. See [`rules/README.md`](./rules/README.md) for the layout and calibration-test convention.
+
+Add a Rust rule (per the steps above) when the detection needs cross-file taint, custom Rust types or traits, or non-trivial AST analysis that the Semgrep-compat surface can't express.
+
 ## Adding a language
 
 1. Add the tree-sitter grammar to `Cargo.toml`

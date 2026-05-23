@@ -20,10 +20,10 @@ All semgrep rules here are **syntactic / structural** — they prove neither SGL
 ## How to run
 
 ```sh
-foxguard --rules rules/kernel/dirty-frag-class/ ./linux/
+foxguard ./linux/
 ```
 
-The loader walks the directory recursively and registers every `*.yaml` / `*.yml` it finds. Built-in Rust rules still run; pass `--no-builtins` to scope a run to this pack only.
+No flag needed — this pack ships inside the `foxguard` binary and is registered at startup alongside the Rust core (see [`rules/README.md`](../../README.md)). `--no-builtins` suppresses both the Rust core and this pack; there is no flag to disable just one of them today.
 
 ## Companion CodeQL queries
 
