@@ -1,0 +1,75 @@
+# Semgrep-vs-foxguard parity corpus.
+#
+# Each entry pins a real-world OSS repo at a specific ref so re-running the
+# harness produces stable diffs over time. Add new entries sparingly: the
+# harness clones, runs foxguard, and runs Semgrep against each one, so wall
+# time grows linearly with corpus size.
+#
+# Fields:
+#   name             — short slug, used for paths and report filenames
+#   url              — clone URL (must be public, no auth)
+#   ref              — pinned commit SHA or tag (full SHA preferred for stable diffs)
+#   language         — language label, passed through to reports
+#   semgrep_ruleset  — Semgrep registry config to use (e.g. "p/python", "p/javascript", "auto")
+#   semgrep_version  — Semgrep version this entry was last validated against
+#                      (informational only; matches benchmarks/run.sh expectations)
+#   scan_subdir      — optional subdirectory of the repo to scan (default: ".")
+#                      use to avoid scanning vendored/test trees that explode
+#                      runtime without exercising the rule set
+#   skip             — optional: set to true to disable an entry without removing it
+#   notes            — free text, surfaces in the report
+
+semgrep_default_version = "1.140.0"
+
+[[repos]]
+name = "express"
+url = "https://github.com/expressjs/express.git"
+ref = "1faf228935aa0a13111f92c28ee795be64ce3f0f"  # v4.21.2
+language = "javascript"
+semgrep_ruleset = "p/javascript"
+scan_subdir = "lib"
+notes = "Small JS web framework. Scanning lib/ only keeps Semgrep wall time under a minute."
+
+[[repos]]
+name = "flask"
+url = "https://github.com/pallets/flask.git"
+ref = "2efaec117637fa51c6c53588899002def7eee37a"  # 3.1.0
+language = "python"
+semgrep_ruleset = "p/python"
+scan_subdir = "src/flask"
+notes = "Reference Python web framework. Small enough to scan end-to-end."
+
+[[repos]]
+name = "echo"
+url = "https://github.com/labstack/echo.git"
+ref = "98ca08e7dd64075b858e758d6693bf9799340756"  # v4.13.4
+language = "go"
+semgrep_ruleset = "p/golang"
+scan_subdir = "."
+notes = "Small Go HTTP framework. Replaces Gin for parity since Gin's source tree is dominated by tests."
+
+[[repos]]
+name = "juice-shop"
+url = "https://github.com/juice-shop/juice-shop.git"
+ref = "7d55c6776a3c27c243bbaa0fa7aabe8efc23d56b"  # v17.3.0
+language = "javascript"
+semgrep_ruleset = "p/owasp-top-ten"
+scan_subdir = "routes"
+# Intentionally-vulnerable app — exercises web-app rule families. Scoping to
+# routes/ keeps runtime sane while still hitting the largest concentration of
+# real findings.
+notes = "OWASP Juice Shop, intentionally vulnerable. routes/ is the highest-signal subdir."
+
+[[repos]]
+name = "libssh-rs"
+url = "https://github.com/wez/libssh-rs.git"
+ref = "main"  # follows main; libssh-rs has no recent tags. Re-pin on next run.
+language = "rust"
+semgrep_ruleset = "p/rust"
+scan_subdir = "."
+skip = true
+# Rust support in Semgrep registry is thin: most p/rust rules target unsafe blocks
+# and FFI. foxguard's Rust coverage is also early. Kept in the manifest as a
+# scaffolding target but skipped by default until both sides have enough rules
+# to make the diff meaningful.
+notes = "Rust unsafe-block target. Skipped by default — see notes inline."
