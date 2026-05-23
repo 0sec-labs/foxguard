@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::Path;
 
+use crate::impl_rule;
 use crate::rules::common::make_finding_from_offsets;
-use crate::rules::Rule;
 use crate::{Finding, Language, Severity};
 
 // ─── Shared seed entry ─────────────────────────────────────────────────────
@@ -195,31 +194,16 @@ const PIP_PACKAGES: &[SeedEntry] = &[
 
 pub struct CargoLockPqCrypto;
 
-impl Rule for CargoLockPqCrypto {
-    fn id(&self) -> &str {
-        "manifest/cargo-pq-vulnerable-dep"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some(MANIFEST_PQ_CWE)
-    }
-    fn description(&self) -> &str {
-        CARGO_PQ_DESC
-    }
-    fn language(&self) -> Language {
-        Language::Manifest
-    }
-    fn cnsa2_deadline(&self) -> Option<&'static str> {
-        Some(MANIFEST_PQ_DEADLINE)
-    }
-
-    fn applies_to_path(&self, path: &Path) -> bool {
-        path.file_name().and_then(|f| f.to_str()) == Some("Cargo.lock")
-    }
-
-    fn check(&self, source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
+impl_rule! {
+    CargoLockPqCrypto,
+    id = "manifest/cargo-pq-vulnerable-dep",
+    severity = Severity::High,
+    cwe = Some(MANIFEST_PQ_CWE),
+    description = CARGO_PQ_DESC,
+    language = Language::Manifest,
+    cnsa2_deadline = MANIFEST_PQ_DEADLINE,
+    applies_to_filename = "Cargo.lock",
+    fn check(_self, source, _tree) {
         let Ok(doc) = source.parse::<toml::Value>() else {
             return Vec::new();
         };
@@ -356,9 +340,9 @@ impl Rule for CargoLockPqCrypto {
             };
 
             let mut f = make_finding_from_offsets(
-                self.id(),
-                self.severity(),
-                self.cwe(),
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
                 &desc,
                 source,
                 offset,
@@ -376,31 +360,16 @@ impl Rule for CargoLockPqCrypto {
 
 pub struct RequirementsTxtPqCrypto;
 
-impl Rule for RequirementsTxtPqCrypto {
-    fn id(&self) -> &str {
-        "manifest/pip-pq-vulnerable-dep"
-    }
-    fn severity(&self) -> Severity {
-        Severity::High
-    }
-    fn cwe(&self) -> Option<&str> {
-        Some(MANIFEST_PQ_CWE)
-    }
-    fn description(&self) -> &str {
-        MANIFEST_PQ_DESC
-    }
-    fn language(&self) -> Language {
-        Language::Manifest
-    }
-    fn cnsa2_deadline(&self) -> Option<&'static str> {
-        Some(MANIFEST_PQ_DEADLINE)
-    }
-
-    fn applies_to_path(&self, path: &Path) -> bool {
-        path.file_name().and_then(|f| f.to_str()) == Some("requirements.txt")
-    }
-
-    fn check(&self, source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
+impl_rule! {
+    RequirementsTxtPqCrypto,
+    id = "manifest/pip-pq-vulnerable-dep",
+    severity = Severity::High,
+    cwe = Some(MANIFEST_PQ_CWE),
+    description = MANIFEST_PQ_DESC,
+    language = Language::Manifest,
+    cnsa2_deadline = MANIFEST_PQ_DEADLINE,
+    applies_to_filename = "requirements.txt",
+    fn check(_self, source, _tree) {
         let pip_map: HashMap<String, &SeedEntry> = PIP_PACKAGES
             .iter()
             .map(|e| (e.name.to_lowercase().replace(['_', '.'], "-"), e))
@@ -457,9 +426,9 @@ impl Rule for RequirementsTxtPqCrypto {
                 };
 
                 let mut f = make_finding_from_offsets(
-                    self.id(),
-                    self.severity(),
-                    self.cwe(),
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
                     &desc,
                     source,
                     line_start,
@@ -514,6 +483,7 @@ fn extract_pip_package_name(s: &str) -> &str {
 mod tests {
     use super::*;
     use crate::engine::parser::parse_file;
+    use crate::rules::Rule;
 
     fn dummy_tree(source: &str) -> tree_sitter::Tree {
         parse_file(source, Language::Manifest).expect("parse")
