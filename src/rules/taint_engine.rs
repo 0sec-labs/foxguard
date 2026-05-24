@@ -4,6 +4,7 @@
 //! `go_taint`) re-exports these types so existing consumers are
 //! unaffected.
 
+use crate::rules::cross_file::{FunctionTaintSummary, ParamSinkFlow};
 use std::collections::{HashMap, HashSet};
 use tree_sitter::Node;
 
@@ -167,6 +168,370 @@ impl TaintState {
     pub fn info(&self, name: &str) -> Option<&TaintInfo> {
         self.tainted.get(name)
     }
+}
+
+/// Bundles the read-only context that every internal walker needs,
+/// replacing the repeated `(source, spec, aliases, summaries)` tuple.
+///
+/// Generic over `CF`, the language-specific cross-file info type:
+/// - JS/TS: `javascript_taint::CrossFileInfo`
+/// - Python: `python_taint::CrossFileInfo`
+/// - Go:    `go_taint::CrossFileInfo`
+pub(super) struct AnalysisContext<'a, CF> {
+    pub source: &'a str,
+    pub spec: &'a TaintSpec,
+    pub aliases: Option<&'a super::common::AliasTable>,
+    pub summaries: &'a ReturnSummary,
+    /// Cross-file info for resolving imported / same-package function calls.
+    pub cross_file: Option<&'a CF>,
+    /// When the batched analyzer merges sinks from multiple rules into a
+    /// single `TaintSpec`, this map attributes each matched sink back to
+    /// its owning rule id. `None` in single-rule mode.
+    pub sink_to_rules: Option<&'a HashMap<String, Vec<String>>>,
+}
+
+// ─── Language adapter trait ──────────────────────────────────────────────
+
+/// Trait implemented by each language-specific taint engine.
+///
+/// Generic over `CF`, the language-specific cross-file info type.
+/// The generic walk/analyze functions call into this trait to dispatch to
+/// language-specific AST handling. Each language implements the trait on a
+/// zero-sized marker type (e.g. `JsTaintAdapter`, `PyTaintAdapter`,
+/// `GoTaintAdapter`) parameterized by its `CrossFileInfo`.
+pub(super) trait TaintLanguageAdapter<CF> {
+    /// Returns `true` if `kind` is a nested function scope that should be
+    /// skipped during the walk (each scope is analyzed independently).
+    fn is_nested_scope(kind: &str) -> bool;
+
+    /// Dispatch a single AST node to language-specific handlers during the
+    /// main analysis walk. Implementations should match on `node.kind()`
+    /// and call their assignment/declaration/call handlers as appropriate.
+    fn dispatch_walk_node(
+        node: Node<'_>,
+        ctx: &AnalysisContext<'_, CF>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+    );
+
+    /// Dispatch a single AST node during the summary walk (pass 1).
+    /// Same as `dispatch_walk_node` but also handles `return_statement`
+    /// for return-taint detection.
+    fn dispatch_summary_node(
+        node: Node<'_>,
+        ctx: &AnalysisContext<'_, CF>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+        return_taint: &mut Option<String>,
+    );
+
+    /// Evaluate whether `expr` is tainted. Returns `(description, line)` or `None`.
+    #[allow(dead_code)]
+    fn expression_taint(
+        expr: Node<'_>,
+        ctx: &AnalysisContext<'_, CF>,
+        state: &TaintState,
+    ) -> Option<(String, usize)>;
+
+    /// Seed taint state from function parameters that match source matchers.
+    fn seed_params(func_node: Node<'_>, ctx: &AnalysisContext<'_, CF>, state: &mut TaintState);
+
+    /// Get the function body node. Returns `None` if the function has no body.
+    fn get_body(func_node: Node<'_>) -> Option<Node<'_>> {
+        func_node.child_by_field_name("body")
+    }
+}
+
+// ─── Generic walk functions ─────────────────────────────────────────────
+
+/// Generic body walker for the main analysis pass (pass 2).
+///
+/// Skips nested scopes (as determined by `T::is_nested_scope`),
+/// dispatches to language-specific handlers, then recurses into children.
+pub(super) fn walk_body_generic<T: TaintLanguageAdapter<CF>, CF>(
+    node: Node<'_>,
+    ctx: &AnalysisContext<'_, CF>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    if T::is_nested_scope(node.kind()) {
+        return;
+    }
+    T::dispatch_walk_node(node, ctx, state, findings);
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_body_generic::<T, CF>(child, ctx, state, findings);
+    }
+}
+
+/// Generic body walker for the summary pass (pass 1).
+///
+/// Same as `walk_body_generic` but also detects return-taint.
+pub(super) fn walk_body_for_summary_generic<T: TaintLanguageAdapter<CF>, CF>(
+    node: Node<'_>,
+    ctx: &AnalysisContext<'_, CF>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+    return_taint: &mut Option<String>,
+) {
+    if T::is_nested_scope(node.kind()) {
+        return;
+    }
+    T::dispatch_summary_node(node, ctx, state, findings, return_taint);
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_body_for_summary_generic::<T, CF>(child, ctx, state, findings, return_taint);
+    }
+}
+
+/// Generic per-function analysis (pass 2).
+///
+/// Seeds parameter taint, gets the body, and walks it with the main walker.
+pub(super) fn analyze_function_generic<T: TaintLanguageAdapter<CF>, CF>(
+    func_node: Node<'_>,
+    ctx: &AnalysisContext<'_, CF>,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let mut state = TaintState::default();
+    T::seed_params(func_node, ctx, &mut state);
+    let Some(body) = T::get_body(func_node) else {
+        return;
+    };
+    walk_body_generic::<T, CF>(body, ctx, &mut state, findings);
+}
+
+/// Generic pass-1 summarizer: seed params, walk body, detect return taint.
+///
+/// Returns `Option<String>` -- the first tainted return expression's
+/// description, or `None` if the function returns clean.
+pub(super) fn summarize_function_generic<T, CF>(
+    func_node: Node<'_>,
+    ctx: &AnalysisContext<'_, CF>,
+) -> Option<String>
+where
+    T: TaintLanguageAdapter<CF>,
+{
+    let mut state = TaintState::default();
+    T::seed_params(func_node, ctx, &mut state);
+    let body = T::get_body(func_node)?;
+    let mut scratch: Vec<TaintFinding> = Vec::new();
+    let mut return_taint: Option<String> = None;
+    walk_body_for_summary_generic::<T, CF>(body, ctx, &mut state, &mut scratch, &mut return_taint);
+    return_taint
+}
+
+/// Generic return-taint summary builder.
+///
+/// Computes:
+/// 1. `direct_source`: does the function body contain a tainted return
+///    independent of caller arguments?
+/// 2. `params_to_return`: which parameter indices flow to a return value?
+pub(super) fn summarize_function_return_generic<T, CF>(
+    func_node: Node<'_>,
+    ctx: &AnalysisContext<'_, CF>,
+    collect_param_names: impl Fn(Node<'_>, &str) -> Vec<String>,
+) -> ReturnTaintSummary
+where
+    T: TaintLanguageAdapter<CF>,
+{
+    let direct_source = summarize_function_generic::<T, CF>(func_node, ctx);
+    let mut summary = ReturnTaintSummary {
+        direct_source,
+        params_to_return: Vec::new(),
+    };
+
+    let empty_summary = ReturnSummary::new();
+    for (param_idx, param_name) in collect_param_names(func_node, ctx.source)
+        .into_iter()
+        .enumerate()
+    {
+        let synthetic_spec = TaintSpec {
+            sources: vec![NodeMatcher::ParamName {
+                names: vec![param_name.clone()],
+                description: format!("parameter '{}'", param_name),
+            }],
+            sinks: vec![],
+            sanitizers: ctx.spec.sanitizers.clone(),
+        };
+        let param_ctx = AnalysisContext {
+            source: ctx.source,
+            spec: &synthetic_spec,
+            aliases: ctx.aliases,
+            summaries: &empty_summary,
+            cross_file: None,
+            sink_to_rules: None,
+        };
+        if summarize_function_generic::<T, CF>(func_node, &param_ctx).is_some() {
+            summary.params_to_return.push(param_idx);
+        }
+    }
+
+    summary
+}
+
+/// Extract cross-file taint summaries for a single function.
+///
+/// For each parameter, treat it as a synthetic taint source and test
+/// whether it flows to any sink (producing `ParamSinkFlow` entries) or
+/// to a return value (producing `params_to_return` entries).
+///
+/// This is the shared inner loop of `extract_cross_file_summaries` for
+/// JS, Python, and Go. Callers provide the function node, its name,
+/// its parameter names, rule specs, aliases, source, and the adapter type.
+pub(super) fn extract_cross_file_summary_for_function<T, CF>(
+    func_node: Node<'_>,
+    func_name: &str,
+    param_names: &[String],
+    source: &str,
+    aliases: Option<&super::common::AliasTable>,
+    rule_specs: &[(&str, TaintSpec)],
+) -> Option<FunctionTaintSummary>
+where
+    T: TaintLanguageAdapter<CF>,
+{
+    if param_names.is_empty() {
+        return None;
+    }
+
+    let mut params_to_sink: Vec<ParamSinkFlow> = Vec::new();
+    let mut params_to_return: Vec<usize> = Vec::new();
+
+    // Partition rules: those without sanitizers can be batched into a
+    // single analyze_function call per parameter; rules with sanitizers
+    // must run individually to avoid incorrect taint clearing.
+    let mut batched_sinks: Vec<NodeMatcher> = Vec::new();
+    let mut sink_desc_to_rule: HashMap<&str, &str> = HashMap::new();
+    let mut sanitizer_rules: Vec<(&str, &TaintSpec)> = Vec::new();
+    for (rule_id, rule_spec) in rule_specs {
+        if rule_spec.sanitizers.is_empty() {
+            for sink in &rule_spec.sinks {
+                sink_desc_to_rule.insert(sink.description(), rule_id);
+                batched_sinks.push(sink.clone());
+            }
+        } else {
+            sanitizer_rules.push((rule_id, rule_spec));
+        }
+    }
+
+    let empty_summary = ReturnSummary::new();
+
+    // Pre-build reusable specs outside the per-param loop.
+    let placeholder_source = NodeMatcher::ParamName {
+        names: vec![],
+        description: String::new(),
+    };
+    let mut return_spec = TaintSpec {
+        sources: vec![placeholder_source.clone()],
+        sinks: vec![],
+        sanitizers: vec![],
+    };
+    let mut batched_spec = TaintSpec {
+        sources: vec![placeholder_source.clone()],
+        sinks: batched_sinks,
+        sanitizers: vec![],
+    };
+    let mut sanitizer_specs: Vec<TaintSpec> = sanitizer_rules
+        .iter()
+        .map(|(_, rule_spec)| TaintSpec {
+            sources: vec![placeholder_source.clone()],
+            sinks: rule_spec.sinks.clone(),
+            sanitizers: rule_spec.sanitizers.clone(),
+        })
+        .collect();
+
+    for (param_idx, param_name) in param_names.iter().enumerate() {
+        let synthetic_source = NodeMatcher::ParamName {
+            names: vec![param_name.clone()],
+            description: format!("parameter '{}'", param_name),
+        };
+
+        // Check return-taint: does this parameter flow to a return value?
+        return_spec.sources[0] = synthetic_source.clone();
+        let return_ctx = AnalysisContext {
+            source,
+            spec: &return_spec,
+            aliases,
+            summaries: &empty_summary,
+            cross_file: None,
+            sink_to_rules: None,
+        };
+        let mut return_findings = Vec::new();
+        let mut return_state = TaintState::default();
+        T::seed_params(func_node, &return_ctx, &mut return_state);
+        if let Some(body) = T::get_body(func_node) {
+            let mut return_taint: Option<String> = None;
+            walk_body_for_summary_generic::<T, CF>(
+                body,
+                &return_ctx,
+                &mut return_state,
+                &mut return_findings,
+                &mut return_taint,
+            );
+            if return_taint.is_some() && !params_to_return.contains(&param_idx) {
+                params_to_return.push(param_idx);
+            }
+        }
+
+        let mut seen: HashSet<(usize, &str)> = HashSet::new();
+
+        // Batched pass: one call for all no-sanitizer rules.
+        if !batched_spec.sinks.is_empty() {
+            batched_spec.sources[0] = synthetic_source.clone();
+            let batched_ctx = AnalysisContext {
+                source,
+                spec: &batched_spec,
+                aliases,
+                summaries: &empty_summary,
+                cross_file: None,
+                sink_to_rules: None,
+            };
+            let mut findings = Vec::new();
+            analyze_function_generic::<T, CF>(func_node, &batched_ctx, &mut findings);
+            for f in &findings {
+                if let Some(&rule_id) = sink_desc_to_rule.get(f.sink_description.as_str()) {
+                    if seen.insert((param_idx, rule_id)) {
+                        params_to_sink.push(ParamSinkFlow {
+                            param_index: param_idx,
+                            sink_rule_id: rule_id.to_string(),
+                            sink_description: f.sink_description.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Individual pass: rules with sanitizers run separately.
+        for (idx, (rule_id, _)) in sanitizer_rules.iter().enumerate() {
+            sanitizer_specs[idx].sources[0] = synthetic_source.clone();
+            let sink_ctx = AnalysisContext {
+                source,
+                spec: &sanitizer_specs[idx],
+                aliases,
+                summaries: &empty_summary,
+                cross_file: None,
+                sink_to_rules: None,
+            };
+            let mut findings = Vec::new();
+            analyze_function_generic::<T, CF>(func_node, &sink_ctx, &mut findings);
+            if !findings.is_empty() && seen.insert((param_idx, rule_id)) {
+                params_to_sink.push(ParamSinkFlow {
+                    param_index: param_idx,
+                    sink_rule_id: rule_id.to_string(),
+                    sink_description: findings[0].sink_description.clone(),
+                });
+            }
+        }
+    }
+
+    if params_to_sink.is_empty() && params_to_return.is_empty() {
+        return None;
+    }
+
+    Some(FunctionTaintSummary {
+        name: func_name.to_string(),
+        params_to_return,
+        params_to_sink,
+    })
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────

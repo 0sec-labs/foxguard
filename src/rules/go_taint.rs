@@ -36,16 +36,17 @@
 
 use super::common::AliasTable;
 use super::taint_engine::{
-    attribution_hint_for_sink, build_batched_taint_groups, cross_file_taint_finding,
-    match_call_sink, node_text, push_attributed_findings, taint_finding_for_node, TaintState,
+    analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
+    cross_file_taint_finding, extract_cross_file_summary_for_function, match_call_sink, node_text,
+    push_attributed_findings, summarize_function_return_generic, taint_finding_for_node,
+    AnalysisContext, TaintLanguageAdapter, TaintState,
 };
 pub use super::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
     TaintSpec,
 };
-use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary};
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tree_sitter::{Node, Tree};
 
@@ -75,20 +76,8 @@ pub struct CrossFileInfo<'a> {
     pub rule_filter: RuleFilter<'a>,
 }
 
-/// Bundles the read-only context that every internal walker needs,
-/// replacing the repeated `(source, spec, aliases, summaries)` tuple.
-struct AnalysisContext<'a> {
-    source: &'a str,
-    spec: &'a TaintSpec,
-    aliases: Option<&'a AliasTable>,
-    summaries: &'a ReturnSummary,
-    /// Cross-file info for resolving same-package function calls.
-    cross_file: Option<&'a CrossFileInfo<'a>>,
-    /// When the batched analyzer merges sinks from multiple rules into a
-    /// single `TaintSpec`, this map attributes each matched sink back to
-    /// its owning rule id. `None` in single-rule mode.
-    sink_to_rules: Option<&'a HashMap<String, Vec<String>>>,
-}
+/// Type alias for the Go-specific analysis context.
+type GoCtx<'a> = AnalysisContext<'a, CrossFileInfo<'a>>;
 
 /// Run the taint engine over every function/method body inside `root`
 /// and return one `TaintFinding` per source→sink flow.
@@ -384,139 +373,19 @@ pub fn extract_cross_file_summaries(
             return;
         };
         let func_name = node_text(name_node, source).to_string();
-
         let param_names = collect_param_names(func_node, source);
-        if param_names.is_empty() {
-            return;
-        }
 
-        let mut params_to_sink: Vec<ParamSinkFlow> = Vec::new();
-        let mut params_to_return: Vec<usize> = Vec::new();
-
-        // Partition rules: those without sanitizers can be batched into a
-        // single analyze_function call per parameter; rules with sanitizers
-        // must run individually to avoid incorrect taint clearing.
-        let mut batched_sinks: Vec<NodeMatcher> = Vec::new();
-        let mut sink_desc_to_rule: HashMap<&str, &str> = HashMap::new();
-        let mut sanitizer_rules: Vec<(&str, &TaintSpec)> = Vec::new();
-        for (rule_id, rule_spec) in rule_specs {
-            if rule_spec.sanitizers.is_empty() {
-                for sink in &rule_spec.sinks {
-                    sink_desc_to_rule.insert(sink.description(), rule_id);
-                    batched_sinks.push(sink.clone());
-                }
-            } else {
-                sanitizer_rules.push((rule_id, rule_spec));
-            }
-        }
-
-        let empty_summary = ReturnSummary::new();
-
-        // Pre-build reusable specs outside the per-param loop. Only the
-        // `sources` field changes per parameter; sinks and sanitizers are
-        // constant. This avoids cloning the entire sink/sanitizer vecs on
-        // every iteration.
-        let placeholder_source = NodeMatcher::ParamName {
-            names: vec![],
-            description: String::new(),
-        };
-        let mut return_spec = TaintSpec {
-            sources: vec![placeholder_source.clone()],
-            sinks: vec![],
-            sanitizers: vec![],
-        };
-        let mut batched_spec = TaintSpec {
-            sources: vec![placeholder_source.clone()],
-            sinks: batched_sinks,
-            sanitizers: vec![],
-        };
-        let mut sanitizer_specs: Vec<TaintSpec> = sanitizer_rules
-            .iter()
-            .map(|(_, rule_spec)| TaintSpec {
-                sources: vec![placeholder_source.clone()],
-                sinks: rule_spec.sinks.clone(),
-                sanitizers: rule_spec.sanitizers.clone(),
-            })
-            .collect();
-
-        for (param_idx, param_name) in param_names.iter().enumerate() {
-            let synthetic_source = NodeMatcher::ParamName {
-                names: vec![param_name.clone()],
-                description: format!("parameter '{}'", param_name),
-            };
-
-            // Check return-taint: does this parameter flow to a return value?
-            return_spec.sources[0] = synthetic_source.clone();
-            let return_ctx = AnalysisContext {
+        if let Some(summary) =
+            extract_cross_file_summary_for_function::<GoTaintAdapter, CrossFileInfo<'_>>(
+                func_node,
+                &func_name,
+                &param_names,
                 source,
-                spec: &return_spec,
                 aliases,
-                summaries: &empty_summary,
-                cross_file: None,
-                sink_to_rules: None,
-            };
-            let (_, ret_taint) = summarize_function(func_node, &return_ctx);
-            if ret_taint.is_some() && !params_to_return.contains(&param_idx) {
-                params_to_return.push(param_idx);
-            }
-
-            let mut seen: HashSet<(usize, &str)> = HashSet::new();
-
-            // Batched pass: one call for all no-sanitizer rules.
-            if !batched_spec.sinks.is_empty() {
-                batched_spec.sources[0] = synthetic_source.clone();
-                let batched_ctx = AnalysisContext {
-                    source,
-                    spec: &batched_spec,
-                    aliases,
-                    summaries: &empty_summary,
-                    cross_file: None,
-                    sink_to_rules: None,
-                };
-                let mut findings = Vec::new();
-                analyze_function(func_node, &batched_ctx, &mut findings);
-                for f in &findings {
-                    if let Some(&rule_id) = sink_desc_to_rule.get(f.sink_description.as_str()) {
-                        if seen.insert((param_idx, rule_id)) {
-                            params_to_sink.push(ParamSinkFlow {
-                                param_index: param_idx,
-                                sink_rule_id: rule_id.to_string(),
-                                sink_description: f.sink_description.clone(),
-                            });
-                        }
-                    }
-                }
-            }
-
-            // Individual pass: rules with sanitizers run separately.
-            for (idx, (rule_id, _)) in sanitizer_rules.iter().enumerate() {
-                sanitizer_specs[idx].sources[0] = synthetic_source.clone();
-                let sink_ctx = AnalysisContext {
-                    source,
-                    spec: &sanitizer_specs[idx],
-                    aliases,
-                    summaries: &empty_summary,
-                    cross_file: None,
-                    sink_to_rules: None,
-                };
-                let mut findings = Vec::new();
-                analyze_function(func_node, &sink_ctx, &mut findings);
-                if !findings.is_empty() && seen.insert((param_idx, rule_id)) {
-                    params_to_sink.push(ParamSinkFlow {
-                        param_index: param_idx,
-                        sink_rule_id: rule_id.to_string(),
-                        sink_description: findings[0].sink_description.clone(),
-                    });
-                }
-            }
-        }
-
-        if !params_to_sink.is_empty() || !params_to_return.is_empty() {
-            summaries.push(FunctionTaintSummary {
-                name: func_name,
-                params_to_return,
-                params_to_sink,
-            });
+                rule_specs,
+            )
+        {
+            summaries.push(summary);
         }
     });
 
@@ -550,107 +419,50 @@ where
     }
 }
 
-/// Extract a function / method simple name. For `method_declaration`
-/// the name is a `field_identifier`; for `function_declaration` it's
-/// an `identifier`.
-fn function_simple_name<'a>(func_node: Node<'_>, source: &'a str) -> Option<&'a str> {
-    func_node
-        .child_by_field_name("name")
-        .map(|n| node_text(n, source))
-}
+/// Zero-sized marker type for the Go taint language adapter.
+pub(super) struct GoTaintAdapter;
 
-/// Pass-1 walker: compute a function/method's return-taint summary.
-fn summarize_function(
-    func_node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
-) -> (Option<String>, Option<String>) {
-    let name = function_simple_name(func_node, ctx.source).map(|s| s.to_string());
-
-    let mut state = TaintState::default();
-    if let Some(params) = func_node.child_by_field_name("parameters") {
-        seed_param_sources(params, ctx.source, ctx.spec, &mut state);
+impl<'a> TaintLanguageAdapter<CrossFileInfo<'a>> for GoTaintAdapter {
+    fn is_nested_scope(kind: &str) -> bool {
+        kind == "func_literal"
     }
-    let Some(body) = func_node.child_by_field_name("body") else {
-        return (name, None);
-    };
 
-    let mut return_taint: Option<String> = None;
-    let mut scratch: Vec<TaintFinding> = Vec::new();
-    walk_body_for_summary(body, ctx, &mut state, &mut scratch, &mut return_taint);
-    (name, return_taint)
-}
-
-fn summarize_function_return(
-    func_node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
-) -> (Option<String>, ReturnTaintSummary) {
-    let (name, direct_source) = summarize_function(func_node, ctx);
-    let mut summary = ReturnTaintSummary {
-        direct_source,
-        params_to_return: Vec::new(),
-    };
-
-    let empty_summary = ReturnSummary::new();
-    for (param_idx, param_name) in collect_param_names(func_node, ctx.source)
-        .into_iter()
-        .enumerate()
-    {
-        let synthetic_spec = TaintSpec {
-            sources: vec![NodeMatcher::ParamName {
-                names: vec![param_name.clone()],
-                description: format!("parameter '{}'", param_name),
-            }],
-            sinks: vec![],
-            sanitizers: ctx.spec.sanitizers.clone(),
-        };
-        let param_ctx = AnalysisContext {
-            source: ctx.source,
-            spec: &synthetic_spec,
-            aliases: ctx.aliases,
-            summaries: &empty_summary,
-            cross_file: None,
-            sink_to_rules: None,
-        };
-        let (_, ret_taint) = summarize_function(func_node, &param_ctx);
-        if ret_taint.is_some() {
-            summary.params_to_return.push(param_idx);
+    fn dispatch_walk_node(
+        node: Node<'_>,
+        ctx: &GoCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+    ) {
+        match node.kind() {
+            "short_var_declaration" => {
+                handle_short_var_declaration(node, ctx, state);
+            }
+            "var_spec" => {
+                handle_var_spec(node, ctx, state);
+            }
+            "assignment_statement" => {
+                handle_assignment(node, ctx, state, findings);
+            }
+            "call_expression" => {
+                handle_call(node, ctx, state, findings);
+            }
+            _ => {}
         }
     }
 
-    (name, summary)
-}
-
-fn walk_body_for_summary(
-    node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
-    state: &mut TaintState,
-    findings: &mut Vec<TaintFinding>,
-    return_taint: &mut Option<String>,
-) {
-    // Don't descend into nested function literals / closures — their
-    // own returns belong to their own summary. Each closure gets its
-    // own independent analysis via `collect_function_defs`.
-    if node.kind() == "func_literal" {
-        return;
-    }
-
-    match node.kind() {
-        "short_var_declaration" => {
-            handle_short_var_declaration(node, ctx, state);
-        }
-        "var_spec" => {
-            handle_var_spec(node, ctx, state);
-        }
-        "assignment_statement" => {
-            handle_assignment(node, ctx, state, findings);
-        }
-        "call_expression" => {
-            handle_call(node, ctx, state, findings);
-        }
-        "return_statement" if return_taint.is_none() => {
+    fn dispatch_summary_node(
+        node: Node<'_>,
+        ctx: &GoCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+        return_taint: &mut Option<String>,
+    ) {
+        // Dispatch the same handlers as the main walk.
+        Self::dispatch_walk_node(node, ctx, state, findings);
+        // Additionally check return statements (Go wraps in expression_list).
+        if node.kind() == "return_statement" && return_taint.is_none() {
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
-                // return statement children are expression_list(s).
                 if child.kind() == "expression_list" {
                     let mut inner = child.walk();
                     for expr in child.named_children(&mut inner) {
@@ -667,30 +479,44 @@ fn walk_body_for_summary(
                 }
             }
         }
-        _ => {}
     }
 
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_body_for_summary(child, ctx, state, findings, return_taint);
+    fn expression_taint(
+        expr: Node<'_>,
+        ctx: &GoCtx<'_>,
+        state: &TaintState,
+    ) -> Option<(String, usize)> {
+        expression_taint(expr, ctx, state)
+    }
+
+    fn seed_params(func_node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
+        if let Some(params) = func_node.child_by_field_name("parameters") {
+            seed_param_sources(params, ctx.source, ctx.spec, state);
+        }
     }
 }
 
-fn analyze_function(
+/// Extract a function / method simple name. For `method_declaration`
+/// the name is a `field_identifier`; for `function_declaration` it's
+/// an `identifier`.
+fn function_simple_name<'a>(func_node: Node<'_>, source: &'a str) -> Option<&'a str> {
+    func_node
+        .child_by_field_name("name")
+        .map(|n| node_text(n, source))
+}
+
+fn summarize_function_return(
     func_node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
-    findings: &mut Vec<TaintFinding>,
-) {
-    let mut state = TaintState::default();
+    ctx: &GoCtx<'_>,
+) -> (Option<String>, ReturnTaintSummary) {
+    let name = function_simple_name(func_node, ctx.source).map(|s| s.to_string());
+    let summary =
+        summarize_function_return_generic::<GoTaintAdapter, _>(func_node, ctx, collect_param_names);
+    (name, summary)
+}
 
-    if let Some(params) = func_node.child_by_field_name("parameters") {
-        seed_param_sources(params, ctx.source, ctx.spec, &mut state);
-    }
-
-    let Some(body) = func_node.child_by_field_name("body") else {
-        return;
-    };
-    walk_body(body, ctx, &mut state, findings);
+fn analyze_function(func_node: Node<'_>, ctx: &GoCtx<'_>, findings: &mut Vec<TaintFinding>) {
+    analyze_function_generic::<GoTaintAdapter, _>(func_node, ctx, findings);
 }
 
 fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &mut TaintState) {
@@ -724,41 +550,6 @@ fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &
     }
 }
 
-fn walk_body(
-    node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
-    state: &mut TaintState,
-    findings: &mut Vec<TaintFinding>,
-) {
-    // Nested function literal / closure — skip. Each closure gets its
-    // own independent analysis via `collect_function_defs`, so we must
-    // not walk into its body here (that would mix taint states).
-    if node.kind() == "func_literal" {
-        return;
-    }
-
-    match node.kind() {
-        "short_var_declaration" => {
-            handle_short_var_declaration(node, ctx, state);
-        }
-        "var_spec" => {
-            handle_var_spec(node, ctx, state);
-        }
-        "assignment_statement" => {
-            handle_assignment(node, ctx, state, findings);
-        }
-        "call_expression" => {
-            handle_call(node, ctx, state, findings);
-        }
-        _ => {}
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_body(child, ctx, state, findings);
-    }
-}
-
 /// Collect identifiers from an `expression_list` that are plain
 /// identifier targets (e.g. LHS of `a, b := f()`). Non-identifier
 /// targets (selector/index) are skipped because the state only tracks
@@ -785,7 +576,7 @@ fn collect_expression_list<'tree>(list: Node<'tree>) -> Vec<Node<'tree>> {
 }
 
 /// Handle `a := ...`, `a, b := ...`, `a, b := f()`.
-fn handle_short_var_declaration(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintState) {
+fn handle_short_var_declaration(node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
     let (Some(left), Some(right)) = (
         node.child_by_field_name("left"),
         node.child_by_field_name("right"),
@@ -796,7 +587,7 @@ fn handle_short_var_declaration(node: Node<'_>, ctx: &AnalysisContext<'_>, state
 }
 
 /// Handle `var x = ...`, `var x, y = f()`, `var x T = ...`.
-fn handle_var_spec(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintState) {
+fn handle_var_spec(node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
     // var_spec has multiple `name` fields and an optional `value`
     // expression_list.
     let Some(value) = node.child_by_field_name("value") else {
@@ -823,7 +614,7 @@ fn handle_var_spec(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintS
 /// Handle `x = ...`, `x, y = ...`, `x += ...`.
 fn handle_assignment(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &mut TaintState,
     _findings: &mut Vec<TaintFinding>,
 ) {
@@ -839,7 +630,7 @@ fn handle_assignment(
 fn propagate_multi_assign(
     left: Node<'_>,
     right: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &mut TaintState,
 ) {
     // Both sides are `expression_list`s in tree-sitter-go.
@@ -870,7 +661,7 @@ fn propagate_multi_assign(
 fn apply_multi_assign_semantics(
     lhs_names: &[&str],
     rhs_exprs: &[Node<'_>],
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &mut TaintState,
 ) {
     if lhs_names.len() == rhs_exprs.len() {
@@ -921,7 +712,7 @@ fn callee_text<'a>(call: Node<'_>, source: &'a str) -> Option<Cow<'a, str>> {
 
 fn handle_call(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
 ) {
@@ -972,7 +763,7 @@ fn handle_call(
 fn handle_cross_file_call(
     node: Node<'_>,
     _callee_text: &str,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &TaintState,
     findings: &mut Vec<TaintFinding>,
     cross_file: &CrossFileInfo<'_>,
@@ -1037,7 +828,7 @@ fn handle_cross_file_call(
 /// references) a tainted value, otherwise `None`.
 fn expression_taint(
     expr: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &TaintState,
 ) -> Option<(String, usize)> {
     let expr_line = expr.start_position().row + 1;
