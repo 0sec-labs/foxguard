@@ -226,6 +226,7 @@ pub(super) trait TaintLanguageAdapter<CF> {
     );
 
     /// Evaluate whether `expr` is tainted. Returns `(description, line)` or `None`.
+    #[allow(dead_code)]
     fn expression_taint(
         expr: Node<'_>,
         ctx: &AnalysisContext<'_, CF>,
@@ -312,9 +313,7 @@ where
 {
     let mut state = TaintState::default();
     T::seed_params(func_node, ctx, &mut state);
-    let Some(body) = T::get_body(func_node) else {
-        return None;
-    };
+    let body = T::get_body(func_node)?;
     let mut scratch: Vec<TaintFinding> = Vec::new();
     let mut return_taint: Option<String> = None;
     walk_body_for_summary_generic::<T, CF>(body, ctx, &mut state, &mut scratch, &mut return_taint);
