@@ -31,18 +31,19 @@
 //! Semgrep-compatible `mode: taint` YAML) will plug into the same API.
 
 use crate::rules::common::AliasTable;
-use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary};
 use crate::rules::taint_engine::{
     analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
     cross_file_taint_finding, extract_cross_file_summary_for_function, match_call_sink, node_text,
-    push_attributed_findings, taint_finding_for_node, walk_body_for_summary_generic,
-    AnalysisContext, TaintLanguageAdapter, TaintState,
+    push_attributed_findings, summarize_function_return_generic,
+    taint_finding_for_node, AnalysisContext, TaintLanguageAdapter,
+    TaintState,
 };
 pub use crate::rules::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
     TaintSpec,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tree_sitter::Node;
 
@@ -320,71 +321,18 @@ fn call_summary_key(name: &str, args: Node<'_>) -> String {
     function_summary_key(name, args.named_children(&mut cursor).count())
 }
 
-/// Pass-1 walker: compute a function's return-taint summary by scanning
-/// its body with the same state machinery used in pass 2, then inspecting
-/// every `return_statement` that appears inside it (excluding nested
-/// function bodies, which have their own summary).
-fn summarize_function(
-    func_node: Node<'_>,
-    ctx: &PyCtx<'_>,
-) -> (Option<String>, Option<String>) {
-    let name = func_node
-        .child_by_field_name("name")
-        .map(|n| node_text(n, ctx.source).to_string());
-
-    let mut state = TaintState::default();
-    if let Some(params) = func_node.child_by_field_name("parameters") {
-        seed_param_sources(params, ctx.source, ctx.spec, &mut state);
-    }
-    let Some(body) = func_node.child_by_field_name("body") else {
-        return (name, None);
-    };
-
-    let mut return_taint: Option<String> = None;
-    // Reuse the normal walker but throw away sink findings — we only want
-    // to update the taint state and inspect return statements.
-    let mut scratch: Vec<TaintFinding> = Vec::new();
-    walk_body_for_summary_generic::<PyTaintAdapter, _>(body, ctx, &mut state, &mut scratch, &mut return_taint);
-    (name, return_taint)
-}
-
 fn summarize_function_return(
     func_node: Node<'_>,
     ctx: &PyCtx<'_>,
 ) -> (Option<String>, ReturnTaintSummary) {
-    let (name, direct_source) = summarize_function(func_node, ctx);
-    let mut summary = ReturnTaintSummary {
-        direct_source,
-        params_to_return: Vec::new(),
-    };
-
-    let empty_summary = ReturnSummary::new();
-    for (param_idx, param_name) in collect_param_names(func_node, ctx.source)
-        .into_iter()
-        .enumerate()
-    {
-        let synthetic_spec = TaintSpec {
-            sources: vec![NodeMatcher::ParamName {
-                names: vec![param_name.clone()],
-                description: format!("parameter '{}'", param_name),
-            }],
-            sinks: vec![],
-            sanitizers: ctx.spec.sanitizers.clone(),
-        };
-        let param_ctx = AnalysisContext {
-            source: ctx.source,
-            spec: &synthetic_spec,
-            aliases: ctx.aliases,
-            summaries: &empty_summary,
-            cross_file: None,
-            sink_to_rules: None,
-        };
-        let (_, ret_taint) = summarize_function(func_node, &param_ctx);
-        if ret_taint.is_some() {
-            summary.params_to_return.push(param_idx);
-        }
-    }
-
+    let name = func_node
+        .child_by_field_name("name")
+        .map(|n| node_text(n, ctx.source).to_string());
+    let summary = summarize_function_return_generic::<PyTaintAdapter, _>(
+        func_node,
+        ctx,
+        collect_param_names,
+    );
     let name = name
         .map(|name| function_summary_key(&name, collect_param_names(func_node, ctx.source).len()));
     (name, summary)

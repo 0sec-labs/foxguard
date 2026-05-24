@@ -28,17 +28,15 @@ use super::common::AliasTable;
 use super::taint_engine::{
     analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
     cross_file_taint_finding, extract_cross_file_summary_for_function, match_call_sink,
-    match_member_assign_sink, node_text, push_attributed_findings, taint_finding_for_node,
-    walk_body_for_summary_generic, walk_body_generic, AnalysisContext, TaintLanguageAdapter,
-    TaintState,
+    match_member_assign_sink, node_text, push_attributed_findings, taint_finding_for_node, walk_body_for_summary_generic, AnalysisContext, TaintLanguageAdapter, TaintState,
 };
 pub use super::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
     TaintSpec,
 };
-use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary};
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tree_sitter::{Node, Tree};
 

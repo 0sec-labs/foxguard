@@ -303,6 +303,77 @@ pub(super) fn analyze_function_generic<T: TaintLanguageAdapter<CF>, CF>(
     walk_body_generic::<T, CF>(body, ctx, &mut state, findings);
 }
 
+/// Generic pass-1 summarizer: seed params, walk body, detect return taint.
+///
+/// Returns `Option<String>` -- the first tainted return expression's
+/// description, or `None` if the function returns clean.
+pub(super) fn summarize_function_generic<T, CF>(
+    func_node: Node<'_>,
+    ctx: &AnalysisContext<'_, CF>,
+) -> Option<String>
+where
+    T: TaintLanguageAdapter<CF>,
+{
+    let mut state = TaintState::default();
+    T::seed_params(func_node, ctx, &mut state);
+    let Some(body) = T::get_body(func_node) else {
+        return None;
+    };
+    let mut scratch: Vec<TaintFinding> = Vec::new();
+    let mut return_taint: Option<String> = None;
+    walk_body_for_summary_generic::<T, CF>(body, ctx, &mut state, &mut scratch, &mut return_taint);
+    return_taint
+}
+
+/// Generic return-taint summary builder.
+///
+/// Computes:
+/// 1. `direct_source`: does the function body contain a tainted return
+///    independent of caller arguments?
+/// 2. `params_to_return`: which parameter indices flow to a return value?
+pub(super) fn summarize_function_return_generic<T, CF>(
+    func_node: Node<'_>,
+    ctx: &AnalysisContext<'_, CF>,
+    collect_param_names: impl Fn(Node<'_>, &str) -> Vec<String>,
+) -> ReturnTaintSummary
+where
+    T: TaintLanguageAdapter<CF>,
+{
+    let direct_source = summarize_function_generic::<T, CF>(func_node, ctx);
+    let mut summary = ReturnTaintSummary {
+        direct_source,
+        params_to_return: Vec::new(),
+    };
+
+    let empty_summary = ReturnSummary::new();
+    for (param_idx, param_name) in collect_param_names(func_node, ctx.source)
+        .into_iter()
+        .enumerate()
+    {
+        let synthetic_spec = TaintSpec {
+            sources: vec![NodeMatcher::ParamName {
+                names: vec![param_name.clone()],
+                description: format!("parameter '{}'", param_name),
+            }],
+            sinks: vec![],
+            sanitizers: ctx.spec.sanitizers.clone(),
+        };
+        let param_ctx = AnalysisContext {
+            source: ctx.source,
+            spec: &synthetic_spec,
+            aliases: ctx.aliases,
+            summaries: &empty_summary,
+            cross_file: None,
+            sink_to_rules: None,
+        };
+        if summarize_function_generic::<T, CF>(func_node, &param_ctx).is_some() {
+            summary.params_to_return.push(param_idx);
+        }
+    }
+
+    summary
+}
+
 /// Extract cross-file taint summaries for a single function.
 ///
 /// For each parameter, treat it as a synthetic taint source and test
