@@ -27,9 +27,10 @@
 use super::common::AliasTable;
 use super::taint_engine::{
     analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
-    cross_file_taint_finding, match_call_sink, match_member_assign_sink, node_text,
-    push_attributed_findings, taint_finding_for_node, walk_body_for_summary_generic,
-    walk_body_generic, AnalysisContext, TaintLanguageAdapter, TaintState,
+    cross_file_taint_finding, extract_cross_file_summary_for_function, match_call_sink,
+    match_member_assign_sink, node_text, push_attributed_findings, taint_finding_for_node,
+    walk_body_for_summary_generic, walk_body_generic, AnalysisContext, TaintLanguageAdapter,
+    TaintState,
 };
 pub use super::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
@@ -347,137 +348,18 @@ pub fn extract_cross_file_summaries(
 
     collect_exported_functions(root, source, &mut |func_name, func_node| {
         let param_names = collect_param_names(func_node, source);
-        if param_names.is_empty() {
-            return;
-        }
 
-        let mut params_to_sink: Vec<ParamSinkFlow> = Vec::new();
-        let mut params_to_return: Vec<usize> = Vec::new();
-
-        // Partition rules: those without sanitizers can be batched into a
-        // single analyze_function call per parameter; rules with sanitizers
-        // must run individually to avoid incorrect taint clearing.
-        let mut batched_sinks: Vec<NodeMatcher> = Vec::new();
-        let mut sink_desc_to_rule: HashMap<&str, &str> = HashMap::new();
-        let mut sanitizer_rules: Vec<(&str, &TaintSpec)> = Vec::new();
-        for (rule_id, rule_spec) in rule_specs {
-            if rule_spec.sanitizers.is_empty() {
-                for sink in &rule_spec.sinks {
-                    sink_desc_to_rule.insert(sink.description(), rule_id);
-                    batched_sinks.push(sink.clone());
-                }
-            } else {
-                sanitizer_rules.push((rule_id, rule_spec));
-            }
-        }
-
-        let empty_summary = ReturnSummary::new();
-
-        // Pre-build reusable specs outside the per-param loop. Only the
-        // `sources` field changes per parameter; sinks and sanitizers are
-        // constant. This avoids cloning the entire sink/sanitizer vecs on
-        // every iteration.
-        let placeholder_source = NodeMatcher::ParamName {
-            names: vec![],
-            description: String::new(),
-        };
-        let mut return_spec = TaintSpec {
-            sources: vec![placeholder_source.clone()],
-            sinks: vec![],
-            sanitizers: vec![],
-        };
-        let mut batched_spec = TaintSpec {
-            sources: vec![placeholder_source.clone()],
-            sinks: batched_sinks,
-            sanitizers: vec![],
-        };
-        let mut sanitizer_specs: Vec<TaintSpec> = sanitizer_rules
-            .iter()
-            .map(|(_, rule_spec)| TaintSpec {
-                sources: vec![placeholder_source.clone()],
-                sinks: rule_spec.sinks.clone(),
-                sanitizers: rule_spec.sanitizers.clone(),
-            })
-            .collect();
-
-        for (param_idx, param_name) in param_names.iter().enumerate() {
-            let synthetic_source = NodeMatcher::ParamName {
-                names: vec![param_name.clone()],
-                description: format!("parameter '{}'", param_name),
-            };
-
-            // Check return-taint: does this parameter flow to a return value?
-            return_spec.sources[0] = synthetic_source.clone();
-            let return_ctx = AnalysisContext {
+        if let Some(summary) =
+            extract_cross_file_summary_for_function::<JsTaintAdapter, CrossFileInfo<'_>>(
+                func_node,
+                &func_name,
+                &param_names,
                 source,
-                spec: &return_spec,
                 aliases,
-                summaries: &empty_summary,
-                cross_file: None,
-                sink_to_rules: None,
-            };
-            let ret_taint = summarize_function(func_node, &return_ctx);
-            if ret_taint.is_some() && !params_to_return.contains(&param_idx) {
-                params_to_return.push(param_idx);
-            }
-
-            let mut seen: HashSet<(usize, &str)> = HashSet::new();
-
-            // Batched pass: one call for all no-sanitizer rules.
-            if !batched_spec.sinks.is_empty() {
-                batched_spec.sources[0] = synthetic_source.clone();
-                let batched_ctx = AnalysisContext {
-                    source,
-                    spec: &batched_spec,
-                    aliases,
-                    summaries: &empty_summary,
-                    cross_file: None,
-                    sink_to_rules: None,
-                };
-                let mut findings = Vec::new();
-                analyze_function(func_node, &batched_ctx, &mut findings);
-                for f in &findings {
-                    if let Some(&rule_id) = sink_desc_to_rule.get(f.sink_description.as_str()) {
-                        if seen.insert((param_idx, rule_id)) {
-                            params_to_sink.push(ParamSinkFlow {
-                                param_index: param_idx,
-                                sink_rule_id: rule_id.to_string(),
-                                sink_description: f.sink_description.clone(),
-                            });
-                        }
-                    }
-                }
-            }
-
-            // Individual pass: rules with sanitizers run separately.
-            for (idx, (rule_id, _)) in sanitizer_rules.iter().enumerate() {
-                sanitizer_specs[idx].sources[0] = synthetic_source.clone();
-                let sink_ctx = AnalysisContext {
-                    source,
-                    spec: &sanitizer_specs[idx],
-                    aliases,
-                    summaries: &empty_summary,
-                    cross_file: None,
-                    sink_to_rules: None,
-                };
-                let mut findings = Vec::new();
-                analyze_function(func_node, &sink_ctx, &mut findings);
-                if !findings.is_empty() && seen.insert((param_idx, rule_id)) {
-                    params_to_sink.push(ParamSinkFlow {
-                        param_index: param_idx,
-                        sink_rule_id: rule_id.to_string(),
-                        sink_description: findings[0].sink_description.clone(),
-                    });
-                }
-            }
-        }
-
-        if !params_to_sink.is_empty() || !params_to_return.is_empty() {
-            summaries.push(FunctionTaintSummary {
-                name: func_name,
-                params_to_return,
-                params_to_sink,
-            });
+                rule_specs,
+            )
+        {
+            summaries.push(summary);
         }
     });
 
