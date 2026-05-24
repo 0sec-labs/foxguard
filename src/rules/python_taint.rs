@@ -34,7 +34,8 @@ use crate::rules::common::AliasTable;
 use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
 use crate::rules::taint_engine::{
     attribution_hint_for_sink, build_batched_taint_groups, cross_file_taint_finding,
-    match_call_sink, node_text, push_attributed_findings, taint_finding_for_node, TaintState,
+    match_call_sink, node_text, push_attributed_findings, taint_finding_for_node,
+    AnalysisContext, TaintState,
 };
 pub use crate::rules::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
@@ -68,20 +69,8 @@ pub struct CrossFileInfo<'a> {
 
 // ─── Public API ────────────────────────────────────────────────────────��──
 
-/// Bundles the read-only context that every internal walker needs,
-/// replacing the repeated `(source, spec, aliases, summaries)` tuple.
-struct AnalysisContext<'a> {
-    source: &'a str,
-    spec: &'a TaintSpec,
-    aliases: Option<&'a AliasTable>,
-    summaries: &'a ReturnSummary,
-    /// Cross-file info for resolving imported function calls.
-    cross_file: Option<&'a CrossFileInfo<'a>>,
-    /// When the batched analyzer merges sinks from multiple rules into a
-    /// single `TaintSpec`, this map attributes each matched sink back to
-    /// its owning rule id. `None` in single-rule mode.
-    sink_to_rules: Option<&'a HashMap<String, Vec<String>>>,
-}
+/// Type alias for the Python-specific analysis context.
+type PyCtx<'a> = AnalysisContext<'a, CrossFileInfo<'a>>;
 
 /// Run the taint engine over every function definition inside `root` and
 /// return one [`TaintFinding`] per source→sink flow discovered.
@@ -457,7 +446,7 @@ fn call_summary_key(name: &str, args: Node<'_>) -> String {
 /// function bodies, which have their own summary).
 fn summarize_function(
     func_node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &PyCtx<'_>,
 ) -> (Option<String>, Option<String>) {
     let name = func_node
         .child_by_field_name("name")
@@ -481,7 +470,7 @@ fn summarize_function(
 
 fn summarize_function_return(
     func_node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &PyCtx<'_>,
 ) -> (Option<String>, ReturnTaintSummary) {
     let (name, direct_source) = summarize_function(func_node, ctx);
     let mut summary = ReturnTaintSummary {
@@ -523,7 +512,7 @@ fn summarize_function_return(
 
 fn walk_body_for_summary(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &PyCtx<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
     return_taint: &mut Option<String>,
@@ -578,7 +567,7 @@ where
 /// Taint metadata carried alongside a tainted variable: the human-readable
 fn analyze_function(
     func_node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &PyCtx<'_>,
     findings: &mut Vec<TaintFinding>,
 ) {
     let mut state = TaintState::default();
@@ -633,7 +622,7 @@ fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &
 
 fn walk_body(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &PyCtx<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
 ) {
@@ -684,7 +673,7 @@ fn walk_body(
     }
 }
 
-fn handle_assignment(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintState) {
+fn handle_assignment(node: Node<'_>, ctx: &PyCtx<'_>, state: &mut TaintState) {
     let (Some(left), Some(right)) = (
         node.child_by_field_name("left"),
         node.child_by_field_name("right"),
@@ -756,7 +745,7 @@ fn handle_assignment(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut Tain
 ///         as_pattern_target
 ///           identifier          (the alias)
 /// ```
-fn handle_with_statement(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintState) {
+fn handle_with_statement(node: Node<'_>, ctx: &PyCtx<'_>, state: &mut TaintState) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() != "with_clause" {
@@ -782,7 +771,7 @@ fn handle_with_statement(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut 
 /// Process an `as_pattern` node: the first named child is the value
 /// expression and the `as_pattern_target` child contains the alias
 /// identifier. If the value is tainted, taint the alias.
-fn handle_as_pattern(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintState) {
+fn handle_as_pattern(node: Node<'_>, ctx: &PyCtx<'_>, state: &mut TaintState) {
     let mut cursor = node.walk();
     let named: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
     // First named child = value expression, look for as_pattern_target among rest.
@@ -864,7 +853,7 @@ fn tuple_like_elements<'tree>(node: Node<'tree>) -> Option<Vec<Node<'tree>>> {
 
 fn handle_call(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &PyCtx<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
 ) {
@@ -920,7 +909,7 @@ fn handle_cross_file_call(
     node: Node<'_>,
     func: Node<'_>,
     callee_text: &str,
-    ctx: &AnalysisContext<'_>,
+    ctx: &PyCtx<'_>,
     state: &TaintState,
     findings: &mut Vec<TaintFinding>,
     cross_file: &CrossFileInfo<'_>,
@@ -1019,7 +1008,7 @@ fn resolve_cross_file_callee(
 /// references) a tainted value, otherwise `None`.
 fn expression_taint(
     expr: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &PyCtx<'_>,
     state: &TaintState,
 ) -> Option<(String, usize)> {
     let expr_line = expr.start_position().row + 1;

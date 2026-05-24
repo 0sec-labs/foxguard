@@ -37,7 +37,8 @@
 use super::common::AliasTable;
 use super::taint_engine::{
     attribution_hint_for_sink, build_batched_taint_groups, cross_file_taint_finding,
-    match_call_sink, node_text, push_attributed_findings, taint_finding_for_node, TaintState,
+    match_call_sink, node_text, push_attributed_findings, taint_finding_for_node,
+    AnalysisContext, TaintState,
 };
 pub use super::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
@@ -75,20 +76,8 @@ pub struct CrossFileInfo<'a> {
     pub rule_filter: RuleFilter<'a>,
 }
 
-/// Bundles the read-only context that every internal walker needs,
-/// replacing the repeated `(source, spec, aliases, summaries)` tuple.
-struct AnalysisContext<'a> {
-    source: &'a str,
-    spec: &'a TaintSpec,
-    aliases: Option<&'a AliasTable>,
-    summaries: &'a ReturnSummary,
-    /// Cross-file info for resolving same-package function calls.
-    cross_file: Option<&'a CrossFileInfo<'a>>,
-    /// When the batched analyzer merges sinks from multiple rules into a
-    /// single `TaintSpec`, this map attributes each matched sink back to
-    /// its owning rule id. `None` in single-rule mode.
-    sink_to_rules: Option<&'a HashMap<String, Vec<String>>>,
-}
+/// Type alias for the Go-specific analysis context.
+type GoCtx<'a> = AnalysisContext<'a, CrossFileInfo<'a>>;
 
 /// Run the taint engine over every function/method body inside `root`
 /// and return one `TaintFinding` per source→sink flow.
@@ -562,7 +551,7 @@ fn function_simple_name<'a>(func_node: Node<'_>, source: &'a str) -> Option<&'a 
 /// Pass-1 walker: compute a function/method's return-taint summary.
 fn summarize_function(
     func_node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
 ) -> (Option<String>, Option<String>) {
     let name = function_simple_name(func_node, ctx.source).map(|s| s.to_string());
 
@@ -582,7 +571,7 @@ fn summarize_function(
 
 fn summarize_function_return(
     func_node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
 ) -> (Option<String>, ReturnTaintSummary) {
     let (name, direct_source) = summarize_function(func_node, ctx);
     let mut summary = ReturnTaintSummary {
@@ -622,7 +611,7 @@ fn summarize_function_return(
 
 fn walk_body_for_summary(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
     return_taint: &mut Option<String>,
@@ -678,7 +667,7 @@ fn walk_body_for_summary(
 
 fn analyze_function(
     func_node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     findings: &mut Vec<TaintFinding>,
 ) {
     let mut state = TaintState::default();
@@ -726,7 +715,7 @@ fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &
 
 fn walk_body(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
 ) {
@@ -785,7 +774,7 @@ fn collect_expression_list<'tree>(list: Node<'tree>) -> Vec<Node<'tree>> {
 }
 
 /// Handle `a := ...`, `a, b := ...`, `a, b := f()`.
-fn handle_short_var_declaration(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintState) {
+fn handle_short_var_declaration(node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
     let (Some(left), Some(right)) = (
         node.child_by_field_name("left"),
         node.child_by_field_name("right"),
@@ -796,7 +785,7 @@ fn handle_short_var_declaration(node: Node<'_>, ctx: &AnalysisContext<'_>, state
 }
 
 /// Handle `var x = ...`, `var x, y = f()`, `var x T = ...`.
-fn handle_var_spec(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintState) {
+fn handle_var_spec(node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
     // var_spec has multiple `name` fields and an optional `value`
     // expression_list.
     let Some(value) = node.child_by_field_name("value") else {
@@ -823,7 +812,7 @@ fn handle_var_spec(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintS
 /// Handle `x = ...`, `x, y = ...`, `x += ...`.
 fn handle_assignment(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &mut TaintState,
     _findings: &mut Vec<TaintFinding>,
 ) {
@@ -839,7 +828,7 @@ fn handle_assignment(
 fn propagate_multi_assign(
     left: Node<'_>,
     right: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &mut TaintState,
 ) {
     // Both sides are `expression_list`s in tree-sitter-go.
@@ -870,7 +859,7 @@ fn propagate_multi_assign(
 fn apply_multi_assign_semantics(
     lhs_names: &[&str],
     rhs_exprs: &[Node<'_>],
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &mut TaintState,
 ) {
     if lhs_names.len() == rhs_exprs.len() {
@@ -921,7 +910,7 @@ fn callee_text<'a>(call: Node<'_>, source: &'a str) -> Option<Cow<'a, str>> {
 
 fn handle_call(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
 ) {
@@ -972,7 +961,7 @@ fn handle_call(
 fn handle_cross_file_call(
     node: Node<'_>,
     _callee_text: &str,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &TaintState,
     findings: &mut Vec<TaintFinding>,
     cross_file: &CrossFileInfo<'_>,
@@ -1037,7 +1026,7 @@ fn handle_cross_file_call(
 /// references) a tainted value, otherwise `None`.
 fn expression_taint(
     expr: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &GoCtx<'_>,
     state: &TaintState,
 ) -> Option<(String, usize)> {
     let expr_line = expr.start_position().row + 1;

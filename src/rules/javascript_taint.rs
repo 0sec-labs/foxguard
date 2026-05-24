@@ -28,7 +28,7 @@ use super::common::AliasTable;
 use super::taint_engine::{
     attribution_hint_for_sink, build_batched_taint_groups, cross_file_taint_finding,
     match_call_sink, match_member_assign_sink, node_text, push_attributed_findings,
-    taint_finding_for_node, TaintState,
+    taint_finding_for_node, AnalysisContext, TaintState,
 };
 pub use super::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
@@ -64,20 +64,8 @@ pub struct CrossFileInfo<'a> {
     pub rule_filter: RuleFilter<'a>,
 }
 
-/// Bundles the read-only context that every internal walker needs,
-/// replacing the repeated `(source, spec, aliases, summaries)` tuple.
-struct AnalysisContext<'a> {
-    source: &'a str,
-    spec: &'a TaintSpec,
-    aliases: Option<&'a AliasTable>,
-    summaries: &'a ReturnSummary,
-    /// Cross-file info for resolving imported function calls.
-    cross_file: Option<&'a CrossFileInfo<'a>>,
-    /// When the batched analyzer merges sinks from multiple rules into a
-    /// single `TaintSpec`, this map attributes each matched sink back to
-    /// its owning rule id. `None` in single-rule mode.
-    sink_to_rules: Option<&'a HashMap<String, Vec<String>>>,
-}
+/// Type alias for the JS-specific analysis context.
+type JsCtx<'a> = AnalysisContext<'a, CrossFileInfo<'a>>;
 
 /// Run the taint engine over every function/method body inside `root` and
 /// return one `TaintFinding` per source→sink flow.
@@ -268,7 +256,7 @@ where
 /// Pass-1 walker: compute the return-taint summary for a single function
 /// scope. Walks the body with the normal state machinery but throws away
 /// sink findings and records the first tainted return expression it sees.
-fn summarize_function(func_node: Node<'_>, ctx: &AnalysisContext<'_>) -> Option<String> {
+fn summarize_function(func_node: Node<'_>, ctx: &JsCtx<'_>) -> Option<String> {
     let mut state = TaintState::default();
     if let Some(params) = func_node.child_by_field_name("parameters") {
         seed_param_sources(params, ctx.source, ctx.spec, &mut state);
@@ -303,7 +291,7 @@ fn summarize_function(func_node: Node<'_>, ctx: &AnalysisContext<'_>) -> Option<
     return_taint
 }
 
-fn summarize_function_return(func_node: Node<'_>, ctx: &AnalysisContext<'_>) -> ReturnTaintSummary {
+fn summarize_function_return(func_node: Node<'_>, ctx: &JsCtx<'_>) -> ReturnTaintSummary {
     let direct_source = summarize_function(func_node, ctx);
     let mut summary = ReturnTaintSummary {
         direct_source,
@@ -341,7 +329,7 @@ fn summarize_function_return(func_node: Node<'_>, ctx: &AnalysisContext<'_>) -> 
 
 fn walk_body_for_summary(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &JsCtx<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
     return_taint: &mut Option<String>,
@@ -1243,7 +1231,7 @@ where
 
 fn analyze_function(
     func_node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &JsCtx<'_>,
     findings: &mut Vec<TaintFinding>,
 ) {
     let mut state = TaintState::default();
@@ -1324,7 +1312,7 @@ fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &
 
 fn walk_body(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &JsCtx<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
 ) {
@@ -1347,7 +1335,7 @@ fn walk_body(
     }
 }
 
-fn handle_variable_declarator(node: Node<'_>, ctx: &AnalysisContext<'_>, state: &mut TaintState) {
+fn handle_variable_declarator(node: Node<'_>, ctx: &JsCtx<'_>, state: &mut TaintState) {
     let Some(name) = node.child_by_field_name("name") else {
         return;
     };
@@ -1420,7 +1408,7 @@ fn collect_destructuring_targets(node: Node<'_>, source: &str) -> Vec<String> {
 
 fn handle_assignment(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &JsCtx<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
 ) {
@@ -1480,7 +1468,7 @@ fn handle_assignment(
 
 fn handle_call(
     node: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &JsCtx<'_>,
     state: &mut TaintState,
     findings: &mut Vec<TaintFinding>,
 ) {
@@ -1534,7 +1522,7 @@ fn handle_cross_file_call(
     node: Node<'_>,
     func: Node<'_>,
     callee_text: &str,
-    ctx: &AnalysisContext<'_>,
+    ctx: &JsCtx<'_>,
     state: &TaintState,
     findings: &mut Vec<TaintFinding>,
     cross_file: &CrossFileInfo<'_>,
@@ -1649,7 +1637,7 @@ fn resolve_cross_file_callee(
 
 fn expression_taint(
     expr: Node<'_>,
-    ctx: &AnalysisContext<'_>,
+    ctx: &JsCtx<'_>,
     state: &TaintState,
 ) -> Option<(String, usize)> {
     let expr_line = expr.start_position().row + 1;

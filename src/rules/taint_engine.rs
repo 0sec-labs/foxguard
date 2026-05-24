@@ -169,6 +169,26 @@ impl TaintState {
     }
 }
 
+/// Bundles the read-only context that every internal walker needs,
+/// replacing the repeated `(source, spec, aliases, summaries)` tuple.
+///
+/// Generic over `CF`, the language-specific cross-file info type:
+/// - JS/TS: `javascript_taint::CrossFileInfo`
+/// - Python: `python_taint::CrossFileInfo`
+/// - Go:    `go_taint::CrossFileInfo`
+pub(super) struct AnalysisContext<'a, CF> {
+    pub source: &'a str,
+    pub spec: &'a TaintSpec,
+    pub aliases: Option<&'a super::common::AliasTable>,
+    pub summaries: &'a ReturnSummary,
+    /// Cross-file info for resolving imported / same-package function calls.
+    pub cross_file: Option<&'a CF>,
+    /// When the batched analyzer merges sinks from multiple rules into a
+    /// single `TaintSpec`, this map attributes each matched sink back to
+    /// its owning rule id. `None` in single-rule mode.
+    pub sink_to_rules: Option<&'a HashMap<String, Vec<String>>>,
+}
+
 // ─── Utilities ───────────────────────────────────────────────────────────
 
 pub(super) fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
