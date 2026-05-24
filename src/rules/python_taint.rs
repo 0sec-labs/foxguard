@@ -35,9 +35,8 @@ use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary};
 use crate::rules::taint_engine::{
     analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
     cross_file_taint_finding, extract_cross_file_summary_for_function, match_call_sink, node_text,
-    push_attributed_findings, summarize_function_return_generic,
-    taint_finding_for_node, AnalysisContext, TaintLanguageAdapter,
-    TaintState,
+    push_attributed_findings, summarize_function_return_generic, taint_finding_for_node,
+    AnalysisContext, TaintLanguageAdapter, TaintState,
 };
 pub use crate::rules::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
@@ -328,11 +327,8 @@ fn summarize_function_return(
     let name = func_node
         .child_by_field_name("name")
         .map(|n| node_text(n, ctx.source).to_string());
-    let summary = summarize_function_return_generic::<PyTaintAdapter, _>(
-        func_node,
-        ctx,
-        collect_param_names,
-    );
+    let summary =
+        summarize_function_return_generic::<PyTaintAdapter, _>(func_node, ctx, collect_param_names);
     let name = name
         .map(|name| function_summary_key(&name, collect_param_names(func_node, ctx.source).len()));
     (name, summary)
@@ -410,11 +406,7 @@ impl<'a> TaintLanguageAdapter<CrossFileInfo<'a>> for PyTaintAdapter {
         expression_taint(expr, ctx, state)
     }
 
-    fn seed_params(
-        func_node: Node<'_>,
-        ctx: &PyCtx<'_>,
-        state: &mut TaintState,
-    ) {
+    fn seed_params(func_node: Node<'_>, ctx: &PyCtx<'_>, state: &mut TaintState) {
         if let Some(params) = func_node.child_by_field_name("parameters") {
             seed_param_sources(params, ctx.source, ctx.spec, state);
         }
@@ -434,11 +426,7 @@ where
     }
 }
 
-fn analyze_function(
-    func_node: Node<'_>,
-    ctx: &PyCtx<'_>,
-    findings: &mut Vec<TaintFinding>,
-) {
+fn analyze_function(func_node: Node<'_>, ctx: &PyCtx<'_>, findings: &mut Vec<TaintFinding>) {
     analyze_function_generic::<PyTaintAdapter, _>(func_node, ctx, findings);
 }
 

@@ -233,11 +233,7 @@ pub(super) trait TaintLanguageAdapter<CF> {
     ) -> Option<(String, usize)>;
 
     /// Seed taint state from function parameters that match source matchers.
-    fn seed_params(
-        func_node: Node<'_>,
-        ctx: &AnalysisContext<'_, CF>,
-        state: &mut TaintState,
-    );
+    fn seed_params(func_node: Node<'_>, ctx: &AnalysisContext<'_, CF>, state: &mut TaintState);
 
     /// Get the function body node. Returns `None` if the function has no body.
     fn get_body(func_node: Node<'_>) -> Option<Node<'_>> {

@@ -28,7 +28,8 @@ use super::common::AliasTable;
 use super::taint_engine::{
     analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
     cross_file_taint_finding, extract_cross_file_summary_for_function, match_call_sink,
-    match_member_assign_sink, node_text, push_attributed_findings, taint_finding_for_node, walk_body_for_summary_generic, AnalysisContext, TaintLanguageAdapter, TaintState,
+    match_member_assign_sink, node_text, push_attributed_findings, taint_finding_for_node,
+    walk_body_for_summary_generic, AnalysisContext, TaintLanguageAdapter, TaintState,
 };
 pub use super::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
@@ -287,7 +288,13 @@ fn summarize_function(func_node: Node<'_>, ctx: &JsCtx<'_>) -> Option<String> {
 
     let mut scratch: Vec<TaintFinding> = Vec::new();
     let mut return_taint: Option<String> = None;
-    walk_body_for_summary_generic::<JsTaintAdapter, _>(body, ctx, &mut state, &mut scratch, &mut return_taint);
+    walk_body_for_summary_generic::<JsTaintAdapter, _>(
+        body,
+        ctx,
+        &mut state,
+        &mut scratch,
+        &mut return_taint,
+    );
     return_taint
 }
 
@@ -1105,11 +1112,7 @@ impl<'a> TaintLanguageAdapter<CrossFileInfo<'a>> for JsTaintAdapter {
         expression_taint(expr, ctx, state)
     }
 
-    fn seed_params(
-        func_node: Node<'_>,
-        ctx: &JsCtx<'_>,
-        state: &mut TaintState,
-    ) {
+    fn seed_params(func_node: Node<'_>, ctx: &JsCtx<'_>, state: &mut TaintState) {
         if let Some(params) = func_node.child_by_field_name("parameters") {
             seed_param_sources(params, ctx.source, ctx.spec, state);
         }
@@ -1157,11 +1160,7 @@ where
     }
 }
 
-fn analyze_function(
-    func_node: Node<'_>,
-    ctx: &JsCtx<'_>,
-    findings: &mut Vec<TaintFinding>,
-) {
+fn analyze_function(func_node: Node<'_>, ctx: &JsCtx<'_>, findings: &mut Vec<TaintFinding>) {
     analyze_function_generic::<JsTaintAdapter, _>(func_node, ctx, findings);
 }
 

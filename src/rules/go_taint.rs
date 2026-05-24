@@ -38,7 +38,8 @@ use super::common::AliasTable;
 use super::taint_engine::{
     analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
     cross_file_taint_finding, extract_cross_file_summary_for_function, match_call_sink, node_text,
-    push_attributed_findings, summarize_function_return_generic, taint_finding_for_node, AnalysisContext, TaintLanguageAdapter, TaintState,
+    push_attributed_findings, summarize_function_return_generic, taint_finding_for_node,
+    AnalysisContext, TaintLanguageAdapter, TaintState,
 };
 pub use super::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
@@ -488,11 +489,7 @@ impl<'a> TaintLanguageAdapter<CrossFileInfo<'a>> for GoTaintAdapter {
         expression_taint(expr, ctx, state)
     }
 
-    fn seed_params(
-        func_node: Node<'_>,
-        ctx: &GoCtx<'_>,
-        state: &mut TaintState,
-    ) {
+    fn seed_params(func_node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
         if let Some(params) = func_node.child_by_field_name("parameters") {
             seed_param_sources(params, ctx.source, ctx.spec, state);
         }
@@ -513,19 +510,12 @@ fn summarize_function_return(
     ctx: &GoCtx<'_>,
 ) -> (Option<String>, ReturnTaintSummary) {
     let name = function_simple_name(func_node, ctx.source).map(|s| s.to_string());
-    let summary = summarize_function_return_generic::<GoTaintAdapter, _>(
-        func_node,
-        ctx,
-        collect_param_names,
-    );
+    let summary =
+        summarize_function_return_generic::<GoTaintAdapter, _>(func_node, ctx, collect_param_names);
     (name, summary)
 }
 
-fn analyze_function(
-    func_node: Node<'_>,
-    ctx: &GoCtx<'_>,
-    findings: &mut Vec<TaintFinding>,
-) {
+fn analyze_function(func_node: Node<'_>, ctx: &GoCtx<'_>, findings: &mut Vec<TaintFinding>) {
     analyze_function_generic::<GoTaintAdapter, _>(func_node, ctx, findings);
 }
 
