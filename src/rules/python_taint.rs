@@ -33,9 +33,10 @@
 use crate::rules::common::AliasTable;
 use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
 use crate::rules::taint_engine::{
-    attribution_hint_for_sink, build_batched_taint_groups, cross_file_taint_finding,
-    match_call_sink, node_text, push_attributed_findings, taint_finding_for_node,
-    AnalysisContext, TaintState,
+    analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
+    cross_file_taint_finding, match_call_sink, node_text, push_attributed_findings,
+    taint_finding_for_node, walk_body_for_summary_generic, AnalysisContext,
+    TaintLanguageAdapter, TaintState,
 };
 pub use crate::rules::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
@@ -464,7 +465,7 @@ fn summarize_function(
     // Reuse the normal walker but throw away sink findings — we only want
     // to update the taint state and inspect return statements.
     let mut scratch: Vec<TaintFinding> = Vec::new();
-    walk_body_for_summary(body, ctx, &mut state, &mut scratch, &mut return_taint);
+    walk_body_for_summary_generic::<PyTaintAdapter, _>(body, ctx, &mut state, &mut scratch, &mut return_taint);
     (name, return_taint)
 }
 
@@ -510,46 +511,88 @@ fn summarize_function_return(
     (name, summary)
 }
 
-fn walk_body_for_summary(
-    node: Node<'_>,
-    ctx: &PyCtx<'_>,
-    state: &mut TaintState,
-    findings: &mut Vec<TaintFinding>,
-    return_taint: &mut Option<String>,
-) {
-    // Don't descend into nested function definitions — their own returns
-    // belong to their own summary.
-    if node.kind() == "function_definition" {
-        return;
+// ─── Internals ────────────────────────────────────────────────────────────
+
+/// Zero-sized marker type for the Python taint language adapter.
+pub(super) struct PyTaintAdapter;
+
+impl<'a> TaintLanguageAdapter<CrossFileInfo<'a>> for PyTaintAdapter {
+    fn is_nested_scope(kind: &str) -> bool {
+        kind == "function_definition"
     }
 
-    if node.kind() == "assignment" {
-        handle_assignment(node, ctx, state);
+    fn dispatch_walk_node(
+        node: Node<'_>,
+        ctx: &PyCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+    ) {
+        if node.kind() == "assignment" {
+            handle_assignment(node, ctx, state);
+        }
+        // Walrus operator: `name := value` (named_expression).
+        if node.kind() == "named_expression" {
+            if let (Some(name), Some(value)) = (
+                node.child_by_field_name("name"),
+                node.child_by_field_name("value"),
+            ) {
+                if name.kind() == "identifier" {
+                    let lhs = node_text(name, ctx.source).to_string();
+                    if let Some((desc, src_line)) = expression_taint(value, ctx, state) {
+                        state.taint(lhs, desc, src_line);
+                    } else {
+                        state.clear(&lhs);
+                    }
+                }
+            }
+        }
+        if node.kind() == "call" {
+            handle_call(node, ctx, state, findings);
+        }
+        if node.kind() == "with_statement" {
+            handle_with_statement(node, ctx, state);
+        }
     }
-    if node.kind() == "call" {
-        handle_call(node, ctx, state, findings);
-    }
-    if node.kind() == "with_statement" {
-        handle_with_statement(node, ctx, state);
-    }
-    if node.kind() == "return_statement" && return_taint.is_none() {
-        // The return's argument is the first named child, if any.
-        let mut cursor = node.walk();
-        for child in node.named_children(&mut cursor) {
-            if let Some((desc, _line)) = expression_taint(child, ctx, state) {
-                *return_taint = Some(desc);
-                break;
+
+    fn dispatch_summary_node(
+        node: Node<'_>,
+        ctx: &PyCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+        return_taint: &mut Option<String>,
+    ) {
+        // Dispatch the same handlers as the main walk.
+        Self::dispatch_walk_node(node, ctx, state, findings);
+        // Additionally check return statements.
+        if node.kind() == "return_statement" && return_taint.is_none() {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                if let Some((desc, _line)) = expression_taint(child, ctx, state) {
+                    *return_taint = Some(desc);
+                    break;
+                }
             }
         }
     }
 
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_body_for_summary(child, ctx, state, findings, return_taint);
+    fn expression_taint(
+        expr: Node<'_>,
+        ctx: &PyCtx<'_>,
+        state: &TaintState,
+    ) -> Option<(String, usize)> {
+        expression_taint(expr, ctx, state)
+    }
+
+    fn seed_params(
+        func_node: Node<'_>,
+        ctx: &PyCtx<'_>,
+        state: &mut TaintState,
+    ) {
+        if let Some(params) = func_node.child_by_field_name("parameters") {
+            seed_param_sources(params, ctx.source, ctx.spec, state);
+        }
     }
 }
-
-// ─── Internals ────────────────────────────────────────────────────────────
 
 fn collect_function_defs<'tree, F>(node: Node<'tree>, visit: &mut F)
 where
@@ -564,25 +607,12 @@ where
     }
 }
 
-/// Taint metadata carried alongside a tainted variable: the human-readable
 fn analyze_function(
     func_node: Node<'_>,
     ctx: &PyCtx<'_>,
     findings: &mut Vec<TaintFinding>,
 ) {
-    let mut state = TaintState::default();
-
-    // Seed the state with any parameters marked as implicit sources.
-    if let Some(params) = func_node.child_by_field_name("parameters") {
-        seed_param_sources(params, ctx.source, ctx.spec, &mut state);
-    }
-
-    // Walk the body in source order, updating taint state at assignments
-    // and reporting flows at sink calls.
-    let Some(body) = func_node.child_by_field_name("body") else {
-        return;
-    };
-    walk_body(body, ctx, &mut state, findings);
+    analyze_function_generic::<PyTaintAdapter, _>(func_node, ctx, findings);
 }
 
 fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &mut TaintState) {
@@ -617,59 +647,6 @@ fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &
                 }
             }
         }
-    }
-}
-
-fn walk_body(
-    node: Node<'_>,
-    ctx: &PyCtx<'_>,
-    state: &mut TaintState,
-    findings: &mut Vec<TaintFinding>,
-) {
-    // Nested function definitions have their own scope. Skip them — they'll
-    // be picked up independently by analyze_tree.
-    if node.kind() == "function_definition" {
-        return;
-    }
-
-    if node.kind() == "assignment" {
-        handle_assignment(node, ctx, state);
-    }
-
-    // Walrus operator: `name := value` (named_expression). The `:=` both
-    // assigns and returns a value, so we need to track the binding.
-    if node.kind() == "named_expression" {
-        if let (Some(name), Some(value)) = (
-            node.child_by_field_name("name"),
-            node.child_by_field_name("value"),
-        ) {
-            if name.kind() == "identifier" {
-                let lhs = node_text(name, ctx.source).to_string();
-                if let Some((desc, src_line)) = expression_taint(value, ctx, state) {
-                    state.taint(lhs, desc, src_line);
-                } else {
-                    state.clear(&lhs);
-                }
-            }
-        }
-    }
-
-    if node.kind() == "call" {
-        handle_call(node, ctx, state, findings);
-    }
-
-    // `with` statement: `with expr as name: ...`
-    // If the context expression is tainted, the `as` target inherits taint.
-    if node.kind() == "with_statement" {
-        handle_with_statement(node, ctx, state);
-    }
-
-    // Tree-sitter's cursor walks in document order, which is exactly the
-    // "process statements in source order, unioning taint across branches"
-    // semantics the POC wants.
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_body(child, ctx, state, findings);
     }
 }
 

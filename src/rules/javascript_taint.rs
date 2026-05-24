@@ -26,9 +26,10 @@
 
 use super::common::AliasTable;
 use super::taint_engine::{
-    attribution_hint_for_sink, build_batched_taint_groups, cross_file_taint_finding,
-    match_call_sink, match_member_assign_sink, node_text, push_attributed_findings,
-    taint_finding_for_node, AnalysisContext, TaintState,
+    analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
+    cross_file_taint_finding, match_call_sink, match_member_assign_sink, node_text,
+    push_attributed_findings, taint_finding_for_node, walk_body_for_summary_generic,
+    walk_body_generic, AnalysisContext, TaintLanguageAdapter, TaintState,
 };
 pub use super::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
@@ -287,7 +288,7 @@ fn summarize_function(func_node: Node<'_>, ctx: &JsCtx<'_>) -> Option<String> {
 
     let mut scratch: Vec<TaintFinding> = Vec::new();
     let mut return_taint: Option<String> = None;
-    walk_body_for_summary(body, ctx, &mut state, &mut scratch, &mut return_taint);
+    walk_body_for_summary_generic::<JsTaintAdapter, _>(body, ctx, &mut state, &mut scratch, &mut return_taint);
     return_taint
 }
 
@@ -325,45 +326,6 @@ fn summarize_function_return(func_node: Node<'_>, ctx: &JsCtx<'_>) -> ReturnTain
     }
 
     summary
-}
-
-fn walk_body_for_summary(
-    node: Node<'_>,
-    ctx: &JsCtx<'_>,
-    state: &mut TaintState,
-    findings: &mut Vec<TaintFinding>,
-    return_taint: &mut Option<String>,
-) {
-    if is_function_scope(node.kind()) {
-        return;
-    }
-
-    match node.kind() {
-        "variable_declarator" => {
-            handle_variable_declarator(node, ctx, state);
-        }
-        "assignment_expression" => {
-            handle_assignment(node, ctx, state, findings);
-        }
-        "call_expression" => {
-            handle_call(node, ctx, state, findings);
-        }
-        "return_statement" if return_taint.is_none() => {
-            let mut cursor = node.walk();
-            for child in node.named_children(&mut cursor) {
-                if let Some((desc, _line)) = expression_taint(child, ctx, state) {
-                    *return_taint = Some(desc);
-                    break;
-                }
-            }
-        }
-        _ => {}
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_body_for_summary(child, ctx, state, findings, return_taint);
-    }
 }
 
 // ─── Cross-file summary extraction ───────────────────────────────────────
@@ -1203,6 +1165,92 @@ fn string_literal_text(node: Node<'_>, source: &str) -> String {
 
 // ─── Internals ────────────────────────────────────────────────────────────
 
+/// Zero-sized marker type for the JS taint language adapter.
+pub(super) struct JsTaintAdapter;
+
+impl<'a> TaintLanguageAdapter<CrossFileInfo<'a>> for JsTaintAdapter {
+    fn is_nested_scope(kind: &str) -> bool {
+        is_function_scope(kind)
+    }
+
+    fn dispatch_walk_node(
+        node: Node<'_>,
+        ctx: &JsCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+    ) {
+        match node.kind() {
+            "variable_declarator" => handle_variable_declarator(node, ctx, state),
+            "assignment_expression" => handle_assignment(node, ctx, state, findings),
+            "call_expression" => handle_call(node, ctx, state, findings),
+            _ => {}
+        }
+    }
+
+    fn dispatch_summary_node(
+        node: Node<'_>,
+        ctx: &JsCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+        return_taint: &mut Option<String>,
+    ) {
+        match node.kind() {
+            "variable_declarator" => {
+                handle_variable_declarator(node, ctx, state);
+            }
+            "assignment_expression" => {
+                handle_assignment(node, ctx, state, findings);
+            }
+            "call_expression" => {
+                handle_call(node, ctx, state, findings);
+            }
+            "return_statement" if return_taint.is_none() => {
+                let mut cursor = node.walk();
+                for child in node.named_children(&mut cursor) {
+                    if let Some((desc, _line)) = expression_taint(child, ctx, state) {
+                        *return_taint = Some(desc);
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn expression_taint(
+        expr: Node<'_>,
+        ctx: &JsCtx<'_>,
+        state: &TaintState,
+    ) -> Option<(String, usize)> {
+        expression_taint(expr, ctx, state)
+    }
+
+    fn seed_params(
+        func_node: Node<'_>,
+        ctx: &JsCtx<'_>,
+        state: &mut TaintState,
+    ) {
+        if let Some(params) = func_node.child_by_field_name("parameters") {
+            seed_param_sources(params, ctx.source, ctx.spec, state);
+        }
+        // Arrow functions with a single bare parameter.
+        if let Some(single) = func_node.child_by_field_name("parameter") {
+            if single.kind() == "identifier" {
+                let name = node_text(single, ctx.source);
+                let line = single.start_position().row + 1;
+                for matcher in &ctx.spec.sources {
+                    if let NodeMatcher::ParamName { names, description } = matcher {
+                        if names.iter().any(|n| n == name) {
+                            state.taint(name.to_string(), description.clone(), line);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Node kinds that introduce a fresh taint scope (a function body).
 fn is_function_scope(kind: &str) -> bool {
     matches!(
@@ -1234,34 +1282,7 @@ fn analyze_function(
     ctx: &JsCtx<'_>,
     findings: &mut Vec<TaintFinding>,
 ) {
-    let mut state = TaintState::default();
-
-    if let Some(params) = func_node.child_by_field_name("parameters") {
-        seed_param_sources(params, ctx.source, ctx.spec, &mut state);
-    }
-    // Arrow functions with a single bare parameter have `parameter` instead
-    // of `parameters` (e.g. `x => x + 1`). tree-sitter-javascript actually
-    // wraps it in `formal_parameters` when there is a paren, but a bare
-    // identifier parameter is an `identifier` child field-named `parameter`.
-    if let Some(single) = func_node.child_by_field_name("parameter") {
-        if single.kind() == "identifier" {
-            let name = node_text(single, ctx.source);
-            let line = single.start_position().row + 1;
-            for matcher in &ctx.spec.sources {
-                if let NodeMatcher::ParamName { names, description } = matcher {
-                    if names.iter().any(|n| n == name) {
-                        state.taint(name.to_string(), description.clone(), line);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    let Some(body) = func_node.child_by_field_name("body") else {
-        return;
-    };
-    walk_body(body, ctx, &mut state, findings);
+    analyze_function_generic::<JsTaintAdapter, _>(func_node, ctx, findings);
 }
 
 fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &mut TaintState) {
@@ -1307,31 +1328,6 @@ fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &
                 }
             }
         }
-    }
-}
-
-fn walk_body(
-    node: Node<'_>,
-    ctx: &JsCtx<'_>,
-    state: &mut TaintState,
-    findings: &mut Vec<TaintFinding>,
-) {
-    // Nested function scopes have their own taint state — skip them; they'll
-    // be picked up independently by analyze_tree.
-    if is_function_scope(node.kind()) {
-        return;
-    }
-
-    match node.kind() {
-        "variable_declarator" => handle_variable_declarator(node, ctx, state),
-        "assignment_expression" => handle_assignment(node, ctx, state, findings),
-        "call_expression" => handle_call(node, ctx, state, findings),
-        _ => {}
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_body(child, ctx, state, findings);
     }
 }
 

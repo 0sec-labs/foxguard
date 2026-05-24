@@ -189,6 +189,119 @@ pub(super) struct AnalysisContext<'a, CF> {
     pub sink_to_rules: Option<&'a HashMap<String, Vec<String>>>,
 }
 
+// ─── Language adapter trait ──────────────────────────────────────────────
+
+/// Trait implemented by each language-specific taint engine.
+///
+/// Generic over `CF`, the language-specific cross-file info type.
+/// The generic walk/analyze functions call into this trait to dispatch to
+/// language-specific AST handling. Each language implements the trait on a
+/// zero-sized marker type (e.g. `JsTaintAdapter`, `PyTaintAdapter`,
+/// `GoTaintAdapter`) parameterized by its `CrossFileInfo`.
+pub(super) trait TaintLanguageAdapter<CF> {
+    /// Returns `true` if `kind` is a nested function scope that should be
+    /// skipped during the walk (each scope is analyzed independently).
+    fn is_nested_scope(kind: &str) -> bool;
+
+    /// Dispatch a single AST node to language-specific handlers during the
+    /// main analysis walk. Implementations should match on `node.kind()`
+    /// and call their assignment/declaration/call handlers as appropriate.
+    fn dispatch_walk_node(
+        node: Node<'_>,
+        ctx: &AnalysisContext<'_, CF>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+    );
+
+    /// Dispatch a single AST node during the summary walk (pass 1).
+    /// Same as `dispatch_walk_node` but also handles `return_statement`
+    /// for return-taint detection.
+    fn dispatch_summary_node(
+        node: Node<'_>,
+        ctx: &AnalysisContext<'_, CF>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+        return_taint: &mut Option<String>,
+    );
+
+    /// Evaluate whether `expr` is tainted. Returns `(description, line)` or `None`.
+    fn expression_taint(
+        expr: Node<'_>,
+        ctx: &AnalysisContext<'_, CF>,
+        state: &TaintState,
+    ) -> Option<(String, usize)>;
+
+    /// Seed taint state from function parameters that match source matchers.
+    fn seed_params(
+        func_node: Node<'_>,
+        ctx: &AnalysisContext<'_, CF>,
+        state: &mut TaintState,
+    );
+
+    /// Get the function body node. Returns `None` if the function has no body.
+    fn get_body(func_node: Node<'_>) -> Option<Node<'_>> {
+        func_node.child_by_field_name("body")
+    }
+}
+
+// ─── Generic walk functions ─────────────────────────────────────────────
+
+/// Generic body walker for the main analysis pass (pass 2).
+///
+/// Skips nested scopes (as determined by `T::is_nested_scope`),
+/// dispatches to language-specific handlers, then recurses into children.
+pub(super) fn walk_body_generic<T: TaintLanguageAdapter<CF>, CF>(
+    node: Node<'_>,
+    ctx: &AnalysisContext<'_, CF>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    if T::is_nested_scope(node.kind()) {
+        return;
+    }
+    T::dispatch_walk_node(node, ctx, state, findings);
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_body_generic::<T, CF>(child, ctx, state, findings);
+    }
+}
+
+/// Generic body walker for the summary pass (pass 1).
+///
+/// Same as `walk_body_generic` but also detects return-taint.
+pub(super) fn walk_body_for_summary_generic<T: TaintLanguageAdapter<CF>, CF>(
+    node: Node<'_>,
+    ctx: &AnalysisContext<'_, CF>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+    return_taint: &mut Option<String>,
+) {
+    if T::is_nested_scope(node.kind()) {
+        return;
+    }
+    T::dispatch_summary_node(node, ctx, state, findings, return_taint);
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_body_for_summary_generic::<T, CF>(child, ctx, state, findings, return_taint);
+    }
+}
+
+/// Generic per-function analysis (pass 2).
+///
+/// Seeds parameter taint, gets the body, and walks it with the main walker.
+pub(super) fn analyze_function_generic<T: TaintLanguageAdapter<CF>, CF>(
+    func_node: Node<'_>,
+    ctx: &AnalysisContext<'_, CF>,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let mut state = TaintState::default();
+    T::seed_params(func_node, ctx, &mut state);
+    let Some(body) = T::get_body(func_node) else {
+        return;
+    };
+    walk_body_generic::<T, CF>(body, ctx, &mut state, findings);
+}
+
 // ─── Utilities ───────────────────────────────────────────────────────────
 
 pub(super) fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {

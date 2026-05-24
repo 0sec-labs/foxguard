@@ -36,9 +36,10 @@
 
 use super::common::AliasTable;
 use super::taint_engine::{
-    attribution_hint_for_sink, build_batched_taint_groups, cross_file_taint_finding,
-    match_call_sink, node_text, push_attributed_findings, taint_finding_for_node,
-    AnalysisContext, TaintState,
+    analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
+    cross_file_taint_finding, match_call_sink, node_text, push_attributed_findings,
+    taint_finding_for_node, walk_body_for_summary_generic, AnalysisContext,
+    TaintLanguageAdapter, TaintState,
 };
 pub use super::taint_engine::{
     BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
@@ -539,6 +540,87 @@ where
     }
 }
 
+/// Zero-sized marker type for the Go taint language adapter.
+pub(super) struct GoTaintAdapter;
+
+impl<'a> TaintLanguageAdapter<CrossFileInfo<'a>> for GoTaintAdapter {
+    fn is_nested_scope(kind: &str) -> bool {
+        kind == "func_literal"
+    }
+
+    fn dispatch_walk_node(
+        node: Node<'_>,
+        ctx: &GoCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+    ) {
+        match node.kind() {
+            "short_var_declaration" => {
+                handle_short_var_declaration(node, ctx, state);
+            }
+            "var_spec" => {
+                handle_var_spec(node, ctx, state);
+            }
+            "assignment_statement" => {
+                handle_assignment(node, ctx, state, findings);
+            }
+            "call_expression" => {
+                handle_call(node, ctx, state, findings);
+            }
+            _ => {}
+        }
+    }
+
+    fn dispatch_summary_node(
+        node: Node<'_>,
+        ctx: &GoCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+        return_taint: &mut Option<String>,
+    ) {
+        // Dispatch the same handlers as the main walk.
+        Self::dispatch_walk_node(node, ctx, state, findings);
+        // Additionally check return statements (Go wraps in expression_list).
+        if node.kind() == "return_statement" && return_taint.is_none() {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                if child.kind() == "expression_list" {
+                    let mut inner = child.walk();
+                    for expr in child.named_children(&mut inner) {
+                        if let Some((desc, _line)) = expression_taint(expr, ctx, state) {
+                            *return_taint = Some(desc);
+                            break;
+                        }
+                    }
+                } else if let Some((desc, _line)) = expression_taint(child, ctx, state) {
+                    *return_taint = Some(desc);
+                }
+                if return_taint.is_some() {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn expression_taint(
+        expr: Node<'_>,
+        ctx: &GoCtx<'_>,
+        state: &TaintState,
+    ) -> Option<(String, usize)> {
+        expression_taint(expr, ctx, state)
+    }
+
+    fn seed_params(
+        func_node: Node<'_>,
+        ctx: &GoCtx<'_>,
+        state: &mut TaintState,
+    ) {
+        if let Some(params) = func_node.child_by_field_name("parameters") {
+            seed_param_sources(params, ctx.source, ctx.spec, state);
+        }
+    }
+}
+
 /// Extract a function / method simple name. For `method_declaration`
 /// the name is a `field_identifier`; for `function_declaration` it's
 /// an `identifier`.
@@ -565,7 +647,7 @@ fn summarize_function(
 
     let mut return_taint: Option<String> = None;
     let mut scratch: Vec<TaintFinding> = Vec::new();
-    walk_body_for_summary(body, ctx, &mut state, &mut scratch, &mut return_taint);
+    walk_body_for_summary_generic::<GoTaintAdapter, _>(body, ctx, &mut state, &mut scratch, &mut return_taint);
     (name, return_taint)
 }
 
@@ -609,77 +691,12 @@ fn summarize_function_return(
     (name, summary)
 }
 
-fn walk_body_for_summary(
-    node: Node<'_>,
-    ctx: &GoCtx<'_>,
-    state: &mut TaintState,
-    findings: &mut Vec<TaintFinding>,
-    return_taint: &mut Option<String>,
-) {
-    // Don't descend into nested function literals / closures — their
-    // own returns belong to their own summary. Each closure gets its
-    // own independent analysis via `collect_function_defs`.
-    if node.kind() == "func_literal" {
-        return;
-    }
-
-    match node.kind() {
-        "short_var_declaration" => {
-            handle_short_var_declaration(node, ctx, state);
-        }
-        "var_spec" => {
-            handle_var_spec(node, ctx, state);
-        }
-        "assignment_statement" => {
-            handle_assignment(node, ctx, state, findings);
-        }
-        "call_expression" => {
-            handle_call(node, ctx, state, findings);
-        }
-        "return_statement" if return_taint.is_none() => {
-            let mut cursor = node.walk();
-            for child in node.named_children(&mut cursor) {
-                // return statement children are expression_list(s).
-                if child.kind() == "expression_list" {
-                    let mut inner = child.walk();
-                    for expr in child.named_children(&mut inner) {
-                        if let Some((desc, _line)) = expression_taint(expr, ctx, state) {
-                            *return_taint = Some(desc);
-                            break;
-                        }
-                    }
-                } else if let Some((desc, _line)) = expression_taint(child, ctx, state) {
-                    *return_taint = Some(desc);
-                }
-                if return_taint.is_some() {
-                    break;
-                }
-            }
-        }
-        _ => {}
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_body_for_summary(child, ctx, state, findings, return_taint);
-    }
-}
-
 fn analyze_function(
     func_node: Node<'_>,
     ctx: &GoCtx<'_>,
     findings: &mut Vec<TaintFinding>,
 ) {
-    let mut state = TaintState::default();
-
-    if let Some(params) = func_node.child_by_field_name("parameters") {
-        seed_param_sources(params, ctx.source, ctx.spec, &mut state);
-    }
-
-    let Some(body) = func_node.child_by_field_name("body") else {
-        return;
-    };
-    walk_body(body, ctx, &mut state, findings);
+    analyze_function_generic::<GoTaintAdapter, _>(func_node, ctx, findings);
 }
 
 fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &mut TaintState) {
@@ -710,41 +727,6 @@ fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &
                 }
             }
         }
-    }
-}
-
-fn walk_body(
-    node: Node<'_>,
-    ctx: &GoCtx<'_>,
-    state: &mut TaintState,
-    findings: &mut Vec<TaintFinding>,
-) {
-    // Nested function literal / closure — skip. Each closure gets its
-    // own independent analysis via `collect_function_defs`, so we must
-    // not walk into its body here (that would mix taint states).
-    if node.kind() == "func_literal" {
-        return;
-    }
-
-    match node.kind() {
-        "short_var_declaration" => {
-            handle_short_var_declaration(node, ctx, state);
-        }
-        "var_spec" => {
-            handle_var_spec(node, ctx, state);
-        }
-        "assignment_statement" => {
-            handle_assignment(node, ctx, state, findings);
-        }
-        "call_expression" => {
-            handle_call(node, ctx, state, findings);
-        }
-        _ => {}
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_body(child, ctx, state, findings);
     }
 }
 
