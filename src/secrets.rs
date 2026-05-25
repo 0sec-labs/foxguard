@@ -346,4 +346,47 @@ mod tests {
         let result = redact_match(line, 0, 1);
         assert_eq!(result, "[REDACTED]secret");
     }
+
+    /// Issue #401: `scan_directory` must include hidden files such as `.env`.
+    #[test]
+    fn scan_directory_includes_dotenv() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let github = ["ghp_", "abcdefghijklmnopqrstuvwxyz1234567890"].concat();
+        std::fs::write(dir.path().join(".env"), format!("TOKEN={github}\n"))
+            .expect("failed to write .env");
+
+        let findings = scan_directory(dir.path().to_str().unwrap(), 1_000_000);
+        assert!(
+            !findings.is_empty(),
+            "scan_directory must detect secrets inside .env"
+        );
+        assert!(
+            findings.iter().any(|f| f.file.contains(".env")),
+            "at least one finding should reference .env"
+        );
+    }
+
+    /// Issue #401: `scan_directory` must descend into hidden directories.
+    #[test]
+    fn scan_directory_includes_hidden_dirs() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let hidden = dir.path().join(".secrets");
+        std::fs::create_dir_all(&hidden).expect("failed to create hidden dir");
+        let github = ["ghp_", "abcdefghijklmnopqrstuvwxyz1234567890"].concat();
+        std::fs::write(hidden.join("creds.txt"), format!("TOKEN={github}\n"))
+            .expect("failed to write creds.txt");
+
+        let findings = scan_directory(dir.path().to_str().unwrap(), 1_000_000);
+        assert!(
+            !findings.is_empty(),
+            "scan_directory must detect secrets inside hidden directories"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.file.contains(".secrets/creds.txt")
+                    || f.file.contains(".secrets\\creds.txt")),
+            "at least one finding should reference .secrets/creds.txt"
+        );
+    }
 }
