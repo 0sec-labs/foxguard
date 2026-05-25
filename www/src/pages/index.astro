@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import SiteNav from '../components/ui/SiteNav.astro';
+import AnnouncementBar from '../components/ui/AnnouncementBar.astro';
 import InstallTabs from '../components/ui/InstallTabs.astro';
 import Hero from '../components/sections/Hero.astro';
 import WhatItCatches from '../components/sections/WhatItCatches.astro';
@@ -16,6 +17,12 @@ import Footer from '../components/sections/Footer.astro';
   description="170+ built-in rules across 10 languages, cross-file taint tracking, sub-second scans. Single Rust binary."
 >
   <div class="sticky top-0 z-40 bg-noir-950 border-b border-noir-800">
+    <AnnouncementBar
+      href="/github"
+      label="GitHub App is live."
+      detail="PR scans without wiring CI by hand."
+      cta="Install it ->"
+    />
     <div class="max-w-5xl mx-auto px-6">
       <SiteNav />
     </div>

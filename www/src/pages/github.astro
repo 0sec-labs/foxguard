@@ -1,0 +1,147 @@
+---
+import Base from '../layouts/Base.astro';
+import SiteNav from '../components/ui/SiteNav.astro';
+import AnnouncementBar from '../components/ui/AnnouncementBar.astro';
+import Footer from '../components/sections/Footer.astro';
+
+const APP_INSTALL_URL = 'https://github.com/apps/foxguard-app/installations/new';
+const SELF_HOST_IMAGE = 'ghcr.io/0sec-labs/foxguard-github-app';
+const APP_REGISTERED = true;
+---
+
+<Base
+  title="foxguard for GitHub — One-click PR scans"
+  description="Install foxguard on any GitHub repo. Every PR gets scanned for vulnerabilities, secrets, and post-quantum-vulnerable crypto in seconds. Free for open source. Self-hostable."
+>
+  <div class="sticky top-0 z-40 bg-noir-950 border-b border-noir-800">
+    {!APP_REGISTERED && (
+      <AnnouncementBar
+        href="https://github.com/0sec-labs/foxguard/issues/246"
+        label="GitHub App coming soon."
+        detail="The hosted app is in active development."
+        cta="Track #246 ->"
+      />
+    )}
+    <div class="max-w-5xl mx-auto px-6">
+      <SiteNav />
+    </div>
+  </div>
+
+  <section class="pt-12 pb-24">
+    <div class="max-w-5xl mx-auto px-6">
+
+      <div class="max-w-3xl mx-auto text-center mb-16">
+        <h1 class="font-heading text-noir-50 text-3xl sm:text-5xl lg:text-6xl leading-[1.1] tracking-tight mb-6">
+          Install foxguard<br/>on any GitHub repo
+        </h1>
+        <p class="text-noir-400 text-sm sm:text-lg leading-relaxed mb-8 max-w-xl mx-auto">
+          Every pull request gets scanned for vulnerabilities, hardcoded secrets, and post-quantum-vulnerable crypto. Findings post as PR comments in seconds. Free for open source.
+        </p>
+
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
+          <a
+            href={APP_INSTALL_URL}
+            class={`flex items-center gap-2 rounded-lg ${APP_REGISTERED ? 'bg-fox hover:bg-fox-light' : 'bg-noir-800 cursor-not-allowed opacity-60'} px-6 py-3 text-sm font-medium transition-colors no-underline`}
+            style={APP_REGISTERED ? 'color:#000;' : 'color:#a8a29e;'}
+            aria-disabled={!APP_REGISTERED}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+            {APP_REGISTERED ? 'Install on GitHub' : 'Install — coming soon'}
+          </a>
+          <a
+            href="#self-host"
+            class="text-sm text-noir-500 hover:text-noir-100 transition-colors no-underline"
+          >
+            Self-host instead →
+          </a>
+        </div>
+      </div>
+
+      <!-- What it does -->
+      <div class="grid md:grid-cols-3 gap-6 mb-24">
+        <div class="rounded-xl border border-noir-800 p-6">
+          <div class="text-fox-light text-2xl mb-3 font-mono">01</div>
+          <h3 class="font-heading text-noir-50 text-lg mb-2">Click install</h3>
+          <p class="text-noir-500 text-sm leading-relaxed">Pick the repos you want covered. No credit card, no signup. Works on private repos too — the App scans inside your tenancy.</p>
+        </div>
+        <div class="rounded-xl border border-noir-800 p-6">
+          <div class="text-fox-light text-2xl mb-3 font-mono">02</div>
+          <h3 class="font-heading text-noir-50 text-lg mb-2">Open a PR</h3>
+          <p class="text-noir-500 text-sm leading-relaxed">foxguard runs against the head ref. Most repos scan in under a second. Findings post as a PR comment grouped by severity.</p>
+        </div>
+        <div class="rounded-xl border border-noir-800 p-6">
+          <div class="text-fox-light text-2xl mb-3 font-mono">03</div>
+          <h3 class="font-heading text-noir-50 text-lg mb-2">Fix and merge</h3>
+          <p class="text-noir-500 text-sm leading-relaxed">Each finding shows the file, line, rule, and a fix recommendation. Push a fix, scan re-runs automatically. No new findings = clean comment.</p>
+        </div>
+      </div>
+
+      <!-- What it catches -->
+      <div class="mb-24">
+        <h2 class="font-heading text-noir-50 text-2xl sm:text-3xl mb-6 text-center">What it flags on PRs</h2>
+        <p class="text-noir-500 text-sm text-center mb-8 max-w-2xl mx-auto">Same engine as the local <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">foxguard</code> CLI — 170+ rules, 10 languages, cross-file taint tracking.</p>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            ['Command injection', 'shelling out with concatenated user input'],
+            ['SQL injection', 'unparameterized queries via f-strings or concat'],
+            ['Path traversal', '../ payloads landing on filesystem reads'],
+            ['SSRF', 'outbound fetches that hit private/loopback ranges'],
+            ['Hardcoded secrets', 'API tokens, AWS keys, Stripe keys, private keys'],
+            ['Weak crypto', 'MD5, SHA-1, DES, ECB, math/rand for tokens'],
+            ['Deserialization', 'pickle.load, yaml.load, unserialize on untrusted input'],
+            ['PQ-vulnerable crypto', 'RSA / ECDSA / ECDH usage with CNSA 2.0 deadlines'],
+          ].map(([title, desc]) => (
+            <div class="rounded-lg border border-noir-800 p-4">
+              <div class="font-heading text-noir-100 text-sm mb-1">{title}</div>
+              <div class="text-noir-500 text-xs leading-relaxed">{desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <!-- Trust / safety -->
+      <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-8 mb-24">
+        <h2 class="font-heading text-noir-50 text-2xl mb-6">How we handle your code</h2>
+        <ul class="space-y-3 text-sm text-noir-400 leading-relaxed">
+          <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">→</span><span><strong class="text-noir-200">Webhook signature verified.</strong> Every delivery from GitHub is HMAC-SHA256 verified before any code is fetched. Forged events are rejected with 401.</span></li>
+          <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">→</span><span><strong class="text-noir-200">Code lives in a sandboxed clone.</strong> The PR head ref is shallow-cloned to a temp dir, scanned, and deleted on completion. Hard caps: 60s scan timeout, 1 GB repo size.</span></li>
+          <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">→</span><span><strong class="text-noir-200">No code leaves your tenancy.</strong> The scanner is the same Rust binary you can <code class="text-fox-light bg-noir-950 px-1 rounded">npx foxguard</code> locally. No model calls, no third-party uploads. Findings stay in the GitHub comment.</span></li>
+          <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">→</span><span><strong class="text-noir-200">Hosted on dedicated infra.</strong> Runs in a single-tenant namespace on a Hetzner Xeon box in HEL1 (EU). Operated by 0sec Labs.</span></li>
+          <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">→</span><span><strong class="text-noir-200">Open source.</strong> The receiver, the scanner, and the Dockerfile are all in <a href="https://github.com/0sec-labs/foxguard" class="text-fox-light hover:underline">0sec-labs/foxguard</a>. You can audit every line.</span></li>
+        </ul>
+      </div>
+
+      <!-- Self-host -->
+      <div id="self-host" class="mb-24 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-2xl sm:text-3xl mb-4">Self-host the receiver</h2>
+        <p class="text-noir-500 text-sm leading-relaxed mb-6 max-w-2xl">
+          For air-gapped CI, regulated workloads, or just because you'd rather. The receiver is published as a Docker image and the Dockerfile is in the repo. Register your own GitHub App, point its webhook URL at your instance, done.
+        </p>
+        <div class="rounded-xl border border-noir-800 overflow-hidden">
+          <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
+          <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`docker run --rm -p 8080:8080 \\
+  -e FOXGUARD_WEBHOOK_SECRET=$(openssl rand -hex 32) \\
+  ${SELF_HOST_IMAGE}:latest`}</code></pre>
+        </div>
+        <p class="text-noir-600 text-xs mt-3">
+          See <a href="https://github.com/0sec-labs/foxguard/blob/main/Dockerfile.github-app" class="text-noir-400 hover:text-noir-100">Dockerfile.github-app</a> for the build details and <a href="https://github.com/0sec-labs/foxguard/issues/246" class="text-noir-400 hover:text-noir-100">issue #246</a> for the broader Phase 1/2 plan.
+        </p>
+      </div>
+
+      <!-- CTA -->
+      <div class="text-center">
+        <h2 class="font-heading text-noir-50 text-2xl sm:text-3xl mb-4">Try foxguard locally first</h2>
+        <p class="text-noir-500 text-sm mb-6">No App, no install, no signup — just see what it'd flag in your codebase.</p>
+        <div class="inline-flex rounded-xl border border-noir-800 overflow-hidden">
+          <div class="px-5 py-3 font-mono text-sm text-fox-light">npx foxguard .</div>
+        </div>
+        <div class="mt-6">
+          <a href="/" class="text-sm text-noir-500 hover:text-noir-100 transition-colors no-underline">← Back to foxguard.dev</a>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <Footer />
+</Base>
