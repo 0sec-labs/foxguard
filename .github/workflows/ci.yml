@@ -268,7 +268,8 @@ jobs:
 
       - name: Verify fixture detection (must find issues)
         run: |
-          if ./target/release/foxguard tests/fixtures/ 2>&1; then
+          # Bypass .foxguard.yml so the repo baseline does not suppress fixture findings.
+          if ./target/release/foxguard --config /dev/null tests/fixtures/ 2>&1; then
             echo "::error::Expected foxguard to find issues in test fixtures but it exited clean"
             exit 1
           else
