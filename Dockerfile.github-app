@@ -10,7 +10,7 @@
 #     -e FOXGUARD_WEBHOOK_SECRET=$(openssl rand -hex 32) \
 #     ghcr.io/0sec-labs/foxguard-github-app:latest
 
-FROM rust:1.83-slim AS builder
+FROM rust:1.88-slim AS builder
 WORKDIR /usr/src/foxguard
 COPY . .
 # Build only the github-app binary; --features turns on the optional
