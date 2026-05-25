@@ -4677,7 +4677,14 @@ mod config_files {
     #[test]
     fn cargo_lock_pq_finds_transitive_rsa_dep() {
         let output = foxguard_cmd()
-            .args(["pqc", "--config", "/dev/null", "tests/fixtures/deps/Cargo.lock", "-f", "json"])
+            .args([
+                "pqc",
+                "--config",
+                "/dev/null",
+                "tests/fixtures/deps/Cargo.lock",
+                "-f",
+                "json",
+            ])
             .output()
             .expect("failed to execute foxguard");
 
@@ -4724,7 +4731,14 @@ mod config_files {
     #[test]
     fn requirements_txt_pq_finds_crypto_deps() {
         let output = foxguard_cmd()
-            .args(["pqc", "--config", "/dev/null", "tests/fixtures/deps/requirements.txt", "-f", "json"])
+            .args([
+                "pqc",
+                "--config",
+                "/dev/null",
+                "tests/fixtures/deps/requirements.txt",
+                "-f",
+                "json",
+            ])
             .output()
             .expect("failed to execute foxguard");
 

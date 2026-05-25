@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" width="80" alt="foxguard" />
+  <img src="assets/logo.png" width="128" alt="foxguard" />
 </p>
 
 <h1 align="center">foxguard</h1>
@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/0sec-labs/foxguard/actions/workflows/ci.yml"><img src="https://github.com/0sec-labs/foxguard/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/0sec-labs/foxguard"><img src="https://img.shields.io/badge/foxguard-clean-3fb950" alt="foxguard: clean" /></a>
   <a href="https://crates.io/crates/foxguard"><img src="https://img.shields.io/crates/v/foxguard?color=d97706&label=crates.io" alt="crates.io" /></a>
   <a href="https://www.npmjs.com/package/foxguard"><img src="https://img.shields.io/npm/v/foxguard?color=d97706&label=npm" alt="npm" /></a>
   <a href="https://github.com/apps/foxguard-app/installations/new"><img src="https://img.shields.io/badge/GitHub_App-Install-2ea44f?logo=github" alt="Install GitHub App" /></a>
@@ -54,6 +55,16 @@ cargo install foxguard                              # from source
     severity: medium
     fail-on-findings: "true"
     upload-sarif: "true"
+```
+
+**pre-commit:**
+
+```yaml
+repos:
+  - repo: https://github.com/0sec-labs/foxguard
+    rev: v0.8.1
+    hooks:
+      - id: foxguard
 ```
 
 **VS Code:** [Install extension](https://marketplace.visualstudio.com/items?itemName=peaktwilight.foxguard) -- scans on save, inline findings.
