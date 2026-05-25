@@ -1,9 +1,22 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
+
 use crate::impl_rule;
 use crate::rules::common::{
-    is_secret_value_long_enough, make_finding, walk_tree, HARDCODED_SECRET_PATTERN,
+    hardcoded_secret_re, is_secret_value_long_enough, make_finding, walk_tree,
 };
 use crate::{Language, Severity};
-use regex::Regex;
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+fn php_preg_e_modifier_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"['"][^'"]*/.*/[a-z]*e[a-z]*['"]"#)
+            .expect("static PHP preg_replace regex should compile")
+    })
+}
 
 // ─── Rule 1: no-eval ──────────────────────────────────────────────────────────
 
@@ -361,8 +374,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let secret_pattern = Regex::new(HARDCODED_SECRET_PATTERN)
-            .expect("static hardcoded secret regex should compile");
+        let secret_pattern = hardcoded_secret_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: $password = "hardcoded";
@@ -499,8 +511,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let e_modifier = Regex::new(r#"['"][^'"]*/.*/[a-z]*e[a-z]*['"]"#)
-            .expect("static PHP preg_replace regex should compile");
+        let e_modifier = php_preg_e_modifier_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "function_call_expression" {

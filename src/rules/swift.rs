@@ -1,10 +1,79 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
+
 use crate::impl_rule;
 use crate::rules::common::{
-    is_secret_value_long_enough, make_finding, make_finding_from_offsets, walk_tree,
-    HARDCODED_SECRET_PATTERN,
+    hardcoded_secret_re, is_secret_value_long_enough, make_finding, make_finding_from_offsets,
+    walk_tree,
 };
 use crate::{Language, Severity};
-use regex::Regex;
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+fn swift_weak_crypto_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\b(CC_MD5|CC_SHA1|\.md5|\.sha1|Insecure\.MD5|Insecure\.SHA1)\b")
+            .expect("static Swift weak crypto regex should compile")
+    })
+}
+
+fn swift_sql_keywords_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\s")
+            .expect("static Swift SQL keyword regex should compile")
+    })
+}
+
+fn swift_interp_string_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#""[^"]*\\\([^)]+\)[^"]*""#)
+            .expect("static Swift interpolation regex should compile")
+    })
+}
+
+fn swift_sql_concat_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?i)(execute|prepare|sqlite3_exec)\s*\([^)]*(?:SELECT|INSERT|UPDATE|DELETE|DROP)[^)]*\+\s*"#,
+        )
+        .expect("static Swift SQL concat regex should compile")
+    })
+}
+
+fn swift_keychain_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\b(kSecAttrAccessibleAlways|kSecAttrAccessibleAlwaysThisDeviceOnly)\b")
+            .expect("static Swift keychain regex should compile")
+    })
+}
+
+fn swift_tls_expired_certs_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"allowsExpiredCertificates\s*=\s*true")
+            .expect("static Swift TLS regex should compile")
+    })
+}
+
+fn swift_tls_expired_roots_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"allowsExpiredRoots\s*=\s*true").expect("static Swift TLS regex should compile")
+    })
+}
+
+fn swift_tls_disable_eval_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\.disableEvaluation").expect("static Swift TLS regex should compile")
+    })
+}
 
 // ─── Rule 1: no-hardcoded-secret ────────────────────────────────────────────
 
@@ -21,9 +90,7 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let mut reported_lines = std::collections::HashSet::new();
-        let secret_pattern =
-            Regex::new(HARDCODED_SECRET_PATTERN)
-                .expect("static hardcoded secret regex should compile");
+        let secret_pattern = hardcoded_secret_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Match property declarations: let password = "hardcoded"
@@ -174,9 +241,7 @@ impl_rule! {
     fn check(_self, source, _tree) {
 
         let mut findings = Vec::new();
-        let pattern =
-            Regex::new(r"\b(CC_MD5|CC_SHA1|\.md5|\.sha1|Insecure\.MD5|Insecure\.SHA1)\b")
-                .expect("static Swift weak crypto regex should compile");
+        let pattern = swift_weak_crypto_re();
 
         for matched in pattern.find_iter(source) {
             let algo = if matched.as_str().contains("MD5") || matched.as_str().contains("md5") {
@@ -295,12 +360,10 @@ impl_rule! {
     fn check(_self, source, _tree) {
 
         let mut findings = Vec::new();
-        let sql_keywords = Regex::new(r"(?i)(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\s")
-            .expect("static Swift SQL keyword regex should compile");
+        let sql_keywords = swift_sql_keywords_re();
 
         // Detect SQL strings with interpolation: "SELECT ... \(variable) ..."
-        let interp_string = Regex::new(r#""[^"]*\\\([^)]+\)[^"]*""#)
-            .expect("static Swift interpolation regex should compile");
+        let interp_string = swift_interp_string_re();
         for matched in interp_string.find_iter(source) {
             let text = matched.as_str();
             if sql_keywords.is_match(text) {
@@ -317,10 +380,7 @@ impl_rule! {
         }
 
         // Detect execute/prepare calls with string concatenation
-        let sql_concat = Regex::new(
-            r#"(?i)(execute|prepare|sqlite3_exec)\s*\([^)]*(?:SELECT|INSERT|UPDATE|DELETE|DROP)[^)]*\+\s*"#,
-        )
-        .expect("static Swift SQL concat regex should compile");
+        let sql_concat = swift_sql_concat_re();
         for matched in sql_concat.find_iter(source) {
             findings.push(make_finding_from_offsets(
                 _self.id(),
@@ -352,9 +412,7 @@ impl_rule! {
     fn check(_self, source, _tree) {
 
         let mut findings = Vec::new();
-        let pattern =
-            Regex::new(r"\b(kSecAttrAccessibleAlways|kSecAttrAccessibleAlwaysThisDeviceOnly)\b")
-                .expect("static Swift keychain regex should compile");
+        let pattern = swift_keychain_re();
 
         for matched in pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
@@ -390,19 +448,17 @@ impl_rule! {
 
         let mut findings = Vec::new();
 
-        let patterns = [
+        let patterns: [(&Regex, &str); 3] = [
             (
-                Regex::new(r"allowsExpiredCertificates\s*=\s*true")
-                    .expect("static Swift TLS regex should compile"),
+                swift_tls_expired_certs_re(),
                 "allowsExpiredCertificates = true disables certificate expiry validation",
             ),
             (
-                Regex::new(r"allowsExpiredRoots\s*=\s*true")
-                    .expect("static Swift TLS regex should compile"),
+                swift_tls_expired_roots_re(),
                 "allowsExpiredRoots = true disables root certificate expiry validation",
             ),
             (
-                Regex::new(r"\.disableEvaluation").expect("static Swift TLS regex should compile"),
+                swift_tls_disable_eval_re(),
                 ".disableEvaluation disables TLS server trust evaluation entirely",
             ),
         ];

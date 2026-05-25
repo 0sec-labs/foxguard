@@ -1,9 +1,21 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
+
 use crate::impl_rule;
 use crate::rules::common::{
-    is_secret_value_long_enough, make_finding, walk_tree, CSHARP_HARDCODED_SECRET_PATTERN,
+    csharp_hardcoded_secret_re, is_secret_value_long_enough, make_finding, walk_tree,
 };
 use crate::{Language, Severity};
-use regex::Regex;
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+fn cs_cors_star_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"WithOrigins\s*\(\s*"\*"\s*\)"#).expect("static C# CORS regex should compile")
+    })
+}
 
 /// Check whether a subtree contains a `binary_expression` with `+` operator.
 fn contains_string_concat(node: tree_sitter::Node, source: &str) -> bool {
@@ -445,8 +457,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let secret_pattern = Regex::new(CSHARP_HARDCODED_SECRET_PATTERN)
-            .expect("static C# hardcoded secret regex should compile");
+        let secret_pattern = csharp_hardcoded_secret_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // variable_declarator: string password = "hardcoded"
@@ -657,8 +668,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let cors_star = Regex::new(r#"WithOrigins\s*\(\s*"\*"\s*\)"#)
-            .expect("static C# CORS regex should compile");
+        let cors_star = cs_cors_star_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "invocation_expression" {

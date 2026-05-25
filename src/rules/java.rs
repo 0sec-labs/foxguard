@@ -1,10 +1,63 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
+
 use crate::impl_rule;
 use crate::rules::common::{
-    is_secret_value_long_enough, make_finding, make_finding_from_offsets, walk_tree,
-    HARDCODED_SECRET_PATTERN,
+    hardcoded_secret_re, is_secret_value_long_enough, make_finding, make_finding_from_offsets,
+    walk_tree,
 };
 use crate::{Language, Severity};
-use regex::Regex;
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+fn java_sql_methods_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^(executeQuery|execute|createQuery|createNativeQuery)$")
+            .expect("static Java SQL method regex should compile")
+    })
+}
+
+fn java_weak_algo_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)"(DES|DESede|RC2|RC4|Blowfish|MD5|SHA-?1|.*ECB.*)"#)
+            .expect("static Java weak crypto regex should compile")
+    })
+}
+
+fn java_xxe_factory_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(DocumentBuilderFactory|SAXParserFactory|XMLInputFactory)\.newInstance\(\)")
+            .expect("static Java XXE factory regex should compile")
+    })
+}
+
+fn java_xxe_secure_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"setFeature\s*\(|setProperty\s*\(|setAttribute\s*\(")
+            .expect("static Java XXE hardening regex should compile")
+    })
+}
+
+fn java_csrf_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\.csrf\(\s*\)\s*\.\s*disable\(\s*\)|csrf\s*\([^)]*\.\s*disable\(\s*\)\s*\)")
+            .expect("static Java CSRF regex should compile")
+    })
+}
+
+fn java_cors_wildcard_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"allowedOrigins\s*\(\s*"\*"\s*\)"#)
+            .expect("static Java CORS regex should compile")
+    })
+}
 
 /// Check whether any descendant of `node` is a `binary_expression` with a `+`
 /// operator that involves a `string_literal`.
@@ -79,9 +132,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let sql_methods =
-            Regex::new(r"^(executeQuery|execute|createQuery|createNativeQuery)$")
-                .expect("static Java SQL method regex should compile");
+        let sql_methods = java_sql_methods_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "method_invocation" {
@@ -415,9 +466,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let weak_algo =
-            Regex::new(r#"(?i)"(DES|DESede|RC2|RC4|Blowfish|MD5|SHA-?1|.*ECB.*)"#)
-                .expect("static Java weak crypto regex should compile");
+        let weak_algo = java_weak_algo_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "method_invocation" {
@@ -606,9 +655,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let secret_pattern =
-            Regex::new(HARDCODED_SECRET_PATTERN)
-                .expect("static hardcoded secret regex should compile");
+        let secret_pattern = hardcoded_secret_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // variable_declarator: String password = "hardcoded";
@@ -686,13 +733,8 @@ impl_rule! {
     fn check(_self, source, _tree) {
 
         let mut findings = Vec::new();
-        let factory_pattern = Regex::new(
-            r"(DocumentBuilderFactory|SAXParserFactory|XMLInputFactory)\.newInstance\(\)",
-        )
-        .expect("static Java XXE factory regex should compile");
-        let secure_pattern =
-            Regex::new(r"setFeature\s*\(|setProperty\s*\(|setAttribute\s*\(")
-                .expect("static Java XXE hardening regex should compile");
+        let factory_pattern = java_xxe_factory_re();
+        let secure_pattern = java_xxe_secure_re();
 
         // Simple heuristic: if a factory is created but no setFeature is called
         // in the same file, flag it.
@@ -729,10 +771,7 @@ impl_rule! {
 
         let mut findings = Vec::new();
         // .csrf().disable() or csrf(csrf -> csrf.disable()) or csrf(c -> c.disable())
-        let csrf_pattern = Regex::new(
-            r"\.csrf\(\s*\)\s*\.\s*disable\(\s*\)|csrf\s*\([^)]*\.\s*disable\(\s*\)\s*\)",
-        )
-        .expect("static Java CSRF regex should compile");
+        let csrf_pattern = java_csrf_re();
 
         for matched in csrf_pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
@@ -908,8 +947,7 @@ impl_rule! {
         let mut findings = Vec::new();
 
         // allowedOrigins("*")
-        let wildcard_pattern = Regex::new(r#"allowedOrigins\s*\(\s*"\*"\s*\)"#)
-            .expect("static Java CORS regex should compile");
+        let wildcard_pattern = java_cors_wildcard_re();
         for matched in wildcard_pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
                 _self.id(),

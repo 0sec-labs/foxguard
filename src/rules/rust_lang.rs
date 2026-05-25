@@ -1,9 +1,30 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
+
 use crate::impl_rule;
 use crate::rules::common::{
-    is_secret_value_long_enough, make_finding, walk_tree, HARDCODED_SECRET_PATTERN,
+    hardcoded_secret_re, is_secret_value_long_enough, make_finding, walk_tree,
 };
 use crate::{Language, Severity};
-use regex::Regex;
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+fn rust_sql_methods_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)\b(query|sql_query|execute|raw_sql)\b")
+            .expect("static Rust SQL method regex should compile")
+    })
+}
+
+fn rust_weak_hash_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\b(md5|sha1|Md5|Sha1|MD5|SHA1)\b")
+            .expect("static Rust weak hash regex should compile")
+    })
+}
 
 // ─── Rule 1: unsafe-block ─────────────────────────────────────────────────────
 
@@ -137,8 +158,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let sql_methods = Regex::new(r"(?i)\b(query|sql_query|execute|raw_sql)\b")
-            .expect("static Rust SQL method regex should compile");
+        let sql_methods = rust_sql_methods_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
@@ -187,8 +207,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let weak_hash = Regex::new(r"\b(md5|sha1|Md5|Sha1|MD5|SHA1)\b")
-            .expect("static Rust weak hash regex should compile");
+        let weak_hash = rust_weak_hash_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect use declarations: use md5::..., use sha1::...
@@ -338,9 +357,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let secret_pattern =
-            Regex::new(HARDCODED_SECRET_PATTERN)
-                .expect("static hardcoded secret regex should compile");
+        let secret_pattern = hardcoded_secret_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // let password = "hardcoded";

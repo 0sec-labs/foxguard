@@ -1,12 +1,25 @@
+use std::borrow::Cow;
+use std::sync::OnceLock;
+
+use regex::Regex;
+
 use crate::impl_rule;
 use crate::rules::common::{
-    get_source_line, is_high_signal_secret_name, is_secret_value_long_enough,
-    looks_like_secret_value, make_finding, walk_tree, HARDCODED_SECRET_PATTERN,
+    get_source_line, hardcoded_secret_re, is_high_signal_secret_name, is_secret_value_long_enough,
+    looks_like_secret_value, make_finding, walk_tree,
 };
 use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
-use regex::Regex;
-use std::borrow::Cow;
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+fn py_sql_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)")
+            .expect("static Python SQL regex should compile")
+    })
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -77,9 +90,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let secret_pattern =
-            Regex::new(HARDCODED_SECRET_PATTERN)
-                .expect("static hardcoded secret regex should compile");
+        let secret_pattern = hardcoded_secret_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // assignment: password = "hardcoded"
@@ -135,8 +146,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let sql_pattern =
-            Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)").expect("static Python SQL regex should compile");
+        let sql_pattern = py_sql_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect f-strings with SQL: f"SELECT * FROM users WHERE id = {user_id}"
