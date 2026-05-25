@@ -8,6 +8,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
+use std::sync::OnceLock;
 
 const RESERVED_RULE_ID_NAMESPACES: &[&str] = &[
     "py", "js", "go", "java", "php", "ruby", "cs", "csharp", "swift", "kotlin", "rs", "rust",
@@ -344,17 +345,22 @@ fn prepare_pattern_for_grammar(source: String, lang: Language) -> String {
 }
 
 fn rewrite_go_semgrep_micro_syntax(source: &str) -> String {
-    let metavars = Regex::new(r"\$([A-Za-z0-9_]+)").expect("valid metavariable regex");
+    static METAVARS_RE: OnceLock<Regex> = OnceLock::new();
+    let metavars = METAVARS_RE
+        .get_or_init(|| Regex::new(r"\$([A-Za-z0-9_]+)").expect("valid metavariable regex"));
     let rewritten = metavars
         .replace_all(source, format!("{GO_METAVAR_PREFIX}$1"))
         .to_string()
         .replace("...", GO_ELLIPSIS_PLACEHOLDER);
 
-    let func_ellipsis_params = Regex::new(&format!(
-        r"(func\s+[A-Za-z_][A-Za-z0-9_]*\s*)\(\s*{}\s*\)",
-        regex::escape(GO_ELLIPSIS_PLACEHOLDER)
-    ))
-    .expect("valid Go func ellipsis regex");
+    static FUNC_ELLIPSIS_RE: OnceLock<Regex> = OnceLock::new();
+    let func_ellipsis_params = FUNC_ELLIPSIS_RE.get_or_init(|| {
+        Regex::new(&format!(
+            r"(func\s+[A-Za-z_][A-Za-z0-9_]*\s*)\(\s*{}\s*\)",
+            regex::escape(GO_ELLIPSIS_PLACEHOLDER)
+        ))
+        .expect("valid Go func ellipsis regex")
+    });
 
     func_ellipsis_params
         .replace_all(&rewritten, "$1()")

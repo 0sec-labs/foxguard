@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
+
+use regex::Regex;
 
 use crate::{Finding, Severity};
 
@@ -61,6 +64,23 @@ pub const HARDCODED_SECRET_PATTERN: &str =
 /// Extended variant for C# that adds `connection_?string` /
 /// `connectionstring` to the base keyword set.
 pub const CSHARP_HARDCODED_SECRET_PATTERN: &str = r"(?i)(password|secret|api_?key|token|auth|credential|private_?key|connection_?string|connectionstring)";
+
+/// Pre-compiled [`HARDCODED_SECRET_PATTERN`] regex (compiled once).
+pub fn hardcoded_secret_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(HARDCODED_SECRET_PATTERN).expect("static hardcoded secret regex should compile")
+    })
+}
+
+/// Pre-compiled [`CSHARP_HARDCODED_SECRET_PATTERN`] regex (compiled once).
+pub fn csharp_hardcoded_secret_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(CSHARP_HARDCODED_SECRET_PATTERN)
+            .expect("static C# hardcoded secret regex should compile")
+    })
+}
 
 /// Default minimum length for strings flagged as a hardcoded secret.
 ///

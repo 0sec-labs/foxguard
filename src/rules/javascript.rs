@@ -1,11 +1,52 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
+
 use crate::impl_rule;
 use crate::rules::common::{
-    get_source_line, is_high_signal_secret_name, is_secret_value_long_enough,
-    looks_like_secret_value, make_finding, walk_tree, HARDCODED_SECRET_PATTERN,
+    get_source_line, hardcoded_secret_re, is_high_signal_secret_name, is_secret_value_long_enough,
+    looks_like_secret_value, make_finding, walk_tree,
 };
 use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
-use regex::Regex;
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+fn js_sql_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)",
+        )
+        .expect("static JavaScript SQL regex should compile")
+    })
+}
+
+fn js_redos_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(\([^)]*[+*][^)]*\)[+*]|\([^)]*\|[^)]*\)[+*])")
+            .expect("static ReDoS regex should compile")
+    })
+}
+
+fn js_user_input_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^req\.(params|query|body|headers)(\b|\[|\.)")
+            .expect("static Express user-input regex should compile")
+    })
+}
+
+fn js_sanitize_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)(escapeHtml|escape|sanitize|encode|encodeURIComponent|encodeURI|htmlEncode|xss|purify|DOMPurify|validator|parseInt|parseFloat|Number|String)\s*\(",
+        )
+        .expect("static JavaScript sanitizer regex should compile")
+    })
+}
 
 // ─── Rule 1: no-eval ─────────────────────────────────────────────────────────
 
@@ -58,9 +99,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let secret_pattern =
-            Regex::new(HARDCODED_SECRET_PATTERN)
-                .expect("static hardcoded secret regex should compile");
+        let secret_pattern = hardcoded_secret_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // variable_declarator: const password = "hardcoded"
@@ -151,9 +190,7 @@ impl_rule! {
         let mut findings = Vec::new();
         // Require SQL keyword followed by SQL structure (FROM, INTO, SET, WHERE, TABLE, VALUES)
         // This avoids matching plain English like res.send('delete ' + name)
-        let sql_pattern = Regex::new(
-            r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)"
-        ).expect("static JavaScript SQL pattern should compile");
+        let sql_pattern = js_sql_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: query("SELECT * FROM users WHERE id = " + userId)
@@ -896,9 +933,7 @@ impl_rule! {
 
         let mut findings = Vec::new();
         // Patterns known to cause catastrophic backtracking: nested quantifiers
-        let dangerous_pattern =
-            Regex::new(r"(\([^)]*[+*][^)]*\)[+*]|\([^)]*\|[^)]*\)[+*])")
-                .expect("static ReDoS regex should compile");
+        let dangerous_pattern = js_redos_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect regex literals: /pattern/
@@ -1244,12 +1279,9 @@ impl_rule! {
 
         let mut findings = Vec::new();
         // Match user-controlled input objects
-        let user_input_re = Regex::new(r"^req\.(params|query|body|headers)(\b|\[|\.)")
-            .expect("static Express user-input regex should compile");
+        let user_input_re = js_user_input_re();
         // Sanitization wrappers that neutralise XSS risk
-        let sanitize_re = Regex::new(
-            r"(?i)(escapeHtml|escape|sanitize|encode|encodeURIComponent|encodeURI|htmlEncode|xss|purify|DOMPurify|validator|parseInt|parseFloat|Number|String)\s*\("
-        ).expect("static JavaScript sanitizer regex should compile");
+        let sanitize_re = js_sanitize_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: res.send(req.query.foo), res.write(req.body.bar)

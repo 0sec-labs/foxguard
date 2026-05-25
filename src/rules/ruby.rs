@@ -1,9 +1,8 @@
 use crate::impl_rule;
 use crate::rules::common::{
-    is_secret_value_long_enough, make_finding, walk_tree, HARDCODED_SECRET_PATTERN,
+    hardcoded_secret_re, is_secret_value_long_enough, make_finding, walk_tree,
 };
 use crate::{Language, Severity};
-use regex::Regex;
 
 /// Returns `true` if a tree-sitter `string` node contains interpolation
 /// children (i.e., `#{}` segments). Plain string literals like `"ls -la"`
@@ -485,9 +484,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let secret_pattern =
-            Regex::new(HARDCODED_SECRET_PATTERN)
-                .expect("static hardcoded secret regex should compile");
+        let secret_pattern = hardcoded_secret_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // assignment: variable = "hardcoded"
