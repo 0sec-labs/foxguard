@@ -5,7 +5,7 @@
 <h1 align="center">foxguard</h1>
 
 <p align="center">
-  <strong>Fast security scanner. Single binary. 170+ rules. 11 languages.</strong>
+  <strong>A fast security scanner. Completely free. 10+ languages supported.</strong>
 </p>
 
 <p align="center">
@@ -26,8 +26,8 @@ npx foxguard .
 ## Features
 
 - **Sub-second scans** on real codebases -- fast enough for pre-commit hooks
-- **170+ built-in rules** -- SQLi, XSS, SSRF, command injection, weak crypto, unsafe deserialization, and more
-- **11 languages** -- JS/TS, Python, Go, Ruby, Java, PHP, Rust, C#, Swift, Kotlin, C
+- **Completely free** -- local scans, CI usage, and GitHub PR checks without a paid tier
+- **10+ languages supported** -- JS/TS, Python, Go, Ruby, Java, PHP, Rust, C#, Swift, Kotlin, C
 - **Cross-file taint tracking** with intraprocedural dataflow and cross-file summaries
 - **Diff scans** -- only new findings since a target branch
 - **Secrets scanning** -- AWS keys, GitHub/GitLab/Slack/Stripe tokens, private keys
