@@ -277,7 +277,8 @@ function scanDocument(document: vscode.TextDocument): void {
 
         let findings: Finding[];
         try {
-          findings = JSON.parse(stdout);
+          const report = JSON.parse(stdout);
+          findings = Array.isArray(report) ? report : report.findings;
         } catch (e) {
           outputChannel.appendLine(`Parse error: ${e}`);
           setStatusDone(0);
@@ -378,7 +379,8 @@ async function scanWorkspace(): Promise<void> {
 
             let findings: Finding[];
             try {
-              findings = JSON.parse(stdout);
+              const report = JSON.parse(stdout);
+              findings = Array.isArray(report) ? report : report.findings;
             } catch {
               resolve();
               return;

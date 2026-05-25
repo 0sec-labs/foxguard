@@ -7802,16 +7802,16 @@
       "line": 328
     },
     {
-      "fingerprint": "56e07b4339a62164ecbff21e94eafbaf1ca97d6e99b56300e4b14acda6318444",
+      "fingerprint": "b1ce75957d582e0ca76386975b2c23fb09ad77f4a81dbc6513ae957de7230824",
       "rule_id": "js/no-command-injection",
-      "file": "./vscode-extension/src/extension.ts",
+      "file": "/Users/peak/coding/0sec/foxguard/vscode-extension/src/extension.ts",
       "line": 263
     },
     {
-      "fingerprint": "4cf1c478a2c49176af7c1f72f0f07ee70372ce79a946079bdb42dbf5b83d28b1",
+      "fingerprint": "a041300cf7a11c01ffbd47ff0dbc9b8911eb53c07d3021ac911eea2518fa7f61",
       "rule_id": "js/no-command-injection",
-      "file": "./vscode-extension/src/extension.ts",
-      "line": 368
+      "file": "/Users/peak/coding/0sec/foxguard/vscode-extension/src/extension.ts",
+      "line": 369
     }
   ]
 }
