@@ -43,7 +43,7 @@ use crate::rules::javascript_taint;
 use crate::rules::python_taint;
 use crate::rules::{FileContext, Rule};
 use crate::{Finding, Language, Severity};
-use serde_yaml::Value as YamlValue;
+use serde_yaml_ng::Value as YamlValue;
 
 // ─── Language-agnostic intermediate representation ───────────────────────
 //
@@ -816,7 +816,7 @@ pattern-sources:
 pattern-sinks:
   - pattern: pickle.loads($X)
 "#;
-        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.id, "semgrep/semgrep-pickle-taint");
@@ -839,7 +839,7 @@ message: x
 severity: ERROR
 languages: [python]
 "#;
-        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(matches!(parse_taint_rule(&v), TaintRuleParse::NotTaint));
     }
 
@@ -854,7 +854,7 @@ message: m
 pattern-sources: [{pattern: req}]
 pattern-sinks: [{pattern: eval($X)}]
 "#;
-        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(matches!(parse_taint_rule(&v), TaintRuleParse::Skip(_)));
     }
 
@@ -869,7 +869,7 @@ message: m
 pattern-sources: [{pattern: req.query}]
 pattern-sinks: [{pattern: eval($X)}]
 "#;
-        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.lang, Language::JavaScript);
@@ -892,7 +892,7 @@ message: m
 pattern-sources: [{pattern: req.body}]
 pattern-sinks: [{pattern: eval($X)}]
 "#;
-        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => assert_eq!(r.lang, Language::JavaScript),
             TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
@@ -911,7 +911,7 @@ message: m
 pattern-sources: [{pattern: c.Query($X)}]
 pattern-sinks: [{pattern: exec.Command($X)}]
 "#;
-        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.lang, Language::Go);
@@ -924,7 +924,7 @@ pattern-sinks: [{pattern: exec.Command($X)}]
     }
 
     fn compiled(yaml: &str) -> SemgrepTaintRule {
-        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => r,
             TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
@@ -1057,7 +1057,7 @@ pattern-sources:
 pattern-sinks:
   - pattern: pickle.loads($X)
 "#;
-        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Skip(msg) => assert!(msg.contains("pattern-sources")),
             other => panic!(
@@ -1106,7 +1106,7 @@ pattern-sources:
 pattern-sinks:
   - pattern: pickle.loads($X)
 "#;
-        let v: YamlValue = serde_yaml::from_str(yaml).unwrap();
+        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(matches!(parse_taint_rule(&v), TaintRuleParse::Skip(_)));
 
         // `pattern-inside:` likewise rejected per-entry.
@@ -1123,7 +1123,7 @@ pattern-sources:
 pattern-sinks:
   - pattern: pickle.loads($X)
 "#;
-        let v2: YamlValue = serde_yaml::from_str(yaml2).unwrap();
+        let v2: YamlValue = serde_yaml_ng::from_str(yaml2).unwrap();
         assert!(matches!(parse_taint_rule(&v2), TaintRuleParse::Skip(_)));
 
         // But a mix where one entry is `patterns:` and another is a plain
