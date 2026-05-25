@@ -582,6 +582,7 @@ fn run_git(
     let mut command = Command::new("git");
     command
         .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", auth_header_key)
         .env(
