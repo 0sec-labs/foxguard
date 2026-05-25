@@ -586,12 +586,6 @@ fn run_git(
     command
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_CONFIG_COUNT", "1")
-        .env("GIT_CONFIG_KEY_0", auth_header_key)
-        .env(
-            "GIT_CONFIG_VALUE_0",
-            format!("AUTHORIZATION: bearer {installation_token}"),
-        )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(current_dir) = current_dir {
