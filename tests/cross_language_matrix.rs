@@ -222,13 +222,13 @@ const MATRIX: &[MatrixRow] = &[
 ];
 
 fn foxguard_cmd() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_foxguard"))
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_foxguard"));
+    cmd.args(["--config", "/dev/null"]);
+    cmd
 }
 
 fn foxguard_cmd_isolated() -> Command {
-    let mut cmd = foxguard_cmd();
-    cmd.args(["--config", "/dev/null"]);
-    cmd
+    foxguard_cmd()
 }
 
 fn fixture_path(name: &str) -> PathBuf {
