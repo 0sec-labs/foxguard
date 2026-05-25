@@ -1,6 +1,7 @@
 pub mod coccinelle;
 pub mod codeql;
 pub mod parser;
+pub mod process;
 pub mod scanner;
 
 pub use parser::{parse_file, parse_path};

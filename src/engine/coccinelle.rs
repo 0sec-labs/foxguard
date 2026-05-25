@@ -6,12 +6,11 @@ use regex::Regex;
 use serde::Deserialize;
 use serde_yaml_ng::Value as YamlValue;
 use std::collections::HashSet;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::time::Duration;
-use wait_timeout::ChildExt;
 
 #[derive(Debug, Clone)]
 pub struct CoccinelleRule {
@@ -350,8 +349,10 @@ fn scan_candidates(
 }
 
 fn run_spatch(script_path: &Path, target: &Path) -> Result<String, String> {
+    use crate::engine::process::{wait_with_output_timeout, TimedOutput};
+
     let timeout = spatch_timeout();
-    let mut child = Command::new("spatch")
+    let child = Command::new("spatch")
         .arg("--very-quiet")
         .arg("--sp-file")
         .arg(script_path)
@@ -361,31 +362,18 @@ fn run_spatch(script_path: &Path, target: &Path) -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("failed to run spatch: {}", e))?;
 
-    let status = match child
-        .wait_timeout(timeout)
-        .map_err(|e| format!("failed to wait for spatch: {}", e))?
-    {
-        Some(status) => status,
-        None => {
-            let _ = child.kill();
-            let _ = child.wait();
+    let result = wait_with_output_timeout(child, timeout)
+        .map_err(|e| format!("failed to wait for spatch: {}", e))?;
+
+    let (status_ok, raw_stdout, raw_stderr) = match result {
+        TimedOutput::TimedOut { .. } => {
             return Err(format!("spatch timed out after {}s", timeout.as_secs()));
         }
+        TimedOutput::Finished(output) => (output.status.success(), output.stdout, output.stderr),
     };
 
-    let mut stdout = Vec::new();
-    if let Some(mut pipe) = child.stdout.take() {
-        pipe.read_to_end(&mut stdout)
-            .map_err(|e| format!("failed to read spatch stdout: {}", e))?;
-    }
-    let mut stderr = Vec::new();
-    if let Some(mut pipe) = child.stderr.take() {
-        pipe.read_to_end(&mut stderr)
-            .map_err(|e| format!("failed to read spatch stderr: {}", e))?;
-    }
-
-    let stdout = String::from_utf8_lossy(&stdout);
-    let stderr = String::from_utf8_lossy(&stderr);
+    let stdout = String::from_utf8_lossy(&raw_stdout);
+    let stderr = String::from_utf8_lossy(&raw_stderr);
     let combined = if stderr.trim().is_empty() {
         stdout.to_string()
     } else if stdout.trim().is_empty() {
@@ -394,7 +382,7 @@ fn run_spatch(script_path: &Path, target: &Path) -> Result<String, String> {
         format!("{stdout}\n{stderr}")
     };
 
-    if status.success()
+    if status_ok
         || combined.contains("\n@@ ")
         || combined.starts_with("@@ ")
         || combined.contains("\n--- ")
