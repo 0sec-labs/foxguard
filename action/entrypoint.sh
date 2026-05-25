@@ -48,7 +48,7 @@ echo "URL: ${DOWNLOAD_URL}"
 INSTALL_DIR="${RUNNER_TEMP:-/tmp}/foxguard"
 mkdir -p "${INSTALL_DIR}"
 
-curl -sL "${DOWNLOAD_URL}" -o "${INSTALL_DIR}/${EXECUTABLE_NAME}"
+curl --fail -sL "${DOWNLOAD_URL}" -o "${INSTALL_DIR}/${EXECUTABLE_NAME}"
 if [ "${PLATFORM}" != "windows" ]; then
     chmod +x "${INSTALL_DIR}/${EXECUTABLE_NAME}"
 fi
@@ -92,7 +92,14 @@ else
     OUTPUT=$("${EXECUTABLE_PATH}" "${ARGS[@]}" 2>&1) || EXIT_CODE=$?
     echo "${OUTPUT}"
     if [ "${FORMAT}" = "json" ]; then
-        FINDINGS_COUNT=$(echo "${OUTPUT}" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+        FINDINGS_COUNT=$(echo "${OUTPUT}" | python3 -c "
+import json, sys
+report = json.load(sys.stdin)
+if isinstance(report, list):
+    print(len(report))
+else:
+    print(report.get('finding_counts', {}).get('total', len(report.get('findings', []))))
+" 2>/dev/null || echo "0")
     else
         FINDINGS_COUNT="${EXIT_CODE}"
     fi
@@ -147,12 +154,12 @@ if [ "${FORMAT}" = "sarif" ] && [ "${UPLOAD_SARIF}" = "true" ] && [ -f "${SARIF_
         COMMIT_SHA="${GITHUB_SHA:-$(git rev-parse HEAD)}"
         REF="${GITHUB_REF:-$(git symbolic-ref HEAD)}"
 
-        curl -sL -X POST \
+        SARIF_RESPONSE=$(curl --fail --show-error -sL -X POST \
             -H "Authorization: token ${INPUT_GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/code-scanning/sarifs" \
             -d "{\"commit_sha\":\"${COMMIT_SHA}\",\"ref\":\"${REF}\",\"sarif\":\"${SARIF_BASE64}\"}" \
-            > /dev/null 2>&1 || echo "::warning::Failed to upload SARIF results (Code Scanning may not be enabled)"
+            2>&1) || echo "::warning::Failed to upload SARIF results (Code Scanning may not be enabled). Response: ${SARIF_RESPONSE}"
     fi
 fi
 
