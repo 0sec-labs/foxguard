@@ -211,3 +211,4 @@ Adding a rule is one struct implementing a trait. See [`CONTRIBUTING.md`](./CONT
 
 MIT OR Apache-2.0
 <!-- v5 -->
+<!-- v6 -->
