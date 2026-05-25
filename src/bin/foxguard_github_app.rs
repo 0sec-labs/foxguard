@@ -545,12 +545,15 @@ fn git_clone_head(
     installation_token: &str,
     checkout: &Path,
 ) -> Result<(), String> {
+    let authed_url = clone_target
+        .url
+        .replace("https://", &format!("https://x-access-token:{installation_token}@"));
     run_git(
         &[
             "clone",
             "--filter=blob:none",
             "--no-checkout",
-            &clone_target.url,
+            &authed_url,
             checkout
                 .to_str()
                 .ok_or_else(|| "checkout path is not valid UTF-8".to_string())?,
