@@ -7,7 +7,27 @@
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
       <div class="flex items-center gap-3">
         <img src="/foxguard-logo.png" alt="" class="h-5 w-5 object-contain" loading="lazy" decoding="async" />
-        <span class="text-noir-500 text-sm">foxguard · MIT OR Apache-2.0 · <a href="https://github.com/0sec-labs" class="text-noir-400 hover:text-noir-100 no-underline">0sec Labs</a></span>
+        <span class="text-noir-500 text-sm">foxguard · MIT OR Apache-2.0 ·
+          <a
+            href="https://0sec.ai"
+            target="_blank"
+            rel="noopener"
+            class="inline-flex items-baseline gap-1 text-noir-400 hover:text-noir-100 no-underline"
+          >
+            <span class="osec-wm osec-wm-tail-slashed text-noir-300" aria-label="0sec">
+              <span class="osec-wm-stage">
+                <span class="osec-wm-mark">0</span>
+                <span class="osec-wm-tail">
+                  <span class="osec-wm-prey">s</span>
+                  <span class="osec-wm-prey">e</span>
+                  <span class="osec-wm-prey">c</span>
+                </span>
+                <span class="osec-wm-bar" aria-hidden="true"></span>
+              </span>
+            </span>
+            <span>Labs</span>
+          </a>
+        </span>
       </div>
       <div class="flex items-center gap-5 text-sm text-noir-600">
         <a href="https://github.com/0sec-labs/foxguard" class="hover:text-noir-100 transition-colors no-underline">GitHub</a>
@@ -18,3 +38,56 @@
     </div>
   </div>
 </footer>
+
+<style>
+  /* 0sec canonical wordmark — mirrors SiteNav's osec-wm styles */
+  .osec-wm {
+    display: inline-block;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.05em;
+    line-height: 1;
+  }
+
+  .osec-wm-stage {
+    position: relative;
+    display: inline-flex;
+    align-items: baseline;
+    line-height: 1;
+  }
+
+  .osec-wm-mark {
+    position: relative;
+    z-index: 3;
+    display: inline-block;
+  }
+
+  .osec-wm-tail {
+    position: relative;
+    display: inline-flex;
+    overflow: hidden;
+    vertical-align: baseline;
+    white-space: nowrap;
+    max-width: 1.8em;
+  }
+
+  .osec-wm-prey {
+    position: relative;
+    z-index: 1;
+    display: inline-block;
+    opacity: 1;
+  }
+
+  .osec-wm-bar {
+    position: absolute;
+    z-index: 4;
+    left: 0;
+    top: 0.085em;
+    width: 0.11em;
+    height: 0.85em;
+    background: #DC2626;
+    transform: translateX(0.32em) rotate(15deg);
+    transform-origin: center;
+    pointer-events: none;
+  }
+</style>
