@@ -167,6 +167,7 @@ fn non_pq_findings_in_json_have_no_cnsa2_deadline() {
 fn cnsa2_flag_off_does_not_mention_cnsa_in_terminal() {
     let out = foxguard_cmd()
         .arg(fixture("vulnerable.py"))
+        .args(["--config", "/dev/null"])
         .output()
         .expect("foxguard should run");
     let text = String::from_utf8_lossy(&out.stdout);
@@ -195,6 +196,7 @@ fn cnsa2_flag_on_adds_deadline_annotation_and_summary() {
     let out = foxguard_cmd()
         .arg(fixture("vulnerable.py"))
         .arg("--cnsa2")
+        .args(["--config", "/dev/null"])
         .output()
         .expect("foxguard should run");
     let text = String::from_utf8_lossy(&out.stdout);
@@ -225,7 +227,7 @@ fn sarif_always_includes_cnsa2_deadline_in_properties() {
     // `cnsa2Deadline` per SARIF convention — not snake_case.
     let out = foxguard_cmd()
         .arg(fixture("vulnerable.py"))
-        .args(["--format", "sarif"])
+        .args(["--format", "sarif", "--config", "/dev/null"])
         .output()
         .expect("foxguard should run");
     let text = String::from_utf8_lossy(&out.stdout);
@@ -243,7 +245,7 @@ fn sarif_always_includes_cnsa2_deadline_in_properties() {
 fn sarif_includes_dep_name_in_properties() {
     let out = foxguard_cmd()
         .arg(fixture("deps/requirements.txt"))
-        .args(["--format", "sarif"])
+        .args(["--format", "sarif", "--config", "/dev/null"])
         .output()
         .expect("foxguard should run");
     let text = String::from_utf8_lossy(&out.stdout);
