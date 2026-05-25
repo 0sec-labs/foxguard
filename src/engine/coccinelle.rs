@@ -4,7 +4,7 @@ use crate::{Finding, Severity};
 use ignore::WalkBuilder;
 use regex::Regex;
 use serde::Deserialize;
-use serde_yaml::Value as YamlValue;
+use serde_yaml_ng::Value as YamlValue;
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -157,7 +157,7 @@ pub fn load_coccinelle_rules(path: &Path) -> (Vec<CoccinelleRule>, Vec<String>) 
 pub fn parse_coccinelle_file(path: &Path) -> Result<(Vec<CoccinelleRule>, Vec<String>), String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-    let raw_doc: YamlValue = serde_yaml::from_str(&content)
+    let raw_doc: YamlValue = serde_yaml_ng::from_str(&content)
         .map_err(|e| format!("Failed to parse YAML {}: {}", path.display(), e))?;
 
     let Some(raw_rules) = raw_doc.get("rules").and_then(YamlValue::as_sequence) else {
@@ -176,7 +176,7 @@ pub fn parse_coccinelle_file(path: &Path) -> Result<(Vec<CoccinelleRule>, Vec<St
             .get("id")
             .and_then(YamlValue::as_str)
             .unwrap_or("<unknown>");
-        let yaml: CoccinelleRuleYaml = match serde_yaml::from_value(raw_rule.clone()) {
+        let yaml: CoccinelleRuleYaml = match serde_yaml_ng::from_value(raw_rule.clone()) {
             Ok(yaml) => yaml,
             Err(error) => {
                 notices.push(format!(

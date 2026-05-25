@@ -335,7 +335,7 @@ pub trait Rule: Send + Sync {
     /// Apply per-rule options from config. Rules that support tuning override
     /// this to parse their options from the YAML value. Returns an error
     /// message if the options are invalid.
-    fn configure(&mut self, _opts: &serde_yaml::Value) -> Result<(), String> {
+    fn configure(&mut self, _opts: &serde_yaml_ng::Value) -> Result<(), String> {
         Ok(())
     }
 
@@ -723,7 +723,7 @@ impl RuleRegistry {
     /// and returns errors for invalid option values.
     pub fn configure_rules(
         &mut self,
-        rule_options: &std::collections::HashMap<String, serde_yaml::Value>,
+        rule_options: &std::collections::HashMap<String, serde_yaml_ng::Value>,
     ) -> Result<Vec<String>, String> {
         let mut warnings = Vec::new();
         for (rule_id, opts) in rule_options {
@@ -972,7 +972,7 @@ mod tests {
     fn configure_rules_warns_on_unknown_rule_id() {
         let mut registry = RuleRegistry::new();
         let mut opts = std::collections::HashMap::new();
-        opts.insert("py/does-not-exist".to_string(), serde_yaml::Value::Null);
+        opts.insert("py/does-not-exist".to_string(), serde_yaml_ng::Value::Null);
         let warnings = registry.configure_rules(&opts).unwrap();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("py/does-not-exist"));
@@ -982,7 +982,7 @@ mod tests {
     fn configure_rules_no_warning_for_known_rule() {
         let mut registry = RuleRegistry::new();
         let mut opts = std::collections::HashMap::new();
-        opts.insert("py/no-eval".to_string(), serde_yaml::Value::Null);
+        opts.insert("py/no-eval".to_string(), serde_yaml_ng::Value::Null);
         let warnings = registry.configure_rules(&opts).unwrap();
         assert!(warnings.is_empty());
     }
