@@ -418,6 +418,12 @@ async fn process_pull_request_delivery(
     .await
     .map_err(|error| format!("pull_request scan task failed: {error}"))??;
 
+    let changed_lines = state
+        .review
+        .pull_request_changed_lines(&result.repo, result.pr_number, &token)
+        .await
+        .map_err(|error| error.to_string())?;
+
     let review = state
         .review
         .post_pull_request_review(
@@ -427,6 +433,7 @@ async fn process_pull_request_delivery(
             &result.findings,
             None,
             &token,
+            Some(&changed_lines),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -434,7 +441,13 @@ async fn process_pull_request_delivery(
     result.deleted_comments = review.deleted_comments;
     match state
         .review
-        .post_check_run(&result.repo, &result.head_sha, &result.findings, &token)
+        .post_check_run(
+            &result.repo,
+            &result.head_sha,
+            &result.findings,
+            &token,
+            Some(&changed_lines),
+        )
         .await
     {
         Ok(check_run) => {

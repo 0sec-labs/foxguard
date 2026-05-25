@@ -57,6 +57,22 @@ impl GitHubReviewClient {
         Ok(Self { http, api_base_url })
     }
 
+    /// Fetch the set of commentable lines (added or context lines) for
+    /// each file in a pull request. This is the same data used to filter
+    /// inline review comments; callers may also use it to scope check-run
+    /// annotations and conclusions to PR-introduced findings only.
+    pub async fn pull_request_changed_lines(
+        &self,
+        repo_full_name: &str,
+        pr_number: u64,
+        installation_token: &str,
+    ) -> Result<HashMap<String, HashSet<usize>>, ReviewError> {
+        let repo = RepositoryPath::parse(repo_full_name)?;
+        self.pull_request_commentable_lines(&repo, pr_number, installation_token)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub async fn post_pull_request_review(
         &self,
         repo_full_name: &str,
@@ -65,6 +81,7 @@ impl GitHubReviewClient {
         findings: &[Finding],
         scan_root: Option<&Path>,
         installation_token: &str,
+        changed_lines: Option<&HashMap<String, HashSet<usize>>>,
     ) -> Result<PostReviewOutcome, ReviewError> {
         let repo = RepositoryPath::parse(repo_full_name)?;
         let existing_comment_ids = self
@@ -80,11 +97,18 @@ impl GitHubReviewClient {
             });
         }
 
-        let commentable_lines = self
-            .pull_request_commentable_lines(&repo, pr_number, installation_token)
-            .await?;
+        let owned_lines;
+        let commentable_lines = match changed_lines {
+            Some(lines) => lines,
+            None => {
+                owned_lines = self
+                    .pull_request_commentable_lines(&repo, pr_number, installation_token)
+                    .await?;
+                &owned_lines
+            }
+        };
         let comments =
-            review_comments_for_commentable_lines(findings, &commentable_lines, scan_root);
+            review_comments_for_commentable_lines(findings, commentable_lines, scan_root);
         if comments.is_empty() {
             let deleted_comments = self
                 .delete_foxguard_comment_ids(&repo, &existing_comment_ids, installation_token)
@@ -117,19 +141,27 @@ impl GitHubReviewClient {
         head_sha: &str,
         findings: &[Finding],
         installation_token: &str,
+        changed_lines: Option<&HashMap<String, HashSet<usize>>>,
     ) -> Result<PostCheckRunOutcome, ReviewError> {
         let repo = RepositoryPath::parse(repo_full_name)?;
-        let annotations = check_run_annotations(findings);
+        let pr_findings: Vec<Finding>;
+        let effective_findings = if let Some(lines) = changed_lines {
+            pr_findings = filter_findings_to_changed_lines(findings, lines);
+            &pr_findings
+        } else {
+            findings
+        };
+        let annotations = check_run_annotations(effective_findings);
         let annotation_count = annotations.len();
         let url = self.endpoint(&format!("repos/{}/{}/check-runs", repo.owner, repo.name))?;
         let body = serde_json::json!({
             "name": "foxguard",
             "head_sha": head_sha,
             "status": "completed",
-            "conclusion": check_run_conclusion(findings),
+            "conclusion": check_run_conclusion(effective_findings),
             "output": {
-                "title": check_run_title(findings),
-                "summary": check_run_summary(findings, annotation_count),
+                "title": check_run_title(effective_findings),
+                "summary": check_run_summary(effective_findings, annotation_count),
                 "annotations": annotations,
             },
         });
@@ -446,6 +478,26 @@ fn hunk_new_start(line: &str) -> Option<usize> {
     start.parse().ok()
 }
 
+/// Filter findings to only those whose file AND line fall within the
+/// PR's changed lines. This ensures check-run annotations and the
+/// conclusion reflect only PR-introduced issues, not pre-existing ones.
+fn filter_findings_to_changed_lines(
+    findings: &[Finding],
+    changed_lines: &HashMap<String, HashSet<usize>>,
+) -> Vec<Finding> {
+    findings
+        .iter()
+        .filter(|finding| {
+            // HashMap::get on the local changed-lines map; not a network call.
+            // foxguard: ignore[rs/no-ssrf]
+            changed_lines
+                .get(&finding.file)
+                .is_some_and(|lines| lines.contains(&finding.line))
+        })
+        .cloned()
+        .collect()
+}
+
 fn check_run_conclusion(findings: &[Finding]) -> &'static str {
     if findings.is_empty() {
         return "success";
@@ -632,6 +684,13 @@ mod tests {
         }
     }
 
+    fn finding_in_file(severity: Severity, file: &str, line: usize) -> Finding {
+        Finding {
+            file: file.to_string(),
+            ..finding(severity, line)
+        }
+    }
+
     #[test]
     fn check_run_conclusion_matches_severity() {
         assert_eq!(check_run_conclusion(&[]), "success");
@@ -667,6 +726,104 @@ mod tests {
 
         assert!(summary.contains("60 issue(s)"));
         assert!(summary.contains("Showing the first 50"));
+    }
+
+    #[test]
+    fn filter_findings_to_changed_lines_excludes_pre_existing() {
+        let mut changed_lines: HashMap<String, HashSet<usize>> = HashMap::new();
+        changed_lines.insert("src/app.js".to_string(), HashSet::from([10, 11, 12]));
+        changed_lines.insert("src/utils.js".to_string(), HashSet::from([5, 6]));
+
+        let findings = vec![
+            // In changed file + changed line -> included
+            finding_in_file(Severity::Critical, "src/app.js", 10),
+            // In changed file but NOT a changed line -> excluded (pre-existing)
+            finding_in_file(Severity::High, "src/app.js", 50),
+            // In an entirely different file not in the PR -> excluded
+            finding_in_file(Severity::High, "src/legacy.js", 1),
+            // In changed file + changed line -> included
+            finding_in_file(Severity::Low, "src/utils.js", 5),
+        ];
+
+        let filtered = filter_findings_to_changed_lines(&findings, &changed_lines);
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].file, "src/app.js");
+        assert_eq!(filtered[0].line, 10);
+        assert_eq!(filtered[1].file, "src/utils.js");
+        assert_eq!(filtered[1].line, 5);
+    }
+
+    #[test]
+    fn check_run_only_fails_for_pr_introduced_high_severity() {
+        // Simulate a repo scan that found both pre-existing and
+        // PR-introduced findings. The check-run conclusion must only
+        // consider findings on lines that the PR actually changed.
+        let mut changed_lines: HashMap<String, HashSet<usize>> = HashMap::new();
+        changed_lines.insert("src/app.js".to_string(), HashSet::from([10, 11, 12]));
+
+        // Pre-existing high-severity finding on an unchanged line.
+        let pre_existing_high = finding_in_file(Severity::High, "src/app.js", 50);
+        // Pre-existing critical finding in an entirely different file.
+        let pre_existing_critical = finding_in_file(Severity::Critical, "src/legacy.js", 1);
+        // PR-introduced low-severity finding.
+        let pr_low = finding_in_file(Severity::Low, "src/app.js", 10);
+
+        let all_findings = vec![pre_existing_high, pre_existing_critical, pr_low];
+
+        // Without filtering (the old behavior), the conclusion would be
+        // "failure" because of the pre-existing high/critical findings.
+        assert_eq!(check_run_conclusion(&all_findings), "failure");
+
+        // With filtering to changed lines, only the low-severity finding
+        // remains, so the conclusion should be "neutral" (not failure).
+        let pr_findings = filter_findings_to_changed_lines(&all_findings, &changed_lines);
+        assert_eq!(pr_findings.len(), 1);
+        assert_eq!(pr_findings[0].severity, Severity::Low);
+        assert_eq!(check_run_conclusion(&pr_findings), "neutral");
+
+        // Annotations should also only include the PR-introduced finding.
+        let annotations = check_run_annotations(&pr_findings);
+        assert_eq!(annotations.len(), 1);
+        assert_eq!(annotations[0]["path"], "src/app.js");
+        assert_eq!(annotations[0]["start_line"], 10);
+        assert_eq!(annotations[0]["annotation_level"], "notice");
+    }
+
+    #[test]
+    fn check_run_fails_only_when_pr_introduces_high_severity() {
+        // When the PR itself introduces a high-severity finding, the
+        // check run should correctly fail.
+        let mut changed_lines: HashMap<String, HashSet<usize>> = HashMap::new();
+        changed_lines.insert("src/app.js".to_string(), HashSet::from([10, 11]));
+
+        let findings = vec![
+            // Pre-existing critical (should be filtered out)
+            finding_in_file(Severity::Critical, "src/legacy.js", 1),
+            // PR-introduced high (should cause failure)
+            finding_in_file(Severity::High, "src/app.js", 10),
+            // PR-introduced low
+            finding_in_file(Severity::Low, "src/app.js", 11),
+        ];
+
+        let pr_findings = filter_findings_to_changed_lines(&findings, &changed_lines);
+        assert_eq!(pr_findings.len(), 2);
+        assert_eq!(check_run_conclusion(&pr_findings), "failure");
+    }
+
+    #[test]
+    fn check_run_succeeds_when_no_pr_findings() {
+        // All findings are pre-existing; the PR changed lines have none.
+        let mut changed_lines: HashMap<String, HashSet<usize>> = HashMap::new();
+        changed_lines.insert("src/app.js".to_string(), HashSet::from([10]));
+
+        let findings = vec![
+            finding_in_file(Severity::Critical, "src/app.js", 50),
+            finding_in_file(Severity::High, "src/other.js", 1),
+        ];
+
+        let pr_findings = filter_findings_to_changed_lines(&findings, &changed_lines);
+        assert!(pr_findings.is_empty());
+        assert_eq!(check_run_conclusion(&pr_findings), "success");
     }
 
     #[test]
