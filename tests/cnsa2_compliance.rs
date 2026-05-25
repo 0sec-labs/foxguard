@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn foxguard_cmd() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_foxguard"))
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_foxguard"));
+    cmd.args(["--config", "/dev/null"]);
+    cmd
 }
 
 fn fixture(name: &str) -> PathBuf {
