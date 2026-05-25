@@ -3,6 +3,7 @@
 //! Provides command building, output parsing, finding normalization,
 //! skip logic, and the `assert_parity` entry point used by every
 //! language-specific parity test file (`semgrep_parity*.rs`).
+#![allow(dead_code)]
 //!
 //! Extracted from the formerly-duplicated per-language harnesses
 //! (issue #408).
