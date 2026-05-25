@@ -317,28 +317,15 @@ impl GitHubAppAuthClient {
         // URL construction is restricted by `validate_api_base_url`; non-GitHub
         // Enterprise hosts must be explicitly allowlisted by the operator.
         let request = self.http.post(url); // foxguard: ignore[rs/no-ssrf]
-        let response = request
+        let token = request
             .bearer_auth(jwt)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
             .send()
+            .await?
+            .error_for_status()?
+            .json::<InstallationToken>()
             .await?;
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        eprintln!("token-exchange: status={status} len={}", body.len());
-        if !status.is_success() {
-            eprintln!("token-exchange-error: {body}");
-            return Err(AuthError::Jwt(jsonwebtoken::errors::Error::from(
-                jsonwebtoken::errors::ErrorKind::InvalidToken,
-            )));
-        }
-        let token: InstallationToken = serde_json::from_str(&body).map_err(|e| {
-            eprintln!("token-exchange-parse: {e}");
-            AuthError::Jwt(jsonwebtoken::errors::Error::from(
-                jsonwebtoken::errors::ErrorKind::InvalidToken,
-            ))
-        })?;
-        eprintln!("token-exchange: ok token_prefix={}", &token.token[..token.token.len().min(10)]);
         Ok(token)
     }
 

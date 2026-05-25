@@ -545,9 +545,10 @@ fn git_clone_head(
     installation_token: &str,
     checkout: &Path,
 ) -> Result<(), String> {
-    let authed_url = clone_target
-        .url
-        .replace("https://", &format!("https://x-access-token:{installation_token}@"));
+    let authed_url = clone_target.url.replace(
+        "https://",
+        &format!("https://x-access-token:{installation_token}@"),
+    );
     run_git(
         &[
             "clone",
@@ -578,7 +579,7 @@ fn git_clone_head(
 
 fn run_git(
     args: &[&str],
-    auth_header_key: &str,
+    _auth_header_key: &str,
     installation_token: &str,
     current_dir: Option<&Path>,
 ) -> Result<(), String> {
