@@ -3865,6 +3865,35 @@ rules:
     }
 
     #[test]
+    fn test_secrets_mode_scans_hidden_files() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_secret_file(repo.path(), ".env");
+
+        let output = foxguard_cmd()
+            .args([
+                "secrets",
+                repo.path().to_str().expect("non-utf8 path"),
+                "-f",
+                "json",
+            ])
+            .output()
+            .expect("failed to execute foxguard secrets");
+
+        assert!(
+            !output.status.success(),
+            "secrets in hidden .env file should produce findings"
+        );
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f["file"].as_str().unwrap_or_default().ends_with(".env")),
+            "expected at least one finding from .env file, got: {findings:?}"
+        );
+    }
+
+    #[test]
     fn test_secrets_mode_ignore_rule_skips_specific_patterns() {
         let repo = TempDir::new().expect("failed to create temp dir");
         write_secrets_fixture(repo.path());
