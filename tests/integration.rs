@@ -3864,6 +3864,68 @@ rules:
         assert!(findings.is_empty(), "expected excluded file to be skipped");
     }
 
+    /// Issue #401: secrets mode must scan hidden files (e.g. `.env`) by default.
+    #[test]
+    fn test_secrets_mode_scans_dotenv_files() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_secret_file(repo.path(), ".env");
+
+        let output = foxguard_cmd()
+            .args([
+                "secrets",
+                repo.path().to_str().expect("non-utf8 path"),
+                "-f",
+                "json",
+            ])
+            .output()
+            .expect("failed to execute foxguard secrets");
+
+        assert!(
+            !output.status.success(),
+            "secrets mode should detect tokens in .env files"
+        );
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f["file"].as_str().unwrap_or_default().ends_with(".env")),
+            "at least one finding should reference .env; findings={findings:?}"
+        );
+    }
+
+    /// Issue #401: secrets mode must also traverse hidden directories.
+    #[test]
+    fn test_secrets_mode_scans_hidden_directories() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        let hidden_dir = repo.path().join(".config");
+        fs::create_dir_all(&hidden_dir).expect("failed to create .config dir");
+        write_secret_file(&hidden_dir, "credentials");
+
+        let output = foxguard_cmd()
+            .args([
+                "secrets",
+                repo.path().to_str().expect("non-utf8 path"),
+                "-f",
+                "json",
+            ])
+            .output()
+            .expect("failed to execute foxguard secrets");
+
+        assert!(
+            !output.status.success(),
+            "secrets mode should detect tokens inside hidden directories"
+        );
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f["file"].as_str().unwrap_or_default().contains(".config")),
+            "at least one finding should reference .config/; findings={findings:?}"
+        );
+    }
+
     #[test]
     fn test_secrets_mode_scans_hidden_files() {
         let repo = TempDir::new().expect("failed to create temp dir");
