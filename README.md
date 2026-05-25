@@ -134,7 +134,7 @@ secrets:
   exclude_paths: [fixtures, testdata]
 ```
 
-Inline suppression: `// foxguard: ignore[rule-id]`. Full reference at [foxguard.dev/docs](https://foxguard.dev/docs).
+Suppress an accepted finding inline with `// foxguard: ignore[rule-id]`.
 
 ## Benchmarks
 
