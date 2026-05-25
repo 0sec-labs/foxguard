@@ -42,16 +42,6 @@ fn foxguard_cmd() -> Command {
     Command::new(env!("CARGO_BIN_EXE_foxguard"))
 }
 
-/// Like [`foxguard_cmd`] but forces `--config /dev/null`. Use this for tests
-/// that scan repo fixtures from `CARGO_MANIFEST_DIR` and assert exact
-/// finding counts — without it, any local developer `.foxguard.yml` or
-/// `.foxguard/baseline.json` in the project root will silently suppress
-/// findings (the repo's own baseline legitimately covers tests/fixtures/*
-/// for self-scan hygiene).
-///
-/// Do NOT use this for tests that set `current_dir` to a TempDir with their
-/// own `.foxguard.yml` — those rely on config discovery and an explicit
-/// `--config` would override them.
 fn foxguard_cmd_isolated() -> Command {
     let mut cmd = foxguard_cmd();
     cmd.args(["--config", "/dev/null"]);
@@ -4452,7 +4442,7 @@ mod config_files {
     use foxguard::Language;
 
     fn scan_fixture_dir(relative: &str) -> Vec<serde_json::Value> {
-        let output = foxguard_cmd()
+        let output = foxguard_cmd_isolated()
             .args([&format!("tests/fixtures/config/{relative}"), "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
