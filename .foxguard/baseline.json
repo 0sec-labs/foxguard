@@ -2930,60 +2930,6 @@
       "line": 30
     },
     {
-      "fingerprint": "0a42b62356bcfda1e3101c7a3984d2142b3c47ae38e6d4833d424f9aa9c69e45",
-      "rule_id": "rs/no-command-injection",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 17
-    },
-    {
-      "fingerprint": "65d13a0f10ee8816cb77a05dead5b3a17f47f84248740d9574bc06669a91ac9e",
-      "rule_id": "rs/no-path-traversal",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 21
-    },
-    {
-      "fingerprint": "433cd3f0889bffe7b0592e65d9298cea78c5848114aae9056795cf2315131222",
-      "rule_id": "rs/no-path-traversal",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 21
-    },
-    {
-      "fingerprint": "1ec6ba7f3356078b65dec9cdba0551d57bba879602eef81a966ab1dc194e3854",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 30
-    },
-    {
-      "fingerprint": "835e315c53de1f3f03873ab092be6e1e41976c6ab2b42a97eb79d35205d1f82f",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 106
-    },
-    {
-      "fingerprint": "7465caf895f2654f1c71af53511394515712c5027f02d4ca0286582c8f5fed8d",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 168
-    },
-    {
-      "fingerprint": "2eb8cb29cf86689a3a3adc2cc78b9296f2df4ba132650cb523e5790421888554",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 195
-    },
-    {
-      "fingerprint": "a8c019ee62c699770dc3ca5d4ae948ee0c480ed869ea3e4b7698eecc52af2f4d",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 226
-    },
-    {
-      "fingerprint": "0fbfee7b7fb457db978e237d5badd726e1b371486c62933e6c1ad003d6c12d95",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 244
-    },
-    {
       "fingerprint": "e4c1e998ff0addd04964f8ef0ff3415760c5e38077fa5e83dfdeb1797be61b55",
       "rule_id": "rs/no-command-injection",
       "file": "tests/coccinelle_integration.rs",
@@ -9774,6 +9720,60 @@
       "rule_id": "js/no-command-injection",
       "file": "vscode-extension/src/extension.ts",
       "line": 368
+    },
+    {
+      "fingerprint": "0a42b62356bcfda1e3101c7a3984d2142b3c47ae38e6d4833d424f9aa9c69e45",
+      "rule_id": "rs/no-command-injection",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 17
+    },
+    {
+      "fingerprint": "65d13a0f10ee8816cb77a05dead5b3a17f47f84248740d9574bc06669a91ac9e",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 21
+    },
+    {
+      "fingerprint": "433cd3f0889bffe7b0592e65d9298cea78c5848114aae9056795cf2315131222",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 21
+    },
+    {
+      "fingerprint": "1ec6ba7f3356078b65dec9cdba0551d57bba879602eef81a966ab1dc194e3854",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 30
+    },
+    {
+      "fingerprint": "835e315c53de1f3f03873ab092be6e1e41976c6ab2b42a97eb79d35205d1f82f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 106
+    },
+    {
+      "fingerprint": "7465caf895f2654f1c71af53511394515712c5027f02d4ca0286582c8f5fed8d",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 168
+    },
+    {
+      "fingerprint": "2eb8cb29cf86689a3a3adc2cc78b9296f2df4ba132650cb523e5790421888554",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 195
+    },
+    {
+      "fingerprint": "a8c019ee62c699770dc3ca5d4ae948ee0c480ed869ea3e4b7698eecc52af2f4d",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 226
+    },
+    {
+      "fingerprint": "0fbfee7b7fb457db978e237d5badd726e1b371486c62933e6c1ad003d6c12d95",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 244
     }
   ]
 }
