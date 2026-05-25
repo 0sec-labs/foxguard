@@ -17,6 +17,25 @@ interface Finding {
   fix_suggestion?: string;
 }
 
+/** Versioned envelope emitted by the CLI JSON reporter (v1.0.0+). */
+interface ReportEnvelope {
+  schema_version: string;
+  findings: Finding[];
+}
+
+/**
+ * Extract the findings array from CLI stdout.  Current foxguard wraps
+ * findings in a {@link ReportEnvelope}; older versions emitted a bare
+ * `Finding[]`.  This helper handles both shapes so the extension stays
+ * backward-compatible.
+ */
+function extractFindings(parsed: ReportEnvelope | Finding[]): Finding[] {
+  if (Array.isArray(parsed)) {
+    return parsed;                   // legacy bare array
+  }
+  return parsed.findings ?? [];      // versioned envelope
+}
+
 /** File extensions foxguard supports. */
 const SUPPORTED_EXTENSIONS = new Set([
   ".js", ".jsx", ".mjs", ".cjs",
@@ -277,7 +296,7 @@ function scanDocument(document: vscode.TextDocument): void {
 
         let findings: Finding[];
         try {
-          findings = JSON.parse(stdout);
+          findings = extractFindings(JSON.parse(stdout));
         } catch (e) {
           outputChannel.appendLine(`Parse error: ${e}`);
           setStatusDone(0);
@@ -378,7 +397,7 @@ async function scanWorkspace(): Promise<void> {
 
             let findings: Finding[];
             try {
-              findings = JSON.parse(stdout);
+              findings = extractFindings(JSON.parse(stdout));
             } catch {
               resolve();
               return;
