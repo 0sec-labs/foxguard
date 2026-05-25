@@ -38,7 +38,6 @@ use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
-use wait_timeout::ChildExt;
 
 /// Hard cap on incoming webhook body size. GitHub's largest legitimate
 /// `pull_request` payload sits around 200 KB; 1 MiB leaves comfortable
@@ -646,38 +645,36 @@ fn run_command_with_timeout(
     timeout: Duration,
     label: &str,
 ) -> Result<String, String> {
-    let mut child = command
+    use foxguard::engine::process::{wait_with_output_timeout, TimedOutput};
+
+    let child = command
         .spawn()
         .map_err(|error| format!("failed to run {label}: {error}"))?;
-    let status = match child
-        .wait_timeout(timeout)
-        .map_err(|error| format!("failed to wait for {label}: {error}"))?
-    {
-        Some(status) => status,
-        None => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!("{label} timed out after {}s", timeout.as_secs()));
+
+    let result = wait_with_output_timeout(child, timeout)
+        .map_err(|error| format!("failed to wait for {label}: {error}"))?;
+
+    match result {
+        TimedOutput::TimedOut { .. } => {
+            Err(format!("{label} timed out after {}s", timeout.as_secs()))
         }
-    };
-
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("failed to collect {label} output: {error}"))?;
-    if !status.success() && label != "foxguard" {
-        return Err(format!(
-            "{label} failed with {status}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+        TimedOutput::Finished(output) => {
+            let status = output.status;
+            if !status.success() && label != "foxguard" {
+                return Err(format!(
+                    "{label} failed with {status}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+            if label == "foxguard" && !matches!(status.code(), Some(0) | Some(1)) {
+                return Err(format!(
+                    "{label} failed with {status}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        }
     }
-    if label == "foxguard" && !matches!(status.code(), Some(0) | Some(1)) {
-        return Err(format!(
-            "{label} failed with {status}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 fn parse_json_findings(output: &str) -> Result<Vec<Finding>, String> {

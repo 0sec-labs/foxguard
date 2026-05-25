@@ -4,12 +4,10 @@ use serde_json::Value as JsonValue;
 use serde_yaml_ng::Value as YamlValue;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tempfile::TempDir;
-use wait_timeout::ChildExt;
 
 #[derive(Debug, Clone)]
 pub struct CodeQlRule {
@@ -367,6 +365,8 @@ pub fn scan_with_notices_for_target(
 }
 
 fn run_codeql_database_analyze(database: &Path, query: &Path) -> Result<String, String> {
+    use crate::engine::process::{wait_with_output_timeout, TimedOutput};
+
     let output = tempfile::NamedTempFile::new()
         .map_err(|e| format!("failed to create temporary SARIF output: {}", e))?;
     let output_path = output.path().to_path_buf();
@@ -375,7 +375,7 @@ fn run_codeql_database_analyze(database: &Path, query: &Path) -> Result<String, 
     output_arg.push(output_path.as_os_str());
 
     let timeout = codeql_timeout();
-    let mut child = Command::new("codeql")
+    let child = Command::new("codeql")
         .arg("database")
         .arg("analyze")
         .arg(database)
@@ -387,45 +387,29 @@ fn run_codeql_database_analyze(database: &Path, query: &Path) -> Result<String, 
         .spawn()
         .map_err(|e| format!("failed to run codeql: {}", e))?;
 
-    let status = match child
-        .wait_timeout(timeout)
-        .map_err(|e| format!("failed to wait for codeql: {}", e))?
-    {
-        Some(status) => status,
-        None => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!("codeql timed out after {}s", timeout.as_secs()));
+    let result = wait_with_output_timeout(child, timeout)
+        .map_err(|e| format!("failed to wait for codeql: {}", e))?;
+
+    match result {
+        TimedOutput::TimedOut { .. } => {
+            Err(format!("codeql timed out after {}s", timeout.as_secs()))
         }
-    };
-
-    let mut stdout = Vec::new();
-    if let Some(mut pipe) = child.stdout.take() {
-        pipe.read_to_end(&mut stdout)
-            .map_err(|e| format!("failed to read codeql stdout: {}", e))?;
+        TimedOutput::Finished(ref output) if !output.status.success() => {
+            let message = process_message(&output.stdout, &output.stderr);
+            if message.is_empty() {
+                Err("codeql exited without output".to_string())
+            } else {
+                Err(message)
+            }
+        }
+        TimedOutput::Finished(_) => std::fs::read_to_string(&output_path).map_err(|e| {
+            format!(
+                "failed to read CodeQL SARIF output {}: {}",
+                output_path.display(),
+                e
+            )
+        }),
     }
-    let mut stderr = Vec::new();
-    if let Some(mut pipe) = child.stderr.take() {
-        pipe.read_to_end(&mut stderr)
-            .map_err(|e| format!("failed to read codeql stderr: {}", e))?;
-    }
-
-    if !status.success() {
-        let message = process_message(&stdout, &stderr);
-        return if message.is_empty() {
-            Err("codeql exited without output".to_string())
-        } else {
-            Err(message)
-        };
-    }
-
-    std::fs::read_to_string(&output_path).map_err(|e| {
-        format!(
-            "failed to read CodeQL SARIF output {}: {}",
-            output_path.display(),
-            e
-        )
-    })
 }
 
 fn parse_sarif_findings(rule: &CodeQlRule, sarif: &str) -> Vec<Finding> {
@@ -600,6 +584,8 @@ fn language_from_source_root(scan_target: &Path) -> Option<String> {
 /// `TempDir` whose `path().join("db")` is the resulting database. Dropping
 /// the returned handle removes the temp tree.
 fn build_auto_database(scan_target: &Path, language: &str) -> Result<TempDir, String> {
+    use crate::engine::process::{wait_with_output_timeout, TimedOutput};
+
     let parent = TempDir::new().map_err(|e| format!("failed to create codeql temp dir: {}", e))?;
     let db_path = parent.path().join("db");
     let mut language_arg = OsString::from("--language=");
@@ -608,7 +594,7 @@ fn build_auto_database(scan_target: &Path, language: &str) -> Result<TempDir, St
     source_arg.push(scan_target.as_os_str());
 
     let timeout = codeql_create_timeout();
-    let mut child = Command::new("codeql")
+    let child = Command::new("codeql")
         .arg("database")
         .arg("create")
         .arg(&db_path)
@@ -620,40 +606,24 @@ fn build_auto_database(scan_target: &Path, language: &str) -> Result<TempDir, St
         .spawn()
         .map_err(|e| format!("failed to spawn codeql: {}", e))?;
 
-    let status = match child
-        .wait_timeout(timeout)
-        .map_err(|e| format!("failed to wait for codeql: {}", e))?
-    {
-        Some(status) => status,
-        None => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!(
-                "codeql database create timed out after {}s",
-                timeout.as_secs()
-            ));
+    let result = wait_with_output_timeout(child, timeout)
+        .map_err(|e| format!("failed to wait for codeql: {}", e))?;
+
+    match result {
+        TimedOutput::TimedOut { .. } => Err(format!(
+            "codeql database create timed out after {}s",
+            timeout.as_secs()
+        )),
+        TimedOutput::Finished(ref output) if !output.status.success() => {
+            let message = process_message(&output.stdout, &output.stderr);
+            if message.is_empty() {
+                Err("codeql database create exited without output".to_string())
+            } else {
+                Err(message)
+            }
         }
-    };
-
-    let mut stdout = Vec::new();
-    if let Some(mut pipe) = child.stdout.take() {
-        pipe.read_to_end(&mut stdout).ok();
+        TimedOutput::Finished(_) => Ok(parent),
     }
-    let mut stderr = Vec::new();
-    if let Some(mut pipe) = child.stderr.take() {
-        pipe.read_to_end(&mut stderr).ok();
-    }
-
-    if !status.success() {
-        let message = process_message(&stdout, &stderr);
-        return if message.is_empty() {
-            Err("codeql database create exited without output".to_string())
-        } else {
-            Err(message)
-        };
-    }
-
-    Ok(parent)
 }
 
 fn codeql_create_timeout() -> Duration {
