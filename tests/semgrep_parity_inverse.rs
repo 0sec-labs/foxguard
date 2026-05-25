@@ -23,9 +23,13 @@
 //! Tests are skipped (not failed) when the `semgrep` binary is absent
 //! from the host, mirroring the convention in `tests/semgrep_parity.rs`.
 
+mod common;
+
+use common::semgrep_parity_harness::{
+    normalize_path, semgrep_bin, skip_if_semgrep_missing, write_file,
+};
 use serde_json::Value;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -47,49 +51,6 @@ fn foxguard_cmd() -> Command {
     // hygiene). Matches the pattern in `tests/realistic_fixtures.rs`.
     cmd.args(["--config", "/dev/null"]);
     cmd
-}
-
-fn semgrep_bin() -> String {
-    std::env::var("SEMGREP_BIN").unwrap_or_else(|_| "semgrep".to_string())
-}
-
-fn semgrep_available() -> bool {
-    Command::new(semgrep_bin())
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-fn skip_if_semgrep_missing() -> bool {
-    if semgrep_available() {
-        return false;
-    }
-    eprintln!("semgrep not installed; skipping inverse parity test");
-    true
-}
-
-fn write_file(dir: &Path, relative_path: &str, content: &str) -> PathBuf {
-    let path = dir.join(relative_path);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("failed to create test directory");
-    }
-    fs::write(&path, content).expect("failed to write test file");
-    path
-}
-
-fn normalize_path(path: &str, repo: &Path) -> String {
-    let candidate = Path::new(path);
-    let normalized = candidate
-        .strip_prefix(repo)
-        .unwrap_or(candidate)
-        .to_string_lossy()
-        .replace('\\', "/");
-
-    normalized
-        .strip_prefix("./")
-        .unwrap_or(&normalized)
-        .to_string()
 }
 
 fn parse_foxguard_findings(output: &[u8], repo: &Path) -> Vec<NormalizedFinding> {
