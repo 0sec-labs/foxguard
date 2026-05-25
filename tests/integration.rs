@@ -3919,10 +3919,9 @@ rules:
 
         let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
         assert!(
-            findings.iter().any(|f| f["file"]
-                .as_str()
-                .unwrap_or_default()
-                .contains(".config")),
+            findings
+                .iter()
+                .any(|f| f["file"].as_str().unwrap_or_default().contains(".config")),
             "at least one finding should reference .config/; findings={findings:?}"
         );
     }
