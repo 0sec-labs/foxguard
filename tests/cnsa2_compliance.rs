@@ -107,7 +107,7 @@ fn scan_json_findings(target: &Path) -> Vec<serde_json::Value> {
     // below collapses to zero.
     let out = foxguard_cmd()
         .arg(target)
-        .args(["--format", "json", "--config", "/dev/null"])
+        .args(["--format", "json"])
         .output()
         .expect("foxguard should run");
     // foxguard exits 1 when findings exist — accept non-zero exit codes.
