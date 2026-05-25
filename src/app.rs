@@ -742,7 +742,7 @@ fn count_secret_files(scan_path: &Path) -> usize {
     }
 
     ignore::WalkBuilder::new(scan_path)
-        .hidden(true)
+        .hidden(false)
         .git_ignore(true)
         .build()
         .filter_map(|entry| entry.ok())

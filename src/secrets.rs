@@ -191,7 +191,7 @@ pub fn scan_directory_with_config_and_notices(
         vec![root_path.to_path_buf()]
     } else {
         WalkBuilder::new(root)
-            .hidden(true)
+            .hidden(false)
             .git_ignore(true)
             .build()
             .filter_map(|entry| entry.ok())
