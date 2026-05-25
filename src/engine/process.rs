@@ -22,10 +22,7 @@ pub enum TimedOutput {
     Finished(Output),
     /// The child did not exit in time and was killed. The captured output
     /// contains whatever was read before the kill.
-    TimedOut {
-        stdout: Vec<u8>,
-        stderr: Vec<u8>,
-    },
+    TimedOut { stdout: Vec<u8>, stderr: Vec<u8> },
 }
 
 impl TimedOutput {
@@ -128,8 +125,7 @@ mod tests {
             .spawn()
             .expect("failed to spawn dd");
 
-        let result =
-            wait_with_output_timeout(child, Duration::from_secs(10)).expect("IO error");
+        let result = wait_with_output_timeout(child, Duration::from_secs(10)).expect("IO error");
 
         match result {
             TimedOutput::Finished(output) => {
@@ -149,8 +145,7 @@ mod tests {
             .spawn()
             .expect("failed to spawn sleep");
 
-        let result =
-            wait_with_output_timeout(child, Duration::from_millis(200)).expect("IO error");
+        let result = wait_with_output_timeout(child, Duration::from_millis(200)).expect("IO error");
 
         assert!(result.timed_out());
     }
