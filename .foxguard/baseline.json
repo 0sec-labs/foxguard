@@ -2,58 +2,64 @@
   "version": 1,
   "entries": [
     {
-      "fingerprint": "b89c124fe93010f77a1a60bb135e1976c99b15280075edb7c947a8785072e7bd",
+      "fingerprint": "ca8d01dc68f93d6d31c289f7e3b49f01e3a6ec9d76a0fd480dc8d69610b203f6",
       "rule_id": "manifest/cargo-pq-vulnerable-dep",
       "file": "Cargo.lock",
-      "line": 704
+      "line": 848
     },
     {
-      "fingerprint": "0ea6086dbd77ba298852d72dcbeccc87a3fdaa4269009636c87d5160bf159171",
+      "fingerprint": "d9b58b015de9a4e886938d3d407c11da1ab7afeab53577be59cd1e3d1a55b38e",
       "rule_id": "manifest/cargo-pq-vulnerable-dep",
       "file": "Cargo.lock",
-      "line": 963
+      "line": 1128
     },
     {
-      "fingerprint": "7e201bee548e3de422819f89744a8e5e8f78ab89501ecfdce56993adf3d2c008",
+      "fingerprint": "782e9ee044acbab6eadcdbe3332c171725dd5130aa83a8bfbbcbe63e18f667d4",
       "rule_id": "manifest/cargo-pq-vulnerable-dep",
       "file": "Cargo.lock",
-      "line": 1765
+      "line": 1458
     },
     {
-      "fingerprint": "7c231dd1a4581f03df8f12ac21b0d0ac07149408f9bb4523da957659bf825208",
+      "fingerprint": "57e6b2a833e0a758db50730306d440f5a39c3b59d19916d9d6fba9930388aaf6",
       "rule_id": "manifest/cargo-pq-vulnerable-dep",
       "file": "Cargo.lock",
-      "line": 1785
+      "line": 2037
     },
     {
-      "fingerprint": "3a06d9d7b770e1b71bfb8dfb66884a5256859a2d1122c078699495c0761f30bb",
+      "fingerprint": "9383e2f1eb510e40e3506c5b0a9a483d1fd700029b45b95adf067dc08e791174",
       "rule_id": "manifest/cargo-pq-vulnerable-dep",
       "file": "Cargo.lock",
-      "line": 2032
+      "line": 2057
     },
     {
-      "fingerprint": "c6c09d85decfe5b84e72df8e89c397ff41b2cea0f8913f4fb5a05ac5a9da504f",
+      "fingerprint": "b8c3f97afd4486c411e0727cad44211599a0c7c1c999b8d7ed4475fce78b380e",
       "rule_id": "manifest/cargo-pq-vulnerable-dep",
       "file": "Cargo.lock",
-      "line": 2111
+      "line": 2316
     },
     {
-      "fingerprint": "c71ba792cdcd673a5298410b148f1db7178d203d5c57c17b4386c4b8f4193562",
+      "fingerprint": "c198ce10d96cd7e20cbe417a7ffe7981ee87c30354973b7cd443b80ac9994947",
       "rule_id": "manifest/cargo-pq-vulnerable-dep",
       "file": "Cargo.lock",
-      "line": 2147
+      "line": 2425
     },
     {
-      "fingerprint": "f692df692d2b7b297b172ffd3c7ad71712885d519e730afb8e42aaed78204806",
+      "fingerprint": "b43db077c8ed4c458ec8af5b7be264e65a30c41521b7c6fcf63f0e737eb72e4a",
       "rule_id": "manifest/cargo-pq-vulnerable-dep",
       "file": "Cargo.lock",
-      "line": 2174
+      "line": 2461
     },
     {
-      "fingerprint": "0b03454a95d26e9e4a6aae1a3bed295aef93124ad4cae1a6707fd07b7ac9bc38",
+      "fingerprint": "2160228bfb2babe2e7885d5081b4c41c6921818f50088cbcad20441806cf82ae",
       "rule_id": "manifest/cargo-pq-vulnerable-dep",
       "file": "Cargo.lock",
-      "line": 2759
+      "line": 2488
+    },
+    {
+      "fingerprint": "ef1d0906f9d2860751882b5266278143b52f86e5364d4f4a4d7c6d2061c6762f",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "Cargo.lock",
+      "line": 3104
     },
     {
       "fingerprint": "2a2713cee642b38f6ff0cd88156299b89d9208775e60069c7146a46976dd5602",
@@ -236,16 +242,16 @@
       "line": 317
     },
     {
-      "fingerprint": "b7d1eae33aee81196828838c7d28075e26990fc7f2471d3158a0aa5589002182",
+      "fingerprint": "4309b43fe59ce4f1fe049b72b9605a89896f172c2d0fd7f588880e15a740cfb6",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/bin/foxguard_github_app.rs",
-      "line": 1037
+      "line": 1046
     },
     {
-      "fingerprint": "08524dc7a5a5fe77070d5b1dd20f465f60e1122396d285f32e7e6af8728cad30",
+      "fingerprint": "bc97a34ef574dff5cb66e7b9cbe1c2492f9fc9a523270e85b50b3939d6c4d569",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/bin/foxguard_github_app.rs",
-      "line": 1081
+      "line": 1090
     },
     {
       "fingerprint": "6880e55fb893d06e5d8dbd1f8962d1bcca4705bd5289c2a276f9c73c94e703b8",
@@ -944,202 +950,202 @@
       "line": 217
     },
     {
-      "fingerprint": "2a91b86751a3cbbd328cc9e764e5fd46469860a1303ddcd4f4996876635e2c2c",
+      "fingerprint": "8f48d7928e9370cac55087685206a4b5383582fbdf3251ff5dd2bbb9e182a2e6",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 487
+      "line": 475
     },
     {
-      "fingerprint": "73601e0f47563aaea017821b247214c3069319366d03838e94f4fa5422bf4fb2",
+      "fingerprint": "fbcb5151825b73b7ab2ff17c6059c4830e9fbd861de83c5fd3ebe03d09bdaf6f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 492
+      "line": 480
     },
     {
-      "fingerprint": "3351fb446ec4a03f5f413a679d64f83d6233005ffe939aaf856a58987fad25dc",
+      "fingerprint": "78f2334fb6d68b25e5e2fa34c52110d4543dde6065aff0693bec18c5f6485b5d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 511
+      "line": 499
     },
     {
-      "fingerprint": "c1b7e410e667e460dffe8ba2f0b589d5b45db6763c4a82520de7141481375975",
+      "fingerprint": "6dcf986e223082b210fed53f1d3d88ab4ec0ba01ebf8005a137b9e1154548a45",
       "rule_id": "rs/no-path-traversal",
       "file": "src/engine/coccinelle.rs",
-      "line": 682
+      "line": 670
     },
     {
-      "fingerprint": "a85ddce703f8ad10e125b2665e215f11b3e8acaa0653d3c72348ed8c0d8c1615",
+      "fingerprint": "ecc84d51ad25b13fd70d35b74600a298b42f21210f8906b35a365876688c20d0",
       "rule_id": "rs/no-path-traversal",
       "file": "src/engine/coccinelle.rs",
-      "line": 686
+      "line": 674
     },
     {
-      "fingerprint": "e5ba3cd47c5c4f0b3de3cac65efb3929bd3895301e42cc844778e049c1c999b9",
+      "fingerprint": "de8579dee748f3c8f52cf424cee8586bcfaae88ba8ad821fd2456f72be0cec20",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 719
+      "line": 707
     },
     {
-      "fingerprint": "dd5db6e7b5ffa060cfcc2d5513965a5355f7003d78075c9fbc10fd25cf601184",
+      "fingerprint": "e178a35b1a6e729c5cfe8bfdee5f044d559858fff93174955630abd7f7a2274b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 720
+      "line": 708
     },
     {
-      "fingerprint": "48c3ad7c01bf473077544cf2eeddc4de8c2357b4307a81be454880f93452a213",
+      "fingerprint": "ce320b70ee0f5cce22c277751987e9a11337ad07daa56425e7ddddae58d4fdfe",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 737
+      "line": 725
     },
     {
-      "fingerprint": "f814067e30414ffdcfca4f6c335280b6134516b67a4f19db8c224e2894dc3163",
+      "fingerprint": "e2323c81a33e3ca34d9e2e7a1d4967fa7ba827979eb6d3b9afc349deb4fe8496",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 747
+      "line": 735
     },
     {
-      "fingerprint": "982974589b51c7678f9e923d8fa9c218ac8d55ac84c41b9a04a425c670e595e3",
+      "fingerprint": "7f64cc55c5654a35a4dc6dbdeb0a5a57be8b56a45d063ba4ab04b3b3aa9f2aca",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 748
+      "line": 736
     },
     {
-      "fingerprint": "bc15e234104b299d616a41d974e867368f59636f8f8579ca908b341ac6d86044",
+      "fingerprint": "654c952789c71c860367c7dd0447bc7105b5f26966a03dd19a560a3dde932793",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 776
+      "line": 764
     },
     {
-      "fingerprint": "45b91fd4ef75a7d0cbc44d87f935bc818d059ac8cc84ab4c52a84595591fa71a",
+      "fingerprint": "ca096dbed93186eea511079d4886bb770497e59d0a4e25802e4cb656ae670e55",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 787
+      "line": 775
     },
     {
-      "fingerprint": "96a1bee845447a1ed2a28c4121fde5beb66ed156b6319f1fb962801cf20fd35a",
+      "fingerprint": "e77168b024ed986b1fef94fbfe2e95a2125f9632e4b01232e8712378bafbbe8a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 789
+      "line": 777
     },
     {
-      "fingerprint": "d04f7b869e272c2c71e9aab4558cab82f72b00f0b28e5b16282ebda6e8585594",
+      "fingerprint": "a70ec50001cd631244fedba93fd1204d82c79c3c708f63551aadf30ca7dd7cbb",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 809
+      "line": 797
     },
     {
-      "fingerprint": "b4fc410d9bbe65df48a51a4498a562891bacdb1a62ff191ea6af7020d53df1a2",
+      "fingerprint": "b8c53a21003f1d117b29d24755a0c71f4572b9311184b57309defb886394a075",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/coccinelle.rs",
-      "line": 811
+      "line": 799
     },
     {
-      "fingerprint": "378dc8791cee0be2d1779f1000bea2a790ebc02321318571f8303f387f171385",
+      "fingerprint": "22517b4c6e15f5d0a858f0fe62fe39fb08d9ec9d6e461f554d84a4247c1e4b5d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/codeql.rs",
-      "line": 272
+      "line": 270
     },
     {
-      "fingerprint": "51317d0d50c19cc49bbdac8edc3b3eeeab8155e201eb54786b8c02db10f2783e",
+      "fingerprint": "ee002f5049db8506ea38f5e279726b10467a71b27c762ab11f9527a16ccd1a4d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/codeql.rs",
-      "line": 304
+      "line": 302
     },
     {
-      "fingerprint": "c3f67942bbd9ebc6621735f62c50c1efa1fd319565f11f311c77892d49dd0730",
+      "fingerprint": "c76ad1992a90c24347241996af671fedbdb106a82015aca294961d72c8fb907f",
       "rule_id": "rs/no-path-traversal",
       "file": "src/engine/codeql.rs",
-      "line": 677
+      "line": 647
     },
     {
-      "fingerprint": "5ec21114cd325eab18a48e5f67115795d9673e7a682839bd01ff4ff99b0aa0fb",
+      "fingerprint": "b50d139375cc8c0a4b6523ae25e08b9cd3e6f400298234a383d5ddadae8bd0d0",
       "rule_id": "rs/no-path-traversal",
       "file": "src/engine/codeql.rs",
-      "line": 681
+      "line": 651
     },
     {
-      "fingerprint": "b9f5a6d99333f3670862a7e9c3cce9a27a70a37f7a33ec33c43361b92216840a",
+      "fingerprint": "735577ff491772019692d54f3707ca48f011211a3d478d95d5113f6874232e65",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/codeql.rs",
-      "line": 865
+      "line": 835
     },
     {
-      "fingerprint": "98ebfef392a7e04aaff3d529c2148119d79887419cc50c3e21b3174279ac374f",
+      "fingerprint": "da80e0741e77850dca367b682a3d66272499b989c0ab47edcd7d12c3cb12a681",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/codeql.rs",
-      "line": 866
+      "line": 836
     },
     {
-      "fingerprint": "307562b218d6d4f79b35a94985f4cb14975fc403e65de20eaf9600719cd18a58",
+      "fingerprint": "65c968be3d95597e7218eb4df0941ccf30a2d74755d265f02b0ee2143e1ecf09",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/codeql.rs",
+      "line": 873
+    },
+    {
+      "fingerprint": "17bcef6c933c6482bedef97544b8abc8dc83c9486c17a7278d77f589753543ca",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/codeql.rs",
+      "line": 874
+    },
+    {
+      "fingerprint": "df6742666a0be5799fcc49908e052041afda9639256b1022b5e1c3609277e862",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/codeql.rs",
+      "line": 891
+    },
+    {
+      "fingerprint": "a126602d75ced6a6cb7d0c4006af660a93fca491c0ce64bae1e24ed43b0bec9f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/codeql.rs",
+      "line": 892
+    },
+    {
+      "fingerprint": "f660ecc533d6a4f4ff392e8bd5a62e1099205522f8541f36b7a99fed71d3ffaa",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/codeql.rs",
+      "line": 900
+    },
+    {
+      "fingerprint": "ed4dcaf05d2d1afcf0ee87b1b3da5607c9546d4ed72bf9937c7baa5a2cfe2f25",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/codeql.rs",
+      "line": 901
+    },
+    {
+      "fingerprint": "e6d332e85dbf9e778cb2936cbc610e5e2c04962e2e18df5eea9cfdafa6c2eea5",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/codeql.rs",
+      "line": 902
+    },
+    {
+      "fingerprint": "4a8eb02b831810d100f737cd2eac5fc0baaa118b31ffedd46771d749e693968c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/codeql.rs",
       "line": 903
     },
     {
-      "fingerprint": "aa22f237b3980c75d9f7bfa2f7f248c68076d77a4c106a62acdf832f65f07eb2",
+      "fingerprint": "b4ffa1c8777f561bb18657d6c8205d5f922a7c070526d2b962d42884fcff65be",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/codeql.rs",
-      "line": 904
+      "line": 919
     },
     {
-      "fingerprint": "737a34a0c13292b9b4734745a588dd2c5e5368f69c716ad0dcca2c5241150c90",
+      "fingerprint": "ab6260c13ad4a6b784265f9d2a15d5dc1d2248e970332ce77cef1cd892d0b5e0",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/codeql.rs",
-      "line": 921
+      "line": 920
     },
     {
-      "fingerprint": "235d389e4ebafe35bd5e9f649220eefc7cd1f0f286c2b89b71f00404dee08a6b",
+      "fingerprint": "62eeb139563aeb0b1b4b058a22358a6d14bb1e22ac897496261d1a21dcf62f9f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/codeql.rs",
-      "line": 922
+      "line": 926
     },
     {
-      "fingerprint": "c5aacf3d52588d890ecdab128dd4b6cd14f1f17a6dded6a54477dac6118755e2",
+      "fingerprint": "166ec0734ef6b1bb2f6eda78ba61e73b22fa6f6db712ab23c2056d25eeaf5381",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/codeql.rs",
-      "line": 930
-    },
-    {
-      "fingerprint": "299eace7f5429144b3e083de38ff5651db5aa72ede93041b943c48176825beaa",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/engine/codeql.rs",
-      "line": 931
-    },
-    {
-      "fingerprint": "630098604fcf2a42ccfde0d3656df7ce8ee70feb5779316e5a9feb3888d69fce",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/engine/codeql.rs",
-      "line": 932
-    },
-    {
-      "fingerprint": "3f62d33763dfa269e63e79cddfee90ca87ebc8c74baa5e8af1dd71a2d3094b3d",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/engine/codeql.rs",
-      "line": 933
-    },
-    {
-      "fingerprint": "95d4833074811c3ebb1395328c0a6bd720607f3ade6c75409833fa4ef49d8bcf",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/engine/codeql.rs",
-      "line": 949
-    },
-    {
-      "fingerprint": "b75cc161c1403aff716baf3af1f9732269dcaefea3ce4f9f3513369846733936",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/engine/codeql.rs",
-      "line": 950
-    },
-    {
-      "fingerprint": "c3ae4ba389cde2a95f52dca2e3745ad5dbfa691d33ac09a084d180bbee271830",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/engine/codeql.rs",
-      "line": 956
-    },
-    {
-      "fingerprint": "cc9daeb05dabda7d3e30f8e0ced0e247ea65135af5f26e3a50b3f9ba4ec6fff1",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/engine/codeql.rs",
-      "line": 958
+      "line": 928
     },
     {
       "fingerprint": "200654956ff084669dda7819d962cd654b83dba3ee1fe99dd4708a1ed1398941",
@@ -1152,6 +1158,30 @@
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/parser.rs",
       "line": 71
+    },
+    {
+      "fingerprint": "fd9109d93f1350f67c38249ecd84f4e211f316de38ca8004761764f3bcfa5151",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/process.rs",
+      "line": 121
+    },
+    {
+      "fingerprint": "e7ce9d71649d79841b550d4c37b4760e51ca3641311895720fbe95ea0b3a1991",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/process.rs",
+      "line": 128
+    },
+    {
+      "fingerprint": "a83218920d52cf7c05ed04d097754a5d9a149ed675d2ffae1d1f933461006272",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/process.rs",
+      "line": 141
+    },
+    {
+      "fingerprint": "17c02b242d1d08854740b440feb22694e6db93d75dbecc60d81ac7fc332401f9",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/process.rs",
+      "line": 148
     },
     {
       "fingerprint": "bea6d0599d9226782a834015ea477c71bb41bf5635469e1ce7f9ac2581982eb2",
@@ -1436,22 +1466,22 @@
       "line": 35
     },
     {
-      "fingerprint": "1771f06dccf7397d4276534cae956ae92672e2f1d934f8924f23f5d28551d0a9",
+      "fingerprint": "f148cd01ad53c022104b851f1238ab247bbe6103a9f030624a683b320e0e8ca3",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/github_app/review.rs",
-      "line": 823
+      "line": 980
     },
     {
-      "fingerprint": "562ad31268b5ba3baa9425195993c949e428faff545359b6fe92591f0b74973d",
+      "fingerprint": "41af2ee714a5eeee01fb3b12f9e45db3c1d7ff1eb8fb5d5900002c834b76d3ff",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/github_app/review.rs",
-      "line": 850
+      "line": 1007
     },
     {
-      "fingerprint": "afcfc9524dc4e7fb94241bc5470e6e8fc46a2f2643def2f67c2dd8647f55066d",
+      "fingerprint": "7b59a1dead55e223aded77af7c2f448fb9912f55ff0bea063f0c7534ae427c10",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/github_app/review.rs",
-      "line": 879
+      "line": 1036
     },
     {
       "fingerprint": "a94a0fac87c21efbf2f7cabe80823f4988f97380d05856c518b8821555145f32",
@@ -2498,6 +2528,48 @@
       "line": 189
     },
     {
+      "fingerprint": "e8c80f0c9a87e44bf41d8d39847b365747bbe8dc19b64610336b0e386c7ae446",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/secrets.rs",
+      "line": 353
+    },
+    {
+      "fingerprint": "d463a432a15927cabcd728cb8e11b45d2131298d2a93c9187164c9be86e52bad",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/secrets.rs",
+      "line": 355
+    },
+    {
+      "fingerprint": "f474115e52970be6694034c074437430e8becec2a6813ecee1cd7f1265234e78",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/secrets.rs",
+      "line": 358
+    },
+    {
+      "fingerprint": "92d8319d066aba0d6f140ea5c3417ed5d5fc26b179dbc495049ca992f818709b",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/secrets.rs",
+      "line": 372
+    },
+    {
+      "fingerprint": "7b71e084246dccaa73a2be4a51480f0aa08b92b1ec1ae2e6eeb122b8f6b2e4d4",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/secrets.rs",
+      "line": 374
+    },
+    {
+      "fingerprint": "49851916275ee84d3c7e3f1898dcf000be2f06ed239ecc421b1f146e3216af21",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/secrets.rs",
+      "line": 376
+    },
+    {
+      "fingerprint": "dee31d386f7b1cbcb391de575ba6d75be7504437f813ea0031225e452bd2ed6f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/secrets.rs",
+      "line": 379
+    },
+    {
       "fingerprint": "87aaa88b46756d7df2449ff7f633af96ef2cce9da1b2d927f92215f512d626fa",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/tui/input.rs",
@@ -2930,217 +3002,271 @@
       "line": 30
     },
     {
-      "fingerprint": "e4c1e998ff0addd04964f8ef0ff3415760c5e38077fa5e83dfdeb1797be61b55",
+      "fingerprint": "9545610bbca2fc8e0e82d774d861621bfc74623b8564d48960670ec8073c7036",
+      "rule_id": "rs/no-command-injection",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 17
+    },
+    {
+      "fingerprint": "fcb07449ddf70d1737f09bac12758b952b847ce3bf40eab3414e96c232cb89f0",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 23
+    },
+    {
+      "fingerprint": "9018b0133630758a7e9c0c1d3e030ecdc81446c59bf0ac7ac7a8f9d4ab33695b",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 23
+    },
+    {
+      "fingerprint": "3d99853253e147eccf159edb3dbf10638cba474d72ca0a8b95bb9135485aece1",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 32
+    },
+    {
+      "fingerprint": "97724f69ebbfe094c1114ca04ab3cf980e6a24da370e4b04d20712f07818aa29",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 108
+    },
+    {
+      "fingerprint": "fefa331f980cfecde6e81cbabb0008d71435c11b101b01429083a3e40b52e67e",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 170
+    },
+    {
+      "fingerprint": "ba0c30e87ba030aaacb21809f71215e9e711c948dba00c5d2ca3c24f8c069fec",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 197
+    },
+    {
+      "fingerprint": "e20add3e29c2fb0127d43df4f31676df8718a260db3fbafbe9e5ba46aef14dc7",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 228
+    },
+    {
+      "fingerprint": "a15e12330ecf25d84493d1e21b982ba36ffc047da6cb5cd24203984ccf5d9201",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/cnsa2_compliance.rs",
+      "line": 246
+    },
+    {
+      "fingerprint": "06ae5a297a940773575b50aea7e83fb625dfe74214617e6903589bc59c39c27f",
       "rule_id": "rs/no-command-injection",
       "file": "tests/coccinelle_integration.rs",
       "line": 10
     },
     {
-      "fingerprint": "2381de6d4719e806185346c3b851822fd35c91294d72be78406a3db4fe233c81",
+      "fingerprint": "01124946b0c57dcb0319f046300583cc03fd3421f60e4adeeb7be4ae5532c7f1",
       "rule_id": "rs/no-path-traversal",
       "file": "tests/coccinelle_integration.rs",
-      "line": 14
+      "line": 16
     },
     {
-      "fingerprint": "70146b54a95e08cc0cb141f3971827f3f21360df2d5d1a3c5eba06f05bec40b4",
+      "fingerprint": "0e77cc48f73d52d2bf254e651425b9e930732c302aed80c299bfe02dc0c0831d",
       "rule_id": "rs/no-path-traversal",
       "file": "tests/coccinelle_integration.rs",
-      "line": 14
+      "line": 16
     },
     {
-      "fingerprint": "8151c43f9600bd8397f34b02b579b0361ac3d40641d7a2da0605b706432c8ea5",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/coccinelle_integration.rs",
-      "line": 40
-    },
-    {
-      "fingerprint": "22ee50e53d948a6591e5cd0d8bc02a389c163cae181f34c1e287b4f11fc56d92",
+      "fingerprint": "8009d46d7b53a8327e2723d4d943e9c9513adef195bf4bcb00269703666f96f8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/coccinelle_integration.rs",
       "line": 42
     },
     {
-      "fingerprint": "484be581378fa54e10f4f6525fbe325f7b8d9a7498ad3f3eb1dcc9e955aa4920",
+      "fingerprint": "6a335ab9c72d93f1a05a1115d349b11735eb75593d13d8137f26607a1bac384b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/coccinelle_integration.rs",
-      "line": 46
+      "line": 44
     },
     {
-      "fingerprint": "ff992325b96ed461e78d3ee363a88e9fd26b9941f5c0f779cea1f70c5168fca8",
+      "fingerprint": "e2f8287a6a1a4d11a6bbe3a63e1f8128a9ea395749e881b0f5a1d1ef24a6aff1",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/coccinelle_integration.rs",
-      "line": 51
+      "line": 48
     },
     {
-      "fingerprint": "ed50c9667d0c555c4863cb79224b169893ef625ccd4cdbaddd4c0e27322d7126",
+      "fingerprint": "e8f8f1e9a121dc975df8de3103db10761f2c5991dcbc1117f47343ab722d16db",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/coccinelle_integration.rs",
-      "line": 52
+      "line": 53
     },
     {
-      "fingerprint": "866a8dd1b1e021c3ee0bb86464a38b01c89401171dc79ee8be9bede2bc3c9bb8",
+      "fingerprint": "d0d65eaa18aa2639bc147bc5b877fb36ced2fc2b62e5c05ecfc08f19a8cf5dec",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/coccinelle_integration.rs",
-      "line": 61
+      "line": 54
     },
     {
-      "fingerprint": "aea1a1d8e92b571cb7b7441e16a08d959e05606555e46d2b1818b1de05f0318d",
+      "fingerprint": "dcdae39d24e48b3abc9b571aa54cbd09ade4dd9c101f253ae896a8140e9d6a51",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/coccinelle_integration.rs",
-      "line": 62
+      "line": 63
     },
     {
-      "fingerprint": "84849ef16cc4ba2b74c05c11b3f4aa7238b01aab498306380bf6b4332635b031",
+      "fingerprint": "3c05e117bc8f765185dffb39ca5388675c27fab3096b810fa7c136acde1f9b2d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/coccinelle_integration.rs",
-      "line": 74
+      "line": 64
     },
     {
-      "fingerprint": "99222843b20a82990d43133acee7b37ef5aa66594e6191c859803a20c2f93666",
+      "fingerprint": "411cb26dd7c68fe26efa063a51c275c913741b3807d29e57deb081da4bcdedf7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/coccinelle_integration.rs",
-      "line": 78
+      "line": 76
     },
     {
-      "fingerprint": "ec0a3e52c2b8b9d862daa10e281da819388783267d4b4135db0d6617250f8a37",
+      "fingerprint": "05912d3967d9a7f77a66bc4f7f8cfcf122fd0d99814a9634867a7dfda3d35be1",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/coccinelle_integration.rs",
-      "line": 88
-    },
-    {
-      "fingerprint": "c758b4e69aa12bdebee86de3365b0d85b15bf60e218f17918c43cc42111f577b",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/coccinelle_integration.rs",
-      "line": 129
-    },
-    {
-      "fingerprint": "c7238cd2047f1cdf3b3b0ed06c236928d819fe3b3ec8ef730ee7a50ba16e54f2",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/coccinelle_integration.rs",
-      "line": 138
-    },
-    {
-      "fingerprint": "6d295ebfda62c09ed41d71e9a9b0c7b7eb8a7c7564066997d916295842b65c36",
-      "rule_id": "rs/no-command-injection",
-      "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 27
-    },
-    {
-      "fingerprint": "aa4cdf15c1c57b15d848601da6f59d571dfe3702600056f4227a24803ccb5b55",
-      "rule_id": "rs/no-command-injection",
-      "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 35
-    },
-    {
-      "fingerprint": "d98c23685e59e44a70afb9a3d233fa1500e7fa6ad6a9975fe3c896bfd217e393",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 45
-    },
-    {
-      "fingerprint": "cfc01e70128248a2bb49c758c790fdca2de0ca69ee2379f984d8a05eb5ccf987",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 47
-    },
-    {
-      "fingerprint": "4f43d602584c5e235fe6b80a71e029a4eb1c0552072f64659220e84f06a34712",
-      "rule_id": "rs/no-path-traversal",
-      "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 52
-    },
-    {
-      "fingerprint": "da56436b342c29b2b04eee42fd7c321e2b863256a5d9bb194e8be401c1cf4790",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/common/semgrep_parity_harness.rs",
       "line": 80
     },
     {
-      "fingerprint": "66a04253e74bc67e3a71ae8d7ed2695779ce82db35da0d952a52c5381417bdae",
+      "fingerprint": "2d720d2c75f8f6a338d899b0005f034ea39371277733a31775ce81728bbf82ee",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/coccinelle_integration.rs",
+      "line": 90
+    },
+    {
+      "fingerprint": "f029a174cd5aeb888bb4a173b12e9035b603e5ce4d912aa4f7ce6724ea50dd73",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/coccinelle_integration.rs",
+      "line": 131
+    },
+    {
+      "fingerprint": "5c12514295d0893d67b96ca4648803f8f1dfc0ccfe8a111ac02bac0b2753e36f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/coccinelle_integration.rs",
+      "line": 140
+    },
+    {
+      "fingerprint": "75e0b03be5794d13d5ae79d47e3d6852769cb80229e2ed7c1f2073477538a806",
+      "rule_id": "rs/no-command-injection",
+      "file": "tests/common/semgrep_parity_harness.rs",
+      "line": 28
+    },
+    {
+      "fingerprint": "db89b570de5497194c4326c469aa008704bdae33bf70b5cc6a1271b7570e5603",
+      "rule_id": "rs/no-command-injection",
+      "file": "tests/common/semgrep_parity_harness.rs",
+      "line": 36
+    },
+    {
+      "fingerprint": "40c47bf968e4ea6aa85c5387e494998ffc8b3f17d3218cea45fc8747525a7b3b",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/common/semgrep_parity_harness.rs",
+      "line": 46
+    },
+    {
+      "fingerprint": "c00c91c74be47dd37ae6709ea6a87ccfe64520ec33314f5161b68187d1d103c8",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/common/semgrep_parity_harness.rs",
+      "line": 48
+    },
+    {
+      "fingerprint": "404d3e598db1fd7d0fd44f31f9ad3470f628261a7695a23a3a75b73ab3d2da2f",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/common/semgrep_parity_harness.rs",
+      "line": 53
+    },
+    {
+      "fingerprint": "f15eb024e14aa852a96d5855bdd6d688f687df09b236df48fd136f0299a08b86",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
       "line": 81
     },
     {
-      "fingerprint": "1b1ddbcf6d132f17eabc35bd0f16c727a74f4fc587a632383613a42354889ee6",
+      "fingerprint": "14f6894b12e2031acff59f3275ca5a42285998c1d18f3ef61b49fd215bea32cd",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 89
+      "line": 82
     },
     {
-      "fingerprint": "175d946fd40e6e832644105c6ebdb73bb4661af75cfdf58854f8ac407c12ab9c",
+      "fingerprint": "b9e57711445900ed8d61ccac0b23694e63f27c1a9d0e3b9dcb15efafcde2edff",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 94
+      "line": 90
     },
     {
-      "fingerprint": "65bc3b905cc1adfad3a1381c4de42282760581f2efc7e0c7b84006cd5c2f9644",
+      "fingerprint": "26efbf0191ac18457fd9689952ce7bc21410914d1bea2475013479e17848ed5d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 97
+      "line": 95
     },
     {
-      "fingerprint": "827705517c8840d35248a523082b48091037914b6e02a061a362304bf19ef192",
+      "fingerprint": "6103315475c2e9f5daf6aee324761ced0f06cd083ea0821ab3639cebc6ab4df2",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 108
+      "line": 98
     },
     {
-      "fingerprint": "acf9b2be30b4fa65a8038d5ed7afb7a3b2293f2a05901febeb34d0df704da0b0",
+      "fingerprint": "9d73079db5a9ff124c05004384fef2b37f457802491487cb7e31d85e5ccef99c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
       "line": 109
     },
     {
-      "fingerprint": "f873d61ab09829e469b19f5113f875fa315db255277934bd3002de0cfe2c1139",
+      "fingerprint": "86f9806b21f198b6b0a2fbae37050a7f2bd3248a51ba556bc6c9cdc22cc90129",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 117
+      "line": 110
     },
     {
-      "fingerprint": "a02a2a676c1a89b65dbe2c7fb05396fc5760a40856b6e4b7876bca48690dbf2e",
+      "fingerprint": "f2f7cf2ab1b733b7cef6e3fd928984e32ecc6a19f16c9d5ffad1c08ccb277d4b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 122
+      "line": 118
     },
     {
-      "fingerprint": "54383422916b3276966778b1e6848acf2494ad11cd52fb83755bc2fbeaf9e714",
+      "fingerprint": "b0bd3a74438446343e133c3fccbcfd96e8b0cdb1f184b676cc4678a9279602e1",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 125
+      "line": 123
     },
     {
-      "fingerprint": "f2ee2b4b7168a6f9d359e83f4deb0524b0e9d971d26c78d1b5842ffd5af9944e",
+      "fingerprint": "0f9b4ac6c6ade6f27ceae174c712ef6f03bb6d236e973d6d247a9f7bfa12e9c6",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 142
+      "line": 126
     },
     {
-      "fingerprint": "6329b1267a730fb257670474ae9bece73556df64ce6180b6da2cebd515b5fd4f",
+      "fingerprint": "a1f2ac5dcfdb4c996e4d91bd940aa69e04f02d775d1837c755a1e04e22b86ff4",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 147
+      "line": 143
     },
     {
-      "fingerprint": "01019d1af44753b00f86a7e2d611eeeddfd6fcc849217288f8752e9ff72ba41a",
+      "fingerprint": "42ef3f4fb40d52db4a011e0384927c26a0999c7e8c7d16d55323e73a8dd5fa8c",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/common/semgrep_parity_harness.rs",
+      "line": 148
+    },
+    {
+      "fingerprint": "02da6c97d77dcbb628dd4bb227df2211d421be7e9cf29b88480a4412b072fff1",
       "rule_id": "rs/no-command-injection",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 169
+      "line": 170
     },
     {
-      "fingerprint": "0279a50f94c89dcbbb54cb042e038c99cc2a2489e4c30119b2ddfc9034c9f4d3",
+      "fingerprint": "cfa7b5ed33e1fe310eed8da5bfc38768736a043af9b84c0604a0de640edd0015",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 169
+      "line": 170
     },
     {
-      "fingerprint": "436987eb41e09753fb693c391eb5ef49478f0a0acb2622899f1a7f3b17281a7f",
+      "fingerprint": "c281638f0198e981f560d678040fad8278a909b8435c6e578965e8fe32d70898",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/common/semgrep_parity_harness.rs",
-      "line": 173
+      "line": 174
     },
     {
-      "fingerprint": "23ac45656b99b597ef3dd1e92e203a232bcfe7a4850aeb2c163277bbb004248d",
+      "fingerprint": "5bb3bbb9efc08ff9771a0ee0606dc184ee1c5e21b7839dd701132bc7be2e4d2b",
       "rule_id": "rs/no-command-injection",
       "file": "tests/cross_language_matrix.rs",
       "line": 225
@@ -3168,30 +3294,6 @@
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/cross_language_matrix.rs",
       "line": 301
-    },
-    {
-      "fingerprint": "90c2586207192e627dae5b27ce0b5a63bf7e5b1148c3da39e88c802795165d67",
-      "rule_id": "js/no-command-injection",
-      "file": "vscode-extension/src/extension.ts",
-      "line": 282
-    },
-    {
-      "fingerprint": "e261b1a819e84534c7c8477d984bc76e5e3aa073d61543915435dd44d1ee7cea",
-      "rule_id": "js/no-command-injection",
-      "file": "vscode-extension/src/extension.ts",
-      "line": 387
-    },
-    {
-      "fingerprint": "3b7fb57b9ceaf603867cce53273548719a76e887714d3e6a2da8521412042fbd",
-      "rule_id": "js/no-command-injection",
-      "file": "/Users/peak/coding/0sec/foxguard/vscode-extension/src/extension.ts",
-      "line": 282
-    },
-    {
-      "fingerprint": "6a4111c89e606885191c4b728afe2dde4cf22f79f6affab3c9197607b22e4b4c",
-      "rule_id": "js/no-command-injection",
-      "file": "/Users/peak/coding/0sec/foxguard/vscode-extension/src/extension.ts",
-      "line": 387
     },
     {
       "fingerprint": "23c23660db60119820308c7c7d1be38d73e4e5f701bd74f063ae620359ed7cdb",
@@ -3272,7 +3374,13 @@
       "line": 571
     },
     {
-      "fingerprint": "8edd0ed99f8599c7b050fcfd0bec2ba80aba29b7f0cdd81d6fb2e19e7d60f900",
+      "fingerprint": "743dc9ec72aef812dc5cb32586dcc327d8da9b1e7527c1c03541a4a7fe0714de",
+      "rule_id": "rs/no-command-injection",
+      "file": "tests/cross_language_matrix.rs",
+      "line": 574
+    },
+    {
+      "fingerprint": "d327b5844a905a4ca3c3f35717694ea7dd5b0cd39d9510c45a8719c3d9813f72",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/cross_language_matrix.rs",
       "line": 575
@@ -6944,1912 +7052,1972 @@
       "line": 42
     },
     {
-      "fingerprint": "e90eca37356da4dec12f9ba19778711f9e1dd35abbbfa732a6e3c6f9acab7bbc",
+      "fingerprint": "54878d1b3034a74890a69102dcfb01751f1559b83037d9c3e43d1e856369cf0b",
       "rule_id": "rs/no-path-traversal",
       "file": "tests/integration.rs",
-      "line": 62
+      "line": 52
     },
     {
-      "fingerprint": "e20d4c0d4b1302729db753fb352b6396efce66d2ea98116ab39bfbfd067a8020",
+      "fingerprint": "2712b455fe1b7af7d0fd6a055d546e1aa5ae3389e9a864dfe072100da085ee24",
       "rule_id": "rs/no-path-traversal",
       "file": "tests/integration.rs",
-      "line": 62
+      "line": 52
     },
     {
-      "fingerprint": "4b25d128113f93ffd554ba69f3ed2dc512d735ccc6612d928fbf943860e91174",
+      "fingerprint": "9526f71233efeab5c79eb53cf0d2f7c4a2c5243f61872ab9b2beae219b7c3064",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 83
+      "line": 73
     },
     {
-      "fingerprint": "01099ccbdc104fd744d1fd247756438c547df75fee9965835cae895777606b5d",
+      "fingerprint": "42c52ff9e2c5dae5a8896a1e22e385bb46768eacf3d64b099d915ad0d91e7f22",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 82
+    },
+    {
+      "fingerprint": "447dc6d883c342a85b3f197fe6f3f6bc9bd591ca526e6972e97c03e10c69fee6",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 90
+    },
+    {
+      "fingerprint": "15f350049434255bac8edec9cfde32571f267c848233498aaaf5ec64a30739de",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 92
     },
     {
-      "fingerprint": "accbfee7f4159296057031d09787d5bd4cd74516dafa4b2d6925291155216667",
+      "fingerprint": "19a443a688e16bc801fb1f07a4cef9c32911b3d5acc5855f39957310f864c3e2",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 100
+      "line": 97
     },
     {
-      "fingerprint": "de05ebe8eb8ef53187a92180f08a80ff82ab00cdbf178c9b5836d680e3e622fe",
+      "fingerprint": "bc56022413efe9901d28750ca3edb06820f21010749c207459599ec221c5ab97",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 102
+      "line": 99
     },
     {
-      "fingerprint": "10b5baae63e12c73849c9be4cb5cbfd642197f9f72f9cd4a46eb1c01649917df",
+      "fingerprint": "833923dc9995b00a7d2eef3d183a3a903a0f869774a6f6e60bf781939fd40b41",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 107
+      "line": 108
     },
     {
-      "fingerprint": "313bb578d2462ffd1d86a3b376e73040b869affcde1695e5b8d7915412fb88c2",
+      "fingerprint": "b9425cb76b2a2130c0abfab9aebfb0f3fcf84943b06b6253480e1477038d14c7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 109
+      "line": 117
     },
     {
-      "fingerprint": "3aac268e021401685272caf141366dfd20d43a1cb863cc0ecaf557b8f737099a",
+      "fingerprint": "baee13b9d6d1f99a2590b3e44c031cfb093400e0079fdc0b5516260da0e01609",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 118
+      "line": 119
     },
     {
-      "fingerprint": "09ddb58b7c80f38304f8947ac854b814cbcff460f38a9f71116e3128c69c66f6",
+      "fingerprint": "349a863167a16e24b577606478e3d26d818445f6a6b3bbd22b1bcee10fce1d9c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 127
     },
     {
-      "fingerprint": "40a588b3af2fef3ec6fcdd8cd8b84b71d2f225ba5b01676494396ed2d904556f",
+      "fingerprint": "e6805fb6a6eff788c47d76d54b79a5791cb7ccf67834c119fdf53260534a4804",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 129
     },
     {
-      "fingerprint": "e7ffd780f5f5b62c341ca6c0a50575ccefdcd3ce484867d26bc52900a512c008",
+      "fingerprint": "67616e52cb08a5efa53e2e2030bdf0a6d1efb0f7f85119e69b59d2c582f3098f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 137
+      "line": 140
     },
     {
-      "fingerprint": "e547fb3a66edf8914a46ca2c5604c1ebd9e718a5cb380814dbf933c30c86d51e",
+      "fingerprint": "c9bbf301666065ab461116808da1c4784014bd905d509720cbacae838112c1ff",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 139
+      "line": 209
     },
     {
-      "fingerprint": "f54625a8554ea3d31c99469973499ab895f1a10ff93c89948deb3dd82df8232a",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/integration.rs",
-      "line": 150
-    },
-    {
-      "fingerprint": "c49365a69f5a7e0f74143712854d49fe6884bf7b9207740e26acb7e3e37a921a",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/integration.rs",
-      "line": 219
-    },
-    {
-      "fingerprint": "ee817f31f5ef067a0b7643b487cd77a534cde4b6687a504a1e97ed0fc5490cac",
+      "fingerprint": "c3203e37fbb93af237019706eec8dacc52b3ead730f2539b88d8017a3e2f2729",
       "rule_id": "rs/no-ssrf",
       "file": "tests/integration.rs",
-      "line": 254
+      "line": 244
     },
     {
-      "fingerprint": "9b177309b974a83b8433c6bf2071d1279e3e3bcf94650aba48f33cea9dd74a5c",
+      "fingerprint": "d9920d47e4cb46b8a7af357975e2acb04a5e61957ff822fe0a144ce6921596ea",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 270
+      "line": 260
     },
     {
-      "fingerprint": "d5b1db252d5c4482c3eed1a889436a124673f60af9f7d248f65ea4d8ff3dee40",
+      "fingerprint": "8b949f8aa9962c6fc03143ea3697bed24f2882ca8fb2b0dfbf1bf7683ccc7c23",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 364
+      "line": 354
     },
     {
-      "fingerprint": "b386e531c77c91b3d1cfa4d6bd84afa1f1fb19a06f7aa075b81acf0cd1ce6677",
+      "fingerprint": "bb881113faed1f7817ac34b17ac6c4d7c2f36e72de3ffc356fa43018cb16c3ae",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 402
+      "line": 392
     },
     {
-      "fingerprint": "2f2f2e63f5bc6755d4e9de50ed904338f2e7840681e1641856295e6ddb1d1370",
+      "fingerprint": "ac8167dfa9cfa9a8e03ab26e5f058d104407218083161f8e8847af283211a6b0",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 439
+      "line": 429
     },
     {
-      "fingerprint": "40a1bd4ed5bfe1ad74370190712eb76b83412660a6f8f168ecdf0972ee8f1aa7",
+      "fingerprint": "eea4b1cdecfad0ee830571819fd49d00d8031a4318f361c2808ca0cc6db563ef",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 471
+      "line": 461
     },
     {
-      "fingerprint": "36d89e675fb69bfba83d8019df471fcdd999cbc2fae128a4594b528385317a59",
+      "fingerprint": "08cafa2e2b97b306b25fd496ce9ee0001838d9a027bf6569c7e951d6805b9968",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 505
+      "line": 495
     },
     {
-      "fingerprint": "d3d131403938cae1c25911c43f9ade9e7064d3d7d2e536465abdc59b1188d70d",
+      "fingerprint": "dbce81e4ab96bf46fecf8433fc31f963461012574d616062326b79332fd63563",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 539
+      "line": 529
     },
     {
-      "fingerprint": "1de51f9d582634d7c08242791a820b6dbf3eafad0a1066db335b84549b310325",
+      "fingerprint": "503d4670e765f40884a84ecd13f3d34b94443138a813decec975fe8f8045dfda",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 572
+      "line": 562
     },
     {
-      "fingerprint": "6df08417b3a7b2724e4d6b7bfb47fec72a67cb3f4a8bda81f25b7e380903d9ef",
+      "fingerprint": "390ccbebef605995fbcff0c7620f015ede07fb973f0210ba5536e9be50d5038c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 605
+      "line": 595
     },
     {
-      "fingerprint": "4036ba53daa3b2d910de33f4c58e2f469e075fd30c1f06a9af8d1fbbe857bc17",
+      "fingerprint": "3aee710fa26301ff8eb9d8797c7bded45829526ec264a7d1fa7c578e2aac1b0e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 627
+      "line": 617
     },
     {
-      "fingerprint": "f0111525a0cbcf3c61fa90670ec570689a4df5d5da753fb3608bb68970487d9e",
+      "fingerprint": "8a73a44b02fc036b658f78e358b91f2f08094a29df16b3194a4b46e1c3412b08",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 647
+      "line": 637
     },
     {
-      "fingerprint": "e842ef94b12fb65d06c7872a772b7988d1ed39aaeebaeb965269fa4e7354a708",
+      "fingerprint": "6dfea884280841edbfbd0cabd14b7b54395f96ea22352173007618ec804bba58",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 714
+      "line": 704
     },
     {
-      "fingerprint": "31915a0440de73dd2cf7b7f21df76ee229dbe5bb69fd078bf52bbda4e0f38d05",
+      "fingerprint": "0dce9601079ae289fb992cf8cc5063adbe7073f14ed20918fb9e424562d97ecb",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 769
+      "line": 759
     },
     {
-      "fingerprint": "d829066c757e8a815813b340bf8726d672c669a2ce3e1d9b32ff1c0a9015575e",
+      "fingerprint": "11a6d0f62131a25253c8fdb383ee525d089b5942c545c06c0e9c285f67eda151",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 800
+      "line": 790
     },
     {
-      "fingerprint": "6cfe05734a6d8399becc4e1d10e527d5b7b195d43ae32bf66757483542041039",
+      "fingerprint": "ea4e596036f000417758ca367ef52435f85e284a55c20ac88de372286e9ac78e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 822
+      "line": 812
     },
     {
-      "fingerprint": "c5c6e367840eeb832294f035cc8fe0367df7bbff3ce69c209cb891ce876cfc8b",
+      "fingerprint": "b3c84868757874eef967dfd4dcfc9f41032a2975cec341de2c228f6afc14b27a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 848
+      "line": 838
     },
     {
-      "fingerprint": "88c6e1e346010e003ac02404763aa923c2bebde7ccca24071235610f8960c14b",
+      "fingerprint": "326183669f09b33c115764fee28046b0f31626efedc9949eb13f364565e614ab",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 871
+      "line": 861
     },
     {
-      "fingerprint": "4a051e11f8646b6f4a4013fe9fc2c56181a4dde7e8b53267a2f734e044ec7fe7",
+      "fingerprint": "56e2956bdfee2793449db13c7f28980a9f63a6a1e6d3e3753a8f1c00d41d7c3d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 894
+      "line": 884
     },
     {
-      "fingerprint": "86d134731111e2e43d27340d31c5d8d03a247145b898668ac6d0a3d35f11dce1",
+      "fingerprint": "03a10b3a9bc778348118b7efc594ce3f8bf6629ca3c819ea9114eac8b1e5bd8b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 916
+      "line": 906
     },
     {
-      "fingerprint": "0a3020f77a1e48df2edb607a3354247d180d1870a28929df62c02a5e589612b5",
+      "fingerprint": "ca03242f0bf7e32285a4cecd707b1ccd8125f6f8ee8497489f40f002fd2f6aa1",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 939
+      "line": 929
     },
     {
-      "fingerprint": "fd3090e61aeed4aa071a3718a836015761a128ee5e180a72b6a8f8f5817dfefa",
+      "fingerprint": "4cf1f94f6998344347526361c56afd2a01f94cb32df862bd6ba01218ec7e98c4",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 961
+      "line": 951
     },
     {
-      "fingerprint": "1de06dadacfdd3436f7f1c860aa3b4099dfcf14417531895e48edba17052636e",
+      "fingerprint": "688131dd454c3d1533a718fb826aa4319e863adc8a38943d7fb0460112f6942e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 981
+      "line": 971
     },
     {
-      "fingerprint": "fe3793daa15a061dd99327a90bdbd069c4610cdb5fa588fbb8c76988e5c7cd3f",
+      "fingerprint": "f8a51b2df37418ee591338b8a4efbeb33e8d71a09a4b6a37e63e3580596a6e96",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1001
+      "line": 991
     },
     {
-      "fingerprint": "4c8ba6f2379ad5513b47a4690f6e8aaa1d8a8de3d1f9b1ded75c3aa9393eecc3",
+      "fingerprint": "591d104b01ad04bc25b5b170897e0ccaa2effc10a78a93cf3168b240de46f8a0",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1052
+      "line": 1042
     },
     {
-      "fingerprint": "78b66df6239934f6a700ef8387757f7e8cefb81ff5fee29bb5bb55f6ded75cf8",
+      "fingerprint": "050e2747bfd4e7e799901d0b2cf0c2f7be22d0d365cccf517e2eef65158a6d9d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1122
+      "line": 1112
     },
     {
-      "fingerprint": "8463c25d30c0663b770348880a44da989b3b982fc47d9d0578d7d5611682f7c4",
+      "fingerprint": "e861de6255b2c51e8d84e4cc552d5476e1a5c0fed4766012fcd7f718f0c04ae5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1154
+      "line": 1144
     },
     {
-      "fingerprint": "8bb710cae0ad24d0f0d5cf32d1f22c1788b3d6309f2f92e77c85c6d7d685dfd5",
+      "fingerprint": "1914aa7b33e052a3d0d6919c909606f567607dfb20c122e0f01c6445ad03ac25",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1174
+      "line": 1164
     },
     {
-      "fingerprint": "a41463432e159f83493cddf32e041bd83f1a6387b90c6f2ee6680c613af466e7",
+      "fingerprint": "f851fba1666938feb34d22d4aa26a704210a8a8ce83fb159e9b390250f35952a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1217
+      "line": 1207
     },
     {
-      "fingerprint": "73cefba65f7dbe06bae8714f1e6b8b51bf6889cc047ee1ec7f727b72efb4ac1d",
+      "fingerprint": "7425279c7bd6bf6821aa81a350ffd5d25659c63788a191ad4518187d47430615",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 1229
+    },
+    {
+      "fingerprint": "fc427ecf79c1cbb22c57c626a189f0ff5555207501e67d2c05d17c903820df23",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 1231
+    },
+    {
+      "fingerprint": "79678ac0b71bed3425a6defae1941bc68d0f52518c7d0d700c14e40710152416",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/integration.rs",
+      "line": 1237
+    },
+    {
+      "fingerprint": "4ba4f9cae4e617fe2730501133733f8735911dc32e9ac0b48ec01c30868d437a",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 1238
+    },
+    {
+      "fingerprint": "4df1b805133d6ecbc6d094ddd9e4d64b669cbf8751b2ac4d83f99d5a80453e24",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 1239
     },
     {
-      "fingerprint": "2e1bab2a97d9619c10ce3abafe4b77f48b0ed503d447229d48533bdadcdbc25d",
+      "fingerprint": "ecee26c8d5312627b9e06453a25eacbefe5665cbde193874a764efe15599905a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 1241
     },
     {
-      "fingerprint": "57632105c23d6c44141c305e6d5e362c206a23b5f261e56c688ab247b669b6c5",
-      "rule_id": "rs/no-path-traversal",
-      "file": "tests/integration.rs",
-      "line": 1247
-    },
-    {
-      "fingerprint": "9ac3242580627c2600c8e21bd88bfda9f008093a4618d6103a7b1411f52e702b",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/integration.rs",
-      "line": 1248
-    },
-    {
-      "fingerprint": "ed6e8c70b395edbba41b01e7f21c720b0aacdfc2d37a6e564a2118e938f5ee11",
+      "fingerprint": "95505e3f7afca6c58566ec59acf5eaf0a5de8a4c7d0c6ba035f126593c0b82ba",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1249
+      "line": 1242
     },
     {
-      "fingerprint": "64406d04968f10e01e07b77881ae13dba003e5d7bd2d94490d088048b936eb9c",
+      "fingerprint": "5e45a80b02436cecad1659c3024ae36d401dcee506d0d3a28343950a55db5005",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1251
+      "line": 1307
     },
     {
-      "fingerprint": "b2f90bcf8c9b11fdfb277be539cf7113276fe0b692dc34e58a63bf58e3ace02a",
+      "fingerprint": "b65f04ac7a76694d112bc2143a1bfcb303aee32a622623ad1d895ad9b0ecbaea",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1252
+      "line": 1354
     },
     {
-      "fingerprint": "d538e03102a180d0137e9fcf8190033fe517eccbc3104cb6ec62ded0f3a08dc5",
+      "fingerprint": "8f29c58e3931825fde058ba6f19051b8e546cac4416187607e2f85090bd69f21",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1317
+      "line": 1397
     },
     {
-      "fingerprint": "85dd4ed44078b7e42df4c2e22cee84446b9df957d6e2b7fc3dfaf71b670010ef",
+      "fingerprint": "64449762dcef1fb0eb18c1c6b591162f12f7492b177f9c38c0ab7bf61028ca26",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1364
+      "line": 1425
     },
     {
-      "fingerprint": "8c9c29b4c0535a3d5c54a4bf3d4eb82dcbee53441924a665c99ff6438399d312",
+      "fingerprint": "431d77a2f67e775655c07457d541ccb4cb8701b2362e263ccd85ea575ca6601f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1407
+      "line": 1472
     },
     {
-      "fingerprint": "8c5dc5fd6dfc266e2b6c913265dbbbeef1d7359d85f833e283c976b3d02d847e",
+      "fingerprint": "df477ee63f85be2ab84788272e2354c8120696dbbec7fbb97ad5a8fffc0a8f64",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1435
+      "line": 1519
     },
     {
-      "fingerprint": "45faa4058999899fa5d25f3da8beaaefc0a1b68bd180894f2f3d28d2a763edd3",
+      "fingerprint": "930051454cb78469b80854d13c12ba890f47f58c2462e4fdade925e9900903ce",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1482
+      "line": 1570
     },
     {
-      "fingerprint": "04308a850030f568770611c9c64b6afdbd1002440cb2828752e7717618b96337",
+      "fingerprint": "0e585583ff0b72114b83db96c17443289820006ca71899911f4401df16333f1d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1529
+      "line": 1606
     },
     {
-      "fingerprint": "cd5f091fb8cdc8b993a277a00289f22fcd3decf06dd0e5c1ebff9ee58c0a4270",
+      "fingerprint": "aa9107f225b2014eb9b8f7b2a0e00b520de85b7eae5152dbb43588757754eca7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1580
+      "line": 1647
     },
     {
-      "fingerprint": "de1da56c4929d448e8e4656adefac6c0d5d55e22709bda14e17fc7154b4d1834",
+      "fingerprint": "128782018bfdcef0451c0f49e18e836fe3d9bb6f0c245969becfc81868073a7b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1616
+      "line": 1680
     },
     {
-      "fingerprint": "8ce9f0d5ced39621fecab9d4c6c1764f3ef40e88dc6d638de7465ea57c6ad803",
+      "fingerprint": "0bb38b99a0d66d98e84cd37f0289e947a4c9e74ebe189b1c5b6fa9b5c5c4652f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1657
+      "line": 1711
     },
     {
-      "fingerprint": "14bc436c22f06b92099e76d45345e8f64e5a98dcd91b6c1c088423e4995731c8",
+      "fingerprint": "95b170a1e5db4e4cfce34e2523c3aed2527b667d10c6e0800dd3ca6dba597b00",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1690
+      "line": 1742
     },
     {
-      "fingerprint": "4c1edca6465895c76a175e1356afaa44b8039aa4b6c87c8b2f3138c0b9da20e9",
+      "fingerprint": "d4b19d992facf56ff15de23b1723d9cdd173aa36bbf0a9b3727c1a240592c238",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1721
+      "line": 1773
     },
     {
-      "fingerprint": "149b435018228a944a5232692ed107ee399f7783558c7400e806bad46b34e6eb",
+      "fingerprint": "993bdcbbbd308866b3d969caa69721cf4cc3d44a37cde4e8f2eb69576eb94232",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1752
+      "line": 1804
     },
     {
-      "fingerprint": "b0720a4e45b7ef1a490b00e1655099f0f17cad205da030e04625fd00a6362907",
+      "fingerprint": "6a7a5710b7ee63a097a4b19a00488ea2cc472e1573607853230970260adef9b9",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1783
+      "line": 1835
     },
     {
-      "fingerprint": "dcff05c436ea014f3efaf2ff33a99517e6455a8284ae9b6236184c6e1896a267",
+      "fingerprint": "32f29af5a4d4a5a216b8e3c780278fab448cfe23fe678829fcbc3c22dd6cc230",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1814
+      "line": 1869
     },
     {
-      "fingerprint": "f8fb666f0d7d38e66ca3f5793780c61795acf85f3d2b619c986106a52272ba4b",
+      "fingerprint": "d746d21b938bd329fb8d5b5ff9bc81b437e87320a0d4a1831d052404e2b1e1d5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1845
+      "line": 1875
     },
     {
-      "fingerprint": "46a39ef15f0d66c433b063362894a0912abe50dac08622202976bf65e4c0ca17",
+      "fingerprint": "8f0f4acbcf228a71baca2cd3573be1b9be8c965c734392586a251c5e56a12c5c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1879
+      "line": 1915
     },
     {
-      "fingerprint": "fa8df1192501aa0d21c7f0c841c8aa4271b6345db66e1b5cd1395bfb47e2fb1b",
+      "fingerprint": "07f7e041b93478bad587b2b110b3b158a1f77a792bed3ac963dea0323f57db24",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1885
+      "line": 1918
     },
     {
-      "fingerprint": "c1b82a5596fd29b60063319296edad413156870fb281be7d7cdbf29d50e67948",
+      "fingerprint": "60f42f2dd6f26fac4e1739b6010dfa0235f1681f8ae942c7259ff9c6d66341ac",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1925
+      "line": 1924
     },
     {
-      "fingerprint": "26982982ee48d241a6f3660cb052c747576a9fb6d21fc3f85565ef6cd24e324b",
+      "fingerprint": "2c0d9fb4489d05d4f6ccc64f3e287f714bd691bedb57af6063fa16bcf501cf80",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1928
+      "line": 1939
     },
     {
-      "fingerprint": "ecb231945ab4c85c9c30c128dff95f2dd671af204ba9d1abc91c98cc52a271fb",
+      "fingerprint": "5a80631ba75f86a3474c029225e6028095cb97b3f3f2b4f4b12a82da611569c8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1934
+      "line": 1952
     },
     {
-      "fingerprint": "27d206d80cb72501ba956acc3d58e6b097e35edb898037e64a7829270fbb3f41",
+      "fingerprint": "c21d3ed8ebdab06bc55e94ae510466f1a22d1c17fc88e5ca665e6560b39f117f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1949
+      "line": 1955
     },
     {
-      "fingerprint": "545ee747a958ee77efd154b25cf1e87555ca04a54d8e22515192ca03b5811864",
+      "fingerprint": "cbee1afea9b3927147483fc24280c7d46d1e5ab92af01ed1461731aa16caf666",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1962
+      "line": 1961
     },
     {
-      "fingerprint": "7174acd821b557963130abfef95a08c9ed233c9f8180d559a916e166c5a1656b",
+      "fingerprint": "1376a1d58eac1b3d94109eef5bd242db91e129fd6b523db7f4c9353ba855cb87",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1965
+      "line": 1975
     },
     {
-      "fingerprint": "96957bf0b6172d888e4e2c0e74e48f7f52b3e5c1e42ecb54edfa77f462585041",
+      "fingerprint": "5e15c3915c294a0f36a5dd29f924ef290321ecec0c12b7c7d7e0aef61f2724b4",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1971
+      "line": 1976
     },
     {
-      "fingerprint": "c3ee59ab571353a5577c8e48f1342c931df81dbff7dfa699d1eb9246c26b7ea0",
+      "fingerprint": "44400819113a9b30874cf62456144861a9e809c99a3c5af86be04fd2c8a2554d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1985
+      "line": 1990
     },
     {
-      "fingerprint": "2babf85793c2d453bec255e883cf94542bc8361d583f0c4bd86354a0e590c67b",
+      "fingerprint": "19d1b79d779e4a2f950e4e07522bedfdc6e777b17ebd04eaddab634635f1da97",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 1986
+      "line": 1993
     },
     {
-      "fingerprint": "88e6547b66b9bcf16182f92a2aaea932919795b76208b63962f7962d8fd04b03",
+      "fingerprint": "0a895f6ec648e22559df58b10739a39fac02a1e53848a97bcdf7fe2147916693",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2000
+      "line": 1999
     },
     {
-      "fingerprint": "d8c39421e9c76b672dafd0b1da012f6b8c9647a8cc69ad0d9c9e262c561da72f",
+      "fingerprint": "270b9bcb84114d586c7620794b8229277111223d030db83458d28c710226278a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2003
+      "line": 2013
     },
     {
-      "fingerprint": "f2066905e5bd72b87f41cd356f9fbb5049359211fd82dd6c59abfc6e005f6a35",
+      "fingerprint": "ecdab991b25e471eafb25bcaec30facf1baf1cc3129a75b977aebd5873dc71e4",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2009
+      "line": 2014
     },
     {
-      "fingerprint": "163703d5da213602049644924fc66df25faf062d9d2ae7494272b3510883daa4",
+      "fingerprint": "ea881b6d0c6ee65a10c7efc519311df5d44f5e13d7327d55971f75d00217e80e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2023
+      "line": 2028
     },
     {
-      "fingerprint": "63e760ec6bf7262b2645a85cf5830f65b8d40f3c0550c7e3a3e047ecb69e4585",
+      "fingerprint": "0101347ba8ccfc6a01478cf1ab39a71d04d56ba3a15f0689fdb72fb856c11b11",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2024
+      "line": 2032
     },
     {
-      "fingerprint": "290f6318f5cd0e202b4314f4cb95a5dcb36f00ff679e97bde8fcff57dc730ce0",
+      "fingerprint": "3be3e7dec4e61a7adefcf5a14f621917c1d601a92f7cfb96243f13395ca86056",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2038
+      "line": 2035
     },
     {
-      "fingerprint": "00936dfaf449fdf5d61f51ea1bc5a47c3a638945d558719c17c323a0da39f3bd",
+      "fingerprint": "697090c2d49c0fdabb1b4cb6efd04fd761258d78d93b5ade9240b54bead029c5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2042
+      "line": 2039
     },
     {
-      "fingerprint": "51d46ec32da0a0904dd06f2afb2c9af8f27027600858cdfea7cab78232d9929f",
+      "fingerprint": "5b68b7f82a516a48ffaf872dcee887c7202e847de6699f5d2ceb746c035f5f00",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2045
+      "line": 2054
     },
     {
-      "fingerprint": "e585238b9f9dd31bbe10b1acd5d66d658b11a65d19f9d2ed53e7a74efdf8e09d",
+      "fingerprint": "349fe1006db4d1b43ec8f0d8801ad60d64ae182f57915e59476b9ad4808e4f0e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2049
+      "line": 2067
     },
     {
-      "fingerprint": "ea1dc6ae4cc61d3446c09e0b3dd878ac1e601c5ea435ee026eb21794e3cf6b7f",
+      "fingerprint": "353fea66f8ca252d08e07d3366ad35550fb2d2f6635dcd002f92bec04a5373b5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2064
+      "line": 2068
     },
     {
-      "fingerprint": "0b609d43ee3f58927dddef091f7392c00c2cb6a4dd69bbbdfae2a1f4beef947e",
+      "fingerprint": "065b7115dbc73dd3ad0b0a807f3140d1c5f8b6001cb4bc36c45fd4dc03fe374f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2077
+      "line": 2073
     },
     {
-      "fingerprint": "f02fe33c516d1b48c0fa22feecdedfc1ac8d4a8b3bca09089ef4a9d504db2caa",
+      "fingerprint": "9828940f1db93e1b2308bf414fe5222db054f87b399fc143fb458dbb875d333b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2078
+      "line": 2075
     },
     {
-      "fingerprint": "214bafde3c71a38cd0a2835ea2382a22159fb818abff013b91e23520e566d61e",
+      "fingerprint": "cda37c4c2fc932ec68b71156463dd1903f13fe2942d5ca0a70d1c97d19e22bc2",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2083
+      "line": 2080
     },
     {
-      "fingerprint": "248669218c8074882cd5bebafdd1a0dc434a6fd135361cc1bbd0788b1f6c37c4",
+      "fingerprint": "f318b592ea5b258ed94b6a4ec322453174ca5f2533fc46b07a07282d192f36fa",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2085
+      "line": 2093
     },
     {
-      "fingerprint": "9ec15d20a14e4b7ed06f51621cedd295f2be0da5452ae3cb2072c5011a015666",
+      "fingerprint": "3b66b6ff9d0c410efd2e0aaa41adc1573fbbd1c3dd508031224007431b737d5a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2090
+      "line": 2100
     },
     {
-      "fingerprint": "20fa2b4fd05d2fc5b3e11cb6570431ff5c673f5f37c89edd312662f1b804d4dd",
+      "fingerprint": "f7b7e2c779f4d996d6ffe2091576f77fda3dc31723f21a534c89dd1f3472f184",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2103
+      "line": 2109
     },
     {
-      "fingerprint": "d8dff4d07c7c1db886b5c5e5e6a401b2dfc3f3f7fdbfa658cb96ed1530a0681a",
+      "fingerprint": "05d4fe360340369884916dec1d76481cb8f466010b16bfcd17d24a698e513dfb",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2110
+      "line": 2124
     },
     {
-      "fingerprint": "576fcac56bae5af0d57ffe86ffda51e8ea7d63745ea8263b7bb27b3016af7b08",
+      "fingerprint": "b43c587e1d8052b8e46cc7a2822f7ce1267895f26cba4177712eb6e5aa9a979e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2119
+      "line": 2138
     },
     {
-      "fingerprint": "a281bd97a94225ef688aca5b99fc0e7aa60e92486281aa0193e67b1d0e0e8da4",
+      "fingerprint": "1602f93a2248dd353be19d69050fcdbf336233c7d20048def78124a4f62e1782",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2134
+      "line": 2143
     },
     {
-      "fingerprint": "b1459329dce437243b635dd36bf9a7667d8f4db23f2aab05337ac476d8f6270e",
+      "fingerprint": "dc3829970e82a2a644d72ef27e6fb5440e8dd747ad1beaf81eb7c804e4c78e7c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2148
+      "line": 2147
     },
     {
-      "fingerprint": "e9118b3af945fc0eb7943a43034a2d07611fe7acb6c795aca7548445ad8d4836",
+      "fingerprint": "2f684dcad903381aceb9c6e65ff36ba51cc77b15e7dfd9675d08bbdce2e4dd78",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2153
+      "line": 2156
     },
     {
-      "fingerprint": "ea3ef593bc858fa9d6bdca89d14b1cd318ff98b4ec87f898f0c77cf9f775ac3d",
+      "fingerprint": "1ebcf71c342aafa54ca757ab3a3af9f1144d3d8c20ba4cec0903615bbbeb22c8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2157
+      "line": 2159
     },
     {
-      "fingerprint": "a1a663b4b6be949478cef4a2f6704f278ff2a2a37e92eb28b2c2485d0ae1e43b",
+      "fingerprint": "d742b333f636b6fa953371dc7ad9dadeaf5452ecf8bab758ff4995faceb27db7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2166
+      "line": 2161
     },
     {
-      "fingerprint": "cb80e2723121dee3a256e8be593aa46ceae6a6b0a5275659e52f7bcad8706d65",
+      "fingerprint": "b75784e8cfb1d3fa973dd2bced8a1644c63967f7dbb1e246140e00f5b195b3c7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2169
+      "line": 2172
     },
     {
-      "fingerprint": "c04ee26e01495c2bab4f765976714d8ecc53c33863bd104be1f73dc6b5fbd4a9",
+      "fingerprint": "d619ce2865f11692f52564a30cc4cf62636695b6437c0fbcc28eaef29cfd85bb",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2171
+      "line": 2173
     },
     {
-      "fingerprint": "3a7309329798951820a0dfa0ed00a29e0d3de4eff159d3c956d8af7936da3b3e",
+      "fingerprint": "a7dd4f283600974f8cdca6cf223c4b9d7006129ea260a39596143b8bb4e313cf",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2182
+      "line": 2178
     },
     {
-      "fingerprint": "b5f890632324118d289f3e1e12a22e3475f5e26bae06145f46a5aea34ea08e64",
+      "fingerprint": "a9e12ba0194c9aa97d4ef56067426c919f585e972bcd1efad1360a9e1202da43",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2183
+      "line": 2180
     },
     {
-      "fingerprint": "78e1e0a72633e2a3abedc768068596843939bf4cb8501e06cb3f0061c0835fad",
+      "fingerprint": "9a50b61024472d9f5fd1b5739c5d66091da771de4911969be0d432554022bb04",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2188
+      "line": 2185
     },
     {
-      "fingerprint": "e04f42d3796be4b5d66f0aef97d890386182d12f3d0f766735afbfc71dafd944",
+      "fingerprint": "ca60c7e4f361ce5ed1bdeb14f6d4e62674518399291e9e2f16b64f6bfb1d76ce",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2190
+      "line": 2198
     },
     {
-      "fingerprint": "15ccd0d82c3cdebe8c2f4dbc3d0757b451783da472bfd05d57ee7f2bb7cbcec1",
+      "fingerprint": "0dc8066826782fa2e30b8ed5a52b07ce0ca99ed68a1c0534acd277dc1419599a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2195
+      "line": 2205
     },
     {
-      "fingerprint": "b217ce7ba18828047c6c8598f88db60c1384a127a43526972bc247edac37f44b",
+      "fingerprint": "02e4fdef4ad279192e9c140a52ce4b5f47e28539d343fde6a2a1c84a251e57ac",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2208
+      "line": 2212
     },
     {
-      "fingerprint": "a43f937d2a758d2127abc4ab2c953baf4085325b9c2773eb314e43e0e3766ea9",
+      "fingerprint": "b4c452be69289d24a90714e8baebb97688f2cdd211283eff785e0858e3874a41",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2215
+      "line": 2224
     },
     {
-      "fingerprint": "3da881fa1656681caf06a9c8fe5e265610aa821f4512462c9f947c900a60095c",
+      "fingerprint": "81056f2bc9411b3a0ebcc88af1a49d3bc7a97821b945e9ec17a56816494ef438",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2222
+      "line": 2230
     },
     {
-      "fingerprint": "3ba4e8811f405f55a30f95269e8849af48109553c784a9f82ce7c54da32ea700",
+      "fingerprint": "f2278b171851ba4a208c9df9f987eb57d3501099e1656ca8fc9152291d6fec54",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2234
+      "line": 2236
     },
     {
-      "fingerprint": "4b6f6b90353216444f48675ef6be2f25c229c7032c4b31e7b098cd7cedeb8c2a",
+      "fingerprint": "a39d0185ad5f7cf24f004a7d15caba5bd1f87d1014d751fc956c116c9697f712",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2240
+      "line": 2241
     },
     {
-      "fingerprint": "2fdaadcf2a51426fe01313fced56487fb335efc4fcb9905139e86b15d519d6b3",
+      "fingerprint": "0eccf39b9676aa577db66fe221c56cbfc8a0514e55577393f277b80de832f95f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2246
+      "line": 2247
     },
     {
-      "fingerprint": "2fb6ee731d7661ffa893ab6b48eac7632751d244e3c67a42290cc0569f198a8d",
+      "fingerprint": "22b7db63e14e7d590e9071b1f30cf1737718b2d63d1f300d3c75735b30c38060",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2251
+      "line": 2255
     },
     {
-      "fingerprint": "5f5884617ad341a5ac4251c82c3f16813cb5e5c0a53ab9fa0dcae1f84d3051be",
+      "fingerprint": "a5b4791198606575fbc952f6766f0d2feeb1850c66d84fee530585bd86aaef75",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2257
+      "line": 2283
     },
     {
-      "fingerprint": "e69846861989bcd5ba4bf74afcb04c31d0a4cfa4e4a7ff5a88de70eeffffa116",
+      "fingerprint": "33e228297ea473dc0df3f55a0df829c6942bd78800b3a4e2fdb7ba81bc3975c5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2265
+      "line": 2284
     },
     {
-      "fingerprint": "547e9ba3f8db49b04efafbdc927f6366db7bd938592ec02aed698fa0d4f1d522",
+      "fingerprint": "1302142074fc1cb05e142ae1b87239561be5bb12201917a38e7e743da7ea7516",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2293
+      "line": 2289
     },
     {
-      "fingerprint": "596b027b9f56dcedfba1d119e65ccfee5c8d8e478e81dde04f7408a2c8c0c382",
+      "fingerprint": "b3d6786daf06244ba79642b6b010460bbd5b05f18b5cf669bfcff08d64f4bedf",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2294
+      "line": 2291
     },
     {
-      "fingerprint": "a91a256fac11bd26a188e95b79dd79c3cd082712bae47f28396da414420db438",
+      "fingerprint": "0b5fd8461549f3e3652de7a1eff7a8648754a170e5e050f1ddf1a72bc5559818",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2299
+      "line": 2296
     },
     {
-      "fingerprint": "b36104b17a4850679f885f7e0550ea423561893f15ef5d893f8001f94b1ac57c",
+      "fingerprint": "cbf17be54205d7ae3916ac500e38413897ddb3bc7e5f8f71138b34bb7c8cb743",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2301
+      "line": 2309
     },
     {
-      "fingerprint": "7d637783bb02290c900e4c8b981d23a4a5f8ddf2aae5f791cc820c1728c1dc24",
+      "fingerprint": "bfd934cc9dd4433faeafb8466d833b15763b540de6b3a74cf5d9605e1501f8d5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2306
+      "line": 2318
     },
     {
-      "fingerprint": "fb067ca0506267f0ed8c510775695cb68a7a2fbbba3d4ad2f4d45f6e06835037",
+      "fingerprint": "b935a059505d8c7f0f49377b6aed7de90880d9d05d695c6b96bc130b2f1562cd",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 2319
     },
     {
-      "fingerprint": "ff76224c6f7c074e7685ba6344f5319a88bea468f6c790508b06aaf0d40d6f82",
+      "fingerprint": "3c6826ddd488b3209186fce18baf6757a6155227a477514cf3958297896a37d8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2328
+      "line": 2325
     },
     {
-      "fingerprint": "2794e89e44830f2c56794eb4a0570f407671622be442cd228c18e3601e2fb4a5",
+      "fingerprint": "1ad5f2e217c64e596f08fe25b504e0f82b499c5d82cf1ceff3c8a0a993f52e35",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2329
+      "line": 2327
     },
     {
-      "fingerprint": "1afd99b696a22b2ae281d2fdb95f9cfda4e8b150d9937faeb441d29ebf0258d6",
+      "fingerprint": "5df6391aa11ee2b005a3adf6e6b4ffe77e30cf433320f99e49a21b1589686a2f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2335
+      "line": 2332
     },
     {
-      "fingerprint": "9e72f8a13858d33fdf353dcd4f8ffc053da7b6ae6a28d519a251448fed6e2489",
+      "fingerprint": "dc430ac910e72eb034ad3bfde80817189521076f1f1d68031333b39b20414437",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2337
+      "line": 2346
     },
     {
-      "fingerprint": "a0444d94d5628f0106a658929a47144990b9bc0530b2a4fa8aecd33bd36345b1",
+      "fingerprint": "fc7e482af3a39e0ab5afc4e2d164bd3bdb3108aa685c76782d1572988f1b416e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2342
+      "line": 2348
     },
     {
-      "fingerprint": "a60f11923e650a29ad68635f771e1660a2715f3405157e6c56a264bb22377bd8",
+      "fingerprint": "6cdf7f66e1907a9a391a3edc6efe90bdbfbb36bdee0cd4cecb06a977f1fddaaf",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 2354
+    },
+    {
+      "fingerprint": "2a3dbb314cfa3e3a0d30ea642b3cab026b63f59cccede33629136efe65d4f1b9",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 2356
     },
     {
-      "fingerprint": "f94687235d81dcbcbbe1de10fe2c691ae774b836004d3cda231254c55a834b3f",
-      "rule_id": "rs/no-unwrap-in-lib",
+      "fingerprint": "c84cde5e836e49224e27ecc5eea8c3496a8296087449baad5c730a17c9ebad52",
+      "rule_id": "rs/no-path-traversal",
       "file": "tests/integration.rs",
-      "line": 2358
+      "line": 2363
     },
     {
-      "fingerprint": "0a6b236e09723229abd9d178050cdfd8eabfbdf5ef1f1746762174e4692a752e",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/integration.rs",
-      "line": 2364
-    },
-    {
-      "fingerprint": "0fd9ecd3b364a4405fad63cb41d1ee21be9f014028c3102fbd547d4c543d224e",
-      "rule_id": "rs/no-unwrap-in-lib",
+      "fingerprint": "3c1e457f24a120b850e4de7096add7614fce0fb1a24be541ecc12d8b4891150c",
+      "rule_id": "rs/no-path-traversal",
       "file": "tests/integration.rs",
       "line": 2366
     },
     {
-      "fingerprint": "dbe7cd6c1bae0c05b8c6cd807674963ee91e4a7960ddc6aad0e573d917e3f47e",
-      "rule_id": "rs/no-path-traversal",
+      "fingerprint": "3a9c0ea08aa7b0196c87f5ae197eeeb2374026e355169f751cfd358e572d6c12",
+      "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 2373
     },
     {
-      "fingerprint": "42d8488228c8c5283005b3da070c07a308874c236ff5d9c45ed83e1873685f85",
-      "rule_id": "rs/no-path-traversal",
-      "file": "tests/integration.rs",
-      "line": 2376
-    },
-    {
-      "fingerprint": "e80b55334c9f4ccb63eb3a196e817b2cd9762da94c80dbe1df28465fdb610089",
+      "fingerprint": "6b1a63d476db941d5883b9fc73a33cb2c15261dc2fc892e2d6aca1870e1533aa",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2383
+      "line": 2393
     },
     {
-      "fingerprint": "c7a9bc46c24779edbf1684ab9b03af80c7d2f200e536b9a840d519592478da9e",
+      "fingerprint": "e6fd863c5358625b18eb37659ae3540d9408d6c28c633663b94aba56cbbfbfe7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2403
+      "line": 2415
     },
     {
-      "fingerprint": "cab104ba8434cc4a5d172f9f1c5661fd2a3d9fa09f20d5bf849a4a4fbdd4082c",
+      "fingerprint": "cfec1d8eb7a99b610a1fa8ae215a36acc561d13aa8970e3b16db3ba4525cbbc8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2425
+      "line": 2442
     },
     {
-      "fingerprint": "b9bcd371269bd023c85a220705ec680646c87463d10e25816ce1a29524a100a4",
+      "fingerprint": "663d70a3ee405e0c58d54ab9311eaf495c08be71d0b7507f63b3350b0eb71602",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2452
+      "line": 2447
     },
     {
-      "fingerprint": "f65ea6c2b9add5691f340c832b1e331941e03b1a37ce0acabe7b0bc767f54884",
+      "fingerprint": "f25dd13f5dd0db00e8ec5e084d623cc3d9c64c9164e71ecaa7db55cc15bf1582",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2457
+      "line": 2448
     },
     {
-      "fingerprint": "7f441ee5912bf87e7e544d589bf4078005747f50840518898afcc8f2d9001921",
+      "fingerprint": "e73dc210de4c3dffe3d182e256f247a9e86d6b40be15a3194ece2dccd2fdd8fe",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2458
+      "line": 2464
     },
     {
-      "fingerprint": "836c14ab7c90b0292706a9919506e93b0d5607c0ad652e257b1e47373066b100",
+      "fingerprint": "9314e522238b17efde7e2bd1e67c711c10a7e6b3c706888fecac7cf5cf4c93bb",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2474
+      "line": 2488
     },
     {
-      "fingerprint": "cbbc0736afe065eab35ea2a0b039edc7ac1bc0412dd6a62404529f42e4880e9f",
+      "fingerprint": "32033688d409f3aec991d5f48655b312ecdf9469e243da13b860e17966d886a3",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2498
+      "line": 2491
     },
     {
-      "fingerprint": "751bedc137fa8348ed42be94deba531c23cf52bc01c502c201c497044631b124",
+      "fingerprint": "7f71e71512e6ae97494cb88da7743409344a40bdee35f6b00f24ca2995e3d01e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2501
+      "line": 2494
     },
     {
-      "fingerprint": "4335bb3f5f7b0a7d69b00703dc0c81234384309d03d7067584297eba7902231f",
+      "fingerprint": "c578e7159df1954b42e872c50803200c60ab8b9d9974f822ab5174e2dcd33665",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2504
+      "line": 2496
     },
     {
-      "fingerprint": "b466da86b2216747d684801edc0e523487862a677d6de6a8f883b801dd5372b5",
+      "fingerprint": "65d19eba8aa182cf429809ce1fb2ea6b4d3b1b610de71ef1bdb722efdab17c19",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2506
+      "line": 2500
     },
     {
-      "fingerprint": "70783fc0e2e9181cc1dd5da70137f6709cd4e417abf61d365f7ee8a717b8d8d6",
+      "fingerprint": "0ae2a2f1a1d7adf6641ba99c3b43413b27b8e9d51ef82bc7bb26c7a022ff2a90",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2510
+      "line": 2511
     },
     {
-      "fingerprint": "3e98b0be9c0763d307ebeed68cbd1d85547947992ed70dda0920202248704317",
+      "fingerprint": "c964c51df464df0c42feae6dd9c75ba2856c035a1ae8e01122d0a015813f4f9e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2521
+      "line": 2513
     },
     {
-      "fingerprint": "80526d6559d8dc99b19858b74a398527f651f9e35eda1eafb95bbcddc550a33a",
+      "fingerprint": "00c64b6695330ad9a96a6c9ebfaa1db0691019a2da1484541f0cbadcea9d2787",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2523
+      "line": 2517
     },
     {
-      "fingerprint": "23c3f5ff5071803d7c532f33c0a006c906c4c2b5e479b09c3be415a81b937df1",
+      "fingerprint": "31f75c9409733a2d190c21bd41e1e2b59f7a18dfd2e59336f0dd8a2cd728b93b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2527
+      "line": 2533
     },
     {
-      "fingerprint": "ccb953072c3cef27ccd84ab7dace3b37e8ea8434b2b146ccc9401668d27ebd23",
+      "fingerprint": "4f3440225b09603c6911f9189b6690e63b13a0c277b70354b3b5ca6331718582",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2543
+      "line": 2534
     },
     {
-      "fingerprint": "0ee5d3ade0a91c075fd50122e6919a6f4e46f42b2e126dc62d49887651c9aaab",
+      "fingerprint": "ac29c3dcf40a15b2ca1ff7b11a820bbb976b5ac5d4bee5d67d074afbd976c01a",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 2541
+    },
+    {
+      "fingerprint": "d27f611074934eca7e91f1b6b88626678c0b8acb439c1833f8a511d19f23e16b",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 2541
+    },
+    {
+      "fingerprint": "db2116acc9878c31df1acbbc31d6d7f6f6591950906fdc310aae400fbdabb7d7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 2544
     },
     {
-      "fingerprint": "5540a5e25c7b9eeb867eef601b383a95f7b758adfca3e6958141c3e7aa6c862e",
+      "fingerprint": "818ad476cc85350196a5c7700d4a26851519f40ca6cab4df365f14b6a5ab81df",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 2551
     },
     {
-      "fingerprint": "f9bc51c804740467e95614abf4cfb59d0dc63cd17d5694c4eef5f57406233ae8",
+      "fingerprint": "54db223cfe916ce4ae19d44f4c35d42e39b2034757b51c17fca1d7980c2d324f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2551
+      "line": 2567
     },
     {
-      "fingerprint": "efa931f0b019669d554f0836bac758516c2aee1a877b811f5a5c9f8ae92eeb46",
+      "fingerprint": "c86cede45ea0b020d68c9ce63b862904562c42ac50c736aff3eec2dbfddbce42",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2554
+      "line": 2588
     },
     {
-      "fingerprint": "c58f211baecc8c8695f48e7e56be45d2a23e53f5d10121fad0c83508b9dd7849",
+      "fingerprint": "a09e6a2e132a022af4d0573d1e88f481fb25d7234409a4c9ca6b90f0e9f67184",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2561
+      "line": 2589
     },
     {
-      "fingerprint": "a89ce854d985845f79a0441c8dbb44084fe18f72a50869073c2f9a28ae26df2a",
+      "fingerprint": "cb2e77531f8917aae3e964691e11da6ffcf0ee1259137d696896588dc834e30d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2577
+      "line": 2596
     },
     {
-      "fingerprint": "d7a8c720fe1e6d02671e59da2acac1babd4b060f39fe2fbb4b0691f45f652bae",
+      "fingerprint": "278e3203b9bd1250a76b9bace820955a8f077926e5084873e3778b70dabffe30",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2598
+      "line": 2597
     },
     {
-      "fingerprint": "d6f76c2270772991d44f76063857a0946ead88d07ebc1f3381163e194458054e",
+      "fingerprint": "f54f13e379a2b162c2e0f5646aa58972dca72242213eb2e449cc9163f9565f93",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2599
+      "line": 2603
     },
     {
-      "fingerprint": "d1039140030335815efd252b51f0697af2aaf6f8f7bc2f694feff8ec29748868",
+      "fingerprint": "adb35aa9ea26abd17a939475ef00ee3fc18484a6970f4bb543343c0c2afaa3d8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2606
+      "line": 2610
     },
     {
-      "fingerprint": "f9c8a3d09e7f17314847e856a0a32006e35f746f03b5b2dcc056a368f13499ed",
+      "fingerprint": "69c34de33e8ded1699e02e3ddbe2c1828d1c90ca00a8ee2a6f72f20cc77aae9c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2607
+      "line": 2626
     },
     {
-      "fingerprint": "72b6d02be9e6823c1c09b458fae73dbbb8686564b8c056930412498430f0f295",
+      "fingerprint": "2fc212515d71b0bdd3f9d2d04026845742579103cd4c844feb1362631078fadd",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2613
+      "line": 2644
     },
     {
-      "fingerprint": "86363a427e624554ca3875ceabf845d01e5ff2558fa78f99af1e3a78541277fa",
+      "fingerprint": "04d8cc2238468a5824cb1ebaf3b0fbcaf86e0836ee6925e5657fbbb9dd77809b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2620
+      "line": 2650
     },
     {
-      "fingerprint": "c8c63a35050fe7d28650c1b4210d30784819666d104b463cebb19509e47a0bea",
+      "fingerprint": "3c0564cc4abb26d9d4d1ed5fa4f755df9904ffe2e97d962b36e54d7813b1b99a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2636
+      "line": 2664
     },
     {
-      "fingerprint": "a7ae9fefb319134bd51a3070b89c71062cdb17813c4e4ce56b401168274ac2d3",
+      "fingerprint": "ac339b2a7e4a4ad307b0d3a9f9fe25993ebe3dcbfe8c068dc19743bad62409a8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2654
+      "line": 2664
     },
     {
-      "fingerprint": "be1f8da593a91b71d37a4b45e7fa3a83df241148991e5fbc3e421c3ce61d10b4",
+      "fingerprint": "b9af4e2b441cda1148ea3dd2daf98b025e8d60d42ece43dd60bd22515cc75c47",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2660
+      "line": 2665
     },
     {
-      "fingerprint": "208291809db0ce2fb903af2144b206e0d9b2aa7cd80dbb62b2a40167877efe3d",
+      "fingerprint": "0e65a5993a56b294bee715cc90d17796bd708049746891c42d5f7b1858cbbb40",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2674
+      "line": 2672
     },
     {
-      "fingerprint": "df3c5f8457be058bf41726e34c0938b75aa62f2cdb3d66dc660f16ffa3460256",
+      "fingerprint": "2ac4e3a50252e9330e3e4cec312bda9066d713b0d5038cedfa5c2aff6b1d5789",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2674
+      "line": 2672
     },
     {
-      "fingerprint": "2cb1de535ca9b0eefdc87eb554e32cf6a7a613de2572711cbacc72ca25500233",
+      "fingerprint": "bf2358316ffd519c2dce846f45a273c942339191c561e9aa23019994c7c6ab51",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2675
+      "line": 2673
     },
     {
-      "fingerprint": "06bd2f822efd47db040fb0a59081caeabdb8be36501731e6b3194fb7f261977b",
+      "fingerprint": "45e0897cc56c3c4bd9e27b7a67ed08c2a46d6cd890f4022acf1654017c5b1e34",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2682
+      "line": 2692
     },
     {
-      "fingerprint": "46089de48168f93e0dc9b0c1e7f75bf1577e1f461730af7d0afe18eaa929dcf6",
+      "fingerprint": "9c7002ebfbf60814c2100bb44d8328d3721dc81d90b8f0bd548635a2eef3e966",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2682
+      "line": 2693
     },
     {
-      "fingerprint": "b436f515dde3313794280bdac6dd942b92e06f96dfe3975cc41eef387a0c3c11",
+      "fingerprint": "aacdffa815c87841c2f57568a124c471852e6af26bcca2092a9e24f2c9f02ad5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2683
+      "line": 2694
     },
     {
-      "fingerprint": "81569593e11654546f53be24d3b1c28785dce98d7af386cb8f48c81b1cebaeb2",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/integration.rs",
-      "line": 2702
-    },
-    {
-      "fingerprint": "17300ef76eb12a70d6eb49e57901158a6c080a5f4854b9dc150b902d23c3c963",
+      "fingerprint": "fd14823235f2c455c12c795259ee891ba2e3f686732484aaf6ad2593ee116255",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 2703
     },
     {
-      "fingerprint": "077378458f41c84f2b27071fac8b31b72ac0ffb4b3a7c61aa0da389b87d83dcd",
+      "fingerprint": "04402ce5e209e442478b943a92edbc982278667e10b279e1b107c485c842bd93",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2704
+      "line": 2710
     },
     {
-      "fingerprint": "333506c1229361cbae196637298dd477ababc2b0d53a8dbb5fbbe7ff253a071a",
+      "fingerprint": "7f1b3b04fde08e8032e9ac90cb327a0df0d7851ac48dc2bdfec0e995a99e0e9e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2713
+      "line": 2726
     },
     {
-      "fingerprint": "e52b89adff54bb83d6fb3e493a32849dc38ac9332ae550c8993a829494ed0a1f",
+      "fingerprint": "d7b3c24fdda5eca21290577640c8fa5f341a63ae0135c939427581142b0d09bd",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2720
+      "line": 2749
     },
     {
-      "fingerprint": "03d60c94164376ca2f1919cfd49a19b72ecc93b943bb491f296e61025ced83dc",
+      "fingerprint": "5f1c693fc8585a1e6fee72efe844fff0ab1c93b29436fc2de39fbc02adce82e8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2736
+      "line": 2758
     },
     {
-      "fingerprint": "3a212b47af24559abe66ca1772060fe6f6f4ba78752edde1b19f906ce37caf2d",
+      "fingerprint": "413eab7e00c8879ad9dcac91d854bf241866a3f85da5b225732eb7842230c959",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2759
+      "line": 2793
     },
     {
-      "fingerprint": "f3573684f2ff18aab03cf9248f101e305906a5ec5c64d3b0268a02d41363c6ac",
+      "fingerprint": "06b95f2bbe38f7aff2dcbd55bced47a39e848d6cdb750146cb605ca1c6d2a125",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2768
+      "line": 2802
     },
     {
-      "fingerprint": "b9795453c9b18f5d154dc817a9d28cc9a51aafcef2c4c4fc1dfcc60e971c0171",
+      "fingerprint": "80e21d29e94d8d93155638300fd1b09fd5f3d41155874154a2c4176dc96d7b29",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2803
+      "line": 2816
     },
     {
-      "fingerprint": "f46729158541aef6c85c4689536c0ca49343a1afb09ef590f7bcf665bb9be065",
+      "fingerprint": "f14890059c8b557b2ad08f8cc75c47cd2bd1133c698486b7a9904b8b34ac7fb3",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2812
+      "line": 2825
     },
     {
-      "fingerprint": "a268664b252913b7726030424abb8e191122536842a2d16e2ca15e8c6ecfd262",
+      "fingerprint": "5b912e38be297c4bdf20c585055eac7ccf2c635b3d8f3ed85e774f1c407d17e8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2826
+      "line": 2846
     },
     {
-      "fingerprint": "26b922b418b96c327f9b063036e7268f3716430aec8c6ac0afe2e9f10e65e379",
+      "fingerprint": "481bb3da67462773ebd432c67fa7351d7950b1affc018a1e7d8e19477f49c626",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2835
+      "line": 2854
     },
     {
-      "fingerprint": "37f3a30d375f4203f2cd64054b2221e6b0b95637b62b0d7c076b29fe5627a425",
+      "fingerprint": "6c5841582f74e07e73b08d17d2afdb1b6463e9cdadca4a05eb874d89a4db49ba",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2856
+      "line": 2879
     },
     {
-      "fingerprint": "5e57384c6dd54713aa60223bdef439bd5369190f86c5845f2d2c83394af383ad",
+      "fingerprint": "09ad082c20a371703638a8a3300436e0213d99ff0e55321eae06fed4314152ef",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2864
+      "line": 2883
     },
     {
-      "fingerprint": "0b1d97e4bb6d86744be0a4b175ccee198958101b582cb9c5797541bfecf64d2f",
+      "fingerprint": "6c656232b3b6c561057b8ffcf5a5233a7d88dcfbaf298dd389501451b59023bf",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2889
+      "line": 2902
     },
     {
-      "fingerprint": "6e198fedd1ba59b878642a5081645b3fdebe47b49d05080b5b75200f5feb1aee",
+      "fingerprint": "53976f271cc7986759917644530f9b4e534eaf1b8ce63c227d08c9187c0a0017",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2893
+      "line": 2923
     },
     {
-      "fingerprint": "55afeda150777dc6571ca9ba866dafbf6c4b4e3c85a5971ec108aad282f67e62",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/integration.rs",
-      "line": 2912
-    },
-    {
-      "fingerprint": "ed6e652ce7688d80999c38dd688195ed89a0eed5e4596b657c1821873d78d45d",
+      "fingerprint": "15cbbfd9dfd14d89e96214e15445e0bc50ffa4216046cfee624a1795d2a59660",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 2933
     },
     {
-      "fingerprint": "4f64ceb6311fbac6e9bdb36f82450552ccaae2cfaaa6c15fdef4f0a0b326fccd",
+      "fingerprint": "f6b9913c8f3831e8102d9d1d38f628bc8aeea1af1341c77fcfc8c8802cc09d0b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2943
+      "line": 2962
     },
     {
-      "fingerprint": "3e4e1d44f42620912ef2b34f66d0275fb82a44a0f578128a1405d9f615ddd7fd",
+      "fingerprint": "a1e8ba4873dbabefea154500664cd0f08d80aeb9614c6baebad20d97b3660e02",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2972
+      "line": 2970
     },
     {
-      "fingerprint": "5fbe943002e30bc4e4cc65e792d8bbafd4d995560ee8e91bd903f801daae2603",
+      "fingerprint": "f8ade3b6f6b14ecf4f73a8ea1a1fcb2418f784dbbb43ae2ab3e926d4c1db4779",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 2980
+      "line": 3002
     },
     {
-      "fingerprint": "f8a0291c775806c5174dd0d5b698a2119863724b53527b55df2a8cc614ee3d06",
+      "fingerprint": "a43182c7999b0dd92c4ab46d4b13d8216491e7675a54236c53aef6287bccf5fa",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 3003
+    },
+    {
+      "fingerprint": "7b8308e199c9291791e5434df041ea6965209dd35e6124d6f781f6d89fa57007",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 3005
+    },
+    {
+      "fingerprint": "c741e06c04f23ce4106b46488201a3c756b4ae221a67b9be744f69b2532940ab",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 3012
     },
     {
-      "fingerprint": "7ac4b7aa59ca49eb21963925c9033f68b32103f5b31ed2e8e49c5c0aa070d6c3",
+      "fingerprint": "c54f04252f6b2563aac81044ebc53a28bdc5f92259e9880c0995a0334097a884",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3013
+      "line": 3038
     },
     {
-      "fingerprint": "f401571c3e89b3bfaaac9d5a29973a93ca41e0535bad4af984987575ace81d28",
+      "fingerprint": "8d4fb6fdfa2c23e02a206261415f4881fbd97076855f7e6469929ba830bdba39",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3015
+      "line": 3039
     },
     {
-      "fingerprint": "b032f032b61b6716d6dda6dbfe28c288e18e44e720349f73de9c51251646e137",
+      "fingerprint": "f1f91a503c4e497d09dd238e30bbe851b7d159daa17a3684829e54819a71b840",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3022
+      "line": 3040
     },
     {
-      "fingerprint": "8f9a8e9c00058faa310a3b485fd488c62d50272705e015c693b1abf3ed25cefd",
+      "fingerprint": "eb2d7aae6c0d19d928def0fb3812d278a101d36cf37cb19d10d954830ed6f9fd",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3048
+      "line": 3041
     },
     {
-      "fingerprint": "97fa42060258759a8898402dcde3cb59cf9019f74409d50ff0420123903064c9",
+      "fingerprint": "be524b20a8145aeeb2076df9d6543c99554c8da6d0a39cc6abfcfee767c04f62",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 3043
+    },
+    {
+      "fingerprint": "a1a8e564383d42659fd72cd4232ab1bda05d539b4232e47f06e2b2c314a70142",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 3049
     },
     {
-      "fingerprint": "18f9f9b4c1ef36ba025658419a628bf709886051dc99f9811fbfbc5b119231a3",
+      "fingerprint": "af04be192bf6eb5887a04e31a2fea6ffc6a7670fd8140f8b7bb87a4acf7c57a3",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3050
+      "line": 3076
     },
     {
-      "fingerprint": "74e08526111e587967c92de03bfc7971c98f5ccd6e02a5094e7b735db24779bb",
+      "fingerprint": "19d2923bbe240cdc156114670d434a1a985607f362c5c8284a7ebd7af0fd4547",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3051
+      "line": 3077
     },
     {
-      "fingerprint": "d9c5e7aa61fe03cadf8105995b3978aae7c99acaec964cd0192d86471746fb6e",
+      "fingerprint": "07730a5c1688f467151997e571a25a106b05d72225f6e6855bd8c75227728cd8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3053
+      "line": 3079
     },
     {
-      "fingerprint": "dc8bcd032ea13ef105ab8348344489f43eb274eebabbfc13d13fe84b1e3defc9",
+      "fingerprint": "e7aa5ec4b8cbbf6e5b2130e0d1fe31a28e746e5238d3644d02b58a36fdc23a72",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3059
+      "line": 3081
     },
     {
-      "fingerprint": "96359456beee424befca4cfea614e6b9225b27456fc9c99ffb1496b2c2ba745f",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/integration.rs",
-      "line": 3086
-    },
-    {
-      "fingerprint": "a9c4870e0bf4ddc4f82f8388081cbdd601b53e49b099e79fd2d042ea807f7a03",
+      "fingerprint": "1e24539a9bde187dfaa5f9c3644dd0756b306ff5ae0acf9222d2a11c4e06e795",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 3087
     },
     {
-      "fingerprint": "2885dc4c832f8177a664a34869d71b1ebddd6ac1f45512ea70b8be027e6e60e9",
+      "fingerprint": "850daa1baaa5d880382df107dd902a21a9595a421f8ef9bca29c3bdc92fdfb2c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3089
+      "line": 3093
     },
     {
-      "fingerprint": "6380dca363a5a24a052fff614746cd7861c000f15534fb973ebac24c719f2b76",
+      "fingerprint": "7e3f7c28e5053dc8d3b91a4ef1289bba599be7d107cc97247a49dec91fa89bc7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3091
+      "line": 3126
     },
     {
-      "fingerprint": "fa820e508cf7d407c892b2f8dd6429da26502483f657de5d898fc101ad92714a",
+      "fingerprint": "f226492842b9f578f6a0168476b09652a70d5ee0b1e069e348e4eb1cacece743",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3097
+      "line": 3127
     },
     {
-      "fingerprint": "885cb6d8f2e9003f03da616db2acc72e0ab1097d187ee664d8b17255385fee33",
+      "fingerprint": "4b7498efe4e25a25d3a40cd77dd98cab512a58828bf03a978361d5f9ecc27971",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3103
+      "line": 3128
     },
     {
-      "fingerprint": "3439230f65a2f41d779dcfd0a531e1c4acbf433048cf9cfb474e4885f3354647",
+      "fingerprint": "2a353bb4022844d2a15beca47ce1fa5bbbe863b36b161932f33334f433f36eae",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 3136
     },
     {
-      "fingerprint": "5e2205fa7cadcd5da01e1dc52b63289a828e7650acc0faf1b7dbabd28d38d5f5",
+      "fingerprint": "5f45740ca0239310c93b49252ee55caeb8fa86a2e23e68a324a7a62c9f6c5b06",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3137
+      "line": 3156
     },
     {
-      "fingerprint": "aa721265ff5afd640238c2d098f2b8b5868f5257f60ed25686d6fee4a1882c91",
+      "fingerprint": "7ff04c9519026d833370d814be57e4c6f68544bb6014db168e0f083e39619c74",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3138
+      "line": 3157
     },
     {
-      "fingerprint": "0c870a4dfe43a82e2efb0cbdba6656ef75be271fb0a9cef5c92f76f284f30e11",
+      "fingerprint": "29c6114ae7d70f003f58a7bdbc83d5b8e7bc3ed09f4b8f4d7257b5a7c512702c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3146
+      "line": 3159
     },
     {
-      "fingerprint": "6d5d2cd162d7854a4f8c18b54a45e93689211d5c8305a68a927d3662bd0d0a2e",
+      "fingerprint": "e6fe94e3b1e623a0dfdfa2967bc779b2c7e250abf950d898e16e3d804ab3bf94",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3166
+      "line": 3160
     },
     {
-      "fingerprint": "447fe7bf6edc642a58b163420fc5f7b30cdef3d6569de6c14ab03e6eecb6d462",
+      "fingerprint": "f17c88354838d004f7fc960c668cacfeb7b66d0307755467f2d9fa550b33f5e6",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3167
+      "line": 3168
     },
     {
-      "fingerprint": "fe5ba2661e769f9fb8f4a553e3a04977d38d8d484a3ac10a86be6fbe635b4251",
+      "fingerprint": "797241396ba382c990373b06e81decd6bede0754e3430f8d195fa9e9cae31f20",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3169
+      "line": 3194
     },
     {
-      "fingerprint": "ae00d465eea89493b88188c2ce69db8bca9bc530ca7162369ceaf7d645d7f39f",
+      "fingerprint": "4b60676b7b27e39192236d3b1ad5c7bb77944e8e721de70714fc49e34fa1a0ab",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3170
+      "line": 3196
     },
     {
-      "fingerprint": "6f79efba72ba55ec21c2dee6eeeac32234a45c9326da42b697f4c7d63704e1d8",
+      "fingerprint": "758bb79cf1be615b03a049802a04b96fec458a165b57a5ad1d71082ad00ccecb",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3178
+      "line": 3202
     },
     {
-      "fingerprint": "2bcf9a1f220583d7ad8b458724826d9f66a99ccdf0edd6d3049e6dfbcec61df0",
+      "fingerprint": "8b3b0661eddbdd9d1e6239e4efbf0c2dc05f05a81f3d280d93522767779cb660",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3204
+      "line": 3203
     },
     {
-      "fingerprint": "87f52a380303ba9304bd246fa71fd201e12a4ae300db64f53e51737012ef235b",
+      "fingerprint": "bf6e01c631dff5c0b1dfa9cdc1f8a505880baf4dc13c9d5b445bd78369e0a7e3",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3206
+      "line": 3221
     },
     {
-      "fingerprint": "03e88b2f92ec8564bc5687e21ab94d32398012db4ec8e974daf8bddeda6ff91f",
+      "fingerprint": "62d8d90a7a68b3c97a3d94bf205ae09b5890aa64569bbf351772f1dae8ac0623",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3212
+      "line": 3223
     },
     {
-      "fingerprint": "85bae88e83c25b86d740daefa88ac255f291bcdb97487af02ffd89ed4b1a7aea",
+      "fingerprint": "b41d1b073ed4ff68a012d4639229135977ba6e0be64befe357b8bbfe6e636ff1",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3213
+      "line": 3226
     },
     {
-      "fingerprint": "e1e6cbc4460d1b29257c52f7e7323630b3dc7d6f5803a7591957eb32a65d7c66",
+      "fingerprint": "0d9d9c8609446a7952dbcdc33c4ef964e7524308ac7c6bc010bb0cf237a5c5d5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3231
+      "line": 3227
     },
     {
-      "fingerprint": "eb96ada1654cd95457672cab976d99a117e80592d02f3b7dac14c78e5fc5b1f5",
+      "fingerprint": "a301763aac83f69bde782d84366840183fcddd8e68b5a6b417309348224079ae",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3233
+      "line": 3245
     },
     {
-      "fingerprint": "ed7821da4ad862c7c5d4744ed746fbc764ca23a1f06d01815b6df78cfb2573e5",
+      "fingerprint": "dd6f0da6ce206cceae5aa981f8092ee0284d80754782f148cd0bb622f5add580",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3236
+      "line": 3247
     },
     {
-      "fingerprint": "1ca4188331adff668ec340bdacb20366a1f8fb5545b3098d342fd64fa81f360f",
+      "fingerprint": "149d77ad344477245f7a6b232a944ff4d4707e06c3bb0885ed0a9d36d5b9d419",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3237
+      "line": 3253
     },
     {
-      "fingerprint": "53016ad406f11df4d9556503d7594927868c3682350905c6ebb56862ee3e108c",
+      "fingerprint": "73ad114244b2c5dd87d043829ac640dc893070dfb4b4c46f1eedd94cabf2dad2",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3255
+      "line": 3254
     },
     {
-      "fingerprint": "e19d98996f4ce5de8e09614453b4434ff36afc2e34ea74cc62e23eaecf3098c7",
+      "fingerprint": "446b10917c169dec5fbfb21bb2b8e0bf0d305ebe0d9816c4df4e3f6a08bbfb81",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3257
+      "line": 3270
     },
     {
-      "fingerprint": "4f3798dc9cea1a05920f29838373eed0cbc3d9e99bcc227da3136f598511fc70",
+      "fingerprint": "7bb84605263baea029903900e48faa812e65392cdf8cf5f9b83bee8dae38158b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3263
+      "line": 3272
     },
     {
-      "fingerprint": "a69d1aaa1762de5f848b5aadafbf67125d5aa409edd15b52c78c325ddf8b0925",
+      "fingerprint": "c172d04a7c64918a0c9eb685732ef3c2d83194d3cd6d4e482e2ced326f7b3be4",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3264
+      "line": 3278
     },
     {
-      "fingerprint": "707b37caea9dbdf9662492578862cae2603ccc20f075a317d11d35d777c83fdf",
+      "fingerprint": "521b9524ce353dcf63e06d723ed323a3b8ed48ead4caec5322c7901c948fd559",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3280
+      "line": 3279
     },
     {
-      "fingerprint": "d2d795fc2ebc5d2f9171baa79926c36498efb0eb736a9e2a874feed044ce427d",
+      "fingerprint": "9d1b1f3f94769607ebeedb5a65ee87dd652b6d4acd35c1f93e896f0e907b086b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3282
+      "line": 3294
     },
     {
-      "fingerprint": "8ac762c2176fd8cc1a78a732d10060af2503909785ed9e293b2620a9f4418551",
+      "fingerprint": "aeb00ae3e1be6368c28e6ffe2f20386a6186b0fe44156eda9c8702f53ef82fb4",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3288
+      "line": 3296
     },
     {
-      "fingerprint": "71706bc53a004539b53622e2801e20253fdf64ae8bfab1ba892fe5954cd89c4e",
+      "fingerprint": "bffb5f547df646a556812b18578d0d19ad967ddf6d46b8f986dde399cf6fecd1",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3289
+      "line": 3302
     },
     {
-      "fingerprint": "1049ec7638898c66bd2629541bcb07e97e05a2f14fd427ff444bfa0eab10fc42",
+      "fingerprint": "faced69433ff4cff7b7a64926669cd4b0b66306342d3a0df5256b9bfc23da33f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3304
+      "line": 3303
     },
     {
-      "fingerprint": "bc8cb977db68df88eaa15317030d9dbe61fda7969200d0da0448ac9edfb032e8",
+      "fingerprint": "e41c5186e27f4484a44e49f37886375c605cba4dca91ea8ebd14643d5d61e94a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3306
+      "line": 3323
     },
     {
-      "fingerprint": "18770a87b59c4f0bb1092918ac8ea7867fc0fea6961b1c5228aa6a44fe72e2be",
+      "fingerprint": "e17262d502c0fe75f819be24831aca4e96254f1745b769b05c8d558804407fd3",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3312
+      "line": 3329
     },
     {
-      "fingerprint": "0a459b62a90f9f1404bd66d6c4ed36bfb413e825d3649783199b11e9918096ac",
+      "fingerprint": "7150f0c2d9e707d9e200f5cfa44f04cb6148cd7d98f17f54e27e0d86b911c058",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3313
+      "line": 3352
     },
     {
-      "fingerprint": "f57933c46700472e0606983bf82b8244a81f0f6142d236241660be37c3852b4c",
+      "fingerprint": "8225b139852f1c1cf54086682c16255c77ce22fc6eee650854a71d0a0e3d6ecc",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3333
+      "line": 3371
     },
     {
-      "fingerprint": "0ac6d1e1570ef04df2e97c27413596c9fc45b478f6bee8258ea88a694a048056",
+      "fingerprint": "fb8647726ae0d0d2a8f9db3bc1cc663f99043f7c81c3d4f7a0d8b74afe636724",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3339
+      "line": 3394
     },
     {
-      "fingerprint": "5de91cbb22ac36c9b642ea5b2b163b4e0498551bca12490cd8c20b34d70239d2",
+      "fingerprint": "0e95a79ae4605d383947d00c25d7c81c1c02a53770b47d18dc2bc5aeff16187c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3362
+      "line": 3425
     },
     {
-      "fingerprint": "56f09fd947961358417c81398d230bbde26115843057d118d44a7f3806c91258",
+      "fingerprint": "cf1436470062c0443d4a4ed4d05d2af34b06448ea179452415957f8d4bff0a25",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3381
+      "line": 3450
     },
     {
-      "fingerprint": "b03d4227798862c52fb71ebe767673b8f471d2484f093d90b68739ff7e70b43d",
+      "fingerprint": "14be2fdbf92471b04cb92a03b61be2e93671f3bee547bc745d5520a4e1fe100d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3404
+      "line": 3474
     },
     {
-      "fingerprint": "57c22b42251ccaa647e94eb093a9fd8ee9b2e7cdf23218fdc2a951b999b1c1e9",
+      "fingerprint": "76a0acae647df0bcab9a5e7f2a5699c3e2bbcf125eaa7405be71e033e7db9837",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3435
+      "line": 3485
     },
     {
-      "fingerprint": "300b5e3bc0ad7768ddc5b79318507fbcf5895989f66cd346400680b9306605af",
+      "fingerprint": "9740cc35598ffb879e13a7950dc1e5f6f7dcd9312c69b65061d8555252c0c3d0",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3460
+      "line": 3506
     },
     {
-      "fingerprint": "09e20bfdeada4d2aa702ce213bc7013b7d8fde02c499b95e56951626a2940f88",
+      "fingerprint": "1a1c95c524f812b5b2c1bc4ab69f2a5dc3c0b9c553c43b1f192a0c22233fb66f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3484
+      "line": 3514
     },
     {
-      "fingerprint": "4b19c00750aeed95206e89108b19193a4e6cec7d63e0a6d1360e1d38a35af564",
+      "fingerprint": "63d09595b28aeff9a46dbdf5467d88b17309759f215158130cca0ba30f009c3a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3495
+      "line": 3529
     },
     {
-      "fingerprint": "9489d3ad439e646a6c467b6bc5c771d3211c03038563d4c5445a447c4d01bf59",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/integration.rs",
-      "line": 3516
-    },
-    {
-      "fingerprint": "ba1e7c65200784beb97633fef37b03c78e5124cb22f134604b7e12c22e9c2824",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/integration.rs",
-      "line": 3524
-    },
-    {
-      "fingerprint": "8741056e32491cd183e4da8274c25527176a6fa524b2da30653723b0a764dd30",
+      "fingerprint": "e46178bfc32cb26540489fbb34dd512655ae80f4d8975e99265d72574ffda71d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 3539
     },
     {
-      "fingerprint": "8051b8051e421384f2ac763f12c2cc3e2e2cc895e954a3f9e54db4b62128de6f",
+      "fingerprint": "95abfac5076467ec0b6364bcf98c8bb01c3f8851b694e13707348b4f2e32f14a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3549
+      "line": 3558
     },
     {
-      "fingerprint": "67797c656443e23e974deee5ff42a8c6aae6dbfe7164ab775c11ee2949609e40",
+      "fingerprint": "edfd42391914928767ac6c350d766acde584fd351ac087b12b98b9c52bbaf3ec",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3568
+      "line": 3569
     },
     {
-      "fingerprint": "554f7f5dcc6e5641f17751424260e6ebf60d2731a2a8bbee931dec477d6f5c76",
+      "fingerprint": "cb04f35290e298db6ca20bc18c3e0333d9fa5bca035a1e1ed2e9587466b944ad",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3579
+      "line": 3586
     },
     {
-      "fingerprint": "5805496bf713253516b124a65bc5a57651e97e1ecc940547909c33723c42bfe4",
+      "fingerprint": "060d7fac83dcdcf006fcd4136a636045bb2b1485831d9d16a1850d186341e22c",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 3593
+    },
+    {
+      "fingerprint": "24887580439b46d131bb6af3ad291c103e87d6cbf8e118b45d7968f8f5fdc5fd",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 3596
     },
     {
-      "fingerprint": "c000a2610c71db289dc9497f56a31034435d84774a731acca1760a7ae2e9e798",
+      "fingerprint": "6189fb2910562a47ed61d359b169c98a721af70c4c88f3189b6ed3d17f22f89e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3603
+      "line": 3599
     },
     {
-      "fingerprint": "287557f958ad0e872421ad83aa4fc6433a8ab2921531f998b3a74b1c3a5f6e6f",
+      "fingerprint": "d28736019da6cd1a6d85bc042177113fa67c2f053ac0728f93a86741ee280366",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3606
+      "line": 3650
     },
     {
-      "fingerprint": "44926bafd33b2320a10c787c22276abda7efc92717a710b8158aa6a22034ce5a",
+      "fingerprint": "dea66421240ab980d286eeabaf413cd167fa45133e54bcf30d781684ecc1c683",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3609
+      "line": 3656
     },
     {
-      "fingerprint": "bb9b45c3580202fa6ac92f3665162e33ccd206a4e25848981a88abba304a3fbc",
+      "fingerprint": "dcf8ff4d669550103f21613f018e46a3ad9296bfeec0c47be12fcf9fd18e1c95",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3660
+      "line": 3679
     },
     {
-      "fingerprint": "399345f6d1d2fc28c640ac612757e93ea1bc37c695322fafbc780297bf0c372e",
+      "fingerprint": "f52b6554612bf9e0ecccedad3e3eb4ea6cff05481f7b2e737bf98198b75c8479",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3666
+      "line": 3682
     },
     {
-      "fingerprint": "e6dcfff01b9869e26ee61cbf2073eadc7bcd7232925b8d13d07af2b2bc09cc8b",
+      "fingerprint": "ad23901444175b019fcc1788c404362ea9ca7252b13f6b4720cbb05bf73eb705",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3689
+      "line": 3685
     },
     {
-      "fingerprint": "0fa576e4630263f692c12812becd5f279c00e3c02957d3c271b8da6c0d9394b1",
+      "fingerprint": "df24fad7b1a00f2fdc49b425a835a04a3a803349dd7f0f12e315a4aeb107d44d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3692
+      "line": 3704
     },
     {
-      "fingerprint": "21f694fb24089e5f333f36c32e106bf9a4db7bfed9e66859841cbb1f2182f39a",
+      "fingerprint": "50a7717df208cae798803d8823e59a1edc5c7ec9ea06795e9a6a5762399713b9",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3695
+      "line": 3708
     },
     {
-      "fingerprint": "3aa725111d4f0adce56ce5eb99c38c7ec722df1844ca27c5e38418d6d930fe0d",
+      "fingerprint": "aec8b713ef2171cf6db0b138cdba76452bf31389e483fff87dbac8d8b293dfaa",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3714
+      "line": 3711
     },
     {
-      "fingerprint": "1087a921f7d46cedbe1121f5237f0a43e71bac9656d308cc19c8932826b01fd6",
+      "fingerprint": "d35f367bb0714aceee2a65bd3d2c3c03d4723dab6063255701635b2a3f43bd84",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3718
+      "line": 3715
     },
     {
-      "fingerprint": "e6c86b9e3c2b06fcc387e536517cc73d9da5b1ed69d618e225594fe2dda3066b",
+      "fingerprint": "a84a75c3c70f53c511c774abf4037613bce3138d52088a23a27a315e19dc29f6",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3721
+      "line": 3726
     },
     {
-      "fingerprint": "4b78d2301f7f52c24af4e44f2c57551c99adb6ee7f56a17cfba7ac711892199e",
+      "fingerprint": "762c39e7384c36eafeeebc4b4a8ce7f910fb78fdf166807cf0d0676b7ea1c33f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3725
+      "line": 3729
     },
     {
-      "fingerprint": "72cfff3e1caece64d48d4029705dc951fd686853f14d6ffd18575699565e88d0",
+      "fingerprint": "6a48a0bb8ffa6021970c501bbe9deda2b995051af360009e7f0bd7c126c36005",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3736
+      "line": 3733
     },
     {
-      "fingerprint": "e1dc4821ded9b8448526188a8b45835bf9d4649955f24a0713bd09d4316514db",
+      "fingerprint": "a21ce12eb342b7a66c40f95d02402bcbdadcbb5d274eaafe3e7df73ce29b6f74",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3739
+      "line": 3751
     },
     {
-      "fingerprint": "5daf9434e57d78c67fc741d0a63ccb8f155790aa1b6fe3c68d37f94980bb2d71",
+      "fingerprint": "4e08db384ba50fad67d39d71dc5effd1fffaa3b6a7fc1d27b5a6447f9411494a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3743
+      "line": 3764
     },
     {
-      "fingerprint": "cc247b842fb942f28d1ada83ed39d986c1cf446a41496e05aec99451362bdd38",
+      "fingerprint": "f51226998a34b8c20e1544682a4b7e406495995495222baebfbbf7f819065f77",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3761
+      "line": 3767
     },
     {
-      "fingerprint": "192fd132d7ac2b1a9c1314e8790aaed6c1a55e33f6fc868b125ba87f2ff5eca8",
+      "fingerprint": "4e536b746c135b17f463dd2e9167d00ebdbe8fbb337ac231c60e1eef057b53d4",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3774
+      "line": 3770
     },
     {
-      "fingerprint": "3d03a22350afb723afb5a71e4eaff08f065a4130ecea48b43e9c14bb3aeaa145",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/integration.rs",
-      "line": 3777
-    },
-    {
-      "fingerprint": "950792a83e10e224f9e403ac73ba50f4bbbdb4822ec423d375aa3cc28c000096",
+      "fingerprint": "92049b9a15dcfc030fa4f9a049bae24648fa94232e816dbbb26bab1ae1608ab9",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 3780
     },
     {
-      "fingerprint": "08945e7fca4c7b845b0710618405fc149b84775b85bcfcb722dab46035bc5a9a",
+      "fingerprint": "d1a3390af54ff75cae7175239b55623542909f4bb429e3cf647ea18e01350824",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3790
+      "line": 3795
     },
     {
-      "fingerprint": "8f44298be6cec4d48facdac0080052617b2696df064fe51ab4d74a4124a9833b",
+      "fingerprint": "0992e68f3a4864a1d2a8a60a571557b3780a5261135dde0d5ae96b6ad14173d8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3805
+      "line": 3799
     },
     {
-      "fingerprint": "605f76ffecb99dc74c2cde0c2ff6d9b4c5038505dbaf3e497ac3ec74874be538",
+      "fingerprint": "64d38ec39f3e6837b3620d9529516ff39ad93b68c87c51fe10fcb47c509744bf",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3809
+      "line": 3804
     },
     {
-      "fingerprint": "8db676854878fbf5046ac4a6cac9a63b1931a4b05a41486794317892cb07e47a",
+      "fingerprint": "7ab15c7bcc85ee9dcdeed124ea7cfa4cbf3be1c8e504f7af6ecd23bf3c417f1e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3814
+      "line": 3829
     },
     {
-      "fingerprint": "f6d2323eeff700d8e40b15268e80c757b7741d07b9605f366d8b8ba34ee7ba8b",
+      "fingerprint": "cf444d583b788adb6b121e81721f2c3cc4934d31c7317c70867da764058f5b44",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3839
+      "line": 3832
     },
     {
-      "fingerprint": "3fabb9cd51d7d557602b132a057fb71486eee3afa7451e7ea75f13d01b9eb02d",
+      "fingerprint": "aea0df9e8476b3c8beaa8f98184f299b17d21add3c722bf68a476c32444e287b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3842
+      "line": 3832
     },
     {
-      "fingerprint": "f67c684f98d0ea9ff59670167bad6e0ab78165e52d18f0e8b151b379e6fdc1f5",
+      "fingerprint": "527f4825f1bc2253cd4e069369d928466621fa6326d7548bc75bd42092c7c049",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3842
+      "line": 3834
     },
     {
-      "fingerprint": "9440014a5699c2f448569b7c0184dbb8e9de3f85d5b95f2ebe185c5cc0c0c6d5",
+      "fingerprint": "efd51a39d61b7fa3bb3e6181a9adb6fa71a9d739e198621faec8bd57d386afc2",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3844
+      "line": 3836
     },
     {
-      "fingerprint": "96a7ac0f11f04d2feb3bc10fb2d8131b8253b7da7086b3bd24e4f599f125f7b4",
+      "fingerprint": "edc3a2604818a95251fa1d35f8b8d609b86dcc174b27e0a732a05a51425ba3c3",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3846
+      "line": 3840
     },
     {
-      "fingerprint": "05857dcf916d598e37e803ac71354598cf51cb499c65d7ad06f67c7bfa9a2279",
+      "fingerprint": "a4d7c6460c9153871d9adc6115893619b270818c539d3679a5f80fb598917fc3",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3850
+      "line": 3841
     },
     {
-      "fingerprint": "5007264235d0dade1567ed5a4e8f2df58ebaf29fd7a5c03ce69c6367e2d29022",
+      "fingerprint": "398f79733eb1f62e864089c5a134ae7919c59246027ee98003266b65bc50c93f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3851
+      "line": 3860
     },
     {
-      "fingerprint": "b8db99215911a3d494c19639f4a8da77731b5cc5278c74652b58c4ec5211326a",
+      "fingerprint": "529f77792f485221950f5704a229fe1bbb46db5fec3063b27be45071c79fc549",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3869
+      "line": 3863
     },
     {
-      "fingerprint": "cd46e8e53359779187401f975056d3122c597f1528d99acfcf2c390ed8cbb3ad",
+      "fingerprint": "ac9e87f62447a33b9fdd9e5df5be730b314e080d5c201160ae0b4cd78b2854a3",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3872
+      "line": 3866
     },
     {
-      "fingerprint": "6480ce32e4f730729777ef9c0205842f9fdcbe23fcd1cf236f9f8982ae8ed31e",
+      "fingerprint": "3e84180e1fe51dcda02384da8551acddd6d18c3be7f47cca150fd46202f99262",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3877
+      "line": 3890
     },
     {
-      "fingerprint": "b286a3c98638ab1e2e323d79c869a63bc746dcf4c8f1ce12707c7571284d79fd",
+      "fingerprint": "f2898bcf2ba8d375fc6bcc733563374e9c4f83206d667c9a569ff0dda5361677",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3906
+      "line": 3892
     },
     {
-      "fingerprint": "565cce2183ad2fd40f1c5ae1548b1b5b4a0a47c0248e000e37f54a6450a540dd",
+      "fingerprint": "9cc7e59b1259dee5cbb2b6a6236f96c6fd2a18ba4858be7edf998cf90f48c435",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3915
+      "line": 3895
     },
     {
-      "fingerprint": "a56c273171c1eb5b175156502b28578ad0c101cdb33ede4013b513be517f35c0",
+      "fingerprint": "ffc965a3c77a7a7a5ecff85a9cb85587211743280e6dcdde967729fe0670b620",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3920
+      "line": 3898
     },
     {
-      "fingerprint": "241e79ad3de5a0912859ec8458b1ad3847e2ed2305fe195886251b56c05925f2",
+      "fingerprint": "f760ed6d1ff48f324beaf166e80b2b692c53630c175c011cb4ae894e915d8c25",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3943
+      "line": 3921
     },
     {
-      "fingerprint": "752113008aae38e1ff8bfa4406fdfb76d1abe80640016be064724b6b86593c35",
+      "fingerprint": "c619e6b97a4bf7a792e2759bbd8ba1f8367880342f84491c8af64efa0ae09aa8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3968
+      "line": 3924
     },
     {
-      "fingerprint": "6078afd406381314795d5be4470ff9bac47bc3eb695a92aeb0b143909ef14019",
+      "fingerprint": "b10db9996a8b98c72fe0664b7ca112025c9ba15ebd5fc0fac766ad43c5575393",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 3988
+      "line": 3927
     },
     {
-      "fingerprint": "e262fd9bbc00ac69c2bf949fd89ea9dfcbab00ffcca4b36a64145f8e734d3c07",
+      "fingerprint": "9112c12e4a0d9f0934195c7777bb08d22e96aa1f3b39938a91281a25290924fb",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4052
+      "line": 3950
     },
     {
-      "fingerprint": "c503eaaade718206dc486c585e4c5a9bbc568a0bda7493083364d0ff573a9b7a",
+      "fingerprint": "65de5e3fb2d811b1a1047337b46cf8d493b6cfd00225f002acba28d48ce7a90f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4106
+      "line": 3953
     },
     {
-      "fingerprint": "7f0f6bb72f1e85014f145e7802a04f4833d349956a7b2f01316803f7e6c2e4bc",
+      "fingerprint": "85388b1bc317571c004bc93d07009c550bb4cb34acb7994c830428d939d9d2ed",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4112
+      "line": 3958
     },
     {
-      "fingerprint": "21c991f247e093dacbafd4d1ac00a398597bbb006c7df37ccc95b271f5f8347f",
+      "fingerprint": "2a370f81ea2ccac30e320b153239e2758f784ae4ffd0892cd4b276767480286d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4114
+      "line": 3987
     },
     {
-      "fingerprint": "e85a97a74e4da8a9dd45ac1ebe14ec04f73dea0ab34c5e92d5590c27564890e4",
+      "fingerprint": "62089ea66301f6a91b281c75d89d0fd26ae39f5bdb44d80ad2905cffaa85ba50",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4135
+      "line": 3996
     },
     {
-      "fingerprint": "b3ae2de7b3b08a1a5456e648d0cd1e7a7968830aa6d4eae176d5b4e7a12f02a4",
+      "fingerprint": "e96d395215b974aa88ae4ab48eafa0096cae548079f4f55ab03db585d31c73a1",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4152
+      "line": 4001
     },
     {
-      "fingerprint": "a34304e926c7b20a73005e1bf08c76f49eb1cf28e4b13348b05bda73d09f6ba1",
+      "fingerprint": "48089ebb5630741c3547cf7cb7e9a3f21c06bfdb5f9c53fd8ce7a1f778504db4",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4170
+      "line": 4024
     },
     {
-      "fingerprint": "5ee79b6af0e71e9c1b3afbe92f814a1fcd3aa3fe5d1e2a2920a83621f6ff416b",
+      "fingerprint": "bdc16e4544c9af72816c595009c38d9c593113dbe677373ac133933f6f0b5d2c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4173
+      "line": 4049
     },
     {
-      "fingerprint": "9cc7ac7e5434ba60e456a326b1efc64fabf8a996d3bb6f1e66621e7602702797",
+      "fingerprint": "853c77dad562d0dc8f1869c3a4a1f59b7d93446b1a2de181effccdbb2cea46ea",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4191
+      "line": 4069
     },
     {
-      "fingerprint": "3dfe4d9fe09828dfc94d1f22a4a0cc230412f08e2097abb79c29621893937ee5",
+      "fingerprint": "7ec5f44e5020cb02334e1922d0013eb571a115aa05eb728b53e60825f610c139",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4199
+      "line": 4133
     },
     {
-      "fingerprint": "b24e96ad75684b548e8b77494dd62674ab4432c85547506795df8212fa80fdb4",
+      "fingerprint": "e0e0b6c78c20e727a221406edc1a0ef65857d0dc01488f5285f099214ceaf60e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4215
+      "line": 4187
     },
     {
-      "fingerprint": "04f83a3bc2332e2155f59d25cc33ee969c7a2a8bb75acc6c9d29af0bd42c7609",
+      "fingerprint": "9f4934ef3dfa75497521c6876e39386d2abb52c3c1d5c28ef4679545de2c1b69",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4223
+      "line": 4193
     },
     {
-      "fingerprint": "f8b26c56f534aed38cb67258871104ee89163ddd6de6a560d8c804f2d85dd4b4",
+      "fingerprint": "6f9f3e5cac67d9ebd668cbc0aa99ccca7db06e8cd14799cf279c18d08b749548",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4239
+      "line": 4195
     },
     {
-      "fingerprint": "59e80aa0e8f872d5a5f4604999cca8e76e98edc43b3fbcb3b7695ea936983cc4",
+      "fingerprint": "45e754b61478a179110fda49fd0965ce93b254629cd9a544815b34ccd2918e36",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4247
+      "line": 4216
     },
     {
-      "fingerprint": "af60986c98790f5ea3cf7d878645739c43e601ab0f02d886fac27d10273ed835",
+      "fingerprint": "2fb529327a0678f995a8ce324d9d877c0c91c4104d7d943a8ee723b6cad2ab2c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4270
+      "line": 4233
     },
     {
-      "fingerprint": "eb94a008e85d05e06967b513bc81064bcd642bd4f30ef0759968f58f09fd3e9c",
+      "fingerprint": "5c9b57e52a3e8869a1adc8099a5e256956d09ef6c6bb427a1d6b81d0aefedbef",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4284
+      "line": 4251
     },
     {
-      "fingerprint": "41243a2ddb83aa8c2f78b2aafb6109969eda3e0f0c1ee37e6bd7abfb8786fc3f",
+      "fingerprint": "6c9467b949926d3a9217f041d2e1cd668c5bd0d3a09bf9cf38f5fb28f1e69f20",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4287
+      "line": 4254
     },
     {
-      "fingerprint": "543fedc3c7f3af9027561f38a49dabc1568bc41d5f2629dd149831dcfd59be8d",
+      "fingerprint": "4c2a342aa9478b66d134d7f176c0e836af6de74dccbf2f16f35e72f57115ca63",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4324
+      "line": 4272
     },
     {
-      "fingerprint": "fecb1ae6359d9bedb32a631b7c334e936c037af58935345cf125200487793820",
+      "fingerprint": "a87baa70e2806c6a324800358126dfbfee12dbfed4a008dc8edcf0c39b61b24a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4325
+      "line": 4280
     },
     {
-      "fingerprint": "a55736bfe23f80bb51f35137b240b7b912b3a1b4ac707fb4a9e088a05688a096",
+      "fingerprint": "961c973983078d25d0b03f03e1f6d1bdd4de3bc6fb5145573b8a8a2d8cff4eca",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4364
+      "line": 4296
     },
     {
-      "fingerprint": "9313f506786da9e1451cf7974a0a5c4f373524b5d8efd24fc7140971e50d5fc3",
+      "fingerprint": "f30e02818238c8834638ab8543573592d0a1dbf7ddce72aff53622a173f27775",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4376
+      "line": 4304
     },
     {
-      "fingerprint": "fb46a1520a10a19a869546e29adbd801c61e2921376afcfeadef6926f4937c2b",
+      "fingerprint": "353f9feff22903a0a07b3156273707a11d3f6d321f73a3375189cdde25519a6e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4598
+      "line": 4320
     },
     {
-      "fingerprint": "529f4b8f3edd97abd4816dfe26e5007e6401ba73be4bab05cd1f451138623cd9",
+      "fingerprint": "d400b66da48aad7abb3027282cbcce2835bb2a5aafa3276ecc087c5f6878e586",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4610
+      "line": 4328
     },
     {
-      "fingerprint": "a9336c512144c828edcf35fc104f1c8c9a0b55ae069db6b0c53615f508daed73",
+      "fingerprint": "71039828595a67ce49fefe9ea1864d62ad6cc7c5780f192c7cde6fb8f5818ebf",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4620
+      "line": 4351
     },
     {
-      "fingerprint": "1ee5ffb4cc249a5166e59f076cd823b6c1e40d67d98514230fb4dc5070beafaa",
+      "fingerprint": "59c37c9aa56821d616fa3362a903057f3b88ddb3b8fa2f579cc4373d0111b7af",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4645
+      "line": 4365
     },
     {
-      "fingerprint": "7d79c953d1c7fd7ea2135e401e41c24fca0bfda891eed7197165af7bc6d72669",
+      "fingerprint": "feb220c6956b6f612cd0872e70b4a2b5d3cfa099c9e1c46d7b6c16c4e8ea6689",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4671
+      "line": 4368
     },
     {
-      "fingerprint": "f68209bac1aa3a64889710f7660461b07aa3b665cfd7eba86a38a58879dcf4a4",
+      "fingerprint": "7079f40d0fb19f70e6c0bb8259457315616c2465f4246608dffb970f9febd608",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4405
+    },
+    {
+      "fingerprint": "b6acdc52db3defe38a393182a376183eb01eb0de8a84fb2fd8c76df6bcf89be9",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4406
+    },
+    {
+      "fingerprint": "bfdfa34b3d620d0eaf00274d5d623ece832a5302008e996bff9de4bda583eb33",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4445
+    },
+    {
+      "fingerprint": "63ac42a6b662af7f2ccd6c897f807c924b12330c69da4bc0c48fc466c3b54d96",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4457
+    },
+    {
+      "fingerprint": "f5e704ddf5ad266a8fe3950bbf2bd3e0c5a74033a9f00563d37f5897c9d18e24",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 4679
+    },
+    {
+      "fingerprint": "6560e0005b6cd8e9e5cd288d8a11b215a6a80172f15e1ae4ba16dc9ba4984df7",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4691
+    },
+    {
+      "fingerprint": "27ef9ba0dee61c256d83731e0e3d84d6e079d9fd22d22e5e95f563d8065b2248",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4701
+    },
+    {
+      "fingerprint": "c386de7e21c2a9125dc4de6afdf3fee859625a2f4f886b6f293a9573bed75961",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4726
+    },
+    {
+      "fingerprint": "663c3d8d14b6e0d87f4df627b4fc10209ac45103ee0eb9c3db70690fade0febe",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4752
+    },
+    {
+      "fingerprint": "023f787ccc437c281e2ab8361dd7c6e3642989ae457c437abe5d935685ae79c5",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4760
     },
     {
       "fingerprint": "5b676a923612a17253cb4241ecfe1149d305cd1f3a17b037d532754e079ed18d",
@@ -9710,70 +9878,16 @@
       "line": 182
     },
     {
-      "fingerprint": "224d0c1c89c1a1a564ff5499a97f91ad4a5a1b8fd1dafc7ff304faaf91d9d505",
+      "fingerprint": "90c2586207192e627dae5b27ce0b5a63bf7e5b1148c3da39e88c802795165d67",
       "rule_id": "js/no-command-injection",
       "file": "vscode-extension/src/extension.ts",
-      "line": 263
+      "line": 282
     },
     {
-      "fingerprint": "a18b59c82157ee6d3a33694ece494dee42849140a323024433bd56cf5b1c0dda",
+      "fingerprint": "e261b1a819e84534c7c8477d984bc76e5e3aa073d61543915435dd44d1ee7cea",
       "rule_id": "js/no-command-injection",
       "file": "vscode-extension/src/extension.ts",
-      "line": 368
-    },
-    {
-      "fingerprint": "0a42b62356bcfda1e3101c7a3984d2142b3c47ae38e6d4833d424f9aa9c69e45",
-      "rule_id": "rs/no-command-injection",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 17
-    },
-    {
-      "fingerprint": "65d13a0f10ee8816cb77a05dead5b3a17f47f84248740d9574bc06669a91ac9e",
-      "rule_id": "rs/no-path-traversal",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 21
-    },
-    {
-      "fingerprint": "433cd3f0889bffe7b0592e65d9298cea78c5848114aae9056795cf2315131222",
-      "rule_id": "rs/no-path-traversal",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 21
-    },
-    {
-      "fingerprint": "1ec6ba7f3356078b65dec9cdba0551d57bba879602eef81a966ab1dc194e3854",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 30
-    },
-    {
-      "fingerprint": "835e315c53de1f3f03873ab092be6e1e41976c6ab2b42a97eb79d35205d1f82f",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 106
-    },
-    {
-      "fingerprint": "7465caf895f2654f1c71af53511394515712c5027f02d4ca0286582c8f5fed8d",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 168
-    },
-    {
-      "fingerprint": "2eb8cb29cf86689a3a3adc2cc78b9296f2df4ba132650cb523e5790421888554",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 195
-    },
-    {
-      "fingerprint": "a8c019ee62c699770dc3ca5d4ae948ee0c480ed869ea3e4b7698eecc52af2f4d",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 226
-    },
-    {
-      "fingerprint": "0fbfee7b7fb457db978e237d5badd726e1b371486c62933e6c1ad003d6c12d95",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "tests/cnsa2_compliance.rs",
-      "line": 244
+      "line": 387
     }
   ]
 }

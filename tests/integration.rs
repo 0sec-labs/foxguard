@@ -4675,10 +4675,9 @@ mod config_files {
     // ── Manifest / dependency-level PQ scanning (#221) ──────────────────
 
     #[test]
-    #[ignore = "PQC dep scanning differs on CI — investigate separately"]
     fn cargo_lock_pq_finds_transitive_rsa_dep() {
-        let output = foxguard_cmd_isolated()
-            .args(["pqc", "tests/fixtures/deps/Cargo.lock", "-f", "json"])
+        let output = foxguard_cmd()
+            .args(["pqc", "--config", "/dev/null", "tests/fixtures/deps/Cargo.lock", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
 
@@ -4723,10 +4722,9 @@ mod config_files {
     }
 
     #[test]
-    #[ignore = "PQC dep scanning differs on CI — investigate separately"]
     fn requirements_txt_pq_finds_crypto_deps() {
-        let output = foxguard_cmd_isolated()
-            .args(["pqc", "tests/fixtures/deps/requirements.txt", "-f", "json"])
+        let output = foxguard_cmd()
+            .args(["pqc", "--config", "/dev/null", "tests/fixtures/deps/requirements.txt", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
 

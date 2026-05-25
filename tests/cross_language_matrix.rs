@@ -566,14 +566,13 @@ fn secrets_json_matrix_cells_find_language_string_secret() {
 }
 
 #[test]
-#[ignore = "PQC fixture detection differs on CI — investigate separately"]
 fn pqc_json_matrix_cells_emit_only_pq_findings() {
     for row in MATRIX.iter().copied().filter(|row| row.pqc.is_covered()) {
         let fixture = row
             .vulnerable_fixture
             .expect("covered pqc cell needs vulnerable fixture");
-        let output = foxguard_cmd()
-            .args(["pqc", fixture_path(fixture).to_str().unwrap(), "-f", "json"])
+        let output = Command::new(env!("CARGO_BIN_EXE_foxguard"))
+            .args(["pqc", "--config", "/dev/null", fixture_path(fixture).to_str().unwrap(), "-f", "json"])
             .output()
             .unwrap_or_else(|error| panic!("failed to run pqc for {}: {error}", row.language));
         let report = parse_json(&output.stdout);
