@@ -3272,16 +3272,16 @@
       "line": 571
     },
     {
-      "fingerprint": "8edd0ed99f8599c7b050fcfd0bec2ba80aba29b7f0cdd81d6fb2e19e7d60f900",
+      "fingerprint": "a2f07566999e78572c41a020d6155d635a5878b57a967ea91817a088c7c855e6",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/cross_language_matrix.rs",
-      "line": 575
+      "line": 579
     },
     {
-      "fingerprint": "cb16dc6d6571fc5e31fc8596b13a56e4f61c36a37fa76ffceb887a2798090b19",
+      "fingerprint": "9702bb7625fd919acd1767d0d7f2f33b8c0d18599e7fced815cb26262cb31dfc",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/cross_language_matrix.rs",
-      "line": 617
+      "line": 624
     },
     {
       "fingerprint": "cca76b4eaa1a94e2e7ed7fadc692558c7e9494e7d50a385aa97c215178657aa4",
