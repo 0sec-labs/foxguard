@@ -147,6 +147,13 @@ jobs:
           find artifacts -type f -exec cp {} release/ \;
           ls -la release/
 
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum * > checksums.txt
+          echo "--- checksums.txt ---"
+          cat checksums.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

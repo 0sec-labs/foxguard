@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { execFileSync } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -72,6 +73,22 @@ function download(url) {
   });
 }
 
+function parseChecksums(text) {
+  // Parse checksums.txt format: "<hash>  <filename>" or "<hash> <filename>"
+  const map = {};
+  for (const line of text.split("\n")) {
+    const match = line.match(/^([0-9a-f]{64})\s+(.+)$/);
+    if (match) {
+      map[match[2]] = match[1];
+    }
+  }
+  return map;
+}
+
+function sha256(buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
 async function downloadBinary() {
   const target = getPlatformKey();
   const cacheDir = getCacheDir();
@@ -97,12 +114,34 @@ async function downloadBinary() {
   } else {
     throw new Error(`unsupported release target: ${target}`);
   }
-  const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${assetName}`;
+  const baseUrl = `https://github.com/${REPO}/releases/download/v${VERSION}`;
+  const url = `${baseUrl}/${assetName}`;
 
   console.error(`foxguard: downloading v${VERSION} for ${target}...`);
 
   try {
-    const data = await download(url);
+    // Download checksums and binary in parallel
+    const [checksumData, data] = await Promise.all([
+      download(`${baseUrl}/checksums.txt`),
+      download(url),
+    ]);
+
+    // Verify integrity
+    const checksums = parseChecksums(checksumData.toString("utf8"));
+    const expected = checksums[assetName];
+    if (!expected) {
+      console.error(`foxguard: integrity error — no checksum found for ${assetName} in checksums.txt`);
+      process.exit(1);
+    }
+
+    const actual = sha256(data);
+    if (actual !== expected) {
+      console.error(`foxguard: integrity error — SHA-256 mismatch for ${assetName}`);
+      console.error(`  expected: ${expected}`);
+      console.error(`  actual:   ${actual}`);
+      process.exit(1);
+    }
+
     fs.writeFileSync(cachedBin, data);
 
     // Make executable

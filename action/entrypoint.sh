@@ -42,16 +42,51 @@ fi
 # ─── Download binary ────────────────────────────────────────────────────────
 
 echo "::group::Downloading foxguard ${VERSION} for ${PLATFORM}-${ARCH_SUFFIX}"
-DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY_NAME}"
+BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+DOWNLOAD_URL="${BASE_URL}/${BINARY_NAME}"
+CHECKSUMS_URL="${BASE_URL}/checksums.txt"
 echo "URL: ${DOWNLOAD_URL}"
 
 INSTALL_DIR="${RUNNER_TEMP:-/tmp}/foxguard"
 mkdir -p "${INSTALL_DIR}"
 
+CHECKSUMS_FILE="${INSTALL_DIR}/checksums.txt"
+curl -sL "${CHECKSUMS_URL}" -o "${CHECKSUMS_FILE}"
+if [ ! -s "${CHECKSUMS_FILE}" ]; then
+    echo "::error::Failed to download checksums.txt from ${CHECKSUMS_URL}"
+    exit 1
+fi
+
 curl --fail -sL "${DOWNLOAD_URL}" -o "${INSTALL_DIR}/${EXECUTABLE_NAME}"
+
+# Verify SHA-256 checksum
+EXPECTED_HASH="$(grep "  ${BINARY_NAME}\$" "${CHECKSUMS_FILE}" | cut -d ' ' -f 1)"
+if [ -z "${EXPECTED_HASH}" ]; then
+    EXPECTED_HASH="$(grep " ${BINARY_NAME}\$" "${CHECKSUMS_FILE}" | cut -d ' ' -f 1)"
+fi
+if [ -z "${EXPECTED_HASH}" ]; then
+    echo "::error::No checksum found for ${BINARY_NAME} in checksums.txt"
+    exit 1
+fi
+
+if command -v sha256sum &>/dev/null; then
+    ACTUAL_HASH="$(sha256sum "${INSTALL_DIR}/${EXECUTABLE_NAME}" | cut -d ' ' -f 1)"
+elif command -v shasum &>/dev/null; then
+    ACTUAL_HASH="$(shasum -a 256 "${INSTALL_DIR}/${EXECUTABLE_NAME}" | cut -d ' ' -f 1)"
+else
+    echo "::error::Neither sha256sum nor shasum found — cannot verify binary integrity"
+    exit 1
+fi
+
+if [ "${ACTUAL_HASH}" != "${EXPECTED_HASH}" ]; then
+    echo "::error::SHA-256 mismatch for ${BINARY_NAME} (expected: ${EXPECTED_HASH}, actual: ${ACTUAL_HASH})"
+    exit 1
+fi
+echo "Checksum verified: ${EXPECTED_HASH}"
 if [ "${PLATFORM}" != "windows" ]; then
     chmod +x "${INSTALL_DIR}/${EXECUTABLE_NAME}"
 fi
+rm -f "${CHECKSUMS_FILE}"
 echo "::endgroup::"
 
 # ─── Build arguments ────────────────────────────────────────────────────────

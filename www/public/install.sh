@@ -52,17 +52,49 @@ printf 'installing foxguard %s for %s-%s...\n' "$tag" "$os_name" "$arch_name"
 
 mkdir -p "$INSTALL_DIR"
 
-download_url="https://github.com/${REPO}/releases/download/${tag}/${binary_name}"
+base_url="https://github.com/${REPO}/releases/download/${tag}"
+download_url="${base_url}/${binary_name}"
+checksums_url="${base_url}/checksums.txt"
+
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+checksums_tmp="$(mktemp)"
+trap 'rm -f "$tmp" "$checksums_tmp"' EXIT
+
+if ! curl -fsSL -o "$checksums_tmp" "$checksums_url"; then
+  err "failed to download checksums.txt from $checksums_url"
+fi
 
 if ! curl -fsSL -o "$tmp" "$download_url"; then
   err "failed to download $download_url"
 fi
 
+# Verify SHA-256 checksum
+expected_hash="$(grep "  ${binary_name}\$" "$checksums_tmp" | cut -d ' ' -f 1)"
+if [ -z "$expected_hash" ]; then
+  # Also try single-space separator
+  expected_hash="$(grep " ${binary_name}\$" "$checksums_tmp" | cut -d ' ' -f 1)"
+fi
+[ -n "$expected_hash" ] || err "no checksum found for ${binary_name} in checksums.txt"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  actual_hash="$(sha256sum "$tmp" | cut -d ' ' -f 1)"
+elif command -v shasum >/dev/null 2>&1; then
+  actual_hash="$(shasum -a 256 "$tmp" | cut -d ' ' -f 1)"
+else
+  err "neither sha256sum nor shasum found — cannot verify binary integrity"
+fi
+
+if [ "$actual_hash" != "$expected_hash" ]; then
+  err "SHA-256 mismatch for ${binary_name}
+  expected: ${expected_hash}
+  actual:   ${actual_hash}"
+fi
+
+printf 'checksum verified: %s\n' "$expected_hash"
+
 chmod +x "$tmp"
 mv "$tmp" "$INSTALL_DIR/foxguard"
-trap - EXIT
+trap 'rm -f "$checksums_tmp"' EXIT
 
 printf '\ninstalled foxguard %s to %s/foxguard\n' "$tag" "$INSTALL_DIR"
 
