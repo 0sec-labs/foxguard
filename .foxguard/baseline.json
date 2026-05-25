@@ -7802,16 +7802,28 @@
       "line": 328
     },
     {
-      "fingerprint": "56e07b4339a62164ecbff21e94eafbaf1ca97d6e99b56300e4b14acda6318444",
+      "fingerprint": "90c2586207192e627dae5b27ce0b5a63bf7e5b1148c3da39e88c802795165d67",
       "rule_id": "js/no-command-injection",
-      "file": "./vscode-extension/src/extension.ts",
-      "line": 263
+      "file": "vscode-extension/src/extension.ts",
+      "line": 282
     },
     {
-      "fingerprint": "4cf1c478a2c49176af7c1f72f0f07ee70372ce79a946079bdb42dbf5b83d28b1",
+      "fingerprint": "e261b1a819e84534c7c8477d984bc76e5e3aa073d61543915435dd44d1ee7cea",
       "rule_id": "js/no-command-injection",
-      "file": "./vscode-extension/src/extension.ts",
-      "line": 368
+      "file": "vscode-extension/src/extension.ts",
+      "line": 387
+    },
+    {
+      "fingerprint": "3b7fb57b9ceaf603867cce53273548719a76e887714d3e6a2da8521412042fbd",
+      "rule_id": "js/no-command-injection",
+      "file": "/Users/peak/coding/0sec/foxguard/vscode-extension/src/extension.ts",
+      "line": 282
+    },
+    {
+      "fingerprint": "6a4111c89e606885191c4b728afe2dde4cf22f79f6affab3c9197607b22e4b4c",
+      "rule_id": "js/no-command-injection",
+      "file": "/Users/peak/coding/0sec/foxguard/vscode-extension/src/extension.ts",
+      "line": 387
     }
   ]
 }
