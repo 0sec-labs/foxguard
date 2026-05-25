@@ -1,8 +1,12 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
+
 use crate::impl_rule;
 use crate::rules::common::AliasTable;
 use crate::rules::common::{
-    get_source_line, is_secret_value_long_enough, make_finding, make_finding_from_offsets,
-    walk_tree, HARDCODED_SECRET_PATTERN,
+    get_source_line, hardcoded_secret_re, is_secret_value_long_enough, make_finding,
+    make_finding_from_offsets, walk_tree,
 };
 use crate::rules::go_taint::{
     self, go_aliases_from_tree, go_taint_sources, NodeMatcher as GoNodeMatcher,
@@ -10,7 +14,68 @@ use crate::rules::go_taint::{
 };
 use crate::rules::FileContext;
 use crate::{Finding, Language, Severity};
-use regex::Regex;
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+fn go_sql_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)")
+            .expect("static Go SQL regex should compile")
+    })
+}
+
+fn go_insecure_skip_verify_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"InsecureSkipVerify\s*:\s*true").expect("static Go TLS regex should compile")
+    })
+}
+
+fn go_min_version_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\bMinVersion\s*:").expect("static Go TLS MinVersion regex should compile")
+    })
+}
+
+fn go_cookie_secure_field_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\bSecure\s*:").expect("static Go cookie Secure field regex should compile")
+    })
+}
+
+fn go_cookie_secure_false_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\bSecure\s*:\s*false\b")
+            .expect("static Go cookie Secure false regex should compile")
+    })
+}
+
+fn go_cookie_http_only_field_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\bHttpOnly\s*:").expect("static Go cookie HttpOnly field regex should compile")
+    })
+}
+
+fn go_cookie_http_only_false_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\bHttpOnly\s*:\s*false\b")
+            .expect("static Go cookie HttpOnly false regex should compile")
+    })
+}
+
+fn go_hardcoded_byte_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"\[\]byte\(\s*"[^"]{4,}"\s*\)"#)
+            .expect("static Go JWT secret regex should compile")
+    })
+}
 
 fn go_composite_literal_type_text<'a>(
     node: tree_sitter::Node<'_>,
@@ -84,8 +149,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let sql_pattern =
-            Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)").expect("static Go SQL regex should compile");
+        let sql_pattern = go_sql_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: "SELECT ... WHERE id = " + userId (binary_expression with +)
@@ -206,9 +270,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let secret_pattern =
-            Regex::new(HARDCODED_SECRET_PATTERN)
-                .expect("static hardcoded secret regex should compile");
+        let secret_pattern = hardcoded_secret_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Short variable declaration: password := "hardcoded"
@@ -649,8 +711,7 @@ impl_rule! {
     fn check(_self, source, _tree) {
 
         let mut findings = Vec::new();
-        let pattern = Regex::new(r"InsecureSkipVerify\s*:\s*true")
-            .expect("static Go TLS regex should compile");
+        let pattern = go_insecure_skip_verify_re();
 
         for matched in pattern.find_iter(source) {
             findings.push(make_finding_from_offsets(
@@ -688,8 +749,7 @@ impl_rule! {
             None
         };
         let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
-        let min_version_re = Regex::new(r"\bMinVersion\s*:")
-            .expect("static Go TLS MinVersion regex should compile");
+        let min_version_re = go_min_version_re();
 
         let mut findings = Vec::new();
 
@@ -744,10 +804,9 @@ impl_rule! {
             None
         };
         let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
-        let secure_field_re = Regex::new(r"\bSecure\s*:")
-            .expect("static Go cookie Secure field regex should compile");
-        let secure_false_re = Regex::new(r"\bSecure\s*:\s*false\b")
-            .expect("static Go cookie Secure false regex should compile");
+        let secure_field_re = go_cookie_secure_field_re();
+
+        let secure_false_re = go_cookie_secure_false_re();
 
         let mut findings = Vec::new();
 
@@ -802,10 +861,9 @@ impl_rule! {
             None
         };
         let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
-        let http_only_field_re = Regex::new(r"\bHttpOnly\s*:")
-            .expect("static Go cookie HttpOnly field regex should compile");
-        let http_only_false_re = Regex::new(r"\bHttpOnly\s*:\s*false\b")
-            .expect("static Go cookie HttpOnly false regex should compile");
+        let http_only_field_re = go_cookie_http_only_field_re();
+
+        let http_only_false_re = go_cookie_http_only_false_re();
 
         let mut findings = Vec::new();
 
@@ -1041,8 +1099,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        let hardcoded_byte_re = Regex::new(r#"\[\]byte\(\s*"[^"]{4,}"\s*\)"#)
-            .expect("static Go JWT secret regex should compile");
+        let hardcoded_byte_re = go_hardcoded_byte_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() != "call_expression" {
