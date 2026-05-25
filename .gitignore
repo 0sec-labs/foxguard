@@ -29,3 +29,8 @@ benchmarks/results*.md
 assets/terminalizer/
 assets/foxguard-terminalizer*.gif
 www/public/foxguard-logo.png
+
+# Local togi mutation-test artifacts
+.togi-cache/
+.togi.lock
+togi.toml
