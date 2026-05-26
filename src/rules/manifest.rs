@@ -746,9 +746,9 @@ impl_rule! {
                 //   "/@scope/pkg@1.0"  (scoped, v6-v8)
                 //   "@scope/pkg@1.0"   (scoped, v9)
                 let stripped = key_str.strip_prefix('/').unwrap_or(key_str);
-                let pkg_name = if stripped.starts_with('@') {
+                let pkg_name = if let Some(after_scope) = stripped.strip_prefix('@') {
                     // Scoped: find the second '@' (version separator)
-                    if let Some(at_pos) = stripped[1..].find('@') {
+                    if let Some(at_pos) = after_scope.find('@') {
                         &stripped[..at_pos + 1]
                     } else {
                         stripped
