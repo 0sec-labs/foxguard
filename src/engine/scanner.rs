@@ -293,7 +293,8 @@ fn detect_config_language(path: &Path) -> Option<Language> {
         "nginx.conf" => return Some(Language::NginxConf),
         "httpd.conf" | "apache2.conf" => return Some(Language::ApacheConf),
         "haproxy.cfg" => return Some(Language::HAProxyConf),
-        "Cargo.lock" | "requirements.txt" => return Some(Language::Manifest),
+        "Cargo.lock" | "requirements.txt" | "poetry.lock" | "Pipfile.lock"
+        | "pnpm-lock.yaml" | "package-lock.json" => return Some(Language::Manifest),
         _ => {}
     }
 

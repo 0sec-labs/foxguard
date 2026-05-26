@@ -1,0 +1,33 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+
+importers:
+  .:
+    dependencies:
+      express:
+        specifier: ^4.18.0
+        version: 4.18.2
+      elliptic:
+        specifier: ^6.5.0
+        version: 6.5.4
+      jsonwebtoken:
+        specifier: ^9.0.0
+        version: 9.0.2
+
+packages:
+  elliptic@6.5.4:
+    resolution: {integrity: sha512-abc123}
+    engines: {node: '>=4.0.0'}
+
+  express@4.18.2:
+    resolution: {integrity: sha512-def456}
+    engines: {node: '>= 0.10.0'}
+
+  jsonwebtoken@9.0.2:
+    resolution: {integrity: sha512-ghi789}
+    engines: {node: '>=12'}
+
+  lodash@4.17.21:
+    resolution: {integrity: sha512-jkl012}

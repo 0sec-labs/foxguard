@@ -479,6 +479,375 @@ fn extract_pip_package_name(s: &str) -> &str {
     &s[..end]
 }
 
+// ─── NPM seed database ────────────────────────────────────────────────────
+
+const NPM_PACKAGES: &[SeedEntry] = &[
+    SeedEntry {
+        name: "node-rsa",
+        crypto_algorithm: Some("RSA"),
+        confidence: 0.95,
+    },
+    SeedEntry {
+        name: "rsa",
+        crypto_algorithm: Some("RSA"),
+        confidence: 0.95,
+    },
+    SeedEntry {
+        name: "elliptic",
+        crypto_algorithm: Some("ECDSA"),
+        confidence: 0.95,
+    },
+    SeedEntry {
+        name: "secp256k1",
+        crypto_algorithm: Some("ECDSA"),
+        confidence: 0.95,
+    },
+    SeedEntry {
+        name: "ed25519",
+        crypto_algorithm: Some("Ed25519"),
+        confidence: 0.95,
+    },
+    SeedEntry {
+        name: "tweetnacl",
+        crypto_algorithm: Some("Ed25519"),
+        confidence: 0.9,
+    },
+    SeedEntry {
+        name: "libsodium-wrappers",
+        crypto_algorithm: Some("Ed25519"),
+        confidence: 0.9,
+    },
+    SeedEntry {
+        name: "jsonwebtoken",
+        crypto_algorithm: None,
+        confidence: 0.8,
+    },
+    SeedEntry {
+        name: "jose",
+        crypto_algorithm: None,
+        confidence: 0.8,
+    },
+    SeedEntry {
+        name: "node-jose",
+        crypto_algorithm: None,
+        confidence: 0.8,
+    },
+    SeedEntry {
+        name: "ssh2",
+        crypto_algorithm: None,
+        confidence: 0.7,
+    },
+    SeedEntry {
+        name: "node-forge",
+        crypto_algorithm: None,
+        confidence: 0.6,
+    },
+    SeedEntry {
+        name: "crypto-js",
+        crypto_algorithm: None,
+        confidence: 0.5,
+    },
+];
+
+// ─── Shared helper: flat dependency check against a seed list ──────────────
+//
+// poetry.lock, Pipfile.lock, pnpm-lock.yaml, and package-lock.json all
+// enumerate packages without a full dependency graph — unlike Cargo.lock's
+// `dependencies` arrays. For these formats we match each declared package
+// directly against the relevant seed list (PIP_PACKAGES for Python,
+// NPM_PACKAGES for Node).
+//
+// This is strictly *direct* matching: a package named "paramiko" is checked
+// against the seed list, but we cannot know whether "flask" transitively
+// depends on "paramiko". Transitive analysis would require building a full
+// dependency graph, which not all formats support equally. Direct matching
+// still covers the vast majority of cases because the seed lists include
+// both leaf crypto libraries and higher-level wrappers.
+
+fn check_flat_deps(
+    rule: &dyn crate::rules::Rule,
+    source: &str,
+    seeds: &HashMap<String, &SeedEntry>,
+    packages: &[(String, usize, usize)], // (normalized_name, start_byte, end_byte)
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+
+    for (lookup, start, end) in packages {
+        if let Some(entry) = seeds.get(lookup.as_str()) {
+            let desc = if let Some(algo) = entry.crypto_algorithm {
+                format!("Package `{}` uses {} (PQ-vulnerable)", entry.name, algo)
+            } else {
+                format!(
+                    "Package `{}` may use PQ-vulnerable algorithms (RSA, ECDSA, Ed25519)",
+                    entry.name
+                )
+            };
+
+            let mut f = make_finding_from_offsets(
+                rule.id(),
+                rule.severity(),
+                rule.cwe(),
+                &desc,
+                source,
+                *start,
+                *end,
+            );
+            finalize_manifest_finding(&mut f, entry, entry.name);
+
+            if entry.crypto_algorithm.is_none() && entry.confidence <= 0.6 {
+                f.fix_suggestion = Some(format!(
+                    "Review usage — `{}` also provides PQ-safe primitives (AES, SHA-256)",
+                    entry.name
+                ));
+            }
+
+            findings.push(f);
+        }
+    }
+
+    findings
+}
+
+/// Build a PEP 503-normalized seed map from PIP_PACKAGES.
+fn pip_seed_map() -> HashMap<String, &'static SeedEntry> {
+    PIP_PACKAGES
+        .iter()
+        .map(|e| (e.name.to_lowercase().replace(['_', '.'], "-"), e))
+        .collect()
+}
+
+/// Build a normalized seed map from NPM_PACKAGES.
+fn npm_seed_map() -> HashMap<String, &'static SeedEntry> {
+    NPM_PACKAGES.iter().map(|e| (e.name.to_string(), e)).collect()
+}
+
+// ─── Rule 3: poetry.lock (Python/Poetry) ───────────────────────────────────
+
+pub struct PoetryLockPqCrypto;
+
+impl_rule! {
+    PoetryLockPqCrypto,
+    id = "manifest/poetry-pq-vulnerable-dep",
+    severity = Severity::High,
+    cwe = Some(MANIFEST_PQ_CWE),
+    description = MANIFEST_PQ_DESC,
+    language = Language::Manifest,
+    cnsa2_deadline = MANIFEST_PQ_DEADLINE,
+    applies_to_filename = "poetry.lock",
+    fn check(_self, source, _tree) {
+        // poetry.lock is TOML with [[package]] sections containing
+        // name and version fields.
+        let Ok(doc) = source.parse::<toml::Value>() else {
+            return Vec::new();
+        };
+
+        let Some(packages) = doc.get("package").and_then(|p| p.as_array()) else {
+            return Vec::new();
+        };
+
+        let seeds = pip_seed_map();
+        let mut parsed = Vec::new();
+
+        for pkg in packages {
+            let Some(name) = pkg.get("name").and_then(|n| n.as_str()) else {
+                continue;
+            };
+
+            // PEP 503 normalize
+            let lookup = name.to_lowercase().replace(['_', '.'], "-");
+
+            // Find the byte offset of this package name in the source.
+            let name_pat = format!("name = \"{}\"", name);
+            if let Some(offset) = source.find(&name_pat) {
+                parsed.push((lookup, offset, offset + name_pat.len()));
+            }
+        }
+
+        check_flat_deps(_self, source, &seeds, &parsed)
+    }
+}
+
+// ─── Rule 4: Pipfile.lock (Python/Pipenv) ──────────────────────────────────
+
+pub struct PipfileLockPqCrypto;
+
+impl_rule! {
+    PipfileLockPqCrypto,
+    id = "manifest/pipfile-pq-vulnerable-dep",
+    severity = Severity::High,
+    cwe = Some(MANIFEST_PQ_CWE),
+    description = MANIFEST_PQ_DESC,
+    language = Language::Manifest,
+    cnsa2_deadline = MANIFEST_PQ_DEADLINE,
+    applies_to_filename = "Pipfile.lock",
+    fn check(_self, source, _tree) {
+        // Pipfile.lock is JSON with "default" and "develop" sections,
+        // each mapping package names to their metadata.
+        let Ok(doc) = serde_json::from_str::<serde_json::Value>(source) else {
+            return Vec::new();
+        };
+
+        let seeds = pip_seed_map();
+        let mut parsed = Vec::new();
+
+        for section in ["default", "develop"] {
+            if let Some(deps) = doc.get(section).and_then(|s| s.as_object()) {
+                for pkg_name in deps.keys() {
+                    let lookup = pkg_name.to_lowercase().replace(['_', '.'], "-");
+
+                    // Find the byte offset of this package key in the source.
+                    let key_pat = format!("\"{}\"", pkg_name);
+                    if let Some(offset) = source.find(&key_pat) {
+                        parsed.push((lookup, offset, offset + key_pat.len()));
+                    }
+                }
+            }
+        }
+
+        check_flat_deps(_self, source, &seeds, &parsed)
+    }
+}
+
+// ─── Rule 5: pnpm-lock.yaml (Node/pnpm) ───────────────────────────────────
+
+pub struct PnpmLockPqCrypto;
+
+impl_rule! {
+    PnpmLockPqCrypto,
+    id = "manifest/pnpm-pq-vulnerable-dep",
+    severity = Severity::High,
+    cwe = Some(MANIFEST_PQ_CWE),
+    description = MANIFEST_PQ_DESC,
+    language = Language::Manifest,
+    cnsa2_deadline = MANIFEST_PQ_DEADLINE,
+    applies_to_filename = "pnpm-lock.yaml",
+    fn check(_self, source, _tree) {
+        // pnpm-lock.yaml has a `packages` mapping. Keys are package
+        // specifiers like "/elliptic@6.5.4" (v6) or "elliptic@6.5.4" (v9).
+        let Ok(doc) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source) else {
+            return Vec::new();
+        };
+
+        let seeds = npm_seed_map();
+        let mut parsed = Vec::new();
+
+        if let Some(packages) = doc.get("packages").and_then(|p| p.as_mapping()) {
+            for key in packages.keys() {
+                let Some(key_str) = key.as_str() else {
+                    continue;
+                };
+
+                // Extract package name from specifier. Formats:
+                //   "/elliptic@6.5.4"  (pnpm v6-v8)
+                //   "elliptic@6.5.4"   (pnpm v9)
+                //   "/@scope/pkg@1.0"  (scoped, v6-v8)
+                //   "@scope/pkg@1.0"   (scoped, v9)
+                let stripped = key_str.strip_prefix('/').unwrap_or(key_str);
+                let pkg_name = if stripped.starts_with('@') {
+                    // Scoped: find the second '@' (version separator)
+                    if let Some(at_pos) = stripped[1..].find('@') {
+                        &stripped[..at_pos + 1]
+                    } else {
+                        stripped
+                    }
+                } else if let Some(at_pos) = stripped.find('@') {
+                    &stripped[..at_pos]
+                } else {
+                    stripped
+                };
+
+                let lookup = pkg_name.to_string();
+
+                // Find the byte offset of this key in the source.
+                if let Some(offset) = source.find(key_str) {
+                    let name_end = offset + key_str.len();
+                    parsed.push((lookup, offset, name_end));
+                }
+            }
+        }
+
+        check_flat_deps(_self, source, &seeds, &parsed)
+    }
+}
+
+// ─── Rule 6: package-lock.json (Node/npm) ──────────────────────────────────
+
+pub struct PackageLockPqCrypto;
+
+impl_rule! {
+    PackageLockPqCrypto,
+    id = "manifest/npm-pq-vulnerable-dep",
+    severity = Severity::High,
+    cwe = Some(MANIFEST_PQ_CWE),
+    description = MANIFEST_PQ_DESC,
+    language = Language::Manifest,
+    cnsa2_deadline = MANIFEST_PQ_DEADLINE,
+    applies_to_filename = "package-lock.json",
+    fn check(_self, source, _tree) {
+        // package-lock.json (v2/v3) has "packages" with keys like
+        // "node_modules/elliptic". Older v1 has "dependencies" at
+        // the top level.
+        let Ok(doc) = serde_json::from_str::<serde_json::Value>(source) else {
+            return Vec::new();
+        };
+
+        let seeds = npm_seed_map();
+        let mut parsed = Vec::new();
+        let mut seen = HashSet::new();
+
+        // v2/v3: "packages" section
+        if let Some(packages) = doc.get("packages").and_then(|p| p.as_object()) {
+            for key in packages.keys() {
+                // Keys: "node_modules/elliptic", "node_modules/@scope/pkg", ""
+                // Extract the package name from the key path.
+                let pkg_name = if key.is_empty() {
+                    continue; // root package entry
+                } else if let Some(last) = key.rsplit_once("node_modules/") {
+                    last.1
+                } else {
+                    key.as_str()
+                };
+
+                if pkg_name.is_empty() || !seen.insert(pkg_name.to_string()) {
+                    continue;
+                }
+
+                let lookup = pkg_name.to_string();
+
+                // Find byte offset of this key in source.
+                let key_pat = format!("\"{}\"", key);
+                if let Some(offset) = source.find(&key_pat) {
+                    parsed.push((lookup, offset, offset + key_pat.len()));
+                }
+            }
+        }
+
+        // v1 fallback: "dependencies" section (flat key → object)
+        if parsed.is_empty() {
+            if let Some(deps) = doc.get("dependencies").and_then(|d| d.as_object()) {
+                for pkg_name in deps.keys() {
+                    if !seen.insert(pkg_name.to_string()) {
+                        continue;
+                    }
+
+                    let lookup = pkg_name.to_string();
+                    let key_pat = format!("\"{}\"", pkg_name);
+                    // Skip the first occurrence which is the top-level "dependencies" key
+                    // by searching after the "dependencies" key itself.
+                    if let Some(deps_offset) = source.find("\"dependencies\"") {
+                        if let Some(offset) = source[deps_offset..].find(&key_pat) {
+                            let abs = deps_offset + offset;
+                            parsed.push((lookup, abs, abs + key_pat.len()));
+                        }
+                    }
+                }
+            }
+        }
+
+        check_flat_deps(_self, source, &seeds, &parsed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -890,5 +1259,294 @@ version = \"0.13.0\"\n";
             findings[0].crypto_algorithm.is_none(),
             "fabric should not attribute RSA"
         );
+    }
+
+    // ─── PoetryLockPqCrypto::check ────────────────────────────────────
+
+    #[test]
+    fn poetry_detects_known_packages() {
+        let src = "\
+[[package]]\n\
+name = \"flask\"\n\
+version = \"3.0.0\"\n\
+\n\
+[[package]]\n\
+name = \"cryptography\"\n\
+version = \"41.0.7\"\n\
+\n\
+[[package]]\n\
+name = \"python-rsa\"\n\
+version = \"4.9\"\n\
+\n\
+[[package]]\n\
+name = \"requests\"\n\
+version = \"2.31.0\"\n";
+        let tree = dummy_tree(src);
+        let findings = PoetryLockPqCrypto.check(src, &tree);
+        let names: Vec<_> = findings
+            .iter()
+            .filter_map(|f| f.dep_name.as_deref())
+            .collect();
+        assert!(names.contains(&"python-rsa"), "expected python-rsa");
+        assert!(names.contains(&"cryptography"), "expected cryptography");
+        assert!(!names.contains(&"flask"), "flask is not crypto");
+        assert!(!names.contains(&"requests"), "requests is not crypto");
+    }
+
+    #[test]
+    fn poetry_high_confidence_has_algorithm() {
+        let src = "\
+[[package]]\n\
+name = \"python-rsa\"\n\
+version = \"4.9\"\n";
+        let tree = dummy_tree(src);
+        let findings = PoetryLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].crypto_algorithm.as_deref(), Some("RSA"));
+        assert_eq!(findings[0].confidence, 0.95);
+    }
+
+    #[test]
+    fn poetry_low_confidence_has_fix_suggestion() {
+        let src = "\
+[[package]]\n\
+name = \"cryptography\"\n\
+version = \"41.0.7\"\n";
+        let tree = dummy_tree(src);
+        let findings = PoetryLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].fix_suggestion.is_some());
+    }
+
+    #[test]
+    fn poetry_invalid_toml_returns_empty() {
+        let src = "this is not valid toml {{{";
+        let tree = dummy_tree(src);
+        assert!(PoetryLockPqCrypto.check(src, &tree).is_empty());
+    }
+
+    #[test]
+    fn poetry_no_findings_for_clean_lockfile() {
+        let src = "\
+[[package]]\n\
+name = \"flask\"\n\
+version = \"3.0.0\"\n\
+\n\
+[[package]]\n\
+name = \"requests\"\n\
+version = \"2.31.0\"\n";
+        let tree = dummy_tree(src);
+        assert!(PoetryLockPqCrypto.check(src, &tree).is_empty());
+    }
+
+    // ─── PipfileLockPqCrypto::check ───────────────────────────────────
+
+    #[test]
+    fn pipfile_detects_default_and_develop_deps() {
+        let src = r#"{
+    "default": {
+        "cryptography": {"version": "==41.0.7"},
+        "flask": {"version": "==3.0.0"}
+    },
+    "develop": {
+        "paramiko": {"version": "==3.4.0"},
+        "pytest": {"version": "==7.4.0"}
+    }
+}"#;
+        let tree = dummy_tree(src);
+        let findings = PipfileLockPqCrypto.check(src, &tree);
+        let names: Vec<_> = findings
+            .iter()
+            .filter_map(|f| f.dep_name.as_deref())
+            .collect();
+        assert!(names.contains(&"cryptography"), "expected cryptography");
+        assert!(names.contains(&"paramiko"), "expected paramiko from develop");
+        assert!(!names.contains(&"flask"), "flask is not crypto");
+        assert!(!names.contains(&"pytest"), "pytest is not crypto");
+    }
+
+    #[test]
+    fn pipfile_high_confidence_has_algorithm() {
+        let src = r#"{
+    "default": {
+        "python-rsa": {"version": "==4.9"}
+    },
+    "develop": {}
+}"#;
+        let tree = dummy_tree(src);
+        let findings = PipfileLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].crypto_algorithm.as_deref(), Some("RSA"));
+        assert_eq!(findings[0].confidence, 0.95);
+    }
+
+    #[test]
+    fn pipfile_invalid_json_returns_empty() {
+        let src = "this is not valid json {{{";
+        let tree = dummy_tree(src);
+        assert!(PipfileLockPqCrypto.check(src, &tree).is_empty());
+    }
+
+    #[test]
+    fn pipfile_no_findings_for_clean_lockfile() {
+        let src = r#"{
+    "default": {
+        "flask": {"version": "==3.0.0"},
+        "requests": {"version": "==2.31.0"}
+    },
+    "develop": {}
+}"#;
+        let tree = dummy_tree(src);
+        assert!(PipfileLockPqCrypto.check(src, &tree).is_empty());
+    }
+
+    // ─── PnpmLockPqCrypto::check ──────────────────────────────────────
+
+    #[test]
+    fn pnpm_detects_known_packages() {
+        let src = "lockfileVersion: '9.0'\n\npackages:\n  elliptic@6.5.4:\n    resolution: {integrity: sha512-abc}\n  express@4.18.2:\n    resolution: {integrity: sha512-def}\n  jsonwebtoken@9.0.2:\n    resolution: {integrity: sha512-ghi}\n  lodash@4.17.21:\n    resolution: {integrity: sha512-jkl}\n";
+        let tree = dummy_tree(src);
+        let findings = PnpmLockPqCrypto.check(src, &tree);
+        let names: Vec<_> = findings
+            .iter()
+            .filter_map(|f| f.dep_name.as_deref())
+            .collect();
+        assert!(names.contains(&"elliptic"), "expected elliptic");
+        assert!(names.contains(&"jsonwebtoken"), "expected jsonwebtoken");
+        assert!(!names.contains(&"express"), "express is not crypto");
+        assert!(!names.contains(&"lodash"), "lodash is not crypto");
+    }
+
+    #[test]
+    fn pnpm_v6_slash_prefix_format() {
+        // pnpm v6-v8 uses /pkg@version format
+        let src = "lockfileVersion: '6.0'\n\npackages:\n  /elliptic@6.5.4:\n    resolution: {integrity: sha512-abc}\n  /express@4.18.2:\n    resolution: {integrity: sha512-def}\n";
+        let tree = dummy_tree(src);
+        let findings = PnpmLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].dep_name.as_deref(), Some("elliptic"));
+        assert_eq!(findings[0].crypto_algorithm.as_deref(), Some("ECDSA"));
+    }
+
+    #[test]
+    fn pnpm_high_confidence_has_algorithm() {
+        let src = "lockfileVersion: '9.0'\n\npackages:\n  elliptic@6.5.4:\n    resolution: {integrity: sha512-abc}\n";
+        let tree = dummy_tree(src);
+        let findings = PnpmLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].crypto_algorithm.as_deref(), Some("ECDSA"));
+        assert_eq!(findings[0].confidence, 0.95);
+    }
+
+    #[test]
+    fn pnpm_invalid_yaml_returns_empty() {
+        let src = "{{{{this is not valid yaml";
+        let tree = dummy_tree(src);
+        assert!(PnpmLockPqCrypto.check(src, &tree).is_empty());
+    }
+
+    #[test]
+    fn pnpm_no_findings_for_clean_lockfile() {
+        let src = "lockfileVersion: '9.0'\n\npackages:\n  express@4.18.2:\n    resolution: {integrity: sha512-def}\n  lodash@4.17.21:\n    resolution: {integrity: sha512-jkl}\n";
+        let tree = dummy_tree(src);
+        assert!(PnpmLockPqCrypto.check(src, &tree).is_empty());
+    }
+
+    // ─── PackageLockPqCrypto::check ───────────────────────────────────
+
+    #[test]
+    fn npm_detects_known_packages() {
+        let src = r#"{
+  "name": "my-app",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "my-app", "version": "1.0.0"},
+    "node_modules/elliptic": {"version": "6.5.4"},
+    "node_modules/express": {"version": "4.18.2"},
+    "node_modules/jsonwebtoken": {"version": "9.0.2"},
+    "node_modules/lodash": {"version": "4.17.21"}
+  }
+}"#;
+        let tree = dummy_tree(src);
+        let findings = PackageLockPqCrypto.check(src, &tree);
+        let names: Vec<_> = findings
+            .iter()
+            .filter_map(|f| f.dep_name.as_deref())
+            .collect();
+        assert!(names.contains(&"elliptic"), "expected elliptic");
+        assert!(names.contains(&"jsonwebtoken"), "expected jsonwebtoken");
+        assert!(!names.contains(&"express"), "express is not crypto");
+        assert!(!names.contains(&"lodash"), "lodash is not crypto");
+    }
+
+    #[test]
+    fn npm_high_confidence_has_algorithm() {
+        let src = r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "app"},
+    "node_modules/elliptic": {"version": "6.5.4"}
+  }
+}"#;
+        let tree = dummy_tree(src);
+        let findings = PackageLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].crypto_algorithm.as_deref(), Some("ECDSA"));
+        assert_eq!(findings[0].confidence, 0.95);
+    }
+
+    #[test]
+    fn npm_v1_dependencies_fallback() {
+        let src = r#"{
+  "name": "my-app",
+  "lockfileVersion": 1,
+  "dependencies": {
+    "elliptic": {"version": "6.5.4"},
+    "express": {"version": "4.18.2"}
+  }
+}"#;
+        let tree = dummy_tree(src);
+        let findings = PackageLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].dep_name.as_deref(), Some("elliptic"));
+    }
+
+    #[test]
+    fn npm_invalid_json_returns_empty() {
+        let src = "this is not valid json {{{";
+        let tree = dummy_tree(src);
+        assert!(PackageLockPqCrypto.check(src, &tree).is_empty());
+    }
+
+    #[test]
+    fn npm_no_findings_for_clean_lockfile() {
+        let src = r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "app"},
+    "node_modules/express": {"version": "4.18.2"},
+    "node_modules/lodash": {"version": "4.17.21"}
+  }
+}"#;
+        let tree = dummy_tree(src);
+        assert!(PackageLockPqCrypto.check(src, &tree).is_empty());
+    }
+
+    #[test]
+    fn npm_tags_and_metadata_correct() {
+        let src = r#"{
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "app"},
+    "node_modules/elliptic": {"version": "6.5.4"}
+  }
+}"#;
+        let tree = dummy_tree(src);
+        let findings = PackageLockPqCrypto.check(src, &tree);
+        assert_eq!(findings.len(), 1);
+        let f = &findings[0];
+        assert!(f.tags.contains(&"PQ".to_string()));
+        assert_eq!(f.dep_name.as_deref(), Some("elliptic"));
+        assert_eq!(f.rule_id, "manifest/npm-pq-vulnerable-dep");
     }
 }

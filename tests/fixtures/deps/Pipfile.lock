@@ -1,0 +1,39 @@
+{
+    "_meta": {
+        "hash": {
+            "sha256": "abc123"
+        },
+        "pipfile-spec": 6,
+        "requires": {
+            "python_version": "3.11"
+        }
+    },
+    "default": {
+        "flask": {
+            "hashes": [],
+            "version": "==3.0.0"
+        },
+        "cryptography": {
+            "hashes": [],
+            "version": "==41.0.7"
+        },
+        "python-rsa": {
+            "hashes": [],
+            "version": "==4.9"
+        },
+        "requests": {
+            "hashes": [],
+            "version": "==2.31.0"
+        }
+    },
+    "develop": {
+        "paramiko": {
+            "hashes": [],
+            "version": "==3.4.0"
+        },
+        "pytest": {
+            "hashes": [],
+            "version": "==7.4.0"
+        }
+    }
+}
