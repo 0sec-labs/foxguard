@@ -1,3 +1,5 @@
+pub mod c;
+pub mod c_taint;
 pub mod common;
 pub mod config;
 pub mod cross_file;
@@ -44,6 +46,7 @@ static BUNDLED_RULES: include_dir::Dir<'_> = include_dir::include_dir!("$CARGO_M
 /// engine choice, source model, and sanitizer behavior stay consistent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaintEngine {
+    C,
     Go,
     JavaScript,
     Kotlin,
@@ -609,6 +612,16 @@ impl RuleRegistry {
         register_rules!(
             registry,
             [
+                c::TaintFormatString,
+                c::TaintCommandInjection,
+                c::TaintBufferOverflow,
+                c::TaintSqlInjection,
+            ]
+        );
+
+        register_rules!(
+            registry,
+            [
                 rust_lang::UnsafeBlock,
                 rust_lang::TransmuteUsage,
                 rust_lang::NoCommandInjection,
@@ -805,6 +818,15 @@ impl RuleRegistry {
 
 fn builtin_taint_specs_for_language(language: Language) -> Vec<RegistryTaintSpec> {
     match language {
+        Language::C => c_taint::c_taint_rule_specs()
+            .into_iter()
+            .map(|(rule_id, spec)| RegistryTaintSpec {
+                rule_id,
+                language,
+                engine: TaintEngine::C,
+                spec,
+            })
+            .collect(),
         Language::Go => go::go_taint_rule_specs()
             .into_iter()
             .map(|(rule_id, spec)| RegistryTaintSpec {

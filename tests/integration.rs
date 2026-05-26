@@ -1154,6 +1154,80 @@ mod go {
     }
 }
 
+// ─── C ──────────────────────────────────────────────────────────────────────
+
+mod c {
+    use super::*;
+
+    /// Positive fixture for the C taint engine. Each function flows an
+    /// untrusted source into a taint sink.
+    #[test]
+    fn test_vulnerable_c_taint_catches_every_flow() {
+        let output = foxguard_cmd_isolated()
+            .args(["tests/fixtures/vulnerable_c_taint.c", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        assert!(!output.status.success());
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+
+        let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for f in &findings {
+            if let Some(rule) = f["rule_id"].as_str() {
+                *counts.entry(rule).or_insert(0) += 1;
+            }
+        }
+
+        for (taint_rule, expected) in [
+            ("c/taint-format-string", 2usize),
+            ("c/taint-command-injection", 4),
+            ("c/taint-buffer-overflow", 3),
+            ("c/taint-sql-injection", 2),
+        ] {
+            assert_eq!(
+                counts.get(taint_rule).copied(),
+                Some(expected),
+                "{} should fire exactly {} time(s) on vulnerable_c_taint.c. counts={:?}",
+                taint_rule,
+                expected,
+                counts
+            );
+        }
+    }
+
+    /// Negative counterpart for the C taint engine. Every function in
+    /// `safe_c_taint.c` either uses a literal argument, has its taint
+    /// killed by sanitization, or avoids the dangerous pattern.
+    /// No c/taint-* rule may fire.
+    #[test]
+    fn test_safe_c_taint_has_no_taint_findings() {
+        let output = foxguard_cmd_isolated()
+            .args(["tests/fixtures/safe_c_taint.c", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+
+        for taint_rule in [
+            "c/taint-format-string",
+            "c/taint-command-injection",
+            "c/taint-buffer-overflow",
+            "c/taint-sql-injection",
+        ] {
+            let n = findings
+                .iter()
+                .filter(|f| f["rule_id"].as_str() == Some(taint_rule))
+                .count();
+            assert_eq!(
+                n, 0,
+                "{} should not fire on safe_c_taint.c, got {} findings",
+                taint_rule, n
+            );
+        }
+    }
+}
+
 // ─── Java ───────────────────────────────────────────────────────────────────
 
 mod java {
