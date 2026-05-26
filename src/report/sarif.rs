@@ -1,5 +1,5 @@
 use crate::{Finding, Severity};
-use serde_json::json;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -183,6 +183,48 @@ fn normalized_fingerprint_snippet(finding: &Finding) -> String {
     normalized
 }
 
+fn taint_code_flows(finding: &Finding, artifact_uri: &str) -> Option<Value> {
+    let (Some(source_line), Some(source_description), Some(sink_line), Some(sink_description)) = (
+        finding.source_line,
+        finding.source_description.as_deref(),
+        finding.sink_line,
+        finding.sink_description.as_deref(),
+    ) else {
+        return None;
+    };
+
+    if source_line == 0 || sink_line == 0 {
+        return None;
+    }
+
+    Some(json!([{
+        "threadFlows": [{
+            "locations": [
+                thread_flow_location(artifact_uri, source_line, source_description),
+                thread_flow_location(artifact_uri, sink_line, sink_description)
+            ]
+        }]
+    }]))
+}
+
+fn thread_flow_location(artifact_uri: &str, line: usize, message: &str) -> Value {
+    json!({
+        "location": {
+            "physicalLocation": {
+                "artifactLocation": {
+                    "uri": artifact_uri
+                },
+                "region": {
+                    "startLine": line
+                }
+            },
+            "message": {
+                "text": non_empty_text(message, "taint flow location", 1024)
+            }
+        }
+    })
+}
+
 pub fn build_sarif(findings: &[Finding]) -> serde_json::Value {
     let (rules, rule_indices) = collect_rules(findings);
     let results: Vec<_> = findings
@@ -253,6 +295,10 @@ pub fn build_sarif(findings: &[Finding]) -> serde_json::Value {
                         "text": fix
                     }
                 }]);
+            }
+
+            if let Some(code_flows) = taint_code_flows(f, &artifact_uri) {
+                result["codeFlows"] = code_flows;
             }
 
             result
@@ -338,7 +384,9 @@ mod tests {
         let sarif = build_sarif(&findings);
 
         let driver = &sarif["runs"][0]["tool"]["driver"];
-        let rules = driver["rules"].as_array().expect("rules array");
+        let Some(rules) = driver["rules"].as_array() else {
+            panic!("rules array");
+        };
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["id"].as_str(), Some("js/no-xss"));
         assert_eq!(
@@ -356,6 +404,80 @@ mod tests {
             result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"].as_str(),
             Some("src/app.js")
         );
+        assert!(result["partialFingerprints"]["primaryLocationLineHash"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()));
+    }
+
+    #[test]
+    fn sarif_omits_code_flows_without_taint_metadata() {
+        let findings = vec![finding("js/no-xss", Severity::High, "src/app.js")];
+        let sarif = build_sarif(&findings);
+
+        let result = &sarif["runs"][0]["results"][0];
+        assert!(
+            result.get("codeFlows").is_none(),
+            "non-taint findings should not emit codeFlows"
+        );
+    }
+
+    #[test]
+    fn sarif_includes_code_flows_for_taint_metadata() {
+        let mut taint = finding("py/taint-sql-injection", Severity::High, "src/app.py");
+        taint.description = "Untrusted request data reaches SQL execution".to_string();
+        taint.line = 9;
+        taint.column = 13;
+        taint.end_line = 9;
+        taint.end_column = 24;
+        taint.source_line = Some(3);
+        taint.source_description = Some("request.args.get(\"name\")".to_string());
+        taint.sink_line = Some(9);
+        taint.sink_description = Some("sqlite3.Cursor.execute".to_string());
+        taint.taint_hops = Some(1);
+        taint.confidence = 0.8;
+
+        let sarif = build_sarif(&[taint]);
+        let result = &sarif["runs"][0]["results"][0];
+
+        let Some(code_flows) = result["codeFlows"].as_array() else {
+            panic!("codeFlows array");
+        };
+        assert_eq!(code_flows.len(), 1);
+        let Some(locations) = code_flows[0]["threadFlows"][0]["locations"].as_array() else {
+            panic!("thread flow locations");
+        };
+        assert_eq!(locations.len(), 2);
+
+        assert_eq!(
+            locations[0]["location"]["physicalLocation"]["artifactLocation"]["uri"].as_str(),
+            Some("src/app.py")
+        );
+        assert_eq!(
+            locations[0]["location"]["physicalLocation"]["region"]["startLine"].as_u64(),
+            Some(3)
+        );
+        assert_eq!(
+            locations[0]["location"]["message"]["text"].as_str(),
+            Some("request.args.get(\"name\")")
+        );
+
+        assert_eq!(
+            locations[1]["location"]["physicalLocation"]["artifactLocation"]["uri"].as_str(),
+            Some("src/app.py")
+        );
+        assert_eq!(
+            locations[1]["location"]["physicalLocation"]["region"]["startLine"].as_u64(),
+            Some(9)
+        );
+        assert_eq!(
+            locations[1]["location"]["message"]["text"].as_str(),
+            Some("sqlite3.Cursor.execute")
+        );
+
+        let Some(rank) = result["rank"].as_f64() else {
+            panic!("rank");
+        };
+        assert!((rank - 80.0).abs() < 0.01, "unexpected rank: {rank}");
         assert!(result["partialFingerprints"]["primaryLocationLineHash"]
             .as_str()
             .is_some_and(|value| !value.is_empty()));
