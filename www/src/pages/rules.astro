@@ -1,0 +1,326 @@
+---
+import Base from '../layouts/Base.astro';
+import SiteNav from '../components/ui/SiteNav.astro';
+import { ruleGroups, totalRules } from '../data/rules';
+
+// Flatten all rules with their group info for the explorer
+const allRules = ruleGroups.flatMap((group) =>
+  group.rules.map((rule) => ({
+    ...rule,
+    language: group.name,
+    slug: group.slug,
+  }))
+);
+
+// Derive unique filter values
+const languages = ruleGroups.map((g) => ({ name: g.name, slug: g.slug, count: g.rules.length }));
+const severities = ['critical', 'high', 'medium', 'low'] as const;
+
+// Derive categories from CWE patterns
+type CategoryEntry = { label: string; cwes: string[] };
+const categoryMap: CategoryEntry[] = [
+  { label: 'Injection', cwes: ['CWE-78', 'CWE-89', 'CWE-90', 'CWE-95', 'CWE-94', 'CWE-943', 'CWE-643', 'CWE-117', 'CWE-134'] },
+  { label: 'XSS', cwes: ['CWE-79'] },
+  { label: 'Deserialization', cwes: ['CWE-502'] },
+  { label: 'Cryptography', cwes: ['CWE-327', 'CWE-326', 'CWE-328', 'CWE-338'] },
+  { label: 'Secrets', cwes: ['CWE-798'] },
+  { label: 'SSRF', cwes: ['CWE-918'] },
+  { label: 'CSRF', cwes: ['CWE-352'] },
+  { label: 'Path Traversal', cwes: ['CWE-22'] },
+  { label: 'Open Redirect', cwes: ['CWE-601'] },
+  { label: 'Cookie / Session', cwes: ['CWE-1004', 'CWE-614', 'CWE-384', 'CWE-359', 'CWE-613'] },
+  { label: 'SSTI', cwes: ['CWE-1336'] },
+  { label: 'XXE', cwes: ['CWE-611'] },
+  { label: 'TLS / Transport', cwes: ['CWE-295', 'CWE-319', 'CWE-311'] },
+  { label: 'CORS', cwes: ['CWE-942'] },
+  { label: 'Other', cwes: [] },
+];
+---
+
+<Base title="Rules — foxguard" description={`Browse all ${totalRules} security rules. Filter by language, severity, CWE, and category.`}>
+  <div class="sticky top-0 z-40 bg-noir-950 border-b border-noir-800">
+    <div class="max-w-5xl mx-auto px-6">
+      <SiteNav backLabel="rules" />
+    </div>
+  </div>
+
+  <main class="pt-8 pb-24">
+    <div class="max-w-5xl mx-auto px-6">
+
+      <header class="mb-10">
+        <h1 class="font-heading text-3xl sm:text-4xl text-noir-50 tracking-tight mb-3">Rule Explorer</h1>
+        <p class="text-noir-500 text-base">Browse all {totalRules} built-in rules. Each maps to a CWE and is enforced out of the box.</p>
+      </header>
+
+      <!-- Search -->
+      <div class="mb-6">
+        <div class="relative">
+          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-noir-600 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input
+            id="rule-search"
+            type="text"
+            placeholder="Search rules by name, description, or CWE..."
+            class="w-full bg-noir-900 border border-noir-800 rounded-lg pl-10 pr-4 py-2.5 text-sm text-noir-100 placeholder:text-noir-600 focus:outline-none focus:border-fox/50 transition-colors"
+          />
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="flex flex-col gap-4 mb-6">
+        <!-- Language chips -->
+        <div class="flex flex-wrap gap-2" id="lang-filters">
+          <button data-lang="all" class="filter-chip active text-xs rounded-full px-3 py-1 border transition-colors cursor-pointer">All languages</button>
+          {languages.map((lang) => (
+            <button data-lang={lang.slug} class="filter-chip text-xs rounded-full px-3 py-1 border transition-colors cursor-pointer">
+              {lang.name} <span class="text-noir-600 ml-0.5">{lang.count}</span>
+            </button>
+          ))}
+        </div>
+
+        <!-- Severity + Category row -->
+        <div class="flex flex-wrap gap-3">
+          <div class="flex items-center gap-2" id="severity-filters">
+            <span class="text-noir-600 text-xs mr-1">Severity:</span>
+            <button data-severity="all" class="filter-chip active text-xs rounded-full px-2.5 py-0.5 border transition-colors cursor-pointer">All</button>
+            {severities.map((s) => (
+              <button data-severity={s} class:list={[
+                'filter-chip text-xs rounded-full px-2.5 py-0.5 border transition-colors cursor-pointer',
+              ]}>
+                <span class:list={[
+                  'inline-block w-1.5 h-1.5 rounded-full mr-1',
+                  s === 'critical' ? 'bg-purple-400' :
+                  s === 'high' ? 'bg-red-400' :
+                  s === 'medium' ? 'bg-yellow-500' : 'bg-noir-600'
+                ]}></span>
+                {s}
+              </button>
+            ))}
+          </div>
+
+          <div class="flex items-center gap-2" id="category-filter-wrap">
+            <span class="text-noir-600 text-xs mr-1">Category:</span>
+            <select id="category-filter" class="bg-noir-900 border border-noir-800 rounded-lg px-2.5 py-1 text-xs text-noir-300 focus:outline-none focus:border-fox/50 cursor-pointer">
+              <option value="all">All categories</option>
+              {categoryMap.map((cat) => (
+                <option value={cat.label}>{cat.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Result count -->
+      <div class="flex items-center justify-between mb-4">
+        <p id="rule-count" class="text-noir-500 text-sm">
+          Showing <span id="visible-count" class="text-noir-300">{totalRules}</span> of <span class="text-noir-300">{totalRules}</span> rules
+        </p>
+        <button id="clear-filters" class="text-xs text-noir-600 hover:text-fox transition-colors cursor-pointer hidden">Clear filters</button>
+      </div>
+
+      <!-- Rule table -->
+      <div class="rounded-xl border border-noir-800 overflow-hidden">
+        <table class="w-full text-left">
+          <thead>
+            <tr class="border-b border-noir-800 bg-noir-900/50">
+              <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Rule</th>
+              <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider hidden sm:table-cell">Description</th>
+              <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider w-24">Severity</th>
+              <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider hidden md:table-cell w-28">Language</th>
+              <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider w-24">CWE</th>
+            </tr>
+          </thead>
+          <tbody id="rules-tbody">
+            {allRules.map((rule) => (
+              <tr
+                class="rule-row border-b border-noir-800/40 last:border-b-0 hover:bg-noir-900/30 transition-colors"
+                data-id={rule.id}
+                data-desc={rule.desc.toLowerCase()}
+                data-cwe={rule.cwe}
+                data-severity={rule.severity}
+                data-lang={rule.slug}
+                data-search={`${rule.id} ${rule.desc.toLowerCase()} ${rule.cwe.toLowerCase()}`}
+              >
+                <td class="px-4 py-2.5">
+                  <code class="font-mono text-fox text-xs break-all">{rule.id}</code>
+                  <div class="text-noir-500 text-xs mt-0.5 sm:hidden">{rule.desc}</div>
+                </td>
+                <td class="px-4 py-2.5 text-noir-400 text-xs hidden sm:table-cell">{rule.desc}</td>
+                <td class="px-4 py-2.5">
+                  <span class:list={[
+                    'inline-flex items-center gap-1 text-[11px] font-medium',
+                    rule.severity === 'critical' ? 'text-purple-400' :
+                    rule.severity === 'high' ? 'text-red-400' :
+                    rule.severity === 'medium' ? 'text-yellow-500' : 'text-noir-600'
+                  ]}>
+                    <span class:list={[
+                      'w-1.5 h-1.5 rounded-full',
+                      rule.severity === 'critical' ? 'bg-purple-400' :
+                      rule.severity === 'high' ? 'bg-red-400' :
+                      rule.severity === 'medium' ? 'bg-yellow-500' : 'bg-noir-600'
+                    ]}></span>
+                    {rule.severity}
+                  </span>
+                </td>
+                <td class="px-4 py-2.5 text-noir-500 text-xs hidden md:table-cell">{rule.language}</td>
+                <td class="px-4 py-2.5">
+                  <a
+                    href={`https://cwe.mitre.org/data/definitions/${rule.cwe.replace('CWE-', '')}.html`}
+                    target="_blank"
+                    rel="noopener"
+                    class="font-mono text-xs text-noir-500 hover:text-fox transition-colors no-underline"
+                  >{rule.cwe}</a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Empty state -->
+      <div id="empty-state" class="hidden py-16 text-center">
+        <p class="text-noir-500 text-sm">No rules match your filters.</p>
+        <button id="empty-clear" class="mt-2 text-xs text-fox hover:text-fox-light transition-colors cursor-pointer">Clear all filters</button>
+      </div>
+
+    </div>
+  </main>
+
+  <footer class="py-8">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="h-px bg-noir-800 mb-8"></div>
+      <a href="/" class="text-noir-600 hover:text-noir-100 transition-colors no-underline text-sm">foxguard.dev</a>
+    </div>
+  </footer>
+</Base>
+
+<style>
+  .filter-chip {
+    border-color: var(--color-noir-800);
+    color: var(--color-noir-500);
+    background: transparent;
+  }
+  .filter-chip:hover {
+    border-color: var(--color-noir-700);
+    color: var(--color-noir-300);
+  }
+  .filter-chip.active {
+    border-color: var(--color-fox);
+    color: var(--color-fox-light);
+    background: rgba(217, 119, 6, 0.08);
+  }
+</style>
+
+<script define:vars={{ categoryMap }}>
+  // Category map for JS-side filtering
+  const categories = categoryMap;
+
+  // Build a CWE -> category lookup
+  const cweToCat = {};
+  for (const cat of categories) {
+    for (const cwe of cat.cwes) {
+      cweToCat[cwe] = cat.label;
+    }
+  }
+  function getCategory(cwe) {
+    return cweToCat[cwe] || 'Other';
+  }
+
+  // State
+  let activeLang = 'all';
+  let activeSeverity = 'all';
+  let activeCategory = 'all';
+  let searchQuery = '';
+
+  // DOM references
+  const searchInput = document.getElementById('rule-search');
+  const tbody = document.getElementById('rules-tbody');
+  const rows = Array.from(tbody.querySelectorAll('.rule-row'));
+  const visibleCountEl = document.getElementById('visible-count');
+  const clearBtn = document.getElementById('clear-filters');
+  const emptyState = document.getElementById('empty-state');
+  const emptyClear = document.getElementById('empty-clear');
+  const tableWrapper = tbody.closest('.rounded-xl');
+  const categorySelect = document.getElementById('category-filter');
+
+  function applyFilters() {
+    let count = 0;
+    const q = searchQuery.toLowerCase().trim();
+
+    for (const row of rows) {
+      const matchesLang = activeLang === 'all' || row.dataset.lang === activeLang;
+      const matchesSev = activeSeverity === 'all' || row.dataset.severity === activeSeverity;
+      const matchesCat = activeCategory === 'all' || getCategory(row.dataset.cwe) === activeCategory;
+      const matchesSearch = !q || row.dataset.search.includes(q);
+
+      if (matchesLang && matchesSev && matchesCat && matchesSearch) {
+        row.style.display = '';
+        count++;
+      } else {
+        row.style.display = 'none';
+      }
+    }
+
+    visibleCountEl.textContent = String(count);
+
+    const hasFilters = activeLang !== 'all' || activeSeverity !== 'all' || activeCategory !== 'all' || q;
+    clearBtn.classList.toggle('hidden', !hasFilters);
+
+    const isEmpty = count === 0;
+    emptyState.classList.toggle('hidden', !isEmpty);
+    tableWrapper.classList.toggle('hidden', isEmpty);
+  }
+
+  // Search
+  searchInput.addEventListener('input', (e) => {
+    searchQuery = e.target.value;
+    applyFilters();
+  });
+
+  // Language chips
+  document.getElementById('lang-filters').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-lang]');
+    if (!btn) return;
+    activeLang = btn.dataset.lang;
+    document.querySelectorAll('#lang-filters .filter-chip').forEach((el) => {
+      el.classList.toggle('active', el.dataset.lang === activeLang);
+    });
+    applyFilters();
+  });
+
+  // Severity chips
+  document.getElementById('severity-filters').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-severity]');
+    if (!btn) return;
+    activeSeverity = btn.dataset.severity;
+    document.querySelectorAll('#severity-filters .filter-chip').forEach((el) => {
+      el.classList.toggle('active', el.dataset.severity === activeSeverity);
+    });
+    applyFilters();
+  });
+
+  // Category dropdown
+  categorySelect.addEventListener('change', () => {
+    activeCategory = categorySelect.value;
+    applyFilters();
+  });
+
+  // Clear filters
+  function resetAll() {
+    activeLang = 'all';
+    activeSeverity = 'all';
+    activeCategory = 'all';
+    searchQuery = '';
+    searchInput.value = '';
+    categorySelect.value = 'all';
+    document.querySelectorAll('#lang-filters .filter-chip').forEach((el) => {
+      el.classList.toggle('active', el.dataset.lang === 'all');
+    });
+    document.querySelectorAll('#severity-filters .filter-chip').forEach((el) => {
+      el.classList.toggle('active', el.dataset.severity === 'all');
+    });
+    applyFilters();
+  }
+
+  clearBtn.addEventListener('click', resetAll);
+  emptyClear.addEventListener('click', resetAll);
+</script>
