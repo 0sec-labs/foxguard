@@ -44,8 +44,7 @@ rules:
       also be flagged by kernel/dirty-frag/skb-inplace-skcipher-no-cow
       when scanning the backend implementation.
 
-      See oss-security 2026-05-07 advisory (Hyunwoo Kim @v4bel) and pwnkit
-      issue #263.
+      See oss-security 2026-05-07 advisory (Hyunwoo Kim @v4bel).
     severity: WARNING
     languages: [c]
     paths:
@@ -56,4 +55,3 @@ rules:
       references:
         - "https://www.openwall.com/lists/oss-security/2026/05/07/8"
         - "https://github.com/V4bel/dirtyfrag/blob/master/assets/write-up.md"
-        - "https://github.com/0sec-labs/pwnkit/issues/263"
