@@ -1,0 +1,475 @@
+---
+import Base from '../layouts/Base.astro';
+import SiteNav from '../components/ui/SiteNav.astro';
+import InstallTabs from '../components/ui/InstallTabs.astro';
+import Footer from '../components/sections/Footer.astro';
+---
+
+<Base
+  title="Docs — foxguard"
+  description="foxguard documentation. Quick start, configuration reference, CI/CD integration, GitHub App setup, VS Code extension, and suppression guide."
+>
+  <div class="sticky top-0 z-40 bg-noir-950 border-b border-noir-800">
+    <div class="max-w-5xl mx-auto px-6">
+      <SiteNav backLabel="docs" />
+    </div>
+  </div>
+
+  <main class="pt-8 pb-24">
+    <div class="max-w-5xl mx-auto px-6">
+
+      <header class="mb-12 max-w-3xl">
+        <h1 class="font-heading text-3xl sm:text-4xl text-noir-50 tracking-tight mb-3">Documentation</h1>
+        <p class="text-noir-500 text-base leading-relaxed">
+          Everything you need to install, configure, and integrate foxguard into your workflow.
+        </p>
+      </header>
+
+      <!-- Table of contents -->
+      <nav class="mb-16 rounded-xl border border-noir-800 bg-noir-900/30 p-6">
+        <h2 class="font-heading text-noir-100 text-sm uppercase tracking-wider mb-4">On this page</h2>
+        <ul class="grid sm:grid-cols-2 gap-2 text-sm">
+          <li><a href="#quick-start" class="text-noir-400 hover:text-fox-light transition-colors no-underline">Quick start</a></li>
+          <li><a href="#configuration" class="text-noir-400 hover:text-fox-light transition-colors no-underline">Configuration reference</a></li>
+          <li><a href="#github-app" class="text-noir-400 hover:text-fox-light transition-colors no-underline">GitHub App setup</a></li>
+          <li><a href="#vscode" class="text-noir-400 hover:text-fox-light transition-colors no-underline">VS Code extension</a></li>
+          <li><a href="#ci-cd" class="text-noir-400 hover:text-fox-light transition-colors no-underline">CI/CD integration</a></li>
+          <li><a href="#suppression" class="text-noir-400 hover:text-fox-light transition-colors no-underline">Suppression guide</a></li>
+          <li><a href="#output-formats" class="text-noir-400 hover:text-fox-light transition-colors no-underline">Output formats</a></li>
+          <li><a href="#pqc" class="text-noir-400 hover:text-fox-light transition-colors no-underline">Post-quantum crypto audit</a></li>
+        </ul>
+      </nav>
+
+      <!-- Quick Start -->
+      <section id="quick-start" class="mb-20 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">01</span>
+          Quick start
+        </h2>
+
+        <div class="space-y-6">
+          <div>
+            <h3 class="font-heading text-noir-100 text-base mb-3">Install</h3>
+            <p class="text-noir-400 text-sm mb-4">Pick whichever method you prefer. No runtime dependencies required.</p>
+            <InstallTabs id="docs-install" />
+          </div>
+
+          <div>
+            <h3 class="font-heading text-noir-100 text-base mb-3">Run your first scan</h3>
+            <div class="rounded-xl border border-noir-800 overflow-hidden">
+              <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# Scan the current directory
+foxguard .
+
+# Scan with JSON output
+foxguard . --format json
+
+# Scan with SARIF output (for CI/CD)
+foxguard . --format sarif -o results.sarif
+
+# Scan only changed files (diff mode)
+foxguard . --baseline main
+
+# Post-quantum crypto audit
+foxguard . --pqc
+
+# Generate a Cryptographic Bill of Materials
+foxguard . --cbom -o cbom.json
+
+# Interactive triage mode
+foxguard . --tui`}</code></pre>
+            </div>
+          </div>
+
+          <div>
+            <h3 class="font-heading text-noir-100 text-base mb-3">What to expect</h3>
+            <p class="text-noir-400 text-sm leading-relaxed">
+              foxguard scans your source code for security vulnerabilities, hardcoded secrets, and weak/pre-quantum cryptography. By default it prints findings to stdout grouped by severity. Exit code 0 means no findings; exit code 1 means findings were detected — useful for CI gating.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Configuration Reference -->
+      <section id="configuration" class="mb-20 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">02</span>
+          Configuration reference
+        </h2>
+
+        <p class="text-noir-400 text-sm mb-6 leading-relaxed">
+          Create a <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">.foxguard.yml</code> in your project root to customize behavior. All fields are optional — foxguard works with zero config.
+        </p>
+
+        <div class="rounded-xl border border-noir-800 overflow-hidden">
+          <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">.foxguard.yml</div>
+          <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# Minimum severity to report (low | medium | high | critical)
+severity: medium
+
+# Paths to exclude from scanning (glob patterns)
+exclude:
+  - "vendor/**"
+  - "node_modules/**"
+  - "**/*.test.ts"
+  - "migrations/**"
+
+# Rules to disable by ID
+disable:
+  - py-hardcoded-secret    # Handled by vault integration
+  - go-md5-usage           # Legacy checksums, not security-critical
+
+# Output format (text | json | sarif)
+format: text
+
+# Enable post-quantum crypto audit
+pqc: false
+
+# Enable secrets scanning
+secrets: true
+
+# Baseline branch for diff-only mode
+# baseline: main
+
+# Maximum file size to scan (bytes)
+max-file-size: 1048576
+
+# Number of threads (0 = auto-detect)
+threads: 0`}</code></pre>
+        </div>
+
+        <div class="mt-6 rounded-xl border border-noir-800 bg-noir-900/30 p-6">
+          <h3 class="font-heading text-noir-100 text-sm mb-3">CLI flags override config</h3>
+          <p class="text-noir-400 text-sm leading-relaxed">
+            Every config option has a corresponding CLI flag. Flags take precedence over <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">.foxguard.yml</code>. Run <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">foxguard --help</code> for the full list.
+          </p>
+        </div>
+      </section>
+
+      <!-- GitHub App -->
+      <section id="github-app" class="mb-20 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">03</span>
+          GitHub App setup
+        </h2>
+
+        <div class="space-y-6">
+          <p class="text-noir-400 text-sm leading-relaxed">
+            The foxguard GitHub App scans every PR automatically. No CI wiring needed — install the app, and findings appear as PR comments within seconds.
+          </p>
+
+          <div class="grid sm:grid-cols-3 gap-4">
+            <div class="rounded-xl border border-noir-800 p-5">
+              <div class="text-fox-light text-xl mb-2 font-mono">1</div>
+              <h3 class="font-heading text-noir-100 text-sm mb-1">Install the app</h3>
+              <p class="text-noir-500 text-xs leading-relaxed">Go to <a href="https://github.com/apps/foxguard-app/installations/new" class="text-fox-light hover:underline">github.com/apps/foxguard-app</a> and select the repos you want scanned.</p>
+            </div>
+            <div class="rounded-xl border border-noir-800 p-5">
+              <div class="text-fox-light text-xl mb-2 font-mono">2</div>
+              <h3 class="font-heading text-noir-100 text-sm mb-1">Open a PR</h3>
+              <p class="text-noir-500 text-xs leading-relaxed">foxguard scans the PR head ref. Most repos finish in under a second. Results are posted as a PR comment.</p>
+            </div>
+            <div class="rounded-xl border border-noir-800 p-5">
+              <div class="text-fox-light text-xl mb-2 font-mono">3</div>
+              <h3 class="font-heading text-noir-100 text-sm mb-1">Fix and merge</h3>
+              <p class="text-noir-500 text-xs leading-relaxed">Push fixes, the scan re-runs automatically. No findings = clean comment. No configuration needed.</p>
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-6">
+            <h3 class="font-heading text-noir-100 text-sm mb-2">Self-hosting</h3>
+            <p class="text-noir-400 text-sm leading-relaxed mb-3">
+              For air-gapped or regulated environments, you can self-host the webhook receiver. Register your own GitHub App, point its webhook URL at your instance, and deploy with Docker:
+            </p>
+            <div class="rounded-lg border border-noir-800 overflow-hidden">
+              <pre class="px-4 py-3 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`docker run --rm -p 8080:8080 \\
+  -e FOXGUARD_WEBHOOK_SECRET=$(openssl rand -hex 32) \\
+  ghcr.io/0sec-labs/foxguard-github-app:latest`}</code></pre>
+            </div>
+            <p class="text-noir-600 text-xs mt-2">
+              See the <a href="/github#self-host" class="text-noir-400 hover:text-noir-100 transition-colors">GitHub App page</a> for more details.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- VS Code Extension -->
+      <section id="vscode" class="mb-20 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">04</span>
+          VS Code extension
+        </h2>
+
+        <div class="space-y-4">
+          <p class="text-noir-400 text-sm leading-relaxed">
+            The foxguard VS Code extension shows findings inline as you code. Install it from the Visual Studio Marketplace or from the command line:
+          </p>
+
+          <div class="rounded-xl border border-noir-800 overflow-hidden">
+            <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
+            <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>code --install-extension 0sec-labs.foxguard</code></pre>
+          </div>
+
+          <div class="grid sm:grid-cols-2 gap-4 mt-4">
+            <div class="rounded-xl border border-noir-800 p-5">
+              <h3 class="font-heading text-noir-100 text-sm mb-1">Real-time diagnostics</h3>
+              <p class="text-noir-500 text-xs leading-relaxed">Findings appear as squiggly underlines with severity-colored markers. Hover for details, CWE links, and fix suggestions.</p>
+            </div>
+            <div class="rounded-xl border border-noir-800 p-5">
+              <h3 class="font-heading text-noir-100 text-sm mb-1">Quick-fix actions</h3>
+              <p class="text-noir-500 text-xs leading-relaxed">Suppress a finding with an inline comment directly from the lightbulb menu. Supports per-line and per-file suppression.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CI/CD Integration -->
+      <section id="ci-cd" class="mb-20 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">05</span>
+          CI/CD integration
+        </h2>
+
+        <p class="text-noir-400 text-sm mb-6 leading-relaxed">
+          foxguard exits with code 1 when findings are detected, making it easy to gate merges. Use SARIF output for rich integration with GitHub Code Scanning, GitLab SAST, and other platforms.
+        </p>
+
+        <!-- GitHub Actions -->
+        <div class="mb-8">
+          <h3 class="font-heading text-noir-100 text-base mb-3">GitHub Actions</h3>
+          <div class="rounded-xl border border-noir-800 overflow-hidden">
+            <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">.github/workflows/foxguard.yml</div>
+            <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`name: foxguard
+on: [push, pull_request]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install foxguard
+        run: curl -fsSL https://foxguard.dev/install.sh | sh
+
+      - name: Run scan
+        run: foxguard . --format sarif -o results.sarif
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif`}</code></pre>
+          </div>
+          <p class="text-noir-600 text-xs mt-2">Alternatively, use the <a href="/github" class="text-noir-400 hover:text-noir-100 transition-colors">GitHub App</a> — it does this automatically with no workflow file needed.</p>
+        </div>
+
+        <!-- GitLab CI -->
+        <div class="mb-8">
+          <h3 class="font-heading text-noir-100 text-base mb-3">GitLab CI</h3>
+          <div class="rounded-xl border border-noir-800 overflow-hidden">
+            <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">.gitlab-ci.yml</div>
+            <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard:
+  stage: test
+  image: rust:latest
+  before_script:
+    - curl -fsSL https://foxguard.dev/install.sh | sh
+  script:
+    - foxguard . --format json -o gl-sast-report.json
+  artifacts:
+    reports:
+      sast: gl-sast-report.json
+    when: always`}</code></pre>
+          </div>
+        </div>
+
+        <!-- Generic CI -->
+        <div>
+          <h3 class="font-heading text-noir-100 text-base mb-3">Any CI system</h3>
+          <div class="rounded-xl border border-noir-800 overflow-hidden">
+            <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
+            <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# Install
+curl -fsSL https://foxguard.dev/install.sh | sh
+
+# Scan and fail the build if findings exist
+foxguard . --severity high
+# exit code 1 = findings found, exit code 0 = clean`}</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- Suppression Guide -->
+      <section id="suppression" class="mb-20 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">06</span>
+          Suppression guide
+        </h2>
+
+        <p class="text-noir-400 text-sm mb-6 leading-relaxed">
+          Not every finding is actionable. foxguard gives you multiple ways to suppress false positives without losing track of them.
+        </p>
+
+        <div class="space-y-6">
+          <!-- Inline comments -->
+          <div>
+            <h3 class="font-heading text-noir-100 text-base mb-3">Inline comments</h3>
+            <p class="text-noir-400 text-sm mb-3 leading-relaxed">
+              Add a <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">foxguard-ignore</code> comment on the line above a finding to suppress it. Optionally specify the rule ID.
+            </p>
+            <div class="rounded-xl border border-noir-800 overflow-hidden">
+              <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">example.py</div>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# foxguard-ignore: py-hardcoded-secret — rotated via vault
+API_KEY = "sk-test-placeholder"
+
+# foxguard-ignore — suppress all rules on next line
+password = get_config("db_password")`}</code></pre>
+            </div>
+          </div>
+
+          <!-- Config-based -->
+          <div>
+            <h3 class="font-heading text-noir-100 text-base mb-3">Config-based disable</h3>
+            <p class="text-noir-400 text-sm mb-3 leading-relaxed">
+              Disable rules globally in <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">.foxguard.yml</code> when they don't apply to your project.
+            </p>
+            <div class="rounded-xl border border-noir-800 overflow-hidden">
+              <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">.foxguard.yml</div>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`disable:
+  - py-hardcoded-secret
+  - go-md5-usage`}</code></pre>
+            </div>
+          </div>
+
+          <!-- Path exclusion -->
+          <div>
+            <h3 class="font-heading text-noir-100 text-base mb-3">Path exclusion</h3>
+            <p class="text-noir-400 text-sm mb-3 leading-relaxed">
+              Exclude entire directories or file patterns from scanning.
+            </p>
+            <div class="rounded-xl border border-noir-800 overflow-hidden">
+              <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">.foxguard.yml</div>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`exclude:
+  - "vendor/**"
+  - "testdata/**"
+  - "**/*_test.go"
+  - "legacy/**"`}</code></pre>
+            </div>
+          </div>
+
+          <!-- Baseline -->
+          <div>
+            <h3 class="font-heading text-noir-100 text-base mb-3">Baseline / diff-only mode</h3>
+            <p class="text-noir-400 text-sm mb-3 leading-relaxed">
+              Only report new findings introduced since a baseline branch. Useful for gradually adopting foxguard on an existing codebase without drowning in pre-existing issues.
+            </p>
+            <div class="rounded-xl border border-noir-800 overflow-hidden">
+              <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# Only show findings not present on main
+foxguard . --baseline main`}</code></pre>
+            </div>
+          </div>
+
+          <!-- TUI triage -->
+          <div>
+            <h3 class="font-heading text-noir-100 text-base mb-3">TUI triage</h3>
+            <p class="text-noir-400 text-sm mb-3 leading-relaxed">
+              Use the interactive terminal UI to review findings one by one, suppress with a keybinding, or export the remaining findings.
+            </p>
+            <div class="rounded-xl border border-noir-800 overflow-hidden">
+              <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard . --tui`}</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Output Formats -->
+      <section id="output-formats" class="mb-20 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">07</span>
+          Output formats
+        </h2>
+
+        <div class="grid sm:grid-cols-3 gap-4">
+          <div class="rounded-xl border border-noir-800 p-5">
+            <h3 class="font-heading text-noir-100 text-sm mb-1">Text (default)</h3>
+            <p class="text-noir-500 text-xs leading-relaxed mb-2">Human-readable output with colors, file paths, line numbers, and fix suggestions.</p>
+            <code class="text-fox-light text-xs bg-noir-900 px-2 py-1 rounded block">foxguard .</code>
+          </div>
+          <div class="rounded-xl border border-noir-800 p-5">
+            <h3 class="font-heading text-noir-100 text-sm mb-1">JSON</h3>
+            <p class="text-noir-500 text-xs leading-relaxed mb-2">Machine-readable findings for scripts, dashboards, or custom integrations.</p>
+            <code class="text-fox-light text-xs bg-noir-900 px-2 py-1 rounded block">foxguard . --format json</code>
+          </div>
+          <div class="rounded-xl border border-noir-800 p-5">
+            <h3 class="font-heading text-noir-100 text-sm mb-1">SARIF</h3>
+            <p class="text-noir-500 text-xs leading-relaxed mb-2">Standard format for GitHub Code Scanning, GitLab SAST, and other security platforms.</p>
+            <code class="text-fox-light text-xs bg-noir-900 px-2 py-1 rounded block">foxguard . --format sarif</code>
+          </div>
+        </div>
+      </section>
+
+      <!-- PQC -->
+      <section id="pqc" class="mb-16 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">08</span>
+          Post-quantum crypto audit
+        </h2>
+
+        <div class="space-y-6">
+          <p class="text-noir-400 text-sm leading-relaxed">
+            foxguard can audit your codebase for cryptographic primitives that will be broken by quantum computers. This maps to NSA CNSA 2.0 timelines — the transition deadlines are approaching fast.
+          </p>
+
+          <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-6">
+            <h3 class="font-heading text-noir-100 text-sm mb-3">What gets flagged</h3>
+            <ul class="space-y-2 text-sm text-noir-400 leading-relaxed">
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">RSA</strong> — key exchange, signing, encryption (all key sizes)</li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">ECDSA / ECDH</strong> — elliptic curve operations (P-256, P-384, etc.)</li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">DH</strong> — classic Diffie-Hellman key exchange</li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">DSA</strong> — Digital Signature Algorithm</li>
+            </ul>
+          </div>
+
+          <div class="grid sm:grid-cols-2 gap-4">
+            <div class="rounded-xl border border-noir-800 overflow-hidden">
+              <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">PQC audit</div>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard . --pqc`}</code></pre>
+            </div>
+            <div class="rounded-xl border border-noir-800 overflow-hidden">
+              <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">CBOM generation</div>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard . --cbom -o cbom.json`}</code></pre>
+            </div>
+          </div>
+
+          <p class="text-noir-500 text-sm leading-relaxed">
+            The CBOM (Cryptographic Bill of Materials) inventories every crypto primitive in your codebase — useful for compliance reporting and tracking your migration to post-quantum algorithms.
+          </p>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section class="text-center">
+        <div class="h-px bg-noir-800 mb-16"></div>
+        <h2 class="font-heading text-noir-50 text-2xl sm:text-3xl mb-4">Questions?</h2>
+        <p class="text-noir-500 text-sm mb-6">Open an issue or check the README for more details.</p>
+        <div class="flex items-center justify-center gap-4">
+          <a
+            href="https://github.com/0sec-labs/foxguard"
+            target="_blank"
+            rel="noopener"
+            class="flex items-center gap-2 rounded-lg bg-fox px-5 py-2.5 text-sm font-medium hover:bg-fox-light transition-colors no-underline"
+            style="color:#000;"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+            GitHub repo
+          </a>
+          <a href="/compare" class="rounded-lg border border-noir-700 px-5 py-2.5 text-sm text-noir-300 hover:border-noir-600 hover:text-noir-100 transition-colors no-underline">
+            Compare with Semgrep
+          </a>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <Footer />
+</Base>

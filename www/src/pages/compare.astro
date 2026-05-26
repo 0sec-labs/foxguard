@@ -1,0 +1,318 @@
+---
+import Base from '../layouts/Base.astro';
+import SiteNav from '../components/ui/SiteNav.astro';
+import Footer from '../components/sections/Footer.astro';
+
+type Row = {
+  feature: string;
+  foxguard: string;
+  semgrep: string;
+  note?: string;
+};
+
+const coreFeatures: Row[] = [
+  { feature: 'Written in', foxguard: 'Rust', semgrep: 'OCaml + Python' },
+  { feature: 'License', foxguard: 'MIT / Apache-2.0', semgrep: 'LGPL-2.1 (OSS engine)' },
+  { feature: 'Price', foxguard: 'Free, forever', semgrep: 'Free tier, paid plans from $40/dev/mo' },
+  { feature: 'Binary distribution', foxguard: 'Single static binary', semgrep: 'Python wheel + OCaml runtime' },
+  { feature: 'Install methods', foxguard: 'npx, curl, cargo, brew', semgrep: 'pip, brew, Docker' },
+];
+
+const analysisFeatures: Row[] = [
+  { feature: 'Intra-file taint tracking', foxguard: 'yes', semgrep: 'yes' },
+  { feature: 'Cross-file taint tracking', foxguard: 'yes', semgrep: 'Paid only (Pro engine)', note: 'Semgrep requires a Team/Enterprise license for cross-file analysis' },
+  { feature: 'Custom rules (YAML DSL)', foxguard: 'Planned', semgrep: 'yes', note: 'foxguard ships 170+ built-in rules; custom YAML rules are on the roadmap' },
+  { feature: 'Secrets detection', foxguard: 'yes', semgrep: 'yes (Secrets product, paid)' },
+  { feature: 'SARIF output', foxguard: 'yes', semgrep: 'yes' },
+  { feature: 'JSON output', foxguard: 'yes', semgrep: 'yes' },
+  { feature: 'Baseline / diff-only mode', foxguard: 'yes', semgrep: 'yes' },
+];
+
+const uniqueFeatures: Row[] = [
+  { feature: 'Post-quantum crypto audit (CNSA 2.0)', foxguard: 'yes', semgrep: 'no', note: 'Flags RSA, ECDSA, ECDH, and other pre-quantum primitives against NSA CNSA 2.0 timelines' },
+  { feature: 'CBOM generation', foxguard: 'yes', semgrep: 'no', note: 'Cryptographic Bill of Materials: inventories every crypto primitive in your codebase' },
+  { feature: 'TUI triage mode', foxguard: 'yes', semgrep: 'no', note: 'Interactive terminal UI to review findings one by one, suppress inline, or export' },
+  { feature: 'GitHub App (one-click PR scans)', foxguard: 'yes', semgrep: 'yes (via Semgrep App)' },
+  { feature: 'VS Code extension', foxguard: 'yes', semgrep: 'yes' },
+  { feature: 'Self-hostable GitHub receiver', foxguard: 'yes', semgrep: 'Partial (CI-based)' },
+];
+
+const performanceFeatures: Row[] = [
+  { feature: 'Typical scan time (medium repo)', foxguard: '< 1 second', semgrep: '10-30 seconds' },
+  { feature: 'Cold start (no cache)', foxguard: '< 1 second', semgrep: '5-15 seconds' },
+  { feature: 'Memory usage', foxguard: '~50 MB', semgrep: '~500 MB+' },
+  { feature: 'Parallel execution', foxguard: 'Rayon (work-stealing)', semgrep: 'Multiprocess' },
+];
+
+const languageSupport = [
+  { lang: 'Python', foxguard: true, semgrep: true },
+  { lang: 'JavaScript', foxguard: true, semgrep: true },
+  { lang: 'TypeScript', foxguard: true, semgrep: true },
+  { lang: 'Go', foxguard: true, semgrep: true },
+  { lang: 'Rust', foxguard: true, semgrep: true },
+  { lang: 'Java', foxguard: true, semgrep: true },
+  { lang: 'C#', foxguard: true, semgrep: true },
+  { lang: 'Ruby', foxguard: true, semgrep: true },
+  { lang: 'PHP', foxguard: true, semgrep: true },
+  { lang: 'Kotlin', foxguard: true, semgrep: true },
+  { lang: 'Scala', foxguard: false, semgrep: true },
+  { lang: 'Swift', foxguard: false, semgrep: true },
+  { lang: 'Terraform / HCL', foxguard: false, semgrep: true },
+];
+
+function icon(val: string) {
+  if (val === 'yes') return 'check';
+  if (val === 'no') return 'x';
+  return 'text';
+}
+---
+
+<Base
+  title="foxguard vs Semgrep — Feature comparison"
+  description="Side-by-side comparison of foxguard and Semgrep. See how they differ on speed, taint tracking, PQC auditing, pricing, and more."
+>
+  <div class="sticky top-0 z-40 bg-noir-950 border-b border-noir-800">
+    <div class="max-w-5xl mx-auto px-6">
+      <SiteNav backLabel="compare" />
+    </div>
+  </div>
+
+  <main class="pt-8 pb-24">
+    <div class="max-w-5xl mx-auto px-6">
+
+      <header class="mb-12 max-w-3xl">
+        <h1 class="font-heading text-3xl sm:text-4xl text-noir-50 tracking-tight mb-3">foxguard vs Semgrep</h1>
+        <p class="text-noir-500 text-base leading-relaxed">
+          Both tools do static analysis. This page lists factual capability differences so you can decide which fits your workflow. Semgrep is a great tool — foxguard focuses on speed, PQC readiness, and being fully free.
+        </p>
+      </header>
+
+      <!-- Performance -->
+      <section class="mb-16">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">01</span>
+          Performance
+        </h2>
+        <div class="rounded-xl border border-noir-800 overflow-hidden">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="border-b border-noir-800 bg-noir-900/50">
+                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Metric</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-fox-light uppercase tracking-wider">foxguard</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Semgrep</th>
+              </tr>
+            </thead>
+            <tbody>
+              {performanceFeatures.map((row) => (
+                <tr class="border-b border-noir-800/40 last:border-b-0">
+                  <td class="px-4 py-2.5 text-sm text-noir-300">{row.feature}</td>
+                  <td class="px-4 py-2.5 text-sm text-noir-100 font-medium">{row.foxguard}</td>
+                  <td class="px-4 py-2.5 text-sm text-noir-400">{row.semgrep}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p class="text-noir-600 text-xs mt-3">Benchmarks measured on the same hardware with the same rulesets where applicable. Your mileage may vary.</p>
+      </section>
+
+      <!-- Core -->
+      <section class="mb-16">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">02</span>
+          Core
+        </h2>
+        <div class="rounded-xl border border-noir-800 overflow-hidden">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="border-b border-noir-800 bg-noir-900/50">
+                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Feature</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-fox-light uppercase tracking-wider">foxguard</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Semgrep</th>
+              </tr>
+            </thead>
+            <tbody>
+              {coreFeatures.map((row) => (
+                <tr class="border-b border-noir-800/40 last:border-b-0">
+                  <td class="px-4 py-2.5 text-sm text-noir-300">{row.feature}</td>
+                  <td class="px-4 py-2.5 text-sm text-noir-100 font-medium">{row.foxguard}</td>
+                  <td class="px-4 py-2.5 text-sm text-noir-400">{row.semgrep}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Analysis capabilities -->
+      <section class="mb-16">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">03</span>
+          Analysis capabilities
+        </h2>
+        <div class="rounded-xl border border-noir-800 overflow-hidden">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="border-b border-noir-800 bg-noir-900/50">
+                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Capability</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-fox-light uppercase tracking-wider">foxguard</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Semgrep</th>
+              </tr>
+            </thead>
+            <tbody>
+              {analysisFeatures.map((row) => (
+                <tr class="border-b border-noir-800/40 last:border-b-0">
+                  <td class="px-4 py-2.5 text-sm text-noir-300">
+                    {row.feature}
+                    {row.note && <span class="block text-[11px] text-noir-600 mt-0.5">{row.note}</span>}
+                  </td>
+                  <td class="px-4 py-2.5 text-sm">
+                    {icon(row.foxguard) === 'check' ? (
+                      <span class="text-sage-light">&#10003;</span>
+                    ) : icon(row.foxguard) === 'x' ? (
+                      <span class="text-noir-700">&mdash;</span>
+                    ) : (
+                      <span class="text-noir-100 font-medium">{row.foxguard}</span>
+                    )}
+                  </td>
+                  <td class="px-4 py-2.5 text-sm">
+                    {icon(row.semgrep) === 'check' ? (
+                      <span class="text-sage-light">&#10003;</span>
+                    ) : icon(row.semgrep) === 'x' ? (
+                      <span class="text-noir-700">&mdash;</span>
+                    ) : (
+                      <span class="text-noir-400">{row.semgrep}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- What foxguard does that Semgrep doesn't -->
+      <section class="mb-16">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">04</span>
+          Unique to foxguard
+        </h2>
+        <div class="rounded-xl border border-noir-800 overflow-hidden">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="border-b border-noir-800 bg-noir-900/50">
+                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Feature</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-fox-light uppercase tracking-wider">foxguard</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Semgrep</th>
+              </tr>
+            </thead>
+            <tbody>
+              {uniqueFeatures.map((row) => (
+                <tr class="border-b border-noir-800/40 last:border-b-0">
+                  <td class="px-4 py-2.5 text-sm text-noir-300">
+                    {row.feature}
+                    {row.note && <span class="block text-[11px] text-noir-600 mt-0.5">{row.note}</span>}
+                  </td>
+                  <td class="px-4 py-2.5 text-sm">
+                    {icon(row.foxguard) === 'check' ? (
+                      <span class="text-sage-light">&#10003;</span>
+                    ) : (
+                      <span class="text-noir-100 font-medium">{row.foxguard}</span>
+                    )}
+                  </td>
+                  <td class="px-4 py-2.5 text-sm">
+                    {icon(row.semgrep) === 'check' ? (
+                      <span class="text-sage-light">&#10003;</span>
+                    ) : icon(row.semgrep) === 'x' ? (
+                      <span class="text-noir-700">&mdash;</span>
+                    ) : (
+                      <span class="text-noir-400">{row.semgrep}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Language support -->
+      <section class="mb-16">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">05</span>
+          Language support
+        </h2>
+        <div class="rounded-xl border border-noir-800 overflow-hidden">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="border-b border-noir-800 bg-noir-900/50">
+                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Language</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-fox-light uppercase tracking-wider">foxguard</th>
+                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Semgrep</th>
+              </tr>
+            </thead>
+            <tbody>
+              {languageSupport.map((row) => (
+                <tr class="border-b border-noir-800/40 last:border-b-0">
+                  <td class="px-4 py-2.5 text-sm text-noir-300">{row.lang}</td>
+                  <td class="px-4 py-2.5 text-sm">
+                    {row.foxguard ? (
+                      <span class="text-sage-light">&#10003;</span>
+                    ) : (
+                      <span class="text-noir-700">&mdash;</span>
+                    )}
+                  </td>
+                  <td class="px-4 py-2.5 text-sm">
+                    {row.semgrep ? (
+                      <span class="text-sage-light">&#10003;</span>
+                    ) : (
+                      <span class="text-noir-700">&mdash;</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p class="text-noir-600 text-xs mt-3">Semgrep supports 30+ languages overall. foxguard focuses on the most-used languages for web and cloud-native applications. Both lists grow over time.</p>
+      </section>
+
+      <!-- Summary -->
+      <section class="mb-16">
+        <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-8">
+          <h2 class="font-heading text-noir-50 text-xl mb-4">When to pick foxguard</h2>
+          <ul class="space-y-2 text-sm text-noir-400 leading-relaxed">
+            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You want a fast, free scanner with no login or token limits.</li>
+            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You need post-quantum crypto auditing (CNSA 2.0 compliance).</li>
+            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You need a CBOM for regulatory or supply-chain requirements.</li>
+            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You prefer a single static binary with no runtime dependencies.</li>
+            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You want cross-file taint tracking without a paid license.</li>
+          </ul>
+
+          <h2 class="font-heading text-noir-50 text-xl mt-8 mb-4">When Semgrep might be better</h2>
+          <ul class="space-y-2 text-sm text-noir-400 leading-relaxed">
+            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span>You need custom YAML rules today (foxguard's custom rules are planned).</li>
+            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span>You need support for 30+ languages including Terraform, Swift, Scala.</li>
+            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span>You need a managed SaaS platform with team dashboards and policies.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section class="text-center">
+        <h2 class="font-heading text-noir-50 text-2xl sm:text-3xl mb-4">Try foxguard on your codebase</h2>
+        <p class="text-noir-500 text-sm mb-6">One command. No config. No signup. No cost.</p>
+        <div class="inline-flex rounded-xl border border-noir-800 overflow-hidden">
+          <code class="px-5 py-3 font-mono text-sm text-fox-light">npx foxguard .</code>
+        </div>
+        <div class="flex items-center justify-center gap-4 mt-6">
+          <a href="/docs" class="text-sm text-noir-500 hover:text-noir-100 transition-colors no-underline">Read the docs &#8594;</a>
+          <a href="/rules" class="text-sm text-noir-500 hover:text-noir-100 transition-colors no-underline">Browse all rules &#8594;</a>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <Footer />
+</Base>
