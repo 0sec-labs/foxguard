@@ -1190,160 +1190,160 @@
       "line": 226
     },
     {
-      "fingerprint": "f8388a7d64821af43fa1572e5252f2b4038fba0ff4d448611644c0d23a66799b",
+      "fingerprint": "dc121bfb5bbe636f3e5259e5410fbc5b5cd6a058989e7a25b7c90abd27fc52dd",
       "rule_id": "rs/no-path-traversal",
       "file": "src/engine/scanner.rs",
-      "line": 371
+      "line": 372
     },
     {
-      "fingerprint": "ac51464c3d8dfe3a9274fa4451562cb7b11e5c520366942b090e4b24639210ac",
+      "fingerprint": "00e00d064753c4c64c4983709892d0731e8e561cb7e3ee67ff56e2b968c4eb77",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 553
+      "line": 554
     },
     {
-      "fingerprint": "1044c834caf0dc97127f074e41ca0dc41db9eb020ce2eff3ca6ca0817e8bb05d",
+      "fingerprint": "a7ca122cab8a1b07fdcf9e2947620054eb61618012a3a6f456d259f80efd0771",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 561
+      "line": 562
     },
     {
-      "fingerprint": "8fb6f2835efe4b219305d96d106d1fb7d2c144b98f89e33c9bd9cbdc84b9af23",
+      "fingerprint": "53b2c82273e2e004ace164343490996607103df0798e0807377c7ad334832d81",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 568
+      "line": 569
     },
     {
-      "fingerprint": "c516475b7c1dc9b97e37b71d7c5a3bb93bfac0d31084eedfdc669381bb70e645",
+      "fingerprint": "8e2788826f6b5dcd8466d4030129d38f393f87bad9f1b5c764d60c05540ece7f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1002
+      "line": 1003
     },
     {
-      "fingerprint": "93d69f3b696ba369fca5e71e71a30b24407343a336b0cb29c2f3893da4ef195e",
+      "fingerprint": "e99cf68f144e2a5d08897aa13c96ac449b09c9ad9ef8927292f9513b8df27309",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1010
+      "line": 1011
     },
     {
-      "fingerprint": "4ab5cd969f549fd5c6797f2e96b23e3ead7bb472032ff422dea4c3234e08f815",
+      "fingerprint": "e81e6d74f05222a5d60e3ef78e73888c39cdaf03123bd45bae6863c0a40919ae",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1027
+      "line": 1028
     },
     {
-      "fingerprint": "326c87bd1d37b609fc3462554f0d1bcff256c429a88ca9b23ef9f7de2ff3433d",
+      "fingerprint": "01669f6511436dce517b172c366dd8d1eb1cede2eb06f30a33be89556962ced7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1034
+      "line": 1035
     },
     {
-      "fingerprint": "0cebec77fc790b1a4e49f0e566a15974eec8615809b60889a6c6cb37cd1f8b1b",
+      "fingerprint": "52b77fb4a93294636879003a67cafa12942c479f3996b552e3d6f7a1d2ebdbe8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1056
+      "line": 1057
     },
     {
-      "fingerprint": "3b411ade3a528a2779521079ffd51f513681161b5812cf043dc732a9f9d5152b",
+      "fingerprint": "f33ef9c1b5d5abfa243c0861811316e5c188c7e52a091e50ded6dd1795ac66ed",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1065
+      "line": 1066
     },
     {
-      "fingerprint": "f67bef3cca688be1c96ebd4843a39d0e4027a7105295ae2a09751365110ae2c0",
+      "fingerprint": "b9ec09f274252b30555f77292b1f8e6c0af69aad3b344816820a5d0fa95d0744",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1074
+      "line": 1075
     },
     {
-      "fingerprint": "1d1b2aaded8333b54889dc615ff543baaf2921b64717a0ad0311783a4119affb",
+      "fingerprint": "844d7611c56f23898fbe5cbad2399862d6bf7495afdc657af76e8ebd57a0bb28",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1430
+      "line": 1431
     },
     {
-      "fingerprint": "4dc5177107758305e32f7ccdbf1e0c385044a676e0c68a182b6b2199dfff429d",
+      "fingerprint": "117d38ffe96b91dbe53bc1ec3d6a2be96ede4a5dc534526e9a575cbe6a427cb5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1464
+      "line": 1465
     },
     {
-      "fingerprint": "f65c3d7efbad3deed48216d48d688f597fe91c1460c426e42b3682c53600117b",
+      "fingerprint": "95e471f7d415b18f217dd8492fd38ad1762f33453267c0776c582d3d38a5ba31",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1472
+      "line": 1473
     },
     {
-      "fingerprint": "05da5e8f591af3b227536f1686bbbc75fa31ed68a54372922c3796050ab9b8be",
+      "fingerprint": "50d884df6e6adadee9135f5d94522de41bcca9b8009d6c1b04005f499526344c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1481
+      "line": 1482
     },
     {
-      "fingerprint": "85c7dc3244e0c16e8f29969251c1ff7264ff282314c3cf8cd469622e16cc31a3",
+      "fingerprint": "5b9f84f1dc310df7e262af9205b5175f9ab3c4c4b73da54125055623a86311f8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1507
+      "line": 1508
     },
     {
-      "fingerprint": "bea5136930bb8baf406172bc9149a8dbda6e965669b4573cf2370445ec1e38cb",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/engine/scanner.rs",
-      "line": 1518
-    },
-    {
-      "fingerprint": "d7e210d6305e7538cd223acfd64b01694e957a742c99f9c3727231d007ae4a54",
+      "fingerprint": "871e1e649363e86bfc094988668294e2cffdc52ac271bea765dcc24ec710f76e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
       "line": 1519
     },
     {
-      "fingerprint": "fba0bfd9053ef6830c3d153e6605f3f8761fc80e61fcc1a598739779cea0120e",
+      "fingerprint": "4d2069fe9f93fa99b38db0e37ca96b51040503e90d615b17411fc5035e400d8b",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1521
+      "line": 1520
     },
     {
-      "fingerprint": "9a225aec42d7b4d76c2042b92bb2c0e814e604b684241e86ad4eda92c43ac84a",
+      "fingerprint": "48785c8bcf1404536e61125e387dbbb82002e20d439f536c4066924f49d0a357",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1523
+      "line": 1522
     },
     {
-      "fingerprint": "3a21f4f8c562d5ef47bc87f078d11c4f38eed391b7614ddfcd193bcdccc7520d",
+      "fingerprint": "03c380ddcbb3c9b5228e9dc77f061bb9ecbf109a79d94024faf6f4af065c7908",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1527
+      "line": 1524
     },
     {
-      "fingerprint": "60805282de4b46ab473ba39053ae98f4e63a6faa20aeac8d83baf530ae9c66fd",
+      "fingerprint": "8f9f5055e7e79b6345ce5f0fbfda442326da61ae66c5af7cbc8816b933a4cf92",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1529
+      "line": 1528
     },
     {
-      "fingerprint": "cb04d88686523fe18a5e43821c06d208b04659956c37cc7cc71189880f7fbe10",
+      "fingerprint": "ead0b1b586897cf7e7d9012b3fed224e3aa58f5c37c08a4dcf5dd41a6ef78aaf",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1546
+      "line": 1530
     },
     {
-      "fingerprint": "a503761d227877bb310ebca6144568c35df341275e5fc7c93639127b04bbfc17",
+      "fingerprint": "53ff0995fbb76cf14848769722e4b7626641c4bea28eab44052e371ed0c27c15",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
       "line": 1547
     },
     {
-      "fingerprint": "10c9fa23436f81616cd514e2abc70f2f5095f845e69cbd6f5f9cfd3a5483b7c7",
+      "fingerprint": "3cd3ce530438f1af7b8f27965ff16e489925cab6b7f05c6bb8f390c55afaf948",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1549
+      "line": 1548
     },
     {
-      "fingerprint": "c52c0c339131a3155db83a1042cd027c68040fa0a004112263576ca29287ea4b",
+      "fingerprint": "e69a53e1dbda802ab0b9c59b30b56b430f8f80ac9fdd692741b6404d385c1fec",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/engine/scanner.rs",
-      "line": 1553
+      "line": 1550
+    },
+    {
+      "fingerprint": "da978f740e0dd619fd89706532b24f33a8b83d75415dbefa30320bb0aa3c7784",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/scanner.rs",
+      "line": 1554
     },
     {
       "fingerprint": "a9ede1a3dac849591e057cb9955767b4fd71374a938b8be55ef4ccda707d458e",
@@ -2096,40 +2096,40 @@
       "line": 766
     },
     {
-      "fingerprint": "6340137fe978156cfde44d9522eb196b7a097fae2ede158488a96fd3e0012083",
+      "fingerprint": "8dbe41fffb92d6392f39cab6bf9c023d505682e2dda2913d0241488585bee782",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/rules/manifest.rs",
-      "line": 489
+      "line": 858
     },
     {
-      "fingerprint": "b000e3b2a486603c1e3d9ce3c43063adbccbbf36ba10114269ca6606b0a445bd",
+      "fingerprint": "1a623b0e599fafbdb77034d0b940296786bde3d2a3a3ba4e143e4335bc23cb20",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/rules/manifest.rs",
-      "line": 533
+      "line": 902
     },
     {
-      "fingerprint": "c7258887451f20b6ad406335dd94e4dda6c6da90023268a3fa854441d48feb6b",
+      "fingerprint": "a99d9a2e70059142be7ffe620f28eaa51647f3462e25066b911d0ac25c795254",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/rules/manifest.rs",
-      "line": 755
+      "line": 1124
     },
     {
-      "fingerprint": "abe1cf13fda36a89a400485e484d235c02ccb3e128bf37b04721bba9a1f97786",
+      "fingerprint": "eafd7b966979175467716f578a214f09c4d09c39698c41cc34ee99248ef4af68",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/rules/mod.rs",
-      "line": 976
+      "line": 980
     },
     {
-      "fingerprint": "f6e8ef0d3a7b96e20e4a77928a146820798c89b818a9c35828f905713be9ca5e",
+      "fingerprint": "d3e9a1d70656da00ed9f41a6f348756aca00c3dea13c6cd70e441db581973b79",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/rules/mod.rs",
-      "line": 986
+      "line": 990
     },
     {
-      "fingerprint": "e3b7d0b3a0becdfd9d5c664c9d1f235a0133b2c46ddc2041b380509f6cf40bf6",
+      "fingerprint": "404072cf5cbce5acc40a4b32462a37cc335e40785b22c3c4413c46c498280e1f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/rules/mod.rs",
-      "line": 994
+      "line": 998
     },
     {
       "fingerprint": "d3f202c67f11aaf37795ef054e74f88ca51aace629d09f1c1f098a3c071ec1df",
@@ -3380,16 +3380,16 @@
       "line": 574
     },
     {
-      "fingerprint": "d327b5844a905a4ca3c3f35717694ea7dd5b0cd39d9510c45a8719c3d9813f72",
+      "fingerprint": "a2f07566999e78572c41a020d6155d635a5878b57a967ea91817a088c7c855e6",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/cross_language_matrix.rs",
-      "line": 575
+      "line": 579
     },
     {
-      "fingerprint": "cb16dc6d6571fc5e31fc8596b13a56e4f61c36a37fa76ffceb887a2798090b19",
+      "fingerprint": "9702bb7625fd919acd1767d0d7f2f33b8c0d18599e7fced815cb26262cb31dfc",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/cross_language_matrix.rs",
-      "line": 617
+      "line": 624
     },
     {
       "fingerprint": "cca76b4eaa1a94e2e7ed7fadc692558c7e9494e7d50a385aa97c215178657aa4",
@@ -3474,6 +3474,66 @@
       "rule_id": "manifest/cargo-pq-vulnerable-dep",
       "file": "tests/fixtures/deps/Cargo.lock",
       "line": 32
+    },
+    {
+      "fingerprint": "ba6a61e0cd13f3b3ecd861b3a1b42af71c25ec695c033c858098d4cedcdeb1a9",
+      "rule_id": "manifest/pipfile-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/Pipfile.lock",
+      "line": 16
+    },
+    {
+      "fingerprint": "064f209b0f7036c072371d227cc63e2f90fe8449f0342f7d0ce0516232d4e2d9",
+      "rule_id": "manifest/pipfile-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/Pipfile.lock",
+      "line": 20
+    },
+    {
+      "fingerprint": "5e375ee9762857e5e36d9ef8cc0e8b13a31d0411be568a8dea7724739b2c6304",
+      "rule_id": "manifest/pipfile-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/Pipfile.lock",
+      "line": 30
+    },
+    {
+      "fingerprint": "9e3c4b550b4fb79de39900ade03598345d581163b5745b07d7b6dc49cb67cf95",
+      "rule_id": "manifest/npm-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/package-lock.json",
+      "line": 20
+    },
+    {
+      "fingerprint": "c3a5d4a83773a9ab0692b34cd0027bf9f3afcc1b884d6aed981533d4e4320376",
+      "rule_id": "manifest/npm-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/package-lock.json",
+      "line": 24
+    },
+    {
+      "fingerprint": "20cbde43173a83965c1735f14d20a628ecfbd0f4f73994c7acbffebc08fb61b4",
+      "rule_id": "manifest/pnpm-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/pnpm-lock.yaml",
+      "line": 20
+    },
+    {
+      "fingerprint": "af58b4800ebe00c793a09e551c96d698b821a4f2b212db04198c97b300033aa5",
+      "rule_id": "manifest/pnpm-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/pnpm-lock.yaml",
+      "line": 28
+    },
+    {
+      "fingerprint": "7c898c6abff01ba3135a2d3d74416b1343f0e37e09a0c7273016da83137a86c3",
+      "rule_id": "manifest/poetry-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/poetry.lock",
+      "line": 9
+    },
+    {
+      "fingerprint": "1db7a7b3bb948346f8a15dc8c6ccdab644bd43e37ed5a7efda9366c2daa06f7e",
+      "rule_id": "manifest/poetry-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/poetry.lock",
+      "line": 14
+    },
+    {
+      "fingerprint": "baa4bd053bf42645eb2f1d76d6627570b7a1832ee0ac35aea17ba87d706e7a08",
+      "rule_id": "manifest/poetry-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/poetry.lock",
+      "line": 19
     },
     {
       "fingerprint": "d5caef4ee4e083d7f52fecbfc420a0c8a6630aa8fcb6689ff8c453207cf1ad36",
@@ -8984,40 +9044,64 @@
       "line": 4457
     },
     {
-      "fingerprint": "f5e704ddf5ad266a8fe3950bbf2bd3e0c5a74033a9f00563d37f5897c9d18e24",
+      "fingerprint": "5d9c205c7ae26fd8d372cfdfca0251efea2f72bb207404a9b5803f197e711bb8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 4679
     },
     {
-      "fingerprint": "6560e0005b6cd8e9e5cd288d8a11b215a6a80172f15e1ae4ba16dc9ba4984df7",
+      "fingerprint": "8b02e4a712753953826b20b602f1f06d67dfe62bf2acfa488eb5c0c0285e8005",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4691
+      "line": 4698
     },
     {
-      "fingerprint": "27ef9ba0dee61c256d83731e0e3d84d6e079d9fd22d22e5e95f563d8065b2248",
+      "fingerprint": "6ac2f0e8077e4ab192ec24f05f1f34e23d61bde0b35bdfaa4c38073cfae88abd",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4701
+      "line": 4708
     },
     {
-      "fingerprint": "c386de7e21c2a9125dc4de6afdf3fee859625a2f4f886b6f293a9573bed75961",
+      "fingerprint": "4750f503a5a1d5c66382837418a5607f77e8d21de45c37aee2d6d443433058e7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4726
+      "line": 4733
     },
     {
-      "fingerprint": "663c3d8d14b6e0d87f4df627b4fc10209ac45103ee0eb9c3db70690fade0febe",
+      "fingerprint": "3645bfdae22bc0a34b18ec61326283da31833dc25fcd524ae88c8511aa450bf0",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4752
+      "line": 4766
     },
     {
-      "fingerprint": "023f787ccc437c281e2ab8361dd7c6e3642989ae457c437abe5d935685ae79c5",
+      "fingerprint": "0ea3581fb5ad282ee3ea74f92bb07c3163db9464e6fa382c4a19393ab35f6fd2",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4760
+      "line": 4774
+    },
+    {
+      "fingerprint": "f0d9a791b26c9f82facdafaa1db8af492235928d93f7ec8f5894fda0de8b1846",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4789
+    },
+    {
+      "fingerprint": "1771baeade6a82d3282f746d53dfb48453438df61adb9cd67e7fbe71a6672267",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4819
+    },
+    {
+      "fingerprint": "6ba85a4b2522d290b162a5ea1605e3d3c5283da6a549f87f45b6f3d2df67ef5e",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4844
+    },
+    {
+      "fingerprint": "2c3138271ccf0524788fb77b407e3efb26c9f235bf1d3b77bbfaf229aeec6236",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/integration.rs",
+      "line": 4869
     },
     {
       "fingerprint": "5b676a923612a17253cb4241ecfe1149d305cd1f3a17b037d532754e079ed18d",

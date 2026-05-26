@@ -632,6 +632,10 @@ impl RuleRegistry {
                 config::DockerfileInsecureTlsEnv,
                 manifest::CargoLockPqCrypto,
                 manifest::RequirementsTxtPqCrypto,
+                manifest::PoetryLockPqCrypto,
+                manifest::PipfileLockPqCrypto,
+                manifest::PnpmLockPqCrypto,
+                manifest::PackageLockPqCrypto,
             ]
         );
 
