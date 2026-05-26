@@ -71,6 +71,9 @@ repos:
 
 **Claude Code:** `claude --plugin-dir ./plugins/claude-code` -- see [docs](docs/claude-code-integration.md).
 
+**MCP server:** `foxguard-mcp` exposes scan, diff, secrets, PQC, SARIF/CBOM,
+rule, explanation, and suppression tools -- see [docs](docs/mcp-server.md).
+
 ## Quick start
 
 ```sh
