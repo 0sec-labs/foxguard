@@ -1298,6 +1298,28 @@ fn scan_files(
                 ));
             }
 
+            // C taint rules: same batched approach as Kotlin above.
+            // No cross-file analysis; each function is analyzed
+            // independently.
+            let enabled_c_taint_ids: std::collections::HashSet<&str> =
+                if matches!(language, Language::C) {
+                    analysis_plan
+                        .taint_specs
+                        .iter()
+                        .filter(|spec| matches!(spec.engine, TaintEngine::C))
+                        .map(|spec| spec.rule_id)
+                        .collect()
+                } else {
+                    std::collections::HashSet::new()
+                };
+            if !enabled_c_taint_ids.is_empty() {
+                file_findings.extend(crate::rules::c::run_c_taint_batched(
+                    source,
+                    tree,
+                    &enabled_c_taint_ids,
+                ));
+            }
+
             file_findings.extend(ast_rule_batch.run(source, tree, &ctx));
 
             for finding in &mut file_findings {
