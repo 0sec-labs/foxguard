@@ -618,7 +618,10 @@ fn pip_seed_map() -> HashMap<String, &'static SeedEntry> {
 
 /// Build a normalized seed map from NPM_PACKAGES.
 fn npm_seed_map() -> HashMap<String, &'static SeedEntry> {
-    NPM_PACKAGES.iter().map(|e| (e.name.to_string(), e)).collect()
+    NPM_PACKAGES
+        .iter()
+        .map(|e| (e.name.to_string(), e))
+        .collect()
 }
 
 // ─── Rule 3: poetry.lock (Python/Poetry) ───────────────────────────────────
@@ -1360,7 +1363,10 @@ version = \"2.31.0\"\n";
             .filter_map(|f| f.dep_name.as_deref())
             .collect();
         assert!(names.contains(&"cryptography"), "expected cryptography");
-        assert!(names.contains(&"paramiko"), "expected paramiko from develop");
+        assert!(
+            names.contains(&"paramiko"),
+            "expected paramiko from develop"
+        );
         assert!(!names.contains(&"flask"), "flask is not crypto");
         assert!(!names.contains(&"pytest"), "pytest is not crypto");
     }

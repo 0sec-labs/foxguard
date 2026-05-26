@@ -1854,10 +1854,7 @@ mod tests {
             "scan:\n  suppressions:\n    - rule_id: js/no-eval\n      path_pattern: \"*invalid[\"\n",
         );
         let err = load_for_scan(repo.path(), None).expect_err("expected regex parse error");
-        assert!(
-            err.contains("scan.suppressions"),
-            "unexpected error: {err}"
-        );
+        assert!(err.contains("scan.suppressions"), "unexpected error: {err}");
         assert!(
             err.contains("invalid path_pattern"),
             "unexpected error: {err}"
@@ -1936,10 +1933,7 @@ mod tests {
             .expect("failed to load config")
             .expect("expected config");
 
-        let findings = vec![finding_with_rule_and_file(
-            "js/no-eval",
-            "src/test_app.js",
-        )];
+        let findings = vec![finding_with_rule_and_file("js/no-eval", "src/test_app.js")];
 
         let filtered = suppress_with_patterns(findings, Some(&config));
         assert_eq!(filtered.len(), 1);
@@ -1966,18 +1960,12 @@ mod tests {
         assert_eq!(filtered.len(), 1, "path mismatch should not suppress");
 
         // Path matches but rule doesn't
-        let findings_wrong_rule = vec![finding_with_rule_and_file(
-            "py/no-eval",
-            "src/test_app.py",
-        )];
+        let findings_wrong_rule = vec![finding_with_rule_and_file("py/no-eval", "src/test_app.py")];
         let filtered = suppress_with_patterns(findings_wrong_rule, Some(&config));
         assert_eq!(filtered.len(), 1, "rule mismatch should not suppress");
 
         // Both match
-        let findings_match = vec![finding_with_rule_and_file(
-            "js/no-eval",
-            "src/test_app.js",
-        )];
+        let findings_match = vec![finding_with_rule_and_file("js/no-eval", "src/test_app.js")];
         let filtered = suppress_with_patterns(findings_match, Some(&config));
         assert_eq!(filtered.len(), 0, "both match should suppress");
     }

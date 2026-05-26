@@ -325,9 +325,7 @@ fn analyze_scope(
     spec: &TaintSpec,
     out: &mut Vec<TaintFinding>,
 ) {
-    let body = scope_node
-        .child_by_field_name("body")
-        .unwrap_or(scope_node);
+    let body = scope_node.child_by_field_name("body").unwrap_or(scope_node);
 
     // Collect sources from the body (call expressions that are sources)
     // and from the function's parameter list (argv).
@@ -634,9 +632,10 @@ fn build_tainted_set(
                             if let Some(dest_name) = arg_names.first() {
                                 if !dest_name.is_empty() && !tainted.contains(dest_name) {
                                     // Check if any argument after the destination is tainted.
-                                    let non_dest_tainted = arg_names.iter().skip(1).any(|name| {
-                                        !name.is_empty() && tainted.contains(name)
-                                    });
+                                    let non_dest_tainted = arg_names
+                                        .iter()
+                                        .skip(1)
+                                        .any(|name| !name.is_empty() && tainted.contains(name));
                                     if non_dest_tainted {
                                         tainted.insert(dest_name.clone());
                                     }
@@ -908,10 +907,7 @@ fn find_innermost_identifier<'a>(node: Node<'_>, src: &'a str) -> Option<&'a str
 
 /// Extract `(var_name, init_expression_node)` from a `declaration` node.
 /// Handles `type *var = expr;` patterns.
-fn extract_declarator_init<'a>(
-    decl: Node<'a>,
-    src: &'a str,
-) -> Option<(String, Node<'a>)> {
+fn extract_declarator_init<'a>(decl: Node<'a>, src: &'a str) -> Option<(String, Node<'a>)> {
     let mut cursor = decl.walk();
     for child in decl.children(&mut cursor) {
         if child.kind() == "init_declarator" {

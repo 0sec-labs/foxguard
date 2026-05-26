@@ -4904,7 +4904,10 @@ mod config_files {
 
         assert!(dep_names.contains(&"cryptography"), "expected cryptography");
         assert!(dep_names.contains(&"python-rsa"), "expected python-rsa");
-        assert!(dep_names.contains(&"paramiko"), "expected paramiko from develop");
+        assert!(
+            dep_names.contains(&"paramiko"),
+            "expected paramiko from develop"
+        );
         assert!(!dep_names.contains(&"flask"), "flask is not a crypto lib");
 
         assert!(findings
@@ -4941,12 +4944,7 @@ mod config_files {
     #[ignore = "PQC dep scanning differs on CI — investigate separately"]
     fn package_lock_pq_finds_crypto_deps() {
         let output = foxguard_cmd_isolated()
-            .args([
-                "pqc",
-                "tests/fixtures/deps/package-lock.json",
-                "-f",
-                "json",
-            ])
+            .args(["pqc", "tests/fixtures/deps/package-lock.json", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
 

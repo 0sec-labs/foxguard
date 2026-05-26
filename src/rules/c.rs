@@ -63,7 +63,9 @@ fn c_taint_meta(rule_id: &str) -> Option<CTaintRuleMeta<'static>> {
             rule_id: "c/taint-format-string",
             severity: Severity::Critical,
             cwe: Some("CWE-134"),
-            fix_suggestion: Some("Use a literal format string: printf(\"%s\", input) instead of printf(input)"),
+            fix_suggestion: Some(
+                "Use a literal format string: printf(\"%s\", input) instead of printf(input)",
+            ),
             format_description: c_taint_format_string_desc,
         }),
         "c/taint-command-injection" => Some(CTaintRuleMeta {
