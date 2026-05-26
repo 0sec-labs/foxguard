@@ -3,6 +3,7 @@ use crate::rules::common::{
     set_hardcoded_secret_min_entropy_override, set_hardcoded_secret_min_length_override,
 };
 use crate::{Finding, Severity};
+use regex::Regex;
 use serde::Deserialize;
 use serde_yaml_ng::{Mapping, Sequence, Value};
 use std::collections::HashMap;
@@ -57,6 +58,12 @@ pub struct ScanConfig {
     /// output. Mirrors the `--cnsa2` CLI flag. See issue #241 and
     /// [`crate::compliance`].
     pub cnsa2: bool,
+    /// Pattern-based suppression rules. Each entry matches findings by
+    /// `rule_id` (exact match) and `path_pattern` (regex matched against
+    /// the finding's file path). When both conditions match, the finding
+    /// is suppressed. Useful for silencing known false positives in test
+    /// or fixture directories without a per-file ignore entry.
+    pub suppressions: Vec<SuppressionPattern>,
 }
 
 /// Tunable thresholds for pattern/heuristic rules.
@@ -108,6 +115,15 @@ pub struct ScanIgnoreRule {
     pub rules: Vec<String>,
 }
 
+/// A pattern-based suppression rule parsed from the `scan.suppressions`
+/// config section. Matches findings whose `rule_id` equals `rule_id` and
+/// whose file path matches `path_pattern` (a regular expression).
+#[derive(Debug, Clone)]
+pub struct SuppressionPattern {
+    pub rule_id: String,
+    pub path_pattern: Regex,
+}
+
 #[derive(Debug, Deserialize, Default)]
 struct RawFoxguardConfig {
     #[serde(default)]
@@ -145,6 +161,8 @@ struct RawScanConfig {
     rule_options: HashMap<String, serde_yaml_ng::Value>,
     #[serde(default)]
     cnsa2: Option<bool>,
+    #[serde(default)]
+    suppressions: Vec<RawSuppressionPattern>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -171,6 +189,12 @@ struct RawScanIgnoreRule {
     path: String,
     #[serde(default)]
     rules: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSuppressionPattern {
+    rule_id: String,
+    path_pattern: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -340,6 +364,24 @@ impl FoxguardConfig {
             },
         };
 
+        let suppressions = raw
+            .scan
+            .suppressions
+            .into_iter()
+            .map(|entry| {
+                let pattern = Regex::new(&entry.path_pattern).map_err(|e| {
+                    format!(
+                        "scan.suppressions: invalid path_pattern '{}': {}",
+                        entry.path_pattern, e
+                    )
+                })?;
+                Ok(SuppressionPattern {
+                    rule_id: entry.rule_id,
+                    path_pattern: pattern,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
         Ok(Self {
             project_root: allowed_root.to_path_buf(),
             scan: ScanConfig {
@@ -355,6 +397,7 @@ impl FoxguardConfig {
                 min_confidence: raw.scan.min_confidence,
                 rule_options: raw.scan.rule_options,
                 cnsa2: raw.scan.cnsa2.unwrap_or(false),
+                suppressions,
             },
             secrets: SecretsConfig {
                 baseline: secrets_baseline,
@@ -438,6 +481,32 @@ pub fn suppress_with_scan_ignores(
                         .rules
                         .iter()
                         .any(|rule_id| rule_id == &finding.rule_id)
+            })
+        })
+        .collect()
+}
+
+/// Suppress findings that match any pattern-based suppression rule from
+/// `scan.suppressions` in the config. A finding is suppressed when its
+/// `rule_id` matches the suppression's `rule_id` exactly and its file
+/// path matches the suppression's `path_pattern` regex.
+pub fn suppress_with_patterns(
+    findings: Vec<Finding>,
+    config: Option<&FoxguardConfig>,
+) -> Vec<Finding> {
+    let Some(config) = config else {
+        return findings;
+    };
+    if config.scan.suppressions.is_empty() {
+        return findings;
+    }
+
+    findings
+        .into_iter()
+        .filter(|finding| {
+            !config.scan.suppressions.iter().any(|suppression| {
+                suppression.rule_id == finding.rule_id
+                    && suppression.path_pattern.is_match(&finding.file)
             })
         })
         .collect()
@@ -1732,5 +1801,211 @@ mod tests {
             .expect("failed to load config")
             .expect("expected config");
         assert!(loaded.scan.rule_options.is_empty());
+    }
+
+    // ── scan.suppressions (pattern-based suppression) ───────────────────
+
+    #[test]
+    fn suppressions_parse_rule_id_and_path_pattern() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  suppressions:\n    - rule_id: js/no-eval\n      path_pattern: \".*test.*\"\n    - rule_id: py/no-hardcoded-secret\n      path_pattern: \".*fixtures.*\"\n",
+        );
+
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        assert_eq!(loaded.scan.suppressions.len(), 2);
+        assert_eq!(loaded.scan.suppressions[0].rule_id, "js/no-eval");
+        assert!(loaded.scan.suppressions[0]
+            .path_pattern
+            .is_match("src/test_app.js"));
+        assert!(!loaded.scan.suppressions[0]
+            .path_pattern
+            .is_match("src/app.js"));
+        assert_eq!(
+            loaded.scan.suppressions[1].rule_id,
+            "py/no-hardcoded-secret"
+        );
+        assert!(loaded.scan.suppressions[1]
+            .path_pattern
+            .is_match("tests/fixtures/secret.py"));
+    }
+
+    #[test]
+    fn suppressions_defaults_to_empty() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(repo.path(), ".foxguard.yml", "scan:\n  severity: high\n");
+        let loaded = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+        assert!(loaded.scan.suppressions.is_empty());
+    }
+
+    #[test]
+    fn suppressions_reject_invalid_regex() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  suppressions:\n    - rule_id: js/no-eval\n      path_pattern: \"*invalid[\"\n",
+        );
+        let err = load_for_scan(repo.path(), None).expect_err("expected regex parse error");
+        assert!(
+            err.contains("scan.suppressions"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains("invalid path_pattern"),
+            "unexpected error: {err}"
+        );
+    }
+
+    fn finding_with_rule_and_file(rule_id: &str, file: &str) -> Finding {
+        Finding {
+            rule_id: rule_id.to_string(),
+            severity: Severity::High,
+            cwe: None,
+            description: "test".to_string(),
+            file: file.to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 1,
+            snippet: "x".to_string(),
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+            confidence: crate::default_confidence(),
+            taint_hops: None,
+            tags: vec![],
+            crypto_algorithm: None,
+            cnsa2_deadline: None,
+            dep_name: None,
+        }
+    }
+
+    #[test]
+    fn suppress_with_patterns_filters_matching_findings() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  suppressions:\n    - rule_id: js/no-eval\n      path_pattern: \".*test.*\"\n",
+        );
+        let config = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        let findings = vec![
+            finding_with_rule_and_file("js/no-eval", "src/test_app.js"),
+            finding_with_rule_and_file("js/no-eval", "src/app.js"),
+            finding_with_rule_and_file("py/no-eval", "src/test_app.py"),
+        ];
+
+        let filtered = suppress_with_patterns(findings, Some(&config));
+
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].file, "src/app.js");
+        assert_eq!(filtered[1].file, "src/test_app.py");
+    }
+
+    #[test]
+    fn suppress_with_patterns_no_config_returns_all() {
+        let findings = vec![
+            finding_with_rule_and_file("js/no-eval", "src/test_app.js"),
+            finding_with_rule_and_file("js/no-eval", "src/app.js"),
+        ];
+
+        let filtered = suppress_with_patterns(findings, None);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn suppress_with_patterns_empty_suppressions_returns_all() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(repo.path(), ".foxguard.yml", "scan:\n  severity: high\n");
+        let config = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        let findings = vec![finding_with_rule_and_file(
+            "js/no-eval",
+            "src/test_app.js",
+        )];
+
+        let filtered = suppress_with_patterns(findings, Some(&config));
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn suppress_with_patterns_requires_both_rule_id_and_path_match() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  suppressions:\n    - rule_id: js/no-eval\n      path_pattern: \".*test.*\"\n",
+        );
+        let config = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        // Rule matches but path doesn't
+        let findings_wrong_path = vec![finding_with_rule_and_file(
+            "js/no-eval",
+            "src/production.js",
+        )];
+        let filtered = suppress_with_patterns(findings_wrong_path, Some(&config));
+        assert_eq!(filtered.len(), 1, "path mismatch should not suppress");
+
+        // Path matches but rule doesn't
+        let findings_wrong_rule = vec![finding_with_rule_and_file(
+            "py/no-eval",
+            "src/test_app.py",
+        )];
+        let filtered = suppress_with_patterns(findings_wrong_rule, Some(&config));
+        assert_eq!(filtered.len(), 1, "rule mismatch should not suppress");
+
+        // Both match
+        let findings_match = vec![finding_with_rule_and_file(
+            "js/no-eval",
+            "src/test_app.js",
+        )];
+        let filtered = suppress_with_patterns(findings_match, Some(&config));
+        assert_eq!(filtered.len(), 0, "both match should suppress");
+    }
+
+    #[test]
+    fn suppress_with_patterns_multiple_rules() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  suppressions:\n    - rule_id: js/no-eval\n      path_pattern: \".*test.*\"\n    - rule_id: py/no-hardcoded-secret\n      path_pattern: \".*fixtures.*\"\n",
+        );
+        let config = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        let findings = vec![
+            finding_with_rule_and_file("js/no-eval", "src/test_app.js"),
+            finding_with_rule_and_file("py/no-hardcoded-secret", "tests/fixtures/creds.py"),
+            finding_with_rule_and_file("py/no-hardcoded-secret", "src/app.py"),
+            finding_with_rule_and_file("js/no-eval", "src/main.js"),
+        ];
+
+        let filtered = suppress_with_patterns(findings, Some(&config));
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].rule_id, "py/no-hardcoded-secret");
+        assert_eq!(filtered[0].file, "src/app.py");
+        assert_eq!(filtered[1].rule_id, "js/no-eval");
+        assert_eq!(filtered[1].file, "src/main.js");
     }
 }
