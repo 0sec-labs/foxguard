@@ -249,7 +249,11 @@ const dockerfileRules: Rule[] = [
 
 const manifestRules: Rule[] = [
   { id: 'manifest/cargo-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm (dev-dependencies not distinguished)', severity: 'high' },
+  { id: 'manifest/npm-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm', severity: 'high' },
   { id: 'manifest/pip-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm', severity: 'high' },
+  { id: 'manifest/pipfile-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm', severity: 'high' },
+  { id: 'manifest/pnpm-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm', severity: 'high' },
+  { id: 'manifest/poetry-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm', severity: 'high' },
 ];
 
 export const ruleGroups: RuleGroup[] = [
