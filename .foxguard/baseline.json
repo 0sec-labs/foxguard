@@ -134,88 +134,88 @@
       "line": 248
     },
     {
-      "fingerprint": "1bcb211e9f8627cbc5aff8f58057783653a33a364f5b4c5a44f13beeed4b3efd",
+      "fingerprint": "6027c0c8b2aae25f8d9921f6404aaef53b901b1a221bb464c7b5ca3f22fab178",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
-      "line": 295
+      "line": 296
     },
     {
-      "fingerprint": "826cacd22c6e8c3f6f18a53e45b9e1806a73a1ea3a84dec990ccd74652ff0d01",
+      "fingerprint": "3f4a17fa5775b8188beba3d7e41e5d004b964d4ae9cfd42e26f5c1a366586810",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
-      "line": 300
+      "line": 301
     },
     {
-      "fingerprint": "d91a669c0868456b6adebd5c50a6af3350db5c04708c7439bf20548a31c86491",
-      "rule_id": "rs/no-path-traversal",
-      "file": "src/app.rs",
-      "line": 333
-    },
-    {
-      "fingerprint": "4e62817f3242080ad6c309a486a3ff2d73cf2b342d7f6c8441d2abb0fa401620",
+      "fingerprint": "0adc60cdf752e93d2d46f6e862085f33809116e6cca297399e96d19cc2c2766c",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
       "line": 334
     },
     {
-      "fingerprint": "3c6fde26b50a94bd23807c61d20e1a6e778bd3c91059d47cec40cef650e91f48",
+      "fingerprint": "c6bab131e041439df7fb56ddff877f42d6ced722eb17a6d4e277bb3ff0fc8142",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
-      "line": 337
+      "line": 335
     },
     {
-      "fingerprint": "93cc4bd12e64915eb4216761bfdfb7a53992fb75ba9280893bb5e001318390bc",
+      "fingerprint": "e6be1aefa1063429537562e5bd872b8c6d6ef0552e5780facb7d98c52ded1d54",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
-      "line": 368
+      "line": 338
     },
     {
-      "fingerprint": "326d3d2ffc0ff94b405373704246239a79cd267e4ed7679fac1e3e66fbb1301f",
+      "fingerprint": "5e2f2e82bee68ef3d33ce740188ed771ae156b4a81266efdaa0cafcb05888078",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
-      "line": 373
+      "line": 369
     },
     {
-      "fingerprint": "84682f2463f62374a525e0a241c704b83841295f35eb96e0b7059e34b0115b71",
+      "fingerprint": "fbc7e1b8fa2cf2239464308851d2e9a521b6c936b1a7fa4e9d81b8641b4a92a1",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
-      "line": 389
+      "line": 374
     },
     {
-      "fingerprint": "0865b2560a169b1d8109a294b6cf8ab2906d806a14e7a854ccc574c0807aeb57",
+      "fingerprint": "4346ba84573e863087189b219384d6970814f760e91688696d2cb1200a77013d",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
       "line": 390
     },
     {
-      "fingerprint": "bc5729f8d76734eb5093bd577979426fb57b38f6c5e736513921eefd61ba830d",
+      "fingerprint": "617562760f9348d6079885ef6bc9e06f1656db22768b32c27f7356fb61c4f5de",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
-      "line": 407
+      "line": 391
     },
     {
-      "fingerprint": "154c3fa3df5cb426ea371eae3e6733593abb7b3afe01332324e2a3167fd95d30",
+      "fingerprint": "6f2e2ce115c5437853b23b9f7f14559bd73e167aacc281cd91a1f92574153205",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
-      "line": 691
+      "line": 408
     },
     {
-      "fingerprint": "8178baf5d3bec2dc00475880cd568eb72f505c08857b94a65f591bef109acaec",
+      "fingerprint": "2f3fc2b954f3fa3f37d22ff8dc30b530b0f0171185d9f7bf6a14f6be2faffa07",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
-      "line": 701
+      "line": 693
     },
     {
-      "fingerprint": "a990b0b89b4b2dd072b881504971b2ad0ed1dc9a62f2c461acadbf6e11349685",
+      "fingerprint": "424685ca08be6f467545b6803dde4971c7a4307632777f4ec9ea60c09b73c578",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
-      "line": 709
+      "line": 703
     },
     {
-      "fingerprint": "1c8c4058b228248c5bd9c361e98e55ecb004beb6e3a4ad03c785b4c268ea8cf0",
+      "fingerprint": "cab7928c75cc7f2cfdeb2762f782bbae18f6899c66ff3b1c2ed68fd87580cec9",
       "rule_id": "rs/no-path-traversal",
       "file": "src/app.rs",
-      "line": 733
+      "line": 711
+    },
+    {
+      "fingerprint": "262760871370c2bc80740e2745f7f2e00c41cb1d14b118561fa2999522b8fdac",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 735
     },
     {
       "fingerprint": "c33c57a6c6523f2d018640ce91f227a0f17a59eb58e1a21769c6ffc48dc647f3",
@@ -266,178 +266,100 @@
       "line": 168
     },
     {
-      "fingerprint": "8ce7fa76bb415096bbfa250df9152ab53b73f8fb653935ec34f6f23f3e611c35",
+      "fingerprint": "a2ef4d650f371d6e77af042e88c41b02ec74bbf2b6cc7dbaf8156655ee289178",
       "rule_id": "rs/no-path-traversal",
       "file": "src/config.rs",
-      "line": 463
+      "line": 532
     },
     {
-      "fingerprint": "607437d2a6019c93199ff8be05ab4d798fd0fb690617f155d6c9ac810285744a",
+      "fingerprint": "994ce59c29575d91aff41e5b4b41f1b0d64b51c5859b983b0bdb3d97f5a675dc",
       "rule_id": "rs/no-path-traversal",
       "file": "src/config.rs",
-      "line": 911
+      "line": 980
     },
     {
-      "fingerprint": "63a1ce966db18def675e0e65ff62df7cba4429f74d2974f1c5d2e0d77468e317",
+      "fingerprint": "890b1d527452391b062684ce58b0493a5f1595ad9e9b68b28821e4c00bd9453d",
       "rule_id": "rs/no-path-traversal",
       "file": "src/config.rs",
-      "line": 948
+      "line": 1017
     },
     {
-      "fingerprint": "b48878646916b0242ba69d8cbdf7f211433103b7e515bf1b03dc43867ee8b349",
+      "fingerprint": "b584d1d53f1ce52a831f42e3093941221f0b7b37b258ebcce4f1692bf94293f8",
       "rule_id": "rs/no-path-traversal",
       "file": "src/config.rs",
-      "line": 949
+      "line": 1018
     },
     {
-      "fingerprint": "b93858d96b52df3dcafc3dfafcbb5e5f071a8a6eef904e4eea7e64d3de31715a",
+      "fingerprint": "17a077df5d52cfed94860c82c5dfd032686eb85304e84c4aeb2a0e8b6bf34319",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 990
+      "line": 1059
     },
     {
-      "fingerprint": "fd47a56ee3466518b60b7b1b89d435dbc9a540f9426067c82b1f49f51ad9447d",
+      "fingerprint": "748d88cfbfd0da818945e5c6db6ca67433ac01a48b83fdcc80b0945750934c57",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 992
+      "line": 1061
     },
     {
-      "fingerprint": "f49f6feb7cda4facc619e140443fc503856e15a332f21d8e0bc6fb9daf7a19e5",
+      "fingerprint": "3a750f48812e8d739222aa2460a87ddeadc58d5fb3de9a0e7d6d5d23e2d5d6ef",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1026
+      "line": 1095
     },
     {
-      "fingerprint": "5055edc5b91bfc4f956548765be231eea4ebd2e5251739b2464fe578bd6b6ef4",
+      "fingerprint": "25a88bd145809270f6c4db88ef94660030192460b44be5a6301d3fcda6798b85",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1044
+      "line": 1113
     },
     {
-      "fingerprint": "43b9ba07118a750d7d9af90beb9200430955c28d5843b565b080690669b0eae5",
+      "fingerprint": "7912d97cda52492d91124fc8c1352f5ee6272b766c3b1e24113b75f910de3f8d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1045
+      "line": 1114
     },
     {
-      "fingerprint": "dc91dbd64c9eb3d63f93df9fcf059705cc6c44de8c679b9cad25c8e1f2b67aaf",
+      "fingerprint": "678ce6ad38410697e23bfde778c81a0b035aba99693a84a3c25cd833cd8cbd89",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1047
+      "line": 1116
     },
     {
-      "fingerprint": "a7bf73de58d3d0be79adbe536c0e5faac7fd9eebc2015822bb3e21a226de1229",
+      "fingerprint": "64cacbc31ebfdce4fe769eb22d4854e8ef9001cc4bc47877a99cf4f56e81731d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1063
+      "line": 1132
     },
     {
-      "fingerprint": "307d36df056ff52e69995a6f183054d49a66a31ed450fdc723b364d97aa1eebb",
+      "fingerprint": "5e246dea058bfc6eabb47488acc0edd9215ad7692380b02144a7e10214ff5c97",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1064
+      "line": 1133
     },
     {
-      "fingerprint": "adf653afc8459726fe56c6b8f8541811513d2ba6530760cc009bcb675d299ede",
+      "fingerprint": "7b6437f14a5fc323c0f06856f37ab39488322273e680f736329ebdc767412f07",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1066
+      "line": 1135
     },
     {
-      "fingerprint": "bfbe30698194f129c5a4e9f52a516378e647bc4c539ccbe761cc4ff662d565cf",
+      "fingerprint": "1b9dd9055339c374ff8705967ca1d1f59d80e403eb98c1ca3b5b93604e805f57",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1067
+      "line": 1136
     },
     {
-      "fingerprint": "ef35e6c35a595b4c7cdbd3d9729b1e3a08fa1a53ae85d5e24f6d3307b4b3f94d",
+      "fingerprint": "1858716400bc4721f54583d7b6648bf05e5007b2680ebb64bab0cf445156e8d8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1083
+      "line": 1152
     },
     {
-      "fingerprint": "c95749c723f3592d25589fb27563a2bd68679e6351709463616cfcc84c7559c2",
+      "fingerprint": "60f3ed434c94506cd72e490c96f25fd7dbfe8e5c0301b0c3c285dd07d6e3744c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1084
-    },
-    {
-      "fingerprint": "7c27affdfbe58e874d0bed7f649f29aacf21dc6666f5223280e3e3d6abf70f07",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1091
-    },
-    {
-      "fingerprint": "0cba121c8d607cab1794089596a9b3326bce0081a06a967d315f005ff9176a1c",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1091
-    },
-    {
-      "fingerprint": "6877d25e2affae626ae1b2a0de6fa9f543b3c11298762e768f4a5bd1d1a372ea",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1091
-    },
-    {
-      "fingerprint": "3ff5eee58a7aaa0a06703d8bdbf84a835e6194b97af1e55fa4b07115ab7331d3",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1105
-    },
-    {
-      "fingerprint": "c67d8c05d943e1df1244473bede71aaf205054fefd7a204dbd644781640102be",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1112
-    },
-    {
-      "fingerprint": "a01d83f4d4f62b4f64c3cfc51d753aa2d3d5b7d7907c527a66250eedb872ed7f",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1112
-    },
-    {
-      "fingerprint": "9d410e04a7f1f97e2fe793871f5886a52804a8925867f4d8f8bc89d1685b6d7e",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1125
-    },
-    {
-      "fingerprint": "d0fa53920ff9e083c9b32b5abe6624e4c75fb074a4dbb54a915be6e1bee6dfea",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1128
-    },
-    {
-      "fingerprint": "8aeb208817ba40e7096d6b4978a8a8c939996fe72ef81a823e81177834bd94da",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1128
-    },
-    {
-      "fingerprint": "1fefc0f486bd789e04093f5ba985d53928077ae9433c8b313a47d15a7abeef3f",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1141
-    },
-    {
-      "fingerprint": "daea31e9e36bbc2821ebc313511347cf6f6ed6e874d02102c45a6ed59939bd7f",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1148
-    },
-    {
-      "fingerprint": "791779a91f68540918d073d27f6ba346d9069bcb949dcace6f30a41bad7fcb24",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1148
-    },
-    {
-      "fingerprint": "97f67d43d00a493b2c618c10c2c77d2a5b914d85bdf64e8cf4899986ebbe5c78",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1157
+      "line": 1153
     },
     {
       "fingerprint": "0280c3f1be6164aa8643abef86cd5eb6c417520698c9765dbd04c600d65f94c5",
@@ -452,34 +374,34 @@
       "line": 1160
     },
     {
-      "fingerprint": "5f5336172166cbd7d281d0aa16737eb835a9e0293ce8e29a9795dcf0f3c9f2aa",
+      "fingerprint": "0b74e5dde591e930e90cb81ff6d5eddccff540f743ac04348f990bbb89e5d2d7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1169
+      "line": 1160
     },
     {
-      "fingerprint": "5218756965717df52ec3f33d070611afd4b9cc306f8335641e47e3e92b49fba2",
+      "fingerprint": "ec91af82a48cf5b4222c2f8e0fe3a8f834e3f6556afd2e28a5869f7fd496c7dd",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1176
+      "line": 1174
     },
     {
-      "fingerprint": "3564f7fb1ff4f36872cc09703ede9ac3b63ecdd6d84351790af3671e7d091a45",
+      "fingerprint": "a277d8deb7f072e1d764eb27ff74fc3714506b5c0c40b8b5ce7ae4c51cc17b9c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1176
+      "line": 1181
     },
     {
-      "fingerprint": "0c192be785b5f2d90b7e6ddc89e6b3138fd157822de8031c93ef1d0e87d5f378",
+      "fingerprint": "90a20b3a163acfabc63444aca645d6638206a44b15a2cbadafef5c4d7bd7a3e5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1189
+      "line": 1181
     },
     {
-      "fingerprint": "26bada325f3d091e1a0fc047029c0c0d8029f2e74f86824115ece4b483c477c5",
+      "fingerprint": "1af01ea2e98a90e27f608a55d6fd71d2f221d4bb8da08555fd02a9e83ce31202",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1193
+      "line": 1194
     },
     {
       "fingerprint": "07d8c055ab50e8d424f4e102a0ad97f55a2ae3904f427307f68b29806385b6b8",
@@ -494,370 +416,382 @@
       "line": 1197
     },
     {
-      "fingerprint": "10f07c6557045bedb8db295945aceab872138c2e10ec6feac18ef579f16a8e13",
+      "fingerprint": "a9cbf0c915ead5bfe32f88b72fc2a731345d3d6e40a33ed26f34f599b48c9ba7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1207
+      "line": 1210
     },
     {
-      "fingerprint": "22adc5a762e53dae32a75c32b522a9ab6e5d33cf6b8b616bfa933405286f114b",
+      "fingerprint": "2443703fec15a5a92c3c9e72a5b1b5c62641a4fbbd3600aaa61fa7aad85ce969",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1213
+      "line": 1217
     },
     {
-      "fingerprint": "7a36a8dcc69c13c7c797366ad7b4a7a63e8a2f11a9ccc33a7e918857830c552a",
+      "fingerprint": "70ded4e45068bb985071fb803f600376c85e3b1fdfa3033c61502f9eb6e0b7e4",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1217
+    },
+    {
+      "fingerprint": "4fe9fc0ff680c1e9bdc9eafcafbd45490acf6f25eca12f9bd47b51c856c545c5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
       "line": 1226
     },
     {
-      "fingerprint": "9f4f973f87e87e8d1bf81db788886019bd9927286d97cd61665859afed339382",
+      "fingerprint": "68e083e712000e5b3e999957ed248ae77fb57d76c754b0e8fd7f61b28bfce558",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1230
+      "line": 1229
     },
     {
-      "fingerprint": "1f946c2a2c3102b99b398476c1402300247f4503447507155bd023741c40cb38",
+      "fingerprint": "f282fb001cd4fd2b85067ceeefb0d7e19d7fad6f41bc2d54cc4e582635cb0c03",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1231
+      "line": 1229
     },
     {
-      "fingerprint": "8c4a6e5c22cc558430fe045a7540df922459bc2abe6167fe7a11c337593e0973",
+      "fingerprint": "6890903ce483c08608728440e36e42d56d9c753cc4a5fe6da1da5b281959ca72",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1232
+      "line": 1238
     },
     {
-      "fingerprint": "804b04a8b2b8f89c4b5fbd7925d4cd48cc82710360747033c0fd7fe33d47bc39",
+      "fingerprint": "b2633fc58d3491219c2f74a8132990e9f4abeacf583c247a82a872f1ae965cf7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1242
+      "line": 1245
     },
     {
-      "fingerprint": "a6884cc9901a6992c08f1b23e5e63f12a58a6c14a658917676c30870b6499ee8",
+      "fingerprint": "ece5a30c678cc921815c8affaaa9e8772a1597ce572d21c07b8bedae7fa80cee",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1256
+      "line": 1245
     },
     {
-      "fingerprint": "1784243ef62e7ed39271c8d9fe7829297a48435191f370fd470c1c2ec2bc538d",
+      "fingerprint": "3f4e6a414ae788042eae9f5dd32645c6e646c54d3b8d58f7f3c164341cf6f937",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1259
+      "line": 1258
     },
     {
-      "fingerprint": "5a65a208948f57bc40635083cabb0bb59016c1eed2b1f272e172adce05edb3bb",
+      "fingerprint": "aa9e1f1ed8738ada59f0de616e90b3f0615ca718818a9c0b80ed51a6d8e80d41",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1264
+      "line": 1262
     },
     {
-      "fingerprint": "0a840e634668998e296112cc732a88851dff71daa2d53dcb2fe96064a72f9cee",
+      "fingerprint": "d33d05e47c399f99b48abb4969dd493265fa0974cd5a0179d868149ac2f7582e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1264
+      "line": 1266
     },
     {
-      "fingerprint": "3d53e6c63210ae736e3b279fd66845e02e99b08f5dc2f7cb489b185acca6bfd2",
+      "fingerprint": "8d31da07dff4c67fb54e9db558d4eee29533baffae6d2bec735130851f35fd69",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1269
+      "line": 1266
     },
     {
-      "fingerprint": "9f9d0601084633052af8b80132f6d83a7907ba72d4f88396f61db9d341ae019d",
+      "fingerprint": "3b35304ad6c1014c79d0eaea150354f93314fe44b1dac92d9de9aa61041ebd75",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1304
+      "line": 1276
     },
     {
-      "fingerprint": "cd57cb409cb5240afc2f5058c64b19d7c07855fb8d6c16f0433da289ef25e9cf",
+      "fingerprint": "65aae766ed54acca1d53ef65a60c5e157015bc33e43cf3e03eb4c5c6ef765c7e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1310
+      "line": 1282
     },
     {
-      "fingerprint": "e9e8f4a51e895a21f0103ecbe91f3d14473446eb7d6a8e3e798bf7444e848a71",
+      "fingerprint": "af31c496fd1f42b7056c6a6f9a56860e691252bcb48ab647dc7002970beb6e09",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1310
+      "line": 1295
     },
     {
-      "fingerprint": "610291531d0b33ccfc48f222587469ef56d607ce652090eaeaec980181985145",
+      "fingerprint": "2afb82c38472f4bfd78e43284ae7e6ad19788aba362ff4a1b968b45da57d1d11",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1336
+      "line": 1299
     },
     {
-      "fingerprint": "460f627ad6352d2b02a706c7efcac1b5d8c72ee74dc6c5d825bf513e875651c1",
+      "fingerprint": "4d884f8fa07ca63bd8ae15294847ed5d22d2bd34b9a8f1b30af2fbeb00400374",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1342
+      "line": 1300
     },
     {
-      "fingerprint": "a0a921f5016adc3ae7c6cb44fb0c32f16cb5c348f8fbb4564e74b4cca88dee83",
+      "fingerprint": "f145d91c59edabf7f36d548bd9578ca0b461aaa5e48d457c11ffdbfa3a6caea9",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1342
+      "line": 1301
     },
     {
-      "fingerprint": "c91f154395f4e671e26503013fe07c1aa96699da4e53da6e9b5684bbfe470219",
+      "fingerprint": "e8cc2a7926cba177fc12ddab492182a79dcaee06e2c6567c9f596e7d19eec047",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1365
+      "line": 1311
     },
     {
-      "fingerprint": "eb7fcbc0dfc7a09942f4525f30ce4786f1641aa33647db203ab7fe05c62faf13",
+      "fingerprint": "822fd996596f73517a315b2ee001446e495e983f09e8f6ac5843e14e657ae03d",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1371
+      "line": 1325
     },
     {
-      "fingerprint": "6738aecfb9950f1d1fca85acd4421f7c231da333186a57073f893bbb6e363405",
+      "fingerprint": "2816aa3e42b4b109b5038e3cd6c1b2845c521b7b98c3e43aa442213e23f6f8aa",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1371
+      "line": 1328
     },
     {
-      "fingerprint": "d68695a02db29ba19c16330ef9d25c2a14f60acb4467361e5440c25f2ed8c1f6",
+      "fingerprint": "1c1a993d1e05fc5a781d3afe0adbea5c1edf2eddfb8eda6b4be792405dbe1246",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1391
+      "line": 1333
     },
     {
-      "fingerprint": "814e755b6589024e056b6de176c2d57d929cf13ab73ee828872c404c67f4b9e3",
+      "fingerprint": "00c989c15088aba9534b582dfa950e514b4b1cbee508e047061b5b67b211626c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1397
+      "line": 1333
     },
     {
-      "fingerprint": "2cb29a69ca070490670b7fb63ee514c22f423750abcd4c04802c3285653f90e8",
+      "fingerprint": "372643ad8e8ba1a31e1e00d40f6e91f4ff9172176c7e7240705c880ac84bbf63",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1397
+      "line": 1338
     },
     {
-      "fingerprint": "97a10a7e11511e06ff4fd55c68016c6c5792b58b83883aa381d1d9916e8e8df2",
+      "fingerprint": "0204fc29e15222a8c3f373cf04f8032187f0793ae1cb864b1c3a2fe0f5da9fdf",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1422
+      "line": 1373
     },
     {
-      "fingerprint": "f49617f994553bb1619941ed57a6d3751514d181a5c5dc89352e8cb19226bcd4",
+      "fingerprint": "6fa94fc77a27b0a6212c5b04fff9774228736c59bc789a5f2935981f319e11c8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1437
+      "line": 1379
     },
     {
-      "fingerprint": "68c84ba3099a011aafbf8e1be2fd32a31150b9a92f17442acee58e84364e57b2",
+      "fingerprint": "7bc5142763aa75e3373ac99d654af5ea167d07fcf591eb37afa57ce8c2ff3cfb",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1439
+      "line": 1379
     },
     {
-      "fingerprint": "a4ca01bce4e66b5f35cd31a031bb97082f6f4dbbaa2347657ec400912a3fa19d",
+      "fingerprint": "84c1456d1f6ea9c691b7a106575e88fe8e533bcc723bc4ff9b92660d1abec0b8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1439
+      "line": 1405
     },
     {
-      "fingerprint": "9eea650276016273d8da3c39ea0fdfed9a0a1952a695efd89d2c5bf87e8bb93d",
+      "fingerprint": "92b7003e7f18f222547fdff22ce670b284551a9a64e5b436f660db378730fbf3",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1449
+      "line": 1411
     },
     {
-      "fingerprint": "123c9c2a94ebe35f67a2dcfb3e0113959f943e48b0918dba6ad6455dc8df91a6",
+      "fingerprint": "fb46599734bb8d18c5dca7cd8b0be25104b5308bde13fb401c9fb22b520307a4",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1451
+      "line": 1411
     },
     {
-      "fingerprint": "ec2064b311a3da76f9d9dffb90779bee8644858dfe789e3f0503f52af7d696e2",
+      "fingerprint": "e0c44888b7bac9ead9d5fa28f01724dee1159a7f9c1a16b2472ba3f071f924de",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1451
+      "line": 1434
     },
     {
-      "fingerprint": "f3ed625bb6872d86c36d9594c852acca46a636335f534a2bd0f3dbdd20486771",
+      "fingerprint": "5dc2d53d5102bfab4761188de736660c008e2b490d17ffda8347047402e77f3c",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1461
+      "line": 1440
     },
     {
-      "fingerprint": "e2582d32d8bf5e2d74991c0c1ac9db1c59ffda7a6675e38e4113ff7e49895787",
+      "fingerprint": "e72676bfaa666bc47db8c3cf649f7f7173d91fafd08a3c7052f84eae1041efa6",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1467
+      "line": 1440
     },
     {
-      "fingerprint": "45f6fbec8445fec4a08a03bd4b3ea93cb7a06bb91d14cd60aae385ac3083c269",
+      "fingerprint": "1d5d704e2a6b262ccf89283084f0094205bad5750c62f95b249f7ab1d6206652",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1467
+      "line": 1460
     },
     {
-      "fingerprint": "9ef4c103d7d5f86fe78e5374885b71a6f501f125c0b9cdbb94d204932a223a17",
+      "fingerprint": "f00a1998675a740878e255ae14feda1a45060dff3c92d5fd9c1030366d1c9b1f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1475
+      "line": 1466
     },
     {
-      "fingerprint": "c9678fba3f0ceb15510382e7ae378611e12bf84d70799276b6a3e3f9a7ea9fed",
+      "fingerprint": "9b5ce771a582550a2b910619a87c966f0cdb7e3f5073c60124dcdb09a85cdbfc",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1481
+      "line": 1466
     },
     {
-      "fingerprint": "fb4610a1b85c9fc78746fdf379585ac3a6252cb1ef92f77fd17bc7b07767a708",
+      "fingerprint": "411e90fe03b6f92dfc753669fd9325d2b765dd7fc35865ff592add37a06f3351",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1481
+      "line": 1491
     },
     {
-      "fingerprint": "a5899854c275fa3ef230e49af6bf6e7a7e74aded1ab59a61a9b0f5eac427ce3e",
+      "fingerprint": "6a63c83ae6792ba746be68011e7e912585e268b64318f01eee27f63eec850c25",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1489
+      "line": 1506
     },
     {
-      "fingerprint": "82066d57f5a1d6eed23987d6e61341cff377954d6b342b506d8ba90c82d85a5c",
+      "fingerprint": "a28c778f62a029a11c5d5ff93ac8757b511a2da69fc362965748d99c3c13bb4a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1495
+      "line": 1508
     },
     {
-      "fingerprint": "b027df40bdd6cf1b01321cc65cd6d96c20c8ac601778d6af7fe99af9ed4fe979",
+      "fingerprint": "2b5de897c13943fa272f9ba6f3cf50ce44ec84f55939a9a026e8f7110ba47a65",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1495
+      "line": 1508
     },
     {
-      "fingerprint": "88afab9ee315b37fe6df3a7f3470931c1675250949b59c99fab900da0bf1174f",
+      "fingerprint": "4c092e54f6543b9d7c1f7ba2c46bd529fd8ef1f49982d2f29d7090ce3b62f479",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1503
+      "line": 1518
     },
     {
-      "fingerprint": "dd51929249984f6465fb442e7e7a573e719295972487e974e89693dedb647a03",
+      "fingerprint": "5d413dff4580ae9b5dd2811fb393f9f22d3df779da123b3d474ebd557dc35561",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1515
+      "line": 1520
     },
     {
-      "fingerprint": "cfe45702900edf1e251fa85543c051711d99f639afe0488a8a8cb1cac2c82885",
+      "fingerprint": "e3bc2d227874b984c590fc5550f5e0e75612c202e7d67627f4bc664f4d702523",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1527
+      "line": 1520
     },
     {
-      "fingerprint": "92b51b298c35864e281fc153b0a88bcb25c8961cbad06e006d0e07d3ff8942da",
+      "fingerprint": "24b2636472cd8589161bef8333a778b60af4cd5318e1dac16ca4af3406d11718",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1541
+      "line": 1530
     },
     {
-      "fingerprint": "e717f5431807172022d3af9170ad72edf536ad04394a84f71c4ba4f5b4a503cc",
+      "fingerprint": "b75c5e73d0c66fc7323d45438e06d3be334773232626ea7082a11c919a5825ff",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1563
+      "line": 1536
     },
     {
-      "fingerprint": "65d769b7d4f49696d26f5b66de2df3dfff51fc2cc9cabf3bb7a6aa0bdf56b484",
+      "fingerprint": "c5ce45149df0f671aa788e3c1abf9354201f359895577b8dcbac172aa4697cc8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1569
+      "line": 1536
     },
     {
-      "fingerprint": "849dc94350b6b6382e0a75e005b77ed335c4db75e261452f952e8716dbb10b59",
+      "fingerprint": "436f19d90feb82fe223ce19a15bc7f1de824db7d25667362f70facac1a9db851",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1569
+      "line": 1544
     },
     {
-      "fingerprint": "752adb9bffb99afe056604c20f2e10b00e18d6b5065b6c2f41af65d1a2f598ea",
+      "fingerprint": "3bd86195093aa1de07bc4271a932da37b743cb51f56f3c3ed3d775c7206fa672",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1577
+      "line": 1550
     },
     {
-      "fingerprint": "c733d6b1d409fdaa7b79ba79b20b8f457436b769a9a998fd0d832282ae73db73",
+      "fingerprint": "55d59bac09b9f044214fade8a74bbcc2f069da0b9c385a957e2548654571042e",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1583
+      "line": 1550
     },
     {
-      "fingerprint": "89418d2b4df8c82d8675c21574df0a09e2111cea0bdc7aeed89050b794dbb3fd",
+      "fingerprint": "31c6bec745ce28933893dedce4c528515c1649855c6e2f38fb98c3d33c3b6eda",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1583
+      "line": 1558
     },
     {
-      "fingerprint": "c7effcac4ba6004a790560167ff7360dd5480484131653e9110641ce0173883b",
+      "fingerprint": "0db8239a6ce9466e96bced89a6459e260cb6fe6fedbe5843946b3691fadff75a",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1594
+      "line": 1564
     },
     {
-      "fingerprint": "06f38ad5eb9b0f3f905d20995be3e663af5335f0018b8909c812358534840936",
+      "fingerprint": "769bed9e005203cf8ab92634e4038e803a5a2a7554deb3b31d225947cc006aa1",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1597
+      "line": 1564
     },
     {
-      "fingerprint": "3966b56605c3c3e2840492ec9dfebb9ebf51771077eeb84ceb79cadde373e537",
+      "fingerprint": "822ccf858d71aa0af2ce14f3ed22c0f88051127efbd13acf0bc6c081dbcfaaf8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1602
+      "line": 1572
     },
     {
-      "fingerprint": "f855e452d285f98ae1122833678b5c6e23a009588b09a633f3f105165f960988",
+      "fingerprint": "1820adc7cde8b4c9f0ba2607f379ef864d928d283a2b847e3ea9f8da9590b369",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1602
+      "line": 1584
     },
     {
-      "fingerprint": "817075e39a724fed7147156bc33775e1320522b2ba3a7d53d64eb67d5f3fde37",
+      "fingerprint": "53a9eb148aa5834dbe07f5e78a7cd3260a12aa6b668983d2ae42f5331418c4e8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1612
+      "line": 1596
     },
     {
-      "fingerprint": "2fc71f84b93efd7e7ffcdd938ac58b32344de53adffb3b72e75b6d6a34e03f64",
+      "fingerprint": "c06efc01d3057e1b2a2379a9f243a0e48f6ad78b3cac6675d2bc01f318bb9554",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1616
+      "line": 1610
     },
     {
-      "fingerprint": "d9c0562343e6e2a6679320d4e9eb61a070c77eb8027a8fe79f0fdeba9e8b4b7a",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1616
-    },
-    {
-      "fingerprint": "64e5a03c6f35f1adeadd8a1b98842e977f1ca4cb506add36e79615b25280efc9",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1627
-    },
-    {
-      "fingerprint": "c33a2033957e2f1eb20ac0640c61d128f4b3db4c8e9d6a7780d4f4967dfb7860",
-      "rule_id": "rs/no-unwrap-in-lib",
-      "file": "src/config.rs",
-      "line": 1628
-    },
-    {
-      "fingerprint": "4d521d3111cf197d309c5d22621240d0dab43cbf4c28fd83ebd8b3a3a3167ae3",
+      "fingerprint": "aca5eec0cb351f923ab10b5b58aed6fe4417e954c2bdab24712be3956b638e72",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
       "line": 1632
     },
     {
-      "fingerprint": "96f3593f7c9407572cae81f22ac7e3b1703f46cbcb8c417507a95a0af454c7b6",
+      "fingerprint": "062bb082ace8f43c43abdae14d74d9e4ef16edad7488764157b6524074279d22",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1642
+      "line": 1638
+    },
+    {
+      "fingerprint": "f631de8e9ede2566201b42887c7b3708a33104d5c5ed61bff152c49b65710dd3",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1638
+    },
+    {
+      "fingerprint": "cdd98e40bd0f5c8cb32bf270f75806b2f2e9c49114b989e5a87a0b45e8e440a7",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1646
+    },
+    {
+      "fingerprint": "4e02a5838fc93d822e963df06dbe8cea5cd211e9d4c4d2d5cad30e8c59c61ddd",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1652
+    },
+    {
+      "fingerprint": "0623d3aa080857542c3555245cc8f127cef0e5f0a16411c34e3e818b70a8fd29",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1652
     },
     {
       "fingerprint": "a99f11a7610d68677aa855223b33e96b8a37cdd9b68a8f3473f8d552b717c3f3",
@@ -866,76 +800,256 @@
       "line": 1663
     },
     {
-      "fingerprint": "e4748b7a7415f485e207fe5384f7cf973b117bd3c1917fc327e7252b8b591494",
+      "fingerprint": "0a2631205646582432f90ecb2c6fc03e516a148050665f77bfa3ff1caf346ac5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
       "line": 1666
     },
     {
-      "fingerprint": "4eebabacd5a9e64766eca2ccd7917680c166734721a6baa8575011cf4050d9b9",
+      "fingerprint": "76a9c0bad6abb62ae3c580e95f37b3d5eed3cbe1395edf17b753ab949c122df1",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1670
+      "line": 1671
     },
     {
-      "fingerprint": "1a0587ba17ec5d80823f7c325b14cdff632b100bcae8bf9f116776b81e221c54",
+      "fingerprint": "2f3da430214e092a52356c1f12c5929b98d4418038922472c3bc123aba269a33",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1670
+      "line": 1671
     },
     {
-      "fingerprint": "21bd10940761d7031778d95a5b718c39c29f94ceb97b930198bb75dae6b2538c",
+      "fingerprint": "0346b84ceb31c396f8fb4f3bdffb2c789a06ff3551e67f073079cdfd1d8e6eff",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1677
+      "line": 1681
     },
     {
-      "fingerprint": "73635d9ebb9dd71356e6ca3ce6763f256717aba598a9d90f3e0295174861b386",
+      "fingerprint": "f07edcfd7468581f3a93ae5e77fe25657a64744af3a1c52fefb2ebbe619e1fba",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1683
+      "line": 1685
     },
     {
-      "fingerprint": "5cd412f914c6a6e1ada5f42625f4e3f37d235d0dfa0560574d7cfdae6649f2c0",
+      "fingerprint": "fada4bf05fe2680e070579610177458e158d468641b32ab8f0fd3849a44ef667",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1700
+      "line": 1685
     },
     {
-      "fingerprint": "0d3130343372d771a142c7359d852146466d50eeecbeb4475d97380bd36955fd",
+      "fingerprint": "10e321ef6d6dac4bacc5f84de513652e744e8f818b007a8519570dae68e9c5e5",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1709
+      "line": 1696
     },
     {
-      "fingerprint": "73a0bcf8da3fc5505fcfcd30aaab10aca3cedaa87a2575e5a63a8bf32e0105fa",
+      "fingerprint": "1a2959555c846a2b477f4dcea7f1c74a49128214603c6e26cac73eda6b2d1413",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1715
+      "line": 1697
     },
     {
-      "fingerprint": "a80308c0960bc34273d487265ed64445ae635901d38772e7a837647dac3d6f79",
+      "fingerprint": "698f5a84bd16c623fe2c4a46d4668ee66eb335b8750d9d097d1b4ec1d7c7e16f",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1715
+      "line": 1701
     },
     {
-      "fingerprint": "a511d97d01d3a531690109e1c97e08064db11bd54a43356a9fca4ddccbf8802d",
+      "fingerprint": "699d28015f0662ebfb410a4bec22776450a3ddbf63380f62b62b826630ba3303",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1729
+      "line": 1711
     },
     {
-      "fingerprint": "cbaed1db2206322d4fe40fe3bcf1b17f9386be112428fcb544d6e2e72d2cd541",
+      "fingerprint": "62a22839af32ebf52e833c64ff76d496a683d9deb599563a0440df58451222eb",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1731
+      "line": 1732
     },
     {
-      "fingerprint": "6dbc6330110bb3a2d88af2dfdbc422312331b63eb51643efd86f045057aa40b5",
+      "fingerprint": "08b9156d6abbd0e8774ec64bc50a26111d36dacb9f1809ffa22c86c046147918",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "src/config.rs",
-      "line": 1731
+      "line": 1735
+    },
+    {
+      "fingerprint": "0fc0e0f7272bb469d3cbb94f4b2fca984805549c67e466b041659031a4f6a2c5",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1739
+    },
+    {
+      "fingerprint": "1e6ed6a364d6ab9e217725fd4b3d9b0a5f568d7d5081ef93e5326c1978424cb5",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1739
+    },
+    {
+      "fingerprint": "aeb5d06e2e4b87d2aad510ffabfca46afb0c7b79218973b6515f3e66b5910dd6",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1746
+    },
+    {
+      "fingerprint": "9ed8d35465d243366d871723a7e45d4a5e55e75e22d247a34398c36928f18378",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1752
+    },
+    {
+      "fingerprint": "98040d8fa96a73fc8dfba18024927b95517d697706004a40a09f269166f251a8",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1769
+    },
+    {
+      "fingerprint": "fd69e9cefda89433b986652922579174321e4d3da6259e2186f33cab0822e996",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1778
+    },
+    {
+      "fingerprint": "eaf16c98362b8c4301d31fab2629e5a3f222a2482b9b6ccd45be04d651ddd68d",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1784
+    },
+    {
+      "fingerprint": "f6ab6fc4e67dc9f71271765e05a00f969ebc8fe2dfc66b36748774b81f1a2d4f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1784
+    },
+    {
+      "fingerprint": "c6b8ad3588c8842cb3ee2b8d433fd845c19d94dd35a5ace896217787769bad06",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1798
+    },
+    {
+      "fingerprint": "d7b8515155631db75ffaf163415c0aff3aacea64ae0d19604580057aa39616b7",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1800
+    },
+    {
+      "fingerprint": "5f01e504087eb48df480973b52a61c73f798194ff2a906a25b3c4572b3426404",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1800
+    },
+    {
+      "fingerprint": "5760940d17e6c79a8727fa2a116e1c3bd0feb30b0f1ec30e7ace30e42f581fe7",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1810
+    },
+    {
+      "fingerprint": "2e21f86e9a984c768dae1e85893507f84039a794ab30aa7db8e4c8eefda96548",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1817
+    },
+    {
+      "fingerprint": "32c1857de6da153cf0dd07478a0449c23dfc1bfb4b8b04202422169cec6357fe",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1817
+    },
+    {
+      "fingerprint": "51493efb1064c1148e9b09557b0184dd371e07097ecde09948303cc823b05e6d",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1840
+    },
+    {
+      "fingerprint": "0f54e93d2ae4298719ebcaf66c30a453e72fa4a23caefcb975bc94b2b2ded4b7",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1842
+    },
+    {
+      "fingerprint": "1a92d9470f35cbfb273f85cd463d924485c95bd9cc7b514129c67bc93125c866",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1842
+    },
+    {
+      "fingerprint": "cce619e897b1e8e29679e4418e05b40ebe8cc61cc75b2e881968c31a34c99ae8",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1850
+    },
+    {
+      "fingerprint": "ed05d49a3d2c8280adac5bf38855868259d2f2a019d38ebcfa575b88b386bdff",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1897
+    },
+    {
+      "fingerprint": "27992fe98c1c8bc0a582f45db6136c1bb0674bb6e760c5dfec820ec7ae884e69",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1903
+    },
+    {
+      "fingerprint": "1a5b6ebd9d801903d414acd3a2c1dc385d52f3a6312bbdf9e1677d3c4a63eb0a",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1903
+    },
+    {
+      "fingerprint": "8c6d5b30926f408ad9fae201f4442f76973fd71297821e4ae680dc68f774f18a",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1933
+    },
+    {
+      "fingerprint": "b2331b241811e1c3d404ab80d5de4a90b45de1ac849b12f4f712f8ee713c1a7c",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1935
+    },
+    {
+      "fingerprint": "0db511d37b52c7b37d750896637b3929144cba07269413f17fba14a4f0bd1e8c",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1935
+    },
+    {
+      "fingerprint": "e18a2c4921cfb2660ea0fd7ed8dc937e156812503a7ac23899075da575d44946",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1950
+    },
+    {
+      "fingerprint": "969e8b5fd4b43ee5d94a8b3b50ac8cbf6e7dffde75046122b47f6878fe29b34c",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1956
+    },
+    {
+      "fingerprint": "e5b7435ba09f2cfac2a284fbb13c340d3a723fc2b8607c5e5b39eb13cdf4a34d",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1956
+    },
+    {
+      "fingerprint": "26590b5ce915382ca2a6fa86d39be9433f581141dc8f51fdd5fe5a68d560b8af",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1987
+    },
+    {
+      "fingerprint": "883dcaeecbd2bfe0ab502641cda9350fde3de4ef83aa9ec9dea62fb92a7eb402",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1993
+    },
+    {
+      "fingerprint": "7a3355996554748f00b540f576caebd04e4caa338d55f72e24bd8a457d302787",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/config.rs",
+      "line": 1993
     },
     {
       "fingerprint": "439a189d212f74f369e20560a142c794a5045aa2e4ca0c6bcf3d05a6c5ec5e2a",
@@ -3380,16 +3494,16 @@
       "line": 574
     },
     {
-      "fingerprint": "d327b5844a905a4ca3c3f35717694ea7dd5b0cd39d9510c45a8719c3d9813f72",
+      "fingerprint": "a2f07566999e78572c41a020d6155d635a5878b57a967ea91817a088c7c855e6",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/cross_language_matrix.rs",
-      "line": 575
+      "line": 579
     },
     {
-      "fingerprint": "cb16dc6d6571fc5e31fc8596b13a56e4f61c36a37fa76ffceb887a2798090b19",
+      "fingerprint": "9702bb7625fd919acd1767d0d7f2f33b8c0d18599e7fced815cb26262cb31dfc",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/cross_language_matrix.rs",
-      "line": 617
+      "line": 624
     },
     {
       "fingerprint": "cca76b4eaa1a94e2e7ed7fadc692558c7e9494e7d50a385aa97c215178657aa4",
@@ -8984,40 +9098,40 @@
       "line": 4457
     },
     {
-      "fingerprint": "f5e704ddf5ad266a8fe3950bbf2bd3e0c5a74033a9f00563d37f5897c9d18e24",
+      "fingerprint": "5d9c205c7ae26fd8d372cfdfca0251efea2f72bb207404a9b5803f197e711bb8",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
       "line": 4679
     },
     {
-      "fingerprint": "6560e0005b6cd8e9e5cd288d8a11b215a6a80172f15e1ae4ba16dc9ba4984df7",
+      "fingerprint": "8b02e4a712753953826b20b602f1f06d67dfe62bf2acfa488eb5c0c0285e8005",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4691
+      "line": 4698
     },
     {
-      "fingerprint": "27ef9ba0dee61c256d83731e0e3d84d6e079d9fd22d22e5e95f563d8065b2248",
+      "fingerprint": "6ac2f0e8077e4ab192ec24f05f1f34e23d61bde0b35bdfaa4c38073cfae88abd",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4701
+      "line": 4708
     },
     {
-      "fingerprint": "c386de7e21c2a9125dc4de6afdf3fee859625a2f4f886b6f293a9573bed75961",
+      "fingerprint": "4750f503a5a1d5c66382837418a5607f77e8d21de45c37aee2d6d443433058e7",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4726
+      "line": 4733
     },
     {
-      "fingerprint": "663c3d8d14b6e0d87f4df627b4fc10209ac45103ee0eb9c3db70690fade0febe",
+      "fingerprint": "3645bfdae22bc0a34b18ec61326283da31833dc25fcd524ae88c8511aa450bf0",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4752
+      "line": 4766
     },
     {
-      "fingerprint": "023f787ccc437c281e2ab8361dd7c6e3642989ae457c437abe5d935685ae79c5",
+      "fingerprint": "0ea3581fb5ad282ee3ea74f92bb07c3163db9464e6fa382c4a19393ab35f6fd2",
       "rule_id": "rs/no-unwrap-in-lib",
       "file": "tests/integration.rs",
-      "line": 4760
+      "line": 4774
     },
     {
       "fingerprint": "5b676a923612a17253cb4241ecfe1149d305cd1f3a17b037d532754e079ed18d",

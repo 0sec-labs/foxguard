@@ -2,7 +2,7 @@ use crate::baseline::{load_baseline, suppress_with_baseline_at_root, write_basel
 use crate::cli::{DiffArgs, OutputFormat, ScanArgs, SecretsArgs, TuiArgs};
 use crate::config::{
     apply_scan_defaults, apply_scan_thresholds, apply_secrets_defaults, apply_severity_overrides,
-    load_for_scan, suppress_with_scan_ignores, FoxguardConfig,
+    load_for_scan, suppress_with_patterns, suppress_with_scan_ignores, FoxguardConfig,
 };
 use crate::diff::run_diff_with_coccinelle_warnings;
 use crate::engine::{
@@ -290,6 +290,7 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
     }
 
     findings = suppress_with_scan_ignores(findings, config.as_ref(), &identity_root);
+    findings = suppress_with_patterns(findings, config.as_ref());
 
     if let Some(ref path) = scan.write_baseline {
         write_baseline_at_root(Path::new(path), &findings, &identity_root)?;
@@ -471,6 +472,7 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
 
     diff_result.new_findings =
         suppress_with_scan_ignores(diff_result.new_findings, config.as_ref(), &identity_root);
+    diff_result.new_findings = suppress_with_patterns(diff_result.new_findings, config.as_ref());
 
     notices.push(format!(
         "foxguard diff vs {}: {} new issue{} ({} total, {} existing)",
