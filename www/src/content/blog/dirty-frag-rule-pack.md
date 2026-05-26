@@ -47,7 +47,7 @@ rules:
       (Dirty Frag class). Verify skb_cow_data / skb_unshare / skb_make_writable /
       pskb_expand_head is reached on the unsafe path before
       aead_request_set_crypt(req, sg, sg, ...) + crypto_aead_decrypt(req).
-      See oss-security 2026-05-07 advisory and pwnkit issue #263.
+      See oss-security 2026-05-07 advisory.
     severity: ERROR
     languages: [c]
     metadata:
@@ -76,7 +76,7 @@ Path-sensitive cow-gate analysis lives in two issues we have open:
 - [foxguard #295](https://github.com/0sec-labs/foxguard/issues/295) — Coccinelle integration. Coccinelle's `@@` metavariables can express `arg2 == arg3` directly, and SmPL has structural understanding of dominators. That's where the in-place property gets a real proof.
 - [foxguard #296](https://github.com/0sec-labs/foxguard/issues/296) — CodeQL integration. CodeQL's data-flow library can carry SGL provenance from `MSG_SPLICE_PAGES` to the AEAD call, which is the actual bug-class invariant.
 
-The variant-hunt orchestrator that walks a kernel tree, fans out to all three engines (foxguard regex, Coccinelle, CodeQL), and reconciles the hits is [pwnkit #263](https://github.com/0sec-labs/pwnkit/issues/263). The foxguard rules are the cheap fast-pass — first sieve, not last word.
+The variant-hunt orchestrator that walks a kernel tree, fans out to all three engines (foxguard regex, Coccinelle, CodeQL), and reconciles the hits is tracked internally. The foxguard rules are the cheap fast-pass — first sieve, not last word.
 
 ## Try it
 
