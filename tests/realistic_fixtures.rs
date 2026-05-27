@@ -170,6 +170,20 @@ fn realistic_hono_app() {
     assert_fixture("hono_app.ts", 7, &[("js/taint-xss-innerhtml", 3)]);
 }
 
+#[test]
+fn realistic_java_spring_controller() {
+    assert_fixture(
+        "java_spring_controller.java",
+        4,
+        &[
+            ("java/taint-command-injection", 1),
+            ("java/taint-sql-injection", 1),
+            ("java/taint-ssrf", 1),
+            ("java/taint-unsafe-deserialization", 1),
+        ],
+    );
+}
+
 /// Multi-file Django fixture (issue #48). Cross-file taint analysis
 /// (issue #46) propagates taint from `views.py` into `queries.py`
 /// helpers via function taint summaries. In-file flows fire as before,

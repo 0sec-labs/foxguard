@@ -4,10 +4,11 @@ use regex::Regex;
 
 use crate::impl_rule;
 use crate::rules::common::{
-    hardcoded_secret_re, is_secret_value_long_enough, make_finding, make_finding_from_offsets,
-    walk_tree,
+    confidence_for_hops, get_source_line, hardcoded_secret_re, is_secret_value_long_enough,
+    make_finding, make_finding_from_offsets, walk_tree,
 };
-use crate::{Language, Severity};
+use crate::rules::java_taint;
+use crate::{Finding, Language, Severity};
 
 // ─── Static regex helpers (compiled once) ────────────────────────────────────
 
@@ -984,5 +985,221 @@ impl_rule! {
         });
         findings
 
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Java taint rules
+// ═══════════════════════════════════════════════════════════════════════════
+
+struct JavaTaintRuleMeta<'a> {
+    rule_id: &'a str,
+    severity: Severity,
+    cwe: Option<&'a str>,
+    fix_suggestion: Option<&'a str>,
+    format_description: fn(&str, &str) -> String,
+}
+
+fn java_taint_sql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject SQL")
+}
+
+fn java_taint_command_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject OS commands")
+}
+
+fn java_taint_ssrf_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can drive server-side request forgery")
+}
+
+fn java_taint_unsafe_deserialization_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can trigger unsafe deserialization")
+}
+
+fn java_taint_meta(rule_id: &str) -> Option<JavaTaintRuleMeta<'static>> {
+    match rule_id {
+        "java/taint-sql-injection" => Some(JavaTaintRuleMeta {
+            rule_id: "java/taint-sql-injection",
+            severity: Severity::Critical,
+            cwe: Some("CWE-89"),
+            fix_suggestion: Some(
+                "Use parameterized queries or PreparedStatement placeholders instead of concatenating request input into SQL",
+            ),
+            format_description: java_taint_sql_injection_desc,
+        }),
+        "java/taint-command-injection" => Some(JavaTaintRuleMeta {
+            rule_id: "java/taint-command-injection",
+            severity: Severity::Critical,
+            cwe: Some("CWE-78"),
+            fix_suggestion: Some(
+                "Avoid invoking shell commands with request-controlled data; pass fixed executable names and validated argument arrays",
+            ),
+            format_description: java_taint_command_injection_desc,
+        }),
+        "java/taint-ssrf" => Some(JavaTaintRuleMeta {
+            rule_id: "java/taint-ssrf",
+            severity: Severity::High,
+            cwe: Some("CWE-918"),
+            fix_suggestion: Some("Validate outbound URLs against an allowlist of permitted hosts"),
+            format_description: java_taint_ssrf_desc,
+        }),
+        "java/taint-unsafe-deserialization" => Some(JavaTaintRuleMeta {
+            rule_id: "java/taint-unsafe-deserialization",
+            severity: Severity::Critical,
+            cwe: Some("CWE-502"),
+            fix_suggestion: Some(
+                "Avoid Java native deserialization for request data; use a safe data format and explicit schema validation",
+            ),
+            format_description: java_taint_unsafe_deserialization_desc,
+        }),
+        _ => None,
+    }
+}
+
+fn map_java_taint_finding(
+    meta: &JavaTaintRuleMeta<'_>,
+    source: &str,
+    finding: java_taint::TaintFinding,
+) -> Finding {
+    Finding {
+        rule_id: meta.rule_id.to_string(),
+        severity: meta.severity,
+        cwe: meta.cwe.map(|s| s.to_string()),
+        description: (meta.format_description)(
+            &finding.source_description,
+            &finding.sink_description,
+        ),
+        file: String::new(),
+        line: finding.sink_line,
+        column: finding.sink_column,
+        end_line: finding.sink_end_line,
+        end_column: finding.sink_end_column,
+        snippet: get_source_line(source, finding.sink_start_byte),
+        source_line: Some(finding.source_line),
+        source_description: Some(finding.source_description),
+        sink_line: Some(finding.sink_line),
+        sink_description: Some(finding.sink_description),
+        fix_suggestion: meta.fix_suggestion.map(|s| s.to_string()),
+        sink_start_byte: Some(finding.sink_start_byte),
+        sink_end_byte: Some(finding.sink_end_byte),
+        confidence: confidence_for_hops(finding.hops),
+        taint_hops: Some(finding.hops),
+        tags: vec![],
+        crypto_algorithm: None,
+        cnsa2_deadline: None,
+        dep_name: None,
+    }
+}
+
+/// Run every enabled Java taint rule over `tree`.
+pub fn run_java_taint_batched(
+    source: &str,
+    tree: &tree_sitter::Tree,
+    enabled_rule_ids: &std::collections::HashSet<&str>,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for (rule_id, spec) in java_taint::java_taint_rule_specs() {
+        if !enabled_rule_ids.contains(rule_id) {
+            continue;
+        }
+        let Some(meta) = java_taint_meta(rule_id) else {
+            continue;
+        };
+        let raw = java_taint::analyze_tree(tree.root_node(), source, &spec, None);
+        for finding in raw {
+            findings.push(map_java_taint_finding(&meta, source, finding));
+        }
+    }
+    findings
+}
+
+fn run_java_taint_single(
+    rule_id: &str,
+    source: &str,
+    tree: &tree_sitter::Tree,
+    spec: &java_taint::TaintSpec,
+) -> Vec<Finding> {
+    let Some(meta) = java_taint_meta(rule_id) else {
+        return Vec::new();
+    };
+    let raw = java_taint::analyze_tree(tree.root_node(), source, spec, None);
+    raw.into_iter()
+        .map(|finding| map_java_taint_finding(&meta, source, finding))
+        .collect()
+}
+
+pub struct TaintSqlInjection;
+
+impl_rule! {
+    TaintSqlInjection,
+    id = "java/taint-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Untrusted Java servlet or Spring input reaches SQL query sink",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+        let spec = java_taint::java_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_java_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+pub struct TaintCommandInjection;
+
+impl_rule! {
+    TaintCommandInjection,
+    id = "java/taint-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Untrusted Java servlet or Spring input reaches command execution sink",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+        let spec = java_taint::java_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_java_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+pub struct TaintSsrf;
+
+impl_rule! {
+    TaintSsrf,
+    id = "java/taint-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Untrusted Java servlet or Spring input reaches outbound URL sink",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+        let spec = java_taint::java_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_java_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+pub struct TaintUnsafeDeserialization;
+
+impl_rule! {
+    TaintUnsafeDeserialization,
+    id = "java/taint-unsafe-deserialization",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Untrusted Java servlet or Spring input reaches unsafe deserialization sink",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+        let spec = java_taint::java_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_java_taint_single(_self.id(), source, tree, &spec)
     }
 }

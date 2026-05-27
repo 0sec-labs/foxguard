@@ -160,6 +160,10 @@ const javaRules: Rule[] = [
   { id: 'java/pq-vulnerable-crypto', cwe: 'CWE-327', desc: 'Use of quantum-vulnerable cryptographic algorithm (RSA/EC/DSA/DH/Ed25519/X25519)', severity: 'high' },
   { id: 'java/spring-cors-permissive', cwe: 'CWE-942', desc: 'Permissive CORS configuration allows any origin', severity: 'medium' },
   { id: 'java/spring-csrf-disabled', cwe: 'CWE-352', desc: 'Spring Security CSRF protection is disabled', severity: 'high' },
+  { id: 'java/taint-command-injection', cwe: 'CWE-78', desc: 'Untrusted Java servlet or Spring input reaches command execution sink', severity: 'critical' },
+  { id: 'java/taint-sql-injection', cwe: 'CWE-89', desc: 'Untrusted Java servlet or Spring input reaches SQL query sink', severity: 'critical' },
+  { id: 'java/taint-ssrf', cwe: 'CWE-918', desc: 'Untrusted Java servlet or Spring input reaches outbound URL sink', severity: 'high' },
+  { id: 'java/taint-unsafe-deserialization', cwe: 'CWE-502', desc: 'Untrusted Java servlet or Spring input reaches unsafe deserialization sink', severity: 'critical' },
 ];
 
 const phpRules: Rule[] = [

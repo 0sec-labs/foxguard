@@ -121,7 +121,7 @@ const MATRIX: &[MatrixRow] = &[
         sarif: Cell::Covered,
         cbom: Cell::Covered,
         pqc: Cell::Covered,
-        taint_explain: Cell::NotApplicable("Java has no taint engine"),
+        taint_explain: Cell::Covered,
     },
     MatrixRow {
         language: "PHP",
@@ -617,6 +617,11 @@ fn taint_explain_matrix_cells_render_traces() {
             "py/taint-pickle-deserialization",
         ),
         ("Go", "vulnerable_go_taint.go", "go/taint-command-injection"),
+        (
+            "Java",
+            "vulnerable_java_taint.java",
+            "java/taint-command-injection",
+        ),
         ("Kotlin", "vulnerable.kt", "kt/taint-sql-injection"),
     ] {
         let output = foxguard_cmd_isolated()

@@ -12,7 +12,7 @@ The taint engine answers the second, on a narrower footprint. It lets us ship ru
 
 The taint engine supports:
 
-- **Three languages**: Python, JavaScript/TypeScript, and Go, each with its own engine (`src/rules/python_taint.rs`, `src/rules/javascript_taint.rs`, `src/rules/go_taint.rs`) sharing an identical surface (`TaintSpec`, `NodeMatcher`, `TaintFinding`, `analyze_tree`). `.ts` and `.tsx` files use dedicated tree-sitter TypeScript/TSX grammars, then run through the JavaScript-compatible rule and taint surface where semantics align.
+- **Six languages**: Python, JavaScript/TypeScript, Go, Kotlin, C, and Java, each with its own grammar-aware engine (`src/rules/*_taint.rs`) sharing the same user-facing trace surface (`TaintSpec`, `NodeMatcher`, `TaintFinding`, `analyze_tree`). `.ts` and `.tsx` files use dedicated tree-sitter TypeScript/TSX grammars, then run through the JavaScript-compatible rule and taint surface where semantics align.
 - **Intraprocedural**: each function body is analyzed independently.
 - **Flow-insensitive**: statements are processed in source order. Reassigning a tainted variable to a clean value drops the taint. Branches are not modeled — taint observed in one branch of an `if` persists through the fall-through.
 - **One level of attribute propagation**: `x.y` is tainted when `x` is tainted.
@@ -29,18 +29,18 @@ The taint engine supports:
 Known limitations:
 
 - **Multi-hop interprocedural chains**: only one level of helper-call propagation is supported. A helper that itself calls another helper is not tracked through the deeper hop.
-- **Cross-file**: Cross-file taint is supported for Python (import resolution), JavaScript (require/import/export default), and Go (same-package) via two-pass function summary analysis.
+- **Cross-file**: Cross-file taint is supported for Python (import resolution), JavaScript (require/import/export default), and Go (same-package) via two-pass function summary analysis. Kotlin, C, and Java are intrafile today.
 - **Instance and class methods in interprocedural summaries**: only top-level `function_declaration`s and `const/let/var foo = ...` arrow/function-expression helpers are summarized. `obj.method()` and `self.helper()` calls are not looked up in the summary map.
 - **Argument taint propagation**: helper summaries are computed with only their parameters' taint sources seeded (via `ParamName`). Passing an already-tainted local into a helper does not influence the helper's return summary — pass 1 analyzes helpers with a conservative view of their parameters.
 - **Per-finding sanitization**: Semgrep's `mode: taint` distinguishes "this specific flow was sanitized" from "the value is now clean"; it can still fire on secondary flows that bypassed the sanitizer along a different path. foxguard's v1 collapses both cases into "clean" and does not track per-finding sanitization state.
 - **Field sensitivity**: `d["key"]` is tainted because `d` is. Different keys are not distinguished.
 - **Object attribute propagation beyond one level**: `x.y.z` is tainted when `x` is tainted, but the engine does not persist taint on `x.y` as a distinct name.
 - **Dynamic import forms**: `importlib.import_module(...)` does not interact with the alias table, so sinks reached through it are not recognized.
-- **Other languages**: Java, Ruby, PHP, C#, Swift, Rust etc. have no taint engine yet. Adding one per language is expected — the shape of the Python, JavaScript, and Go engines is intended to serve as a template. JavaScript/TypeScript uses the same scope as Python (intraprocedural, flow-insensitive, one-level subscript propagation, template-literal and wrapping-call propagation, collapse-to-clean sanitizers) with a `JsImportAliases` table for `import`/`require` forms. Go (see "Supported Go frameworks" below) uses `GoImportAliases` for grouped / aliased import specs and the same flow-insensitive, one-level propagation semantics, plus native multi-return destructuring and binary `+` string-concatenation propagation.
+- **Other languages**: Ruby, PHP, C#, Swift, Rust etc. have no taint engine yet. Adding one per language is expected — the shape of the Python, JavaScript, Go, Kotlin, C, and Java engines is intended to serve as a template. JavaScript/TypeScript uses the same scope as Python (intraprocedural, flow-insensitive, one-level subscript propagation, template-literal and wrapping-call propagation, collapse-to-clean sanitizers) with a `JsImportAliases` table for `import`/`require` forms. Go (see "Supported Go frameworks" below) uses `GoImportAliases` for grouped / aliased import specs and the same flow-insensitive, one-level propagation semantics, plus native multi-return destructuring and binary `+` string-concatenation propagation.
 
 ## API
 
-The engine lives in `src/rules/python_taint.rs`. The public surface is four items:
+Each language engine lives under `src/rules/*_taint.rs`. The public surface is four items:
 
 ```rust
 pub enum NodeMatcher {
@@ -167,7 +167,7 @@ Taint rules do not replace direct-sink rules. For example, `py/no-pickle` fires 
 
 ## Performance
 
-The taint engine runs once per file, only on Python, and only when the file contains function definitions. The walk is a single pass over the AST with a small `HashMap` as state. No additional parsing, no network, no disk. On the existing `vulnerable.py` fixture the taint rule adds microseconds to a run that was already sub-millisecond.
+The taint engines run only for languages with enabled taint-backed rules. Each walk is over the already-parsed AST with small in-memory state. No additional parsing, no network, no disk. Go, Python, and JavaScript batch compatible taint rules to avoid repeated summary walks; Kotlin, C, and Java use lightweight intrafile dispatchers.
 
 ## Semgrep-compatible YAML bridge
 
@@ -288,6 +288,43 @@ We rely on the explicit method-call matchers above instead. The
   file-local `import` statement; calls to functions in imported
   packages are matched by canonical dotted path, not by tracing into
   their source.
+
+## Supported Java frameworks
+
+Issue #449 added `src/rules/java_taint.rs` and four first-consumer
+rules:
+
+| Rule | CWE | Sink families |
+| ---- | --- | ------------- |
+| `java/taint-command-injection` | CWE-78 | `Runtime.exec(...)`, `new ProcessBuilder(...)` |
+| `java/taint-sql-injection` | CWE-89 | `executeQuery`, `execute`, `prepareStatement`, JPA `createQuery` / `createNativeQuery` |
+| `java/taint-ssrf` | CWE-918 | `new URL(...)`, `new URI(...)`, Spring `RestTemplate` request methods |
+| `java/taint-unsafe-deserialization` | CWE-502 | `new ObjectInputStream(...)`, `new XMLDecoder(...)`, `Yaml.load(...)` |
+
+Sources currently covered:
+
+| Framework / surface | Sources |
+| ------------------- | ------- |
+| Servlet APIs | `request` / `req` calls to `getParameter`, `getParameterMap`, `getParameterValues`, `getHeader`, `getHeaders`, `getQueryString`, `getInputStream`, `getReader`, `getCookies` |
+| Spring MVC | Parameters annotated with `@RequestParam`, `@RequestBody`, `@PathVariable`, `@RequestHeader`, `@CookieValue`, `@ModelAttribute` |
+| Generic service inputs | `System.getenv(...)` |
+
+### Java-specific engine notes
+
+- **Why Java first, not C#**: Java already had broad AST rules, Semgrep
+  parity coverage, and Java fixtures in this repo, so #449 chose Java as
+  the lower-risk next taint engine.
+- **Scope**: method, constructor, and lambda bodies are analyzed
+  independently. There is no Java cross-file/type-resolution pass yet.
+- **Propagation**: local variables, assignment, string concatenation,
+  constructor wrappers, nested source calls, and method calls on tainted
+  receivers propagate taint.
+- **Sanitizers**: the engine honors `TaintSpec.sanitizers`, but the
+  built-in Java rules intentionally declare no sanitizers. For these
+  vulnerability classes, the preferred fixes are structural: prepared
+  statements, fixed executable names and validated argument arrays,
+  outbound host allowlists, and avoiding Java native deserialization for
+  request data.
 
 ## Open questions for the full #10
 

@@ -1288,6 +1288,68 @@ mod java {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+
+    #[test]
+    fn test_vulnerable_java_taint_catches_every_flow() {
+        let output = foxguard_cmd_isolated()
+            .args(["tests/fixtures/vulnerable_java_taint.java", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard"); // foxguard: ignore[rs/no-unwrap-in-lib]
+
+        assert!(!output.status.success());
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+
+        let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for f in &findings {
+            if let Some(rule) = f["rule_id"].as_str() {
+                *counts.entry(rule).or_insert(0) += 1;
+            }
+        }
+
+        for (taint_rule, expected) in [
+            ("java/taint-command-injection", 1usize),
+            ("java/taint-sql-injection", 1),
+            ("java/taint-ssrf", 1),
+            ("java/taint-unsafe-deserialization", 1),
+        ] {
+            assert_eq!(
+                counts.get(taint_rule).copied(),
+                Some(expected),
+                "{} should fire exactly {} time(s) on vulnerable_java_taint.java. counts={:?}",
+                taint_rule,
+                expected,
+                counts
+            );
+        }
+    }
+
+    #[test]
+    fn test_safe_java_taint_has_no_taint_findings() {
+        let output = foxguard_cmd_isolated()
+            .args(["tests/fixtures/safe_java_taint.java", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard"); // foxguard: ignore[rs/no-unwrap-in-lib]
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+
+        for taint_rule in [
+            "java/taint-command-injection",
+            "java/taint-sql-injection",
+            "java/taint-ssrf",
+            "java/taint-unsafe-deserialization",
+        ] {
+            let n = findings
+                .iter()
+                .filter(|f| f["rule_id"].as_str() == Some(taint_rule))
+                .count();
+            assert_eq!(
+                n, 0,
+                "{} should not fire on safe_java_taint.java, got {} findings",
+                taint_rule, n
+            );
+        }
+    }
 }
 
 // ─── Crypto agility negative fixtures ──────────────────────────────────────

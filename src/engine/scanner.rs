@@ -1228,6 +1228,29 @@ fn scan_files(
                 ));
             }
 
+            // Java taint rules are intraprocedural today, like the Kotlin
+            // engine below. They still go through a shared dispatcher so
+            // the scanner does not run the Rule::check fallback path once
+            // per taint rule.
+            let enabled_java_taint_ids: std::collections::HashSet<&str> =
+                if matches!(language, Language::Java) {
+                    analysis_plan
+                        .taint_specs
+                        .iter()
+                        .filter(|spec| matches!(spec.engine, TaintEngine::Java))
+                        .map(|spec| spec.rule_id)
+                        .collect()
+                } else {
+                    std::collections::HashSet::new()
+                };
+            if !enabled_java_taint_ids.is_empty() {
+                file_findings.extend(crate::rules::java::run_java_taint_batched(
+                    source,
+                    tree,
+                    &enabled_java_taint_ids,
+                ));
+            }
+
             // Python taint rules share identical Pass 1 summaries across
             // all rules in the same sanitizer-group. Same rationale as
             // the Go block above — see `crate::rules::python::run_py_taint_batched`.
