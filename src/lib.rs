@@ -3,6 +3,7 @@ pub mod baseline;
 pub mod cli;
 pub mod compliance;
 pub mod config;
+pub mod deps;
 pub mod diff;
 pub mod engine;
 pub mod fix;
@@ -141,4 +142,28 @@ pub struct Finding {
     /// `None` for source-level rules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dep_name: Option<String>,
+    /// Installed dependency version when a lockfile format exposes one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dep_version: Option<String>,
+    /// Package ecosystem name used by the vulnerability source (e.g. "npm", "PyPI").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dep_ecosystem: Option<String>,
+    /// Package URL for the dependency when foxguard can construct one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dep_purl: Option<String>,
+    /// Vulnerability identifier from the dependency advisory database.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dep_vulnerability_id: Option<String>,
+    /// First fixed version reported by the advisory, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dep_fixed_version: Option<String>,
+    /// Dependency advisory source database, e.g. "OSV".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dep_source: Option<String>,
+    /// Advisory-native severity text when supplied by the source database.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dep_vulnerability_severity: Option<String>,
+    /// Dependency path from manifest root to vulnerable package when known.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dep_path: Vec<String>,
 }

@@ -68,6 +68,14 @@ fn source_context_finding() -> Finding {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     }
 }
 
@@ -386,6 +394,14 @@ fn compare_findings_prioritizes_higher_severity() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
     let medium = Finding {
         severity: Severity::Medium,
@@ -434,6 +450,14 @@ fn dataflow_lines_render_path_when_source_and_sink_are_present() {
         crypto_algorithm: Some("RSA".to_string()),
         cnsa2_deadline: Some("2030".to_string()),
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -480,6 +504,14 @@ fn dataflow_lines_render_locations_without_descriptions() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -521,6 +553,14 @@ fn dataflow_lines_render_descriptions_without_locations() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -569,6 +609,14 @@ fn dataflow_lines_show_fallback_when_no_trace_exists() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     assert_eq!(
@@ -606,6 +654,14 @@ fn open_target_lines_show_finding_even_without_trace_details() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let rendered = open_target_lines(&finding, OpenFocus::Finding)
@@ -647,6 +703,14 @@ fn render_source_context_includes_surrounding_lines_and_caret() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let rendered = render_source_context(
@@ -699,6 +763,14 @@ fn render_source_context_aligns_caret_after_wide_glyphs() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let caret = render_source_context("😀exec(cmd);\n", &finding, 0)
@@ -739,6 +811,14 @@ fn render_source_context_aligns_caret_after_tabs() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let caret = render_source_context("\texec(cmd);\n", &finding, 0)
@@ -779,6 +859,14 @@ fn render_source_context_aligns_caret_after_combining_marks() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let caret = render_source_context("e\u{301}exec(cmd);\n", &finding, 0)
@@ -819,6 +907,14 @@ fn render_source_context_uses_single_cell_width_for_combined_glyph_selection() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let caret = render_source_context("e\u{301}x\n", &finding, 0)
@@ -1021,6 +1117,14 @@ fn available_open_focuses_include_source_and_sink_when_present() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     assert_eq!(
@@ -1055,6 +1159,14 @@ fn available_open_focuses_include_description_only_source_and_sink() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     assert_eq!(
@@ -1118,6 +1230,14 @@ fn cycle_open_focus_advances_through_available_targets() {
             crypto_algorithm: None,
             cnsa2_deadline: None,
             dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
         }],
         files_scanned: 1,
         duration: Duration::from_secs(1),
@@ -1200,6 +1320,14 @@ fn open_action_menu_is_available_in_scan_mode() {
             crypto_algorithm: None,
             cnsa2_deadline: None,
             dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
         }],
         files_scanned: 1,
         duration: Duration::from_secs(1),
@@ -1262,6 +1390,14 @@ fn open_action_menu_is_available_in_secrets_mode() {
             crypto_algorithm: None,
             cnsa2_deadline: None,
             dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
         }],
         files_scanned: 1,
         duration: Duration::from_secs(1),
@@ -1350,6 +1486,14 @@ fn apply_action_review_state_is_session_only() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
     app.result = Some(TuiExecution {
         mode: TuiMode::Scan,
@@ -1395,6 +1539,14 @@ fn dataflow_lines_highlight_active_open_target() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let rendered = dataflow_lines(&finding, OpenFocus::Source)
@@ -1439,6 +1591,14 @@ fn render_source_context_marks_each_line_of_multiline_findings() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let rendered = render_source_context(
@@ -1586,6 +1746,14 @@ fn confidence_sort_places_high_confidence_before_low_regardless_of_severity() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
     let low_conf_high_sev = Finding {
         severity: Severity::Critical,
@@ -1655,6 +1823,14 @@ fn session_confidence_filter_hides_low_confidence_findings() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
     let low_conf = Finding {
         confidence: 0.5,
@@ -1729,6 +1905,14 @@ fn open_action_menu_in_scan_mode_exposes_new_triage_actions() {
             crypto_algorithm: None,
             cnsa2_deadline: None,
             dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
         }],
         files_scanned: 1,
         duration: Duration::from_secs(1),
@@ -1786,6 +1970,14 @@ fn apply_action_lower_severity_writes_override_and_replaces() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
     app.result = Some(TuiExecution {
         mode: TuiMode::Scan,
@@ -1850,6 +2042,14 @@ fn apply_action_disable_rule_globally_appends_and_detects_duplicate() {
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
     app.result = Some(TuiExecution {
         mode: TuiMode::Scan,
@@ -1905,6 +2105,14 @@ fn render_source_context_truncates_long_lines_around_selected_range() {
         crypto_algorithm: Some("RSA".to_string()),
         cnsa2_deadline: Some("2030".to_string()),
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
 
     let rendered = render_source_context(
@@ -1963,6 +2171,14 @@ fn cnsa_finding(rule_id: &str, deadline: Option<&str>) -> Finding {
         crypto_algorithm: None,
         cnsa2_deadline: deadline.map(String::from),
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     }
 }
 
@@ -1998,6 +2214,14 @@ fn app_with_single_finding(
         crypto_algorithm,
         cnsa2_deadline,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     };
     let mut app = tui_app_with_findings(vec![finding]);
     app.show_launch = false;

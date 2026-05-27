@@ -26,7 +26,13 @@ pub fn emit_scan_report(
             findings,
             args.output.as_deref(),
             JsonReportMetadata {
-                command: if args.pq_mode { "pqc" } else { "scan" },
+                command: if args.pq_mode {
+                    "pqc"
+                } else if args.sca && args.no_builtins {
+                    "sca"
+                } else {
+                    "scan"
+                },
                 config: config_metadata(&args.path, args.config.as_deref()),
                 target: JsonTargetMetadata {
                     path: &args.path,

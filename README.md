@@ -32,6 +32,7 @@ npx foxguard .
 - **Cross-file taint tracking** with intraprocedural dataflow and cross-file summaries
 - **Diff scans** -- only new findings since a target branch
 - **Secrets scanning** -- AWS keys, GitHub/GitLab/Slack/Stripe tokens, private keys
+- **Dependency vulnerability scanning** -- OSV-backed SCA for Cargo, npm, pnpm, pip, Poetry, and Pipenv lockfiles
 - **Post-quantum crypto audit** -- CNSA 2.0 migration deadlines on every finding
 - **Semgrep/OpenGrep-compatible YAML bridge** -- load external rule packs via `--rules`
 - **Interactive TUI** -- triage, baseline, ignore, severity overrides
@@ -77,6 +78,7 @@ repos:
 foxguard .                    # scan everything
 foxguard diff main .          # only new findings vs main
 foxguard secrets .            # leaked credentials and keys
+foxguard sca .                # dependency vulnerabilities from OSV
 foxguard pqc .                # post-quantum crypto audit
 foxguard tui .                # interactive triage UI
 foxguard --format sarif . > results.sarif   # SARIF for CI
@@ -118,6 +120,16 @@ src/tls/client.go
 ```
 
 Each finding carries its CNSA 2.0 migration deadline. Covers Python, JS/TS, Go, Java, Rust, and TLS config files. Export as CycloneDX 1.6 CBOM with `--format cbom`.
+
+## Dependency vulnerability scanning
+
+```sh
+foxguard sca .
+foxguard --sca . --format json
+foxguard sca . --sca-offline --sca-db ./osv-advisories.json
+```
+
+SCA supports `Cargo.lock`, `package-lock.json`, `pnpm-lock.yaml`, `requirements.txt`, `poetry.lock`, and `Pipfile.lock`. Offline mode uses `--sca-db` or an existing `--sca-cache`; without either, OSV lookup is skipped and normal/PQ manifest rules still run. See [docs/dependency-scanning.md](docs/dependency-scanning.md).
 
 ## Configuration
 

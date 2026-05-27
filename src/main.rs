@@ -6,7 +6,7 @@ use foxguard::app::{
 use foxguard::baseline::write_baseline_at_root;
 use foxguard::cli::{
     BaselineArgs, BaselineScanArgs, ChangeModeArgs, Cli, Command, DiffArgs, InitArgs, OutputFormat,
-    PqcArgs, ScanArgs, SecretsArgs, TuiArgs,
+    PqcArgs, ScaArgs, ScanArgs, SecretsArgs, TuiArgs,
 };
 use foxguard::config::load_for_scan;
 use foxguard::tui::run_scan_tui;
@@ -26,6 +26,7 @@ fn main() {
         Some(Command::Diff(args)) => run_diff_cmd(&args),
         Some(Command::Tui(args)) => run_tui(&args),
         Some(Command::Pqc(args)) => run_pqc(&args),
+        Some(Command::Sca(args)) => run_sca(&args),
         None => run_scan(&cli.scan),
     };
 
@@ -33,6 +34,11 @@ fn main() {
 }
 
 fn run_pqc(args: &PqcArgs) -> i32 {
+    let scan = args.to_scan_args();
+    run_scan(&scan)
+}
+
+fn run_sca(args: &ScaArgs) -> i32 {
     let scan = args.to_scan_args();
     run_scan(&scan)
 }
@@ -372,6 +378,10 @@ fn run_init(args: &InitArgs) -> i32 {
                 show_confidence: false,
                 min_confidence: None,
                 pq_mode: false,
+                sca: false,
+                sca_offline: false,
+                sca_db: None,
+                sca_cache: None,
                 cnsa2: false,
             },
             output: repo_root.join(&args.baseline).display().to_string(),

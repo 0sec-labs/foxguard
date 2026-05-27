@@ -4,6 +4,7 @@ use crate::config::{
     apply_scan_defaults, apply_scan_thresholds, apply_secrets_defaults, apply_severity_overrides,
     load_for_scan, suppress_with_patterns, suppress_with_scan_ignores, FoxguardConfig,
 };
+use crate::deps::{scan_dependency_vulnerabilities, DependencyScanOptions};
 use crate::diff::run_diff_with_coccinelle_warnings;
 use crate::engine::{
     coccinelle, codeql, scan_directory_with_notices, scan_paths_with_root_with_notices,
@@ -177,7 +178,21 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
     };
 
     let scan_started = std::time::Instant::now();
-    let (result, mut notices) = if let Some(files) = targets.as_ref() {
+    let sca_only = scan.sca
+        && registry.all_rules().is_empty()
+        && coccinelle_rules.is_empty()
+        && codeql_rules.is_empty();
+    let (result, mut notices) = if sca_only {
+        (
+            ScanResult {
+                findings: Vec::new(),
+                files_scanned: 0,
+                stats: ScanStats::default(),
+                duration: std::time::Duration::default(),
+            },
+            Vec::new(),
+        )
+    } else if let Some(files) = targets.as_ref() {
         scan_paths_with_root_with_notices(
             Path::new(&scan.path),
             files,
@@ -259,6 +274,32 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
                 .then(a.rule_id.cmp(&b.rule_id))
         });
     }
+
+    if scan.sca {
+        let sca_options = DependencyScanOptions {
+            offline: scan.sca_offline,
+            advisory_db: scan.sca_db.as_ref().map(PathBuf::from),
+            cache_path: scan.sca_cache.as_ref().map(PathBuf::from),
+        };
+        let sca_result = scan_dependency_vulnerabilities(
+            Path::new(&scan.path),
+            targets.as_deref(),
+            Some(&excludes),
+            scan.max_file_size,
+            &sca_options,
+        )?;
+        files_scanned += sca_result.files_scanned;
+        notices.extend(sca_result.notices);
+        findings.extend(sca_result.findings);
+        findings.sort_by(|a, b| {
+            a.file
+                .cmp(&b.file)
+                .then(a.line.cmp(&b.line))
+                .then(a.column.cmp(&b.column))
+                .then(a.rule_id.cmp(&b.rule_id))
+        });
+    }
+
     let duration = scan_started.elapsed();
     append_scan_stats_notice(&mut notices, &stats);
 
@@ -268,7 +309,10 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
     // `src/main.rs`).
     crate::compliance::annotate_cnsa2_deadlines(&mut findings, &registry);
 
-    let known_rule_ids = collect_rule_ids(&registry, &coccinelle_rules, &codeql_rules);
+    let mut known_rule_ids = collect_rule_ids(&registry, &coccinelle_rules, &codeql_rules);
+    if scan.sca {
+        known_rule_ids.insert(crate::deps::OSV_RULE_ID.to_string());
+    }
     let override_warnings =
         apply_severity_overrides(&mut findings, config.as_ref(), &known_rule_ids);
     notices.extend(override_warnings);
@@ -579,6 +623,10 @@ fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
         show_confidence: false,
         min_confidence: None,
         pq_mode: args.pq_mode,
+        sca: false,
+        sca_offline: false,
+        sca_db: None,
+        sca_cache: None,
         cnsa2: args.pq_mode,
     }
 }

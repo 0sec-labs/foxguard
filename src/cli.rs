@@ -139,6 +139,22 @@ pub struct ScanArgs {
     #[arg(hide = true, long, default_value_t = false)]
     pub pq_mode: bool,
 
+    /// Query OSV for dependency vulnerabilities in supported lockfiles.
+    #[arg(long, default_value_t = false)]
+    pub sca: bool,
+
+    /// Do not query OSV over the network; use --sca-db or --sca-cache only.
+    #[arg(long, default_value_t = false)]
+    pub sca_offline: bool,
+
+    /// Local OSV advisory JSON/JSONL file or directory for offline SCA runs.
+    #[arg(long)]
+    pub sca_db: Option<String>,
+
+    /// Read/write an OSV query cache for dependency vulnerability scanning.
+    #[arg(long)]
+    pub sca_cache: Option<String>,
+
     /// Emit CNSA 2.0 compliance annotations on crypto-related findings and
     /// a migration-readiness summary block in terminal output (issue #241).
     ///
@@ -271,6 +287,22 @@ pub struct BaselineScanArgs {
     /// Internal: set by the `pqc` subcommand to filter to PQ rules only.
     #[arg(hide = true, long, default_value_t = false)]
     pub pq_mode: bool,
+
+    /// Query OSV for dependency vulnerabilities in supported lockfiles.
+    #[arg(long, default_value_t = false)]
+    pub sca: bool,
+
+    /// Do not query OSV over the network; use --sca-db or --sca-cache only.
+    #[arg(long, default_value_t = false)]
+    pub sca_offline: bool,
+
+    /// Local OSV advisory JSON/JSONL file or directory for offline SCA runs.
+    #[arg(long)]
+    pub sca_db: Option<String>,
+
+    /// Read/write an OSV query cache for dependency vulnerability scanning.
+    #[arg(long)]
+    pub sca_cache: Option<String>,
 
     /// Emit CNSA 2.0 compliance annotations on crypto-related findings and
     /// a migration-readiness summary block in terminal output (issue #241).
@@ -477,6 +509,73 @@ pub struct PqcArgs {
     pub show_confidence: bool,
 }
 
+#[derive(Args, Debug, Clone)]
+pub struct ScaArgs {
+    /// Path to scan
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Path to foxguard config file
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: OutputFormat,
+
+    /// Minimum severity to report
+    #[arg(short, long, value_enum)]
+    pub severity: Option<SeverityFilter>,
+
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
+
+    /// Exclude scan-relative paths by glob or prefix (repeatable)
+    #[arg(long)]
+    pub exclude: Vec<String>,
+
+    /// Apply a baseline file to suppress known findings
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    /// Suppress terminal output (exit code still reflects findings)
+    #[arg(short, long)]
+    pub quiet: bool,
+
+    /// Maximum file size in bytes to scan (default: 1 MB)
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_file_size: u64,
+
+    /// Post findings as inline review comments on a GitHub PR
+    #[arg(long)]
+    pub github_pr: Option<u64>,
+
+    /// Write machine-readable output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
+
+    /// Show per-finding confidence scores in terminal output
+    #[arg(long, default_value_t = false)]
+    pub show_confidence: bool,
+
+    /// Minimum confidence (0.0–1.0) to report. Findings below this
+    /// threshold are suppressed. Defaults to 0.0 (report all).
+    #[arg(long)]
+    pub min_confidence: Option<f32>,
+
+    /// Do not query OSV over the network; use --sca-db or --sca-cache only.
+    #[arg(long, default_value_t = false)]
+    pub sca_offline: bool,
+
+    /// Local OSV advisory JSON/JSONL file or directory for offline SCA runs.
+    #[arg(long)]
+    pub sca_db: Option<String>,
+
+    /// Read/write an OSV query cache for dependency vulnerability scanning.
+    #[arg(long)]
+    pub sca_cache: Option<String>,
+}
+
 impl PqcArgs {
     /// Convert to `ScanArgs` with `pq_mode` enabled.
     pub fn to_scan_args(&self) -> ScanArgs {
@@ -501,9 +600,46 @@ impl PqcArgs {
             show_confidence: self.show_confidence,
             min_confidence: None,
             pq_mode: true,
+            sca: false,
+            sca_offline: false,
+            sca_db: None,
+            sca_cache: None,
             // `pqc` subcommand always shows CNSA 2.0 context — that's
             // exactly the audience for that command.
             cnsa2: true,
+        }
+    }
+}
+
+impl ScaArgs {
+    /// Convert to `ScanArgs` with dependency vulnerability scanning enabled.
+    pub fn to_scan_args(&self) -> ScanArgs {
+        ScanArgs {
+            path: self.path.clone(),
+            config: self.config.clone(),
+            format: self.format,
+            severity: self.severity,
+            rules: None,
+            codeql_db: None,
+            no_builtins: true,
+            changes: self.changes.clone(),
+            exclude: self.exclude.clone(),
+            baseline: self.baseline.clone(),
+            write_baseline: None,
+            explain: false,
+            fix: false,
+            github_pr: self.github_pr,
+            quiet: self.quiet,
+            output: self.output.clone(),
+            max_file_size: self.max_file_size,
+            show_confidence: self.show_confidence,
+            min_confidence: self.min_confidence,
+            pq_mode: false,
+            sca: true,
+            sca_offline: self.sca_offline,
+            sca_db: self.sca_db.clone(),
+            sca_cache: self.sca_cache.clone(),
+            cnsa2: false,
         }
     }
 }
@@ -531,6 +667,10 @@ impl BaselineScanArgs {
             show_confidence: self.show_confidence,
             min_confidence: self.min_confidence,
             pq_mode: self.pq_mode,
+            sca: self.sca,
+            sca_offline: self.sca_offline,
+            sca_db: self.sca_db.clone(),
+            sca_cache: self.sca_cache.clone(),
             cnsa2: self.cnsa2,
         }
     }
@@ -550,6 +690,8 @@ pub enum Command {
     Tui(TuiArgs),
     /// Post-quantum cryptography audit — scan for quantum-vulnerable algorithms
     Pqc(PqcArgs),
+    /// Dependency vulnerability audit using OSV
+    Sca(ScaArgs),
 }
 
 #[derive(Parser, Debug)]

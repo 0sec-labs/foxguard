@@ -214,6 +214,30 @@ pub fn build_sarif(findings: &[Finding]) -> serde_json::Value {
             if let Some(dep) = &f.dep_name {
                 props.insert("depName".to_string(), json!(dep));
             }
+            if let Some(version) = &f.dep_version {
+                props.insert("depVersion".to_string(), json!(version));
+            }
+            if let Some(ecosystem) = &f.dep_ecosystem {
+                props.insert("depEcosystem".to_string(), json!(ecosystem));
+            }
+            if let Some(purl) = &f.dep_purl {
+                props.insert("depPurl".to_string(), json!(purl));
+            }
+            if let Some(id) = &f.dep_vulnerability_id {
+                props.insert("depVulnerabilityId".to_string(), json!(id));
+            }
+            if let Some(version) = &f.dep_fixed_version {
+                props.insert("depFixedVersion".to_string(), json!(version));
+            }
+            if let Some(source) = &f.dep_source {
+                props.insert("depSource".to_string(), json!(source));
+            }
+            if let Some(severity) = &f.dep_vulnerability_severity {
+                props.insert("depVulnerabilitySeverity".to_string(), json!(severity));
+            }
+            if !f.dep_path.is_empty() {
+                props.insert("depPath".to_string(), json!(f.dep_path));
+            }
 
             // SARIF `rank` is a native 0.0..=100.0 ordering hint. Map
             // confidence linearly so 1.0 → 100 and 0.0 → 0.
@@ -314,6 +338,14 @@ mod tests {
             crypto_algorithm: None,
             cnsa2_deadline: None,
             dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
         }
     }
 

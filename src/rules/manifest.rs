@@ -17,6 +17,26 @@ const MANIFEST_PQ_DESC: &str = "Dependency uses quantum-vulnerable cryptographic
 const CARGO_PQ_DESC: &str =
     "Dependency uses quantum-vulnerable cryptographic algorithm (dev-dependencies not distinguished)";
 const MANIFEST_PQ_DEADLINE: &str = "2033";
+const OSV_SCA_CWE: &str = "CWE-937";
+const OSV_SCA_DESC: &str = "Dependency is affected by a known OSV vulnerability";
+
+pub struct OsvVulnerableDependency;
+
+impl_rule! {
+    OsvVulnerableDependency,
+    id = crate::deps::OSV_RULE_ID,
+    severity = Severity::High,
+    cwe = Some(OSV_SCA_CWE),
+    description = OSV_SCA_DESC,
+    language = Language::Manifest,
+    fn check(_self, _source, _tree) {
+        // Emitted by the dependency scanner when `--sca` or `foxguard sca`
+        // is enabled. The registered rule keeps metadata, severity
+        // overrides, and rule inventory stable without performing network
+        // work in the normal manifest pass.
+        Vec::new()
+    }
+}
 
 /// Apply shared PQ fields to a manifest finding.
 fn finalize_manifest_finding(f: &mut Finding, entry: &SeedEntry, pkg_name: &str) {

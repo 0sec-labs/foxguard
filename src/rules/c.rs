@@ -130,6 +130,14 @@ fn map_c_taint_finding(
         crypto_algorithm: None,
         cnsa2_deadline: None,
         dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
     }
 }
 

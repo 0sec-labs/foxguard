@@ -58,6 +58,14 @@ pub struct ScanConfig {
     /// output. Mirrors the `--cnsa2` CLI flag. See issue #241 and
     /// [`crate::compliance`].
     pub cnsa2: bool,
+    /// Enable dependency vulnerability scanning with OSV.
+    pub sca: bool,
+    /// Force SCA to use local advisory/cache inputs only.
+    pub sca_offline: bool,
+    /// Local OSV advisory JSON/JSONL file or directory.
+    pub sca_db: Option<String>,
+    /// OSV query cache path.
+    pub sca_cache: Option<String>,
     /// Pattern-based suppression rules. Each entry matches findings by
     /// `rule_id` (exact match) and `path_pattern` (regex matched against
     /// the finding's file path). When both conditions match, the finding
@@ -162,6 +170,12 @@ struct RawScanConfig {
     #[serde(default)]
     cnsa2: Option<bool>,
     #[serde(default)]
+    sca: Option<bool>,
+    #[serde(default)]
+    sca_offline: Option<bool>,
+    sca_db: Option<String>,
+    sca_cache: Option<String>,
+    #[serde(default)]
     suppressions: Vec<RawSuppressionPattern>,
 }
 
@@ -236,7 +250,8 @@ pub fn apply_scan_defaults(scan: &mut ScanArgs, config: Option<&FoxguardConfig>)
         return;
     };
 
-    if scan.rules.is_none() {
+    let sca_only = scan.sca && scan.no_builtins && !scan.pq_mode;
+    if scan.rules.is_none() && !sca_only {
         scan.rules = config.scan.rules.clone();
     }
     if !scan.no_builtins && config.scan.no_builtins {
@@ -253,6 +268,18 @@ pub fn apply_scan_defaults(scan: &mut ScanArgs, config: Option<&FoxguardConfig>)
     }
     if !scan.cnsa2 && config.scan.cnsa2 {
         scan.cnsa2 = true;
+    }
+    if !scan.sca && config.scan.sca {
+        scan.sca = true;
+    }
+    if !scan.sca_offline && config.scan.sca_offline {
+        scan.sca_offline = true;
+    }
+    if scan.sca_db.is_none() {
+        scan.sca_db = config.scan.sca_db.clone();
+    }
+    if scan.sca_cache.is_none() {
+        scan.sca_cache = config.scan.sca_cache.clone();
     }
 }
 
@@ -288,6 +315,16 @@ impl FoxguardConfig {
             .scan
             .baseline
             .map(|path| resolve_value_path(config_dir, allowed_root, "scan.baseline", &path))
+            .transpose()?;
+        let scan_sca_db = raw
+            .scan
+            .sca_db
+            .map(|path| resolve_value_path(config_dir, allowed_root, "scan.sca_db", &path))
+            .transpose()?;
+        let scan_sca_cache = raw
+            .scan
+            .sca_cache
+            .map(|path| resolve_value_path(config_dir, allowed_root, "scan.sca_cache", &path))
             .transpose()?;
         let scan_ignore_rules = raw
             .scan
@@ -397,6 +434,10 @@ impl FoxguardConfig {
                 min_confidence: raw.scan.min_confidence,
                 rule_options: raw.scan.rule_options,
                 cnsa2: raw.scan.cnsa2.unwrap_or(false),
+                sca: raw.scan.sca.unwrap_or(false),
+                sca_offline: raw.scan.sca_offline.unwrap_or(false),
+                sca_db: scan_sca_db,
+                sca_cache: scan_sca_cache,
                 suppressions,
             },
             secrets: SecretsConfig {
@@ -1087,6 +1128,14 @@ mod tests {
             crypto_algorithm: None,
             cnsa2_deadline: None,
             dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
         }
     }
 
@@ -1365,6 +1414,14 @@ mod tests {
             crypto_algorithm: None,
             cnsa2_deadline: None,
             dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
         }
     }
 
@@ -1886,6 +1943,14 @@ mod tests {
             crypto_algorithm: None,
             cnsa2_deadline: None,
             dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
         }
     }
 
