@@ -1,0 +1,45 @@
+# Labeled precision corpus for foxguard.
+#
+# Entries are pinned to immutable commit SHAs. The runner clones each repo,
+# checks out `ref`, scans `scan_subdir`, and joins emitted findings against
+# labels.jsonl by stable finding id.
+
+[settings]
+fail_on_missing_labels = true
+warn_precision_drop_pp = 5.0
+fail_precision_drop_pp = 10.0
+warn_noise_increase_pp = 5.0
+fail_noise_increase_pp = 10.0
+
+[[repos]]
+name = "express"
+url = "https://github.com/expressjs/express.git"
+ref = "1faf228935aa0a13111f92c28ee795be64ce3f0f" # v4.21.2
+language = "javascript"
+scan_subdir = "lib"
+notes = "Reference JavaScript web framework production source."
+
+[[repos]]
+name = "flask"
+url = "https://github.com/pallets/flask.git"
+ref = "ab8149664182b662453a563161aa89013c806dc9" # v3.1.0
+language = "python"
+scan_subdir = "src/flask"
+notes = "Reference Python web framework production source."
+
+[[repos]]
+name = "echo"
+url = "https://github.com/labstack/echo.git"
+ref = "98ca08e7dd64075b858e758d6693bf9799340756" # v4.13.4
+language = "go"
+scan_subdir = "."
+exclude = ["*_test.go"]
+notes = "Go web framework production source; tests excluded so noise is measured on library code."
+
+[[repos]]
+name = "juice-shop"
+url = "https://github.com/juice-shop/juice-shop.git"
+ref = "1867b926c5f50e4e692dc9c8f61821413cebe0cd" # v17.3.0
+language = "javascript"
+scan_subdir = "routes"
+notes = "OWASP Juice Shop intentionally vulnerable route handlers."

@@ -1,0 +1,228 @@
+{
+  "aggregate": {
+    "false_positive": 32,
+    "labeled": 48,
+    "reviewed": 48,
+    "reviewed_noise_rate": 0.6667,
+    "reviewed_precision": 0.3333,
+    "total": 48,
+    "true_positive": 16,
+    "unsure": 0
+  },
+  "generated_by": "benchmarks/precision/precision.py",
+  "repos": {
+    "echo": {
+      "false_positive": 6,
+      "labeled": 6,
+      "reviewed": 6,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 6,
+      "true_positive": 0,
+      "unsure": 0
+    },
+    "express": {
+      "false_positive": 1,
+      "labeled": 2,
+      "reviewed": 2,
+      "reviewed_noise_rate": 0.5,
+      "reviewed_precision": 0.5,
+      "total": 2,
+      "true_positive": 1,
+      "unsure": 0
+    },
+    "flask": {
+      "false_positive": 14,
+      "labeled": 14,
+      "reviewed": 14,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 14,
+      "true_positive": 0,
+      "unsure": 0
+    },
+    "juice-shop": {
+      "false_positive": 11,
+      "labeled": 26,
+      "reviewed": 26,
+      "reviewed_noise_rate": 0.4231,
+      "reviewed_precision": 0.5769,
+      "total": 26,
+      "true_positive": 15,
+      "unsure": 0
+    }
+  },
+  "rules": {
+    "go/math-random-used": {
+      "false_positive": 2,
+      "labeled": 2,
+      "reviewed": 2,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 2,
+      "true_positive": 0,
+      "unsure": 0
+    },
+    "go/no-hardcoded-secret": {
+      "false_positive": 4,
+      "labeled": 4,
+      "reviewed": 4,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 4,
+      "true_positive": 0,
+      "unsure": 0
+    },
+    "js/jwt-decode-without-verify": {
+      "false_positive": 0,
+      "labeled": 1,
+      "reviewed": 1,
+      "reviewed_noise_rate": 0.0,
+      "reviewed_precision": 1.0,
+      "total": 1,
+      "true_positive": 1,
+      "unsure": 0
+    },
+    "js/no-eval": {
+      "false_positive": 1,
+      "labeled": 2,
+      "reviewed": 2,
+      "reviewed_noise_rate": 0.5,
+      "reviewed_precision": 0.5,
+      "total": 2,
+      "true_positive": 1,
+      "unsure": 0
+    },
+    "js/no-path-traversal": {
+      "false_positive": 11,
+      "labeled": 15,
+      "reviewed": 15,
+      "reviewed_noise_rate": 0.7333,
+      "reviewed_precision": 0.2667,
+      "total": 15,
+      "true_positive": 4,
+      "unsure": 0
+    },
+    "js/no-sql-injection": {
+      "false_positive": 0,
+      "labeled": 2,
+      "reviewed": 2,
+      "reviewed_noise_rate": 0.0,
+      "reviewed_precision": 1.0,
+      "total": 2,
+      "true_positive": 2,
+      "unsure": 0
+    },
+    "js/no-ssrf": {
+      "false_positive": 0,
+      "labeled": 1,
+      "reviewed": 1,
+      "reviewed_noise_rate": 0.0,
+      "reviewed_precision": 1.0,
+      "total": 1,
+      "true_positive": 1,
+      "unsure": 0
+    },
+    "js/no-unsafe-deserialization": {
+      "false_positive": 0,
+      "labeled": 2,
+      "reviewed": 2,
+      "reviewed_noise_rate": 0.0,
+      "reviewed_precision": 1.0,
+      "total": 2,
+      "true_positive": 2,
+      "unsure": 0
+    },
+    "js/taint-eval": {
+      "false_positive": 0,
+      "labeled": 1,
+      "reviewed": 1,
+      "reviewed_noise_rate": 0.0,
+      "reviewed_precision": 1.0,
+      "total": 1,
+      "true_positive": 1,
+      "unsure": 0
+    },
+    "js/taint-log-injection": {
+      "false_positive": 0,
+      "labeled": 1,
+      "reviewed": 1,
+      "reviewed_noise_rate": 0.0,
+      "reviewed_precision": 1.0,
+      "total": 1,
+      "true_positive": 1,
+      "unsure": 0
+    },
+    "js/taint-sql-injection": {
+      "false_positive": 0,
+      "labeled": 2,
+      "reviewed": 2,
+      "reviewed_noise_rate": 0.0,
+      "reviewed_precision": 1.0,
+      "total": 2,
+      "true_positive": 2,
+      "unsure": 0
+    },
+    "js/taint-ssrf": {
+      "false_positive": 0,
+      "labeled": 1,
+      "reviewed": 1,
+      "reviewed_noise_rate": 0.0,
+      "reviewed_precision": 1.0,
+      "total": 1,
+      "true_positive": 1,
+      "unsure": 0
+    },
+    "py/no-eval": {
+      "false_positive": 2,
+      "labeled": 2,
+      "reviewed": 2,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 2,
+      "true_positive": 0,
+      "unsure": 0
+    },
+    "py/no-open-redirect": {
+      "false_positive": 1,
+      "labeled": 1,
+      "reviewed": 1,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 1,
+      "true_positive": 0,
+      "unsure": 0
+    },
+    "py/no-path-traversal": {
+      "false_positive": 9,
+      "labeled": 9,
+      "reviewed": 9,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 9,
+      "true_positive": 0,
+      "unsure": 0
+    },
+    "py/no-weak-crypto": {
+      "false_positive": 1,
+      "labeled": 1,
+      "reviewed": 1,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 1,
+      "true_positive": 0,
+      "unsure": 0
+    },
+    "py/taint-eval": {
+      "false_positive": 1,
+      "labeled": 1,
+      "reviewed": 1,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 1,
+      "true_positive": 0,
+      "unsure": 0
+    }
+  },
+  "schema_version": 1
+}

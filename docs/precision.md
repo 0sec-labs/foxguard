@@ -6,20 +6,21 @@ tuned for. It is the honest, technical counterpart to the marketing-facing
 coverage table in the [README](../README.md).
 
 It is also the document [issue #9](https://github.com/0sec-labs/foxguard/issues/9)
-asks for: rather than publishing a single global "precision number" that would
-be meaningless without a corpus, we publish a per-rule tier classification
-based on how each rule is implemented, and an explicit list of the false-positive
-patterns we already know about.
+asks for: rather than publishing a single global "precision number" without
+context, we publish a per-rule tier classification, a labeled OSS precision
+corpus, and an explicit list of the false-positive patterns we already know
+about.
 
 If you want the one-line version: foxguard rules fall into three tiers — tight
 structural matches, intentionally-loud conservative sink rules, and
 heuristic/regex-based rules — plus a fourth taint-based tier that trades recall
-for precision. We have not yet published labeled precision numbers on a real
-corpus; that work is tracked in issue #9 as a follow-up.
+for precision. The labeled corpus is intentionally small and reviewed rather
+than broad and unlabeled; use it as a regression baseline, not as a universal
+claim about every repository.
 
 ## Section 1: Methodology
 
-foxguard measures rule quality with three artifacts that all live in the repo:
+foxguard measures rule quality with four artifacts that all live in the repo:
 
 1. **Positive fixtures** under `tests/fixtures/vulnerable_*.{py,js,rs,...}`
    and `tests/fixtures/vulnerable.{py,js,go,rs,java,php,rb,cs,swift}`. These
@@ -51,7 +52,32 @@ foxguard measures rule quality with three artifacts that all live in the repo:
    is how we catch end-to-end precision regressions that neither the
    single-function fixtures nor the public corpus scan would notice.
 
-3. **Real-world corpus scans.** We have run foxguard against the latest HEAD of
+3. **Labeled OSS precision corpus.** `benchmarks/precision/corpus.toml` pins
+   Express, Flask, Echo, and OWASP Juice Shop by full commit SHA. Every current
+   foxguard finding in those scan scopes has a row in
+   `benchmarks/precision/labels.jsonl` with one of `true_positive`,
+   `false_positive`, or `unsure`, plus a one-line review justification. Run:
+
+   ```sh
+   ./benchmarks/precision/run.sh --check
+   ```
+
+   The command clones the corpus, scans it, joins findings to labels, and
+   writes `benchmarks/precision/results/summary.md` plus machine-readable
+   `summary.json`. The blessed snapshot in
+   `benchmarks/precision/expected.json` currently covers 48 findings:
+   16 true positives, 32 false positives, 0 unsure. Reviewed precision is
+   **33.3%** and reviewed noise is **66.7%** on this seed corpus. That number is
+   deliberately not softened: it shows the noisy rule families we need to fix,
+   especially broad path traversal, hardcoded-secret, and framework-helper
+   heuristics.
+
+   CI validates the corpus metadata on every PR, and the scheduled
+   `.github/workflows/precision-nightly.yml` run executes the full corpus,
+   uploads the dashboard artifact, and fails if reviewed precision drops or
+   reviewed noise rises beyond the thresholds in `corpus.toml`.
+
+4. **Real-world corpus scans.** We have run foxguard against the latest HEAD of
    Express, Flask, Gin, Laravel, Rails (actionpack), Spring Petclinic, and a
    Next.js starter — 799 files, 369 findings, 0.86 seconds total. Numbers and
    per-repo breakdown are in the blog post
@@ -67,12 +93,15 @@ foxguard measures rule quality with three artifacts that all live in the repo:
   (# expected findings)`. For well-constructed fixtures this is 1.0, and CI
   fails if it drops. This does **not** measure recall on real code — a hand-
   crafted fixture is not a representative corpus.
-- **False-positive footprint on real code:** the count of findings our
+- **Reviewed precision on the labeled corpus:** `TP / (TP + FP)` over labels in
+  `benchmarks/precision/labels.jsonl`, excluding `unsure` from the denominator.
+  The current seed-corpus snapshot is 33.3% reviewed precision and 66.7%
+  reviewed noise. This is a regression baseline, not a global product claim.
+- **False-positive footprint on broader real code:** the count of findings our
   engineers reviewed on the seven-framework corpus and classified as "not a
-  real issue." We have not done this exhaustively and we are not publishing a
-  number we cannot defend. Section 3 lists every false-positive *pattern* we
-  found and fixed; that is the honest version of the metric we can stand
-  behind today.
+  real issue." Section 3 lists every false-positive *pattern* we found and
+  fixed; the labeled precision corpus is now the durable place to track these
+  classifications over time.
 - **Noise ratio:** findings in test/example/vendored directories versus
   findings in production code. foxguard ships a built-in noise filter in
   `src/engine/scanner.rs` that skips `vendor/`, `node_modules/`,
@@ -83,13 +112,11 @@ foxguard measures rule quality with three artifacts that all live in the repo:
 
 ### What this methodology is not
 
-It is not a published per-rule precision table backed by a labeled corpus.
-Issue #9 scopes that as a separate effort — it requires pinning a set of OSS
-repos by SHA, labeling every finding TP/FP/unsure with a one-line
-justification, and wiring the result into CI. We have not done that yet. This
-document is the predecessor: it describes how we *think* about precision and
-which rules we already know are loose, so users can set expectations before
-they scan.
+It is not a universal precision claim for all codebases. The labeled corpus is
+a pinned, reviewed seed set designed to catch regressions and expose noisy rule
+families. It will grow over time, but users should still treat the per-rule tier
+classification and the known false-positive notes as the context for deciding
+which rules to gate in their own repositories.
 
 ## Section 2: Rule classifications
 
@@ -356,6 +383,5 @@ next to the code) and baselines for gradual rollout on legacy repositories.
 
 ---
 
-*This document tracks [issue #9](https://github.com/0sec-labs/foxguard/issues/9).
-The labeled-corpus follow-up — pinned OSS repos, TP/FP labels per finding,
-per-rule precision table in CI — is scoped separately in the same issue.*
+*This document now includes the labeled precision corpus added for
+[issue #445](https://github.com/0sec-labs/foxguard/issues/445).*

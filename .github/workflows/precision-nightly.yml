@@ -1,0 +1,53 @@
+name: Precision Corpus
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  precision:
+    name: Run labeled precision corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-precision-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-precision-
+            ${{ runner.os }}-cargo-build-
+
+      - uses: actions/cache@v5
+        with:
+          path: benchmarks/precision/clones
+          key: precision-clones-${{ hashFiles('benchmarks/precision/corpus.toml') }}
+          restore-keys: precision-clones-
+
+      - name: Build foxguard
+        run: cargo build --release
+
+      - name: Run precision corpus
+        run: FOXGUARD=target/release/foxguard ./benchmarks/precision/run.sh --check
+
+      - name: Upload precision dashboard
+        uses: actions/upload-artifact@v4
+        with:
+          name: precision-corpus
+          path: benchmarks/precision/results/
+          if-no-files-found: error
+          retention-days: 30

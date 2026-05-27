@@ -165,9 +165,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: bash -n action/entrypoint.sh
+      - run: bash -n benchmarks/precision/run.sh
       - run: bash -n benchmarks/run.sh
       - run: bash -n scripts/linux-codeql-dirty-frag.sh
       - run: bash -n scripts/release.sh
+
+  precision-corpus-metadata:
+    name: Precision Corpus Metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python3 benchmarks/precision/precision.py validate
 
   readme-version-refs:
     name: README Version Refs
