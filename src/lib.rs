@@ -1,3 +1,4 @@
+pub mod adapter;
 pub mod app;
 pub mod baseline;
 pub mod cli;

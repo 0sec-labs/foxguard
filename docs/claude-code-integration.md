@@ -93,4 +93,7 @@ Track the publishing checklist in the GitHub issue linked from the README/PR que
 This integration is intentionally Claude Code-specific. Shared behavior for other
 agent or editor hook systems is documented in
 [`agent-editor-integration.md`](agent-editor-integration.md) so Claude Code
-marketplace work can proceed independently.
+marketplace work can proceed independently. That shared contract now includes
+the `foxguard-adapter` JSON protocol; Claude Code's PostToolUse hook maps to
+`scan-file`, while its slash commands map to `scan-workspace`, `diff`, `pqc`,
+and `secrets`.
