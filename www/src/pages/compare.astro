@@ -2,74 +2,39 @@
 import Base from '../layouts/Base.astro';
 import SiteNav from '../components/ui/SiteNav.astro';
 import Footer from '../components/sections/Footer.astro';
+import {
+  matrixTools,
+  matrixRows,
+  coreRows,
+  performanceFeatures,
+  uniqueFeatures,
+  pricingRows,
+  type ToolKey,
+  type Cell,
+  type MatrixRow,
+} from '../data/compare';
 
-type Row = {
-  feature: string;
-  foxguard: string;
-  semgrep: string;
-  note?: string;
-};
-
-const coreFeatures: Row[] = [
-  { feature: 'Written in', foxguard: 'Rust', semgrep: 'OCaml + Python' },
-  { feature: 'License', foxguard: 'MIT / Apache-2.0', semgrep: 'LGPL-2.1 (OSS engine)' },
-  { feature: 'Price', foxguard: 'Free, forever', semgrep: 'Free tier, paid plans from $40/dev/mo' },
-  { feature: 'Binary distribution', foxguard: 'Single static binary', semgrep: 'Python wheel + OCaml runtime' },
-  { feature: 'Install methods', foxguard: 'npx, curl, cargo, brew', semgrep: 'pip, brew, Docker' },
+const multiTables: { num: string; title: string; rows: MatrixRow[]; minW: string; footnote?: string }[] = [
+  {
+    num: '01',
+    title: 'Capability matrix',
+    rows: matrixRows,
+    minW: 'min-w-[820px]',
+    footnote:
+      '✓ = supported out of the box; — = not available; short text = available with a caveat (paid tier, partial support, or a different mechanism). Competitor capabilities reflect their generally available, documented behavior — check each vendor for the latest.',
+  },
+  {
+    num: '02',
+    title: 'Core attributes',
+    rows: coreRows,
+    minW: 'min-w-[860px]',
+  },
 ];
-
-const analysisFeatures: Row[] = [
-  { feature: 'Intra-file taint tracking', foxguard: 'yes', semgrep: 'yes' },
-  { feature: 'Cross-file taint tracking', foxguard: 'yes', semgrep: 'Paid only (Pro engine)', note: 'Semgrep requires a Team/Enterprise license for cross-file analysis' },
-  { feature: 'Custom rules (YAML DSL)', foxguard: 'Planned', semgrep: 'yes', note: 'foxguard ships 170+ built-in rules; custom YAML rules are on the roadmap' },
-  { feature: 'Secrets detection', foxguard: 'yes', semgrep: 'yes (Secrets product, paid)' },
-  { feature: 'SARIF output', foxguard: 'yes', semgrep: 'yes' },
-  { feature: 'JSON output', foxguard: 'yes', semgrep: 'yes' },
-  { feature: 'Baseline / diff-only mode', foxguard: 'yes', semgrep: 'yes' },
-];
-
-const uniqueFeatures: Row[] = [
-  { feature: 'Post-quantum crypto audit (CNSA 2.0)', foxguard: 'yes', semgrep: 'no', note: 'Flags RSA, ECDSA, ECDH, and other pre-quantum primitives against NSA CNSA 2.0 timelines' },
-  { feature: 'CBOM generation', foxguard: 'yes', semgrep: 'no', note: 'Cryptographic Bill of Materials: inventories every crypto primitive in your codebase' },
-  { feature: 'TUI triage mode', foxguard: 'yes', semgrep: 'no', note: 'Interactive terminal UI to review findings one by one, suppress inline, or export' },
-  { feature: 'GitHub App (one-click PR scans)', foxguard: 'yes', semgrep: 'yes (via Semgrep App)' },
-  { feature: 'VS Code extension', foxguard: 'yes', semgrep: 'yes' },
-  { feature: 'Self-hostable GitHub receiver', foxguard: 'yes', semgrep: 'Partial (CI-based)' },
-];
-
-const performanceFeatures: Row[] = [
-  { feature: 'Typical scan time (medium repo)', foxguard: '< 1 second', semgrep: '10-30 seconds' },
-  { feature: 'Cold start (no cache)', foxguard: '< 1 second', semgrep: '5-15 seconds' },
-  { feature: 'Memory usage', foxguard: '~50 MB', semgrep: '~500 MB+' },
-  { feature: 'Parallel execution', foxguard: 'Rayon (work-stealing)', semgrep: 'Multiprocess' },
-];
-
-const languageSupport = [
-  { lang: 'Python', foxguard: true, semgrep: true },
-  { lang: 'JavaScript', foxguard: true, semgrep: true },
-  { lang: 'TypeScript', foxguard: true, semgrep: true },
-  { lang: 'Go', foxguard: true, semgrep: true },
-  { lang: 'Rust', foxguard: true, semgrep: true },
-  { lang: 'Java', foxguard: true, semgrep: true },
-  { lang: 'C#', foxguard: true, semgrep: true },
-  { lang: 'Ruby', foxguard: true, semgrep: true },
-  { lang: 'PHP', foxguard: true, semgrep: true },
-  { lang: 'Kotlin', foxguard: true, semgrep: true },
-  { lang: 'Scala', foxguard: false, semgrep: true },
-  { lang: 'Swift', foxguard: false, semgrep: true },
-  { lang: 'Terraform / HCL', foxguard: false, semgrep: true },
-];
-
-function icon(val: string) {
-  if (val === 'yes') return 'check';
-  if (val === 'no') return 'x';
-  return 'text';
-}
 ---
 
 <Base
-  title="foxguard vs Semgrep — Feature comparison"
-  description="Side-by-side comparison of foxguard and Semgrep. See how they differ on speed, taint tracking, PQC auditing, pricing, and more."
+  title="foxguard vs Semgrep, OpenGrep, CodeQL, Snyk Code & SonarQube"
+  description="How foxguard compares to Semgrep, OpenGrep, CodeQL, Snyk Code, and SonarQube on speed, taint analysis, post-quantum auditing, and price."
 >
   <div class="sticky top-0 z-40 bg-noir-950 border-b border-noir-800">
     <div class="max-w-5xl mx-auto px-6">
@@ -81,224 +46,185 @@ function icon(val: string) {
     <div class="max-w-5xl mx-auto px-6">
 
       <header class="mb-12 max-w-3xl">
-        <h1 class="font-heading text-3xl sm:text-4xl text-noir-50 tracking-tight mb-3">foxguard vs Semgrep</h1>
+        <h1 class="font-heading text-3xl sm:text-4xl text-noir-50 tracking-tight mb-3">How foxguard compares</h1>
         <p class="text-noir-500 text-base leading-relaxed">
-          Both tools do static analysis. This page lists factual capability differences so you can decide which fits your workflow. Semgrep is a great tool — foxguard focuses on speed, PQC readiness, and being fully free.
+          foxguard vs Semgrep, OpenGrep, CodeQL, Snyk Code, and SonarQube &mdash; on speed, taint analysis,
+          post-quantum readiness, and price. Facts only; verify the specifics with each vendor.
         </p>
       </header>
 
-      <!-- Performance -->
-      <section class="mb-16">
-        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
-          <span class="text-fox-light font-mono text-sm">01</span>
-          Performance
-        </h2>
-        <div class="rounded-xl border border-noir-800 overflow-hidden">
-          <table class="w-full text-left">
-            <thead>
-              <tr class="border-b border-noir-800 bg-noir-900/50">
-                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Metric</th>
-                <th class="px-4 py-2.5 text-xs font-medium text-fox-light uppercase tracking-wider">foxguard</th>
-                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Semgrep</th>
-              </tr>
-            </thead>
-            <tbody>
-              {performanceFeatures.map((row) => (
-                <tr class="border-b border-noir-800/40 last:border-b-0">
-                  <td class="px-4 py-2.5 text-sm text-noir-300">{row.feature}</td>
-                  <td class="px-4 py-2.5 text-sm text-noir-100 font-medium">{row.foxguard}</td>
-                  <td class="px-4 py-2.5 text-sm text-noir-400">{row.semgrep}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p class="text-noir-600 text-xs mt-3">Benchmarks measured on the same hardware with the same rulesets where applicable. Your mileage may vary.</p>
-      </section>
+      {/* 01 Capability matrix + 02 Core attributes share the multi-tool table layout */}
+      {multiTables.map((tbl) => (
+        <section class="mb-16">
+          <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
+            <span class="text-fox-light font-mono text-sm">{tbl.num}</span>
+            {tbl.title}
+          </h2>
+          <div class="rounded-xl border border-noir-800 overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class={`w-full text-left ${tbl.minW}`}>
+                <thead>
+                  <tr class="border-b border-noir-800 bg-noir-900/50">
+                    <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider sticky left-0 bg-noir-900/50">
+                      {tbl.title === 'Core attributes' ? 'Attribute' : 'Capability'}
+                    </th>
+                    {matrixTools.map((tool) => (
+                      <th class={`px-4 py-2.5 text-xs font-medium uppercase tracking-wider ${tool.key === 'foxguard' ? 'text-fox-light' : 'text-noir-500'}`}>
+                        <span class="block whitespace-nowrap">{tool.label}</span>
+                        <span class="block text-[10px] font-normal normal-case tracking-normal text-noir-600 mt-0.5">{tool.tagline}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tbl.rows.map((row) => (
+                    <tr class="border-b border-noir-800/40 last:border-b-0">
+                      <td class="px-4 py-2.5 text-sm text-noir-300 align-top sticky left-0 bg-noir-950">
+                        <span class="block whitespace-nowrap">{row.capability}</span>
+                        {row.note && <span class="block text-[11px] text-noir-600 mt-0.5 whitespace-normal max-w-[260px]">{row.note}</span>}
+                      </td>
+                      {matrixTools.map((tool) => {
+                        const val: Cell = row.cells[tool.key as ToolKey];
+                        const isFox = tool.key === 'foxguard';
+                        return (
+                          <td class="px-4 py-2.5 text-sm align-top">
+                            {val === 'yes' ? (
+                              <span class="text-sage-light">&#10003;</span>
+                            ) : val === 'no' ? (
+                              <span class="text-noir-700">&mdash;</span>
+                            ) : (
+                              <span class={isFox ? 'text-noir-100 font-medium' : 'text-noir-400'}>{val}</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {tbl.footnote && <p class="text-noir-600 text-xs mt-3">{tbl.footnote}</p>}
+        </section>
+      ))}
 
-      <!-- Core -->
-      <section class="mb-16">
-        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
-          <span class="text-fox-light font-mono text-sm">02</span>
-          Core
-        </h2>
-        <div class="rounded-xl border border-noir-800 overflow-hidden">
-          <table class="w-full text-left">
-            <thead>
-              <tr class="border-b border-noir-800 bg-noir-900/50">
-                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Feature</th>
-                <th class="px-4 py-2.5 text-xs font-medium text-fox-light uppercase tracking-wider">foxguard</th>
-                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Semgrep</th>
-              </tr>
-            </thead>
-            <tbody>
-              {coreFeatures.map((row) => (
-                <tr class="border-b border-noir-800/40 last:border-b-0">
-                  <td class="px-4 py-2.5 text-sm text-noir-300">{row.feature}</td>
-                  <td class="px-4 py-2.5 text-sm text-noir-100 font-medium">{row.foxguard}</td>
-                  <td class="px-4 py-2.5 text-sm text-noir-400">{row.semgrep}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- Analysis capabilities -->
+      {/* 03 Performance — the one head-to-head we actually measured */}
       <section class="mb-16">
         <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
           <span class="text-fox-light font-mono text-sm">03</span>
-          Analysis capabilities
+          Performance
         </h2>
         <div class="rounded-xl border border-noir-800 overflow-hidden">
-          <table class="w-full text-left">
-            <thead>
-              <tr class="border-b border-noir-800 bg-noir-900/50">
-                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Capability</th>
-                <th class="px-4 py-2.5 text-xs font-medium text-fox-light uppercase tracking-wider">foxguard</th>
-                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Semgrep</th>
-              </tr>
-            </thead>
-            <tbody>
-              {analysisFeatures.map((row) => (
-                <tr class="border-b border-noir-800/40 last:border-b-0">
-                  <td class="px-4 py-2.5 text-sm text-noir-300">
-                    {row.feature}
-                    {row.note && <span class="block text-[11px] text-noir-600 mt-0.5">{row.note}</span>}
-                  </td>
-                  <td class="px-4 py-2.5 text-sm">
-                    {icon(row.foxguard) === 'check' ? (
-                      <span class="text-sage-light">&#10003;</span>
-                    ) : icon(row.foxguard) === 'x' ? (
-                      <span class="text-noir-700">&mdash;</span>
-                    ) : (
-                      <span class="text-noir-100 font-medium">{row.foxguard}</span>
-                    )}
-                  </td>
-                  <td class="px-4 py-2.5 text-sm">
-                    {icon(row.semgrep) === 'check' ? (
-                      <span class="text-sage-light">&#10003;</span>
-                    ) : icon(row.semgrep) === 'x' ? (
-                      <span class="text-noir-700">&mdash;</span>
-                    ) : (
-                      <span class="text-noir-400">{row.semgrep}</span>
-                    )}
-                  </td>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left min-w-[520px]">
+              <thead>
+                <tr class="border-b border-noir-800 bg-noir-900/50">
+                  <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Metric</th>
+                  <th class="px-4 py-2.5 text-xs font-medium text-fox-light uppercase tracking-wider">foxguard</th>
+                  <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Semgrep</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {performanceFeatures.map((row) => (
+                  <tr class="border-b border-noir-800/40 last:border-b-0">
+                    <td class="px-4 py-2.5 text-sm text-noir-300">{row.feature}</td>
+                    <td class="px-4 py-2.5 text-sm text-noir-100 font-medium">{row.foxguard}</td>
+                    <td class="px-4 py-2.5 text-sm text-noir-400">{row.semgrep}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
+        <p class="text-noir-600 text-xs mt-3">
+          Measured on the same hardware and rulesets; reproduce with <code class="text-noir-500">./benchmarks/run.sh</code>.
+          OpenGrep forks the Semgrep engine, so its numbers track Semgrep closely. CodeQL builds a database before it can
+          query, and SonarQube runs as a server &mdash; both are heavier-weight by design rather than sub-second local tools.
+        </p>
       </section>
 
-      <!-- What foxguard does that Semgrep doesn't -->
+      {/* 04 Unique to foxguard */}
       <section class="mb-16">
         <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
           <span class="text-fox-light font-mono text-sm">04</span>
           Unique to foxguard
         </h2>
-        <div class="rounded-xl border border-noir-800 overflow-hidden">
-          <table class="w-full text-left">
-            <thead>
-              <tr class="border-b border-noir-800 bg-noir-900/50">
-                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Feature</th>
-                <th class="px-4 py-2.5 text-xs font-medium text-fox-light uppercase tracking-wider">foxguard</th>
-                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Semgrep</th>
-              </tr>
-            </thead>
-            <tbody>
-              {uniqueFeatures.map((row) => (
-                <tr class="border-b border-noir-800/40 last:border-b-0">
-                  <td class="px-4 py-2.5 text-sm text-noir-300">
-                    {row.feature}
-                    {row.note && <span class="block text-[11px] text-noir-600 mt-0.5">{row.note}</span>}
-                  </td>
-                  <td class="px-4 py-2.5 text-sm">
-                    {icon(row.foxguard) === 'check' ? (
-                      <span class="text-sage-light">&#10003;</span>
-                    ) : (
-                      <span class="text-noir-100 font-medium">{row.foxguard}</span>
-                    )}
-                  </td>
-                  <td class="px-4 py-2.5 text-sm">
-                    {icon(row.semgrep) === 'check' ? (
-                      <span class="text-sage-light">&#10003;</span>
-                    ) : icon(row.semgrep) === 'x' ? (
-                      <span class="text-noir-700">&mdash;</span>
-                    ) : (
-                      <span class="text-noir-400">{row.semgrep}</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-6 sm:p-8">
+          <p class="text-noir-500 text-sm mb-6">None of the other five tools ship these out of the box:</p>
+          <ul class="grid sm:grid-cols-2 gap-x-8 gap-y-5 list-none pl-0">
+            {uniqueFeatures.map((f) => (
+              <li>
+                <div class="flex items-baseline gap-2">
+                  <span class="text-fox-light flex-shrink-0">&#10003;</span>
+                  <span class="text-noir-100 text-sm font-medium">{f.feature}</span>
+                </div>
+                <p class="text-noir-500 text-xs leading-relaxed mt-1 pl-6">{f.note}</p>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
 
-      <!-- Language support -->
+      {/* 05 Pricing & licensing */}
       <section class="mb-16">
         <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-6 flex items-center gap-2">
           <span class="text-fox-light font-mono text-sm">05</span>
-          Language support
+          Pricing &amp; licensing
         </h2>
         <div class="rounded-xl border border-noir-800 overflow-hidden">
-          <table class="w-full text-left">
-            <thead>
-              <tr class="border-b border-noir-800 bg-noir-900/50">
-                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Language</th>
-                <th class="px-4 py-2.5 text-xs font-medium text-fox-light uppercase tracking-wider">foxguard</th>
-                <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Semgrep</th>
-              </tr>
-            </thead>
-            <tbody>
-              {languageSupport.map((row) => (
-                <tr class="border-b border-noir-800/40 last:border-b-0">
-                  <td class="px-4 py-2.5 text-sm text-noir-300">{row.lang}</td>
-                  <td class="px-4 py-2.5 text-sm">
-                    {row.foxguard ? (
-                      <span class="text-sage-light">&#10003;</span>
-                    ) : (
-                      <span class="text-noir-700">&mdash;</span>
-                    )}
-                  </td>
-                  <td class="px-4 py-2.5 text-sm">
-                    {row.semgrep ? (
-                      <span class="text-sage-light">&#10003;</span>
-                    ) : (
-                      <span class="text-noir-700">&mdash;</span>
-                    )}
-                  </td>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left min-w-[680px]">
+              <thead>
+                <tr class="border-b border-noir-800 bg-noir-900/50">
+                  <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Tool</th>
+                  <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">License</th>
+                  <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Cost model</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {pricingRows.map((row) => {
+                  const isFox = row.tool === 'foxguard';
+                  return (
+                    <tr class="border-b border-noir-800/40 last:border-b-0">
+                      <td class={`px-4 py-2.5 text-sm align-top whitespace-nowrap ${isFox ? 'text-fox-light font-medium' : 'text-noir-300'}`}>{row.tool}</td>
+                      <td class="px-4 py-2.5 text-sm text-noir-400 align-top">{row.license}</td>
+                      <td class="px-4 py-2.5 text-sm align-top">
+                        <span class={isFox ? 'text-noir-100 font-medium' : 'text-noir-400'}>{row.cost}</span>
+                        <span class="block text-[11px] text-noir-600 mt-0.5 whitespace-normal">{row.note}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <p class="text-noir-600 text-xs mt-3">Semgrep supports 30+ languages overall. foxguard focuses on the most-used languages for web and cloud-native applications. Both lists grow over time.</p>
+        <p class="text-noir-600 text-xs mt-3">
+          Pricing and licensing terms change; figures are indicative of each vendor's published model, not a quote.
+        </p>
       </section>
 
-      <!-- Summary -->
+      {/* Summary */}
       <section class="mb-16">
         <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-8">
           <h2 class="font-heading text-noir-50 text-xl mb-4">When to pick foxguard</h2>
-          <ul class="space-y-2 text-sm text-noir-400 leading-relaxed">
+          <ul class="space-y-2 text-sm text-noir-400 leading-relaxed list-none pl-0">
             <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You want a fast, free scanner with no login or token limits.</li>
-            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You need post-quantum crypto auditing (CNSA 2.0 compliance).</li>
-            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You need a CBOM for regulatory or supply-chain requirements.</li>
-            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You prefer a single static binary with no runtime dependencies.</li>
-            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You want cross-file taint tracking without a paid license.</li>
+            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You need post-quantum crypto auditing (CNSA 2.0) or a CBOM.</li>
+            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You prefer a single static binary with no runtime or database build.</li>
+            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You want cross-file taint tracking (Python, JS, Go) without a paid license.</li>
           </ul>
 
-          <h2 class="font-heading text-noir-50 text-xl mt-8 mb-4">When Semgrep might be better</h2>
-          <ul class="space-y-2 text-sm text-noir-400 leading-relaxed">
-            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span>You need custom YAML rules today (foxguard's custom rules are planned).</li>
-            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span>You need support for 30+ languages including Terraform, Swift, Scala.</li>
-            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span>You need a managed SaaS platform with team dashboards and policies.</li>
+          <h2 class="font-heading text-noir-50 text-xl mt-8 mb-4">When another tool might fit better</h2>
+          <ul class="space-y-2 text-sm text-noir-400 leading-relaxed list-none pl-0">
+            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span><span><span class="text-noir-300">Semgrep / OpenGrep</span> &mdash; you want a native custom-rule DSL or 30+ languages including Scala and Terraform.</span></li>
+            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span><span><span class="text-noir-300">CodeQL</span> &mdash; you live in GitHub Advanced Security and want deep QL queries with code scanning in the platform.</span></li>
+            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span><span><span class="text-noir-300">Snyk Code / SonarQube</span> &mdash; you want a managed SaaS or server with team dashboards, policy gates, and quality metrics.</span></li>
           </ul>
         </div>
       </section>
 
-      <!-- CTA -->
+      {/* CTA */}
       <section class="text-center">
         <h2 class="font-heading text-noir-50 text-2xl sm:text-3xl mb-4">Try foxguard on your codebase</h2>
         <p class="text-noir-500 text-sm mb-6">One command. No config. No signup. No cost.</p>

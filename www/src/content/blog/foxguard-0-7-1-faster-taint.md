@@ -100,4 +100,4 @@ v0.7.1 is a drop-in replacement for v0.7.0. Same rules, same output, faster.
 
 ---
 
-*foxguard is an open-source security scanner written in Rust. 170+ built-in rules, 10 languages, cross-file taint tracking for Python, JavaScript, and Go. [Try it](https://github.com/0sec-labs/foxguard): `npx foxguard .`*
+*foxguard is an open-source security scanner written in Rust. 196 built-in rules, 10 languages, cross-file taint tracking for Python, JavaScript, and Go. [Try it](https://github.com/0sec-labs/foxguard): `npx foxguard .`*

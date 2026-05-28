@@ -1,6 +1,7 @@
 ---
 import Base from '../../layouts/Base.astro';
 import SiteNav from '../../components/ui/SiteNav.astro';
+import Footer from '../../components/sections/Footer.astro';
 import { getCollection } from 'astro:content';
 
 const posts = (await getCollection('blog')).sort((a, b) =>
@@ -9,8 +10,10 @@ const posts = (await getCollection('blog')).sort((a, b) =>
 ---
 
 <Base title="Blog — foxguard" description="Notes on security scanning, rule development, and what we find in real codebases.">
-  <div class="max-w-5xl mx-auto px-6">
-    <SiteNav backLabel="blog" />
+  <div class="sticky top-0 z-40 bg-noir-950 border-b border-noir-800">
+    <div class="max-w-5xl mx-auto px-6">
+      <SiteNav backLabel="blog" />
+    </div>
   </div>
 
   <main class="pt-8 pb-24">
@@ -43,10 +46,5 @@ const posts = (await getCollection('blog')).sort((a, b) =>
     </div>
   </main>
 
-  <footer class="py-8">
-    <div class="max-w-5xl mx-auto px-6">
-      <div class="h-px bg-noir-800 mb-8"></div>
-      <a href="/" class="text-noir-600 hover:text-noir-100 transition-colors no-underline text-sm">foxguard.dev</a>
-    </div>
-  </footer>
+  <Footer />
 </Base>

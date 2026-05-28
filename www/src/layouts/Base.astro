@@ -8,6 +8,7 @@ interface Props {
 }
 
 const { title, description = 'A fast security scanner written in Rust. Completely free, 10+ languages supported, cross-file taint tracking, and sub-second scans.' } = Astro.props;
+const canonicalURL = new URL(Astro.url.pathname, Astro.site);
 ---
 
 <!doctype html>
@@ -22,7 +23,7 @@ const { title, description = 'A fast security scanner written in Rust. Completel
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://foxguard.dev" />
+    <meta property="og:url" content={canonicalURL} />
     <meta property="og:image" content="https://foxguard.dev/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -30,7 +31,7 @@ const { title, description = 'A fast security scanner written in Rust. Completel
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content="https://foxguard.dev/og-image.png" />
-    <link rel="canonical" href="https://foxguard.dev" />
+    <link rel="canonical" href={canonicalURL} />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <script type="application/ld+json" set:html={JSON.stringify({
       "@context": "https://schema.org",

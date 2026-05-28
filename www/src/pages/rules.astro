@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import SiteNav from '../components/ui/SiteNav.astro';
+import Footer from '../components/sections/Footer.astro';
 import { ruleGroups, totalRules } from '../data/rules';
 
 // Flatten all rules with their group info for the explorer
@@ -185,12 +186,7 @@ const categoryMap: CategoryEntry[] = [
     </div>
   </main>
 
-  <footer class="py-8">
-    <div class="max-w-5xl mx-auto px-6">
-      <div class="h-px bg-noir-800 mb-8"></div>
-      <a href="/" class="text-noir-600 hover:text-noir-100 transition-colors no-underline text-sm">foxguard.dev</a>
-    </div>
-  </footer>
+  <Footer />
 </Base>
 
 <style>

@@ -1,4 +1,6 @@
 ---
+import OsecWordmark from './OsecWordmark.astro';
+
 interface Props {
   backLink?: string;
   backLabel?: string;
@@ -22,17 +24,7 @@ const { backLink, backLabel } = Astro.props;
       class="hidden sm:inline-flex items-baseline gap-1 border-l border-noir-800 pl-2 text-[11px] font-medium text-noir-500 hover:text-noir-300 transition-colors no-underline"
     >
       <span>by</span>
-      <span class="osec-wm osec-wm-tail-slashed text-noir-300" aria-label="0sec">
-        <span class="osec-wm-stage">
-          <span class="osec-wm-mark">0</span>
-          <span class="osec-wm-tail">
-            <span class="osec-wm-prey">s</span>
-            <span class="osec-wm-prey">e</span>
-            <span class="osec-wm-prey">c</span>
-          </span>
-          <span class="osec-wm-bar" aria-hidden="true"></span>
-        </span>
-      </span>
+      <OsecWordmark />
     </a>
   </div>
 
@@ -84,7 +76,12 @@ const { backLink, backLabel } = Astro.props;
     <script>
       document.getElementById('nav-free-btn')?.addEventListener('click', () => {
         const installBox = document.querySelector('[data-install-box]') as HTMLElement;
-        if (!installBox) return;
+        // Pages without an install box (compare, github, rules, blog) send the
+        // visitor to the homepage hero, where the install command lives.
+        if (!installBox) {
+          window.location.href = '/';
+          return;
+        }
 
         const rect = installBox.getBoundingClientRect();
         const inView = rect.top >= 0 && rect.bottom <= window.innerHeight;
@@ -134,58 +131,3 @@ const { backLink, backLabel } = Astro.props;
     </script>
   </div>
 </nav>
-
-<style>
-  /* 0sec provenance mark.
-     Mirrors @0cloud/ui's OsecWordmark DOM plus CloudWordmark's
-     "slash through 0 while tail stays visible" static state. */
-  .osec-wm {
-    display: inline-block;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    font-weight: 600;
-    letter-spacing: -0.05em;
-    line-height: 1;
-  }
-
-  .osec-wm-stage {
-    position: relative;
-    display: inline-flex;
-    align-items: baseline;
-    line-height: 1;
-  }
-
-  .osec-wm-mark {
-    position: relative;
-    z-index: 3;
-    display: inline-block;
-  }
-
-  .osec-wm-tail {
-    position: relative;
-    display: inline-flex;
-    overflow: hidden;
-    vertical-align: baseline;
-    white-space: nowrap;
-    max-width: 1.8em;
-  }
-
-  .osec-wm-prey {
-    position: relative;
-    z-index: 1;
-    display: inline-block;
-    opacity: 1;
-  }
-
-  .osec-wm-bar {
-    position: absolute;
-    z-index: 4;
-    left: 0;
-    top: 0.085em;
-    width: 0.11em;
-    height: 0.85em;
-    background: #DC2626;
-    transform: translateX(0.32em) rotate(15deg);
-    transform-origin: center;
-    pointer-events: none;
-  }
-</style>

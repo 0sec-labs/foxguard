@@ -68,16 +68,16 @@ foxguard . --format json
 foxguard . --format sarif -o results.sarif
 
 # Scan only changed files (diff mode)
-foxguard . --baseline main
+foxguard diff main
 
 # Post-quantum crypto audit
-foxguard . --pqc
+foxguard pqc .
 
 # Generate a Cryptographic Bill of Materials
-foxguard . --cbom -o cbom.json
+foxguard pqc . --format cbom -o cbom.json
 
 # Interactive triage mode
-foxguard . --tui`}</code></pre>
+foxguard tui .`}</code></pre>
             </div>
           </div>
 
@@ -118,8 +118,8 @@ disable:
   - py-hardcoded-secret    # Handled by vault integration
   - go-md5-usage           # Legacy checksums, not security-critical
 
-# Output format (text | json | sarif)
-format: text
+# Output format (terminal | json | sarif)
+format: terminal
 
 # Enable post-quantum crypto audit
 pqc: false
@@ -363,7 +363,7 @@ password = get_config("db_password")`}</code></pre>
             <div class="rounded-xl border border-noir-800 overflow-hidden">
               <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
               <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# Only show findings not present on main
-foxguard . --baseline main`}</code></pre>
+foxguard diff main`}</code></pre>
             </div>
           </div>
 
@@ -375,7 +375,7 @@ foxguard . --baseline main`}</code></pre>
             </p>
             <div class="rounded-xl border border-noir-800 overflow-hidden">
               <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
-              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard . --tui`}</code></pre>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard tui .`}</code></pre>
             </div>
           </div>
         </div>
@@ -390,7 +390,7 @@ foxguard . --baseline main`}</code></pre>
 
         <div class="grid sm:grid-cols-3 gap-4">
           <div class="rounded-xl border border-noir-800 p-5">
-            <h3 class="font-heading text-noir-100 text-sm mb-1">Text (default)</h3>
+            <h3 class="font-heading text-noir-100 text-sm mb-1">Terminal (default)</h3>
             <p class="text-noir-500 text-xs leading-relaxed mb-2">Human-readable output with colors, file paths, line numbers, and fix suggestions.</p>
             <code class="text-fox-light text-xs bg-noir-900 px-2 py-1 rounded block">foxguard .</code>
           </div>
@@ -432,11 +432,11 @@ foxguard . --baseline main`}</code></pre>
           <div class="grid sm:grid-cols-2 gap-4">
             <div class="rounded-xl border border-noir-800 overflow-hidden">
               <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">PQC audit</div>
-              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard . --pqc`}</code></pre>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard pqc .`}</code></pre>
             </div>
             <div class="rounded-xl border border-noir-800 overflow-hidden">
               <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">CBOM generation</div>
-              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard . --cbom -o cbom.json`}</code></pre>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard pqc . --format cbom -o cbom.json`}</code></pre>
             </div>
           </div>
 

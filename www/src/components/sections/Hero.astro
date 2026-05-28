@@ -1,6 +1,7 @@
 ---
 import TerminalDemo from '../ui/TerminalDemo.astro';
 import SiteNav from '../ui/SiteNav.astro';
+import InstallTabs from '../ui/InstallTabs.astro';
 ---
 
 <section class="pt-0 pb-24">
@@ -17,66 +18,10 @@ import SiteNav from '../ui/SiteNav.astro';
         Completely free. 10+ languages supported. Cross-file taint tracking for Python, JavaScript, and Go. Single Rust binary, sub-second scans.
       </p>
       <!-- Tabbed install -->
-      <div data-install-box class="rounded-xl border border-noir-800 overflow-hidden mb-8 mx-auto transition-all duration-300" style="width: 440px; max-width: 100%;">
-        <div class="flex border-b border-noir-800">
-          <button data-tab="npx" class="install-tab active flex-1 px-4 py-2 text-sm text-noir-100 border-b-2 border-fox cursor-pointer">npx</button>
-          <button data-tab="curl" class="install-tab flex-1 px-4 py-2 text-sm text-noir-600 border-b-2 border-transparent hover:text-noir-400 transition-colors cursor-pointer">curl</button>
-          <button data-tab="cargo" class="install-tab flex-1 px-4 py-2 text-sm text-noir-600 border-b-2 border-transparent hover:text-noir-400 transition-colors cursor-pointer">cargo</button>
-        </div>
-        <button id="install-area" class="w-full px-5 py-3 font-mono text-sm flex items-center justify-center cursor-pointer hover:bg-noir-900/30 active:scale-95 transition-all">
-          <code id="install-cmd" class="text-fox-light whitespace-nowrap overflow-hidden text-ellipsis">npx foxguard .</code>
-        </button>
+      <div class="mb-8">
+        <InstallTabs id="hero" />
       </div>
     </div>
-
-    <script>
-      // Install tabs + copy
-      const cmds: Record<string, string> = {
-        npx: 'npx foxguard .',
-        curl: 'curl -fsSL https://foxguard.dev/install.sh | sh',
-        cargo: 'cargo install foxguard',
-      };
-
-      let currentCmd = 'npx foxguard .';
-
-      function showCopied() {
-        const cmdEl = document.getElementById('install-cmd')!;
-        const box = document.getElementById('install-area')!.parentElement!;
-        navigator.clipboard.writeText(currentCmd);
-
-        // Flash the border green + scale bounce
-        box.classList.remove('copy-flash');
-        void box.offsetWidth; // force reflow
-        box.classList.add('copy-flash');
-
-        // Brief green text
-        cmdEl.classList.add('text-green-400');
-        cmdEl.classList.remove('text-fox-light');
-        setTimeout(() => {
-          cmdEl.classList.remove('text-green-400');
-          cmdEl.classList.add('text-fox-light');
-        }, 400);
-      }
-
-      // Click command area to copy
-      document.getElementById('install-area')?.addEventListener('click', showCopied);
-
-      // Tab switching also copies
-      document.querySelectorAll('.install-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-          const key = (tab as HTMLElement).dataset.tab!;
-          currentCmd = cmds[key];
-          document.getElementById('install-cmd')!.textContent = currentCmd;
-          document.querySelectorAll('.install-tab').forEach(t => {
-            t.classList.remove('active', 'text-noir-100', 'border-fox');
-            t.classList.add('text-noir-600', 'border-transparent');
-          });
-          tab.classList.add('active', 'text-noir-100', 'border-fox');
-          tab.classList.remove('text-noir-600', 'border-transparent');
-          showCopied();
-        });
-      });
-    </script>
 
     <!-- Terminal -->
     <TerminalDemo />
