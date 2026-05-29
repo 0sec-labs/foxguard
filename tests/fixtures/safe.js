@@ -52,4 +52,33 @@ res.sendFile("/srv/app/public/logo.svg");
 // Safe: safe regex
 const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
-module.exports = { getUser, setContent, hashData, readConfig, cookieOptions, sessionLifecycle, token, verified, verifiedExpiry, verifiedStrict, parsedHeader };
+// Safe: const-bound URL passed to fetch (no dynamic/user input)
+const url = "https://api.example.com";
+fetch(url);
+
+// Safe: const-bound redirect destination
+const dest = "/home";
+res.redirect(dest);
+
+// Safe: static innerHTML assignment
+function renderStatic(el) {
+    el.innerHTML = "<b>static</b>";
+}
+
+// Safe: sanitized HTML via DOMPurify
+function renderSanitized(el, raw) {
+    el.innerHTML = DOMPurify.sanitize(raw);
+}
+
+// Safe: plain object literal, not a session() configuration
+const mockData = { secret: "not-a-session-secret-here" };
+
+// Safe: logging a local variable (not user-controlled input)
+function logStatus(status) {
+    console.log(`status is ${status}`);
+}
+
+// Safe: simple non-catastrophic regex with alternation (no nested quantifiers)
+const protocolRegex = /^(http|https)$/;
+
+module.exports = { getUser, setContent, hashData, readConfig, cookieOptions, sessionLifecycle, token, verified, verifiedExpiry, verifiedStrict, parsedHeader, renderStatic, renderSanitized, mockData, logStatus };
