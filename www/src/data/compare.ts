@@ -58,7 +58,7 @@ export interface MatrixRow {
 export const matrixRows: MatrixRow[] = [
   {
     capability: 'Free, no account required',
-    note: 'Can you run a full scan locally with no login, token, or paid tier?',
+    note: 'Full local scan with no login, token, or paid tier?',
     cells: {
       foxguard: 'yes',
       semgrep: 'yes',
@@ -81,7 +81,7 @@ export const matrixRows: MatrixRow[] = [
   },
   {
     capability: 'Sub-second local scans',
-    note: 'On small-to-medium repos; see the performance section for measured numbers.',
+    note: 'On small-to-medium repos; measured numbers below.',
     cells: {
       foxguard: 'yes',
       semgrep: 'no',
@@ -93,7 +93,7 @@ export const matrixRows: MatrixRow[] = [
   },
   {
     capability: 'Runs fully offline',
-    note: 'A default scan with no data leaving the machine. SaaS tools upload code or require an account.',
+    note: 'Default scan, no data leaves the machine. SaaS tools upload code or require an account.',
     cells: {
       foxguard: 'yes',
       semgrep: 'yes',
@@ -116,7 +116,7 @@ export const matrixRows: MatrixRow[] = [
   },
   {
     capability: 'Cross-file taint on the free tier',
-    note: 'foxguard: Python, JS, Go. Semgrep cross-file needs Pro; SonarQube needs Developer ed.; OpenGrep is per-file today.',
+    note: 'foxguard: Python, JS, Go. Semgrep needs Pro; SonarQube needs Developer ed.; OpenGrep is per-file today.',
     cells: {
       foxguard: 'yes',
       semgrep: 'Paid (Pro)',
@@ -139,7 +139,7 @@ export const matrixRows: MatrixRow[] = [
   },
   {
     capability: 'Custom rules',
-    note: "foxguard runs Semgrep-style YAML today; its own native rule DSL is on the roadmap.",
+    note: 'foxguard runs Semgrep-style YAML today; a native DSL is on the roadmap.',
     cells: {
       foxguard: 'Semgrep YAML',
       semgrep: 'YAML DSL',
@@ -151,7 +151,7 @@ export const matrixRows: MatrixRow[] = [
   },
   {
     capability: 'Loads Semgrep / OpenGrep YAML',
-    note: 'foxguard ingests a focused, parity-tested subset of Semgrep/OpenGrep YAML via --rules.',
+    note: 'Ingests a parity-tested subset of Semgrep/OpenGrep YAML via --rules.',
     cells: {
       foxguard: 'yes',
       semgrep: 'yes',
@@ -174,7 +174,7 @@ export const matrixRows: MatrixRow[] = [
   },
   {
     capability: 'Post-quantum crypto audit',
-    note: 'CNSA 2.0 readiness — flags pre-quantum primitives (RSA, ECDSA, ECDH, DH, DSA).',
+    note: 'CNSA 2.0 readiness. Flags pre-quantum primitives: RSA, ECDSA, ECDH, DH, DSA.',
     cells: {
       foxguard: 'yes',
       semgrep: 'no',
@@ -186,7 +186,7 @@ export const matrixRows: MatrixRow[] = [
   },
   {
     capability: 'CBOM generation',
-    note: 'Cryptographic Bill of Materials — inventory of every crypto primitive in the codebase.',
+    note: 'Cryptographic Bill of Materials. Lists every crypto primitive in the codebase.',
     cells: {
       foxguard: 'yes',
       semgrep: 'no',
@@ -293,7 +293,7 @@ export const coreRows: MatrixRow[] = [
   },
   {
     capability: 'Languages',
-    note: 'foxguard: 10 programming languages plus config/infra targets. Counts vary by edition/version.',
+    note: 'foxguard: 10 programming languages plus config/infra. Counts vary by edition/version.',
     cells: {
       foxguard: '10 + config',
       semgrep: '30+',
@@ -346,19 +346,19 @@ export interface UniqueFeature {
 export const uniqueFeatures: UniqueFeature[] = [
   {
     feature: 'Post-quantum crypto audit (CNSA 2.0)',
-    note: 'foxguard pqc . flags RSA, ECDSA, ECDH, DH, and DSA against NSA CNSA 2.0 migration timelines.',
+    note: 'foxguard pqc . flags RSA, ECDSA, ECDH, DH, and DSA against NSA CNSA 2.0 timelines.',
   },
   {
     feature: 'CBOM generation',
-    note: 'foxguard pqc . --format cbom inventories every crypto primitive for compliance and supply-chain reporting.',
+    note: 'foxguard pqc . --format cbom inventories every crypto primitive for compliance and supply-chain reports.',
   },
   {
     feature: 'TUI triage mode',
-    note: 'foxguard tui . opens an interactive terminal UI to review findings, read dataflow traces, and suppress inline.',
+    note: 'foxguard tui . opens an interactive UI to review findings, read dataflow traces, and suppress inline.',
   },
   {
     feature: 'Sub-second scans from a single binary',
-    note: 'No runtime, no database build, no server — one Rust binary that finishes before your editor saves.',
+    note: 'One Rust binary that scans in milliseconds. It runs without a runtime, a database build, or a server.',
   },
 ];
 
@@ -378,36 +378,36 @@ export const pricingRows: PricingRow[] = [
     tool: 'foxguard',
     license: 'MIT OR Apache-2.0',
     cost: 'Free, forever',
-    note: 'Fully open source. No accounts, no token limits, no paid tier gating engine features.',
+    note: 'Open source. Every engine feature is free, with no accounts or token limits.',
   },
   {
     tool: 'Semgrep',
     license: 'LGPL-2.1 (OSS engine)',
     cost: 'Free OSS + Team ~$35/contributor/mo',
-    note: 'CLI engine is open source; cross-file (Pro) analysis, Secrets, and the AppSec Platform are paid.',
+    note: 'CLI engine is open source; cross-file (Pro), Secrets, and the AppSec Platform are paid.',
   },
   {
     tool: 'OpenGrep',
     license: 'LGPL-2.1 (community fork)',
     cost: 'Free',
-    note: 'Vendor-neutral fork of the Semgrep engine, created in 2025; no paid tier or hosted platform.',
+    note: 'Vendor-neutral fork of the Semgrep engine (2025); no paid tier or hosted platform.',
   },
   {
     tool: 'CodeQL',
     license: 'MIT queries / proprietary CLI',
     cost: 'Free for OSS; paid for private',
-    note: 'Free on public repos and for research; private use is licensed via GitHub Advanced Security.',
+    note: 'Free on public repos and for research; private use needs GitHub Advanced Security.',
   },
   {
     tool: 'Snyk Code',
     license: 'Proprietary SaaS',
     cost: 'Free tier + Team from ~$25/dev/mo',
-    note: 'Cloud-based; code is uploaded for analysis by default. Limited free tier, paid team/enterprise plans.',
+    note: 'Cloud-based; code is uploaded by default. Limited free tier, paid team/enterprise plans.',
   },
   {
     tool: 'SonarQube',
     license: 'LGPLv3 (Community) + commercial',
     cost: 'Community free; Developer/Enterprise by LOC',
-    note: 'Self-hosted Community Build is free; cross-file taint and many languages need Developer Edition or higher.',
+    note: 'Self-hosted Community Build is free; cross-file taint and many languages need Developer Edition+.',
   },
 ];

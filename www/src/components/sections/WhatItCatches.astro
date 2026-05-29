@@ -5,8 +5,7 @@
   <div class="max-w-5xl mx-auto px-6">
 
     <h2 class="font-heading text-noir-50 text-3xl sm:text-4xl mb-4">Cross-file taint analysis</h2>
-    <p class="text-noir-500 text-base mb-2">Traces untrusted input across file boundaries.</p>
-    <p class="text-noir-500 text-base mb-12">Source in one file, sink in another — connected in 0.03 seconds.</p>
+    <p class="text-noir-500 text-base mb-12">foxguard tracks untrusted input across files in Python, JavaScript, and Go, linking a source in one file to a sink in another in 0.03 seconds.</p>
 
     <!-- Code example -->
     <div class="grid md:grid-cols-2 gap-px bg-noir-800 rounded-xl overflow-hidden mb-8">
@@ -45,13 +44,13 @@
       <div>
         <h3 class="text-noir-100 text-sm font-medium mb-2">Dataflow traces</h3>
         <p class="text-noir-500 text-sm leading-relaxed">
-          <code class="text-noir-400">--explain</code> shows the full path from source to sink with file and line references.
+          <code class="text-noir-400">--explain</code> prints the full source-to-sink path, file and line, plus a fix.
         </p>
       </div>
       <div>
-        <h3 class="text-noir-100 text-sm font-medium mb-2">Fix suggestions</h3>
+        <h3 class="text-noir-100 text-sm font-medium mb-2">Confidence-scored</h3>
         <p class="text-noir-500 text-sm leading-relaxed">
-          Every taint finding includes a concrete remediation with safe code patterns.
+          Findings are ranked by dataflow depth, so the most certain ones surface first.
         </p>
       </div>
       <div>

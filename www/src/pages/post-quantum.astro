@@ -1,0 +1,215 @@
+---
+import Base from '../layouts/Base.astro';
+import SiteNav from '../components/ui/SiteNav.astro';
+import Footer from '../components/sections/Footer.astro';
+import {
+  primitives,
+  milestones,
+  readinessLevels,
+} from '../data/pqc';
+---
+
+<Base
+  title="Post-quantum crypto audit, foxguard"
+  description="Flag RSA, ECDSA, ECDH, DH, and DSA against the NSA CNSA 2.0 (2030/2033/2035) deadlines and emit a CycloneDX 1.6 CBOM. Free, open source, runs locally."
+>
+  <div class="sticky top-0 z-40 bg-noir-950 border-b border-noir-800">
+    <div class="max-w-5xl mx-auto px-6">
+      <SiteNav backLabel="post-quantum" />
+    </div>
+  </div>
+
+  <main class="pt-8 pb-24">
+    <div class="max-w-5xl mx-auto px-6">
+
+      {/* Hero */}
+      <header class="mb-20 max-w-3xl">
+        <span class="text-fox-light font-mono text-xs uppercase tracking-wider">Post-quantum readiness</span>
+        <h1 class="font-heading text-3xl sm:text-5xl text-noir-50 tracking-tight mt-3 mb-5">
+          Post-quantum crypto compliance, built in.
+        </h1>
+        <p class="text-noir-300 text-base sm:text-lg leading-relaxed mb-4">
+          Attackers are already running <span class="text-noir-100">harvest-now, decrypt-later</span>. They capture
+          today's RSA- and ECC-protected traffic to crack once a quantum computer arrives. The NSA's
+          <span class="text-noir-100"> CNSA 2.0</span> mandate sets hard deadlines to migrate.
+        </p>
+        <p class="text-noir-500 text-base leading-relaxed mb-8">
+          foxguard audits your code and dependencies for quantum-vulnerable crypto, tags each finding with its CNSA 2.0
+          deadline, and emits a Cryptographic Bill of Materials. The whole audit runs locally from one free Rust binary.
+        </p>
+        <div class="rounded-xl border border-noir-800 overflow-hidden inline-block">
+          <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
+          <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# Audit the current directory for quantum-vulnerable crypto
+foxguard pqc .`}</code></pre>
+        </div>
+      </header>
+
+      {/* 01 What gets flagged */}
+      <section class="mb-20 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-3 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">01</span>
+          What gets flagged
+        </h2>
+        <p class="text-noir-500 text-sm leading-relaxed mb-6 max-w-3xl">
+          foxguard detects five quantum-vulnerable primitives. Each falls to Shor's algorithm. Their security rests on
+          integer factoring or discrete log, both of which a large-scale quantum computer solves efficiently.
+        </p>
+        <div class="rounded-xl border border-noir-800 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left min-w-[680px]">
+              <thead>
+                <tr class="border-b border-noir-800 bg-noir-900/50">
+                  <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Algorithm</th>
+                  <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Role</th>
+                  <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Why it breaks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {primitives.map((p) => (
+                  <tr class="border-b border-noir-800/40 last:border-b-0">
+                    <td class="px-4 py-2.5 text-sm text-fox-light font-mono font-medium align-top whitespace-nowrap">{p.name}</td>
+                    <td class="px-4 py-2.5 text-sm text-noir-300 align-top whitespace-nowrap">{p.role}</td>
+                    <td class="px-4 py-2.5 text-sm text-noir-400 align-top">{p.risk}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="mt-6 rounded-xl border border-noir-800 bg-noir-900/30 p-6">
+          <h3 class="font-heading text-noir-100 text-sm uppercase tracking-wider mb-3">Detection scope</h3>
+          <ul class="space-y-2 text-sm text-noir-400 leading-relaxed list-none pl-0">
+            <li class="flex gap-3">
+              <span class="text-fox-light flex-shrink-0">&#10003;</span>
+              <span><span class="text-noir-200">Source code in 5 languages.</span> Python, JavaScript, Go, Java, and Rust.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="text-fox-light flex-shrink-0">&#10003;</span>
+              <span><span class="text-noir-200">Web-server configuration.</span> Flags quantum-vulnerable TLS settings.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="text-fox-light flex-shrink-0">&#10003;</span>
+              <span><span class="text-noir-200">6 lockfile formats.</span> <code class="text-noir-400">Cargo.lock</code>, <code class="text-noir-400">requirements.txt</code>, <code class="text-noir-400">poetry.lock</code>, <code class="text-noir-400">Pipfile.lock</code>, <code class="text-noir-400">pnpm-lock.yaml</code>, and <code class="text-noir-400">package-lock.json</code>, so PQ-vulnerable dependencies are caught too.</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      {/* 02 CNSA 2.0 timeline */}
+      <section class="mb-20 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-3 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">02</span>
+          The CNSA 2.0 timeline
+        </h2>
+        <p class="text-noir-500 text-sm leading-relaxed mb-8 max-w-3xl">
+          CNSA 2.0 sets exclusive-use deadlines by system class. foxguard tags each finding with the year its class must be
+          fully migrated, sourced from the NSA CNSA 2.0 FAQ (Dec 2024, v2.1), so you know your runway.
+        </p>
+        <div class="grid gap-4 sm:grid-cols-3">
+          {milestones.map((m) => (
+            <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-6 flex flex-col">
+              <div class="font-heading text-fox-light text-3xl sm:text-4xl tracking-tight mb-1">{m.year}</div>
+              <div class="text-noir-100 text-sm font-medium mb-3">{m.label}</div>
+              <p class="text-noir-500 text-xs leading-relaxed">{m.covers}</p>
+            </div>
+          ))}
+        </div>
+        <p class="text-noir-600 text-xs mt-4 max-w-3xl">
+          Years are the <span class="text-noir-500">exclusive-use</span> milestones, the date by which a class must
+          have completed migration. The 2035 limit comes from the White House National Security Memorandum 10 (NSM-10).
+        </p>
+      </section>
+
+      {/* 03 CBOM */}
+      <section class="mb-20 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-3 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">03</span>
+          Generate a CBOM
+        </h2>
+        <p class="text-noir-500 text-sm leading-relaxed mb-6 max-w-3xl">
+          A <span class="text-noir-200">Cryptographic Bill of Materials</span> inventories every crypto primitive in your
+          codebase. It is the crypto counterpart to an SBOM. foxguard emits one in
+          <span class="text-noir-200"> CycloneDX 1.6</span>, the version that standardizes crypto assets.
+        </p>
+        <div class="rounded-xl border border-noir-800 overflow-hidden mb-6">
+          <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
+          <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# Write a CycloneDX 1.6 CBOM to a file
+foxguard pqc . --format cbom --output cbom.json`}</code></pre>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-6">
+            <h3 class="font-heading text-noir-100 text-sm uppercase tracking-wider mb-3">What's inside</h3>
+            <ul class="space-y-2 text-sm text-noir-400 leading-relaxed list-none pl-0">
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8226;</span><span><span class="text-noir-200">Cryptographic-asset components</span> grouped by algorithm, with the crypto primitive (e.g. <code class="text-noir-400">pk-encryption</code>, <code class="text-noir-400">signature</code>, <code class="text-noir-400">key-agree</code>) and functions.</span></li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8226;</span><span><span class="text-noir-200">Evidence occurrences</span> with the exact file, line, and column for every usage.</span></li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8226;</span><span><span class="text-noir-200">Library components</span> for flagged dependencies, with package manager and version text.</span></li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8226;</span><span><span class="text-noir-200">Linked vulnerability entries</span> with severity, CWE, and a remediation recommendation.</span></li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8226;</span><span>A deterministic serial number, so re-running on unchanged code yields the same CBOM.</span></li>
+            </ul>
+          </div>
+          <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-6">
+            <h3 class="font-heading text-noir-100 text-sm uppercase tracking-wider mb-3">Why it matters</h3>
+            <ul class="space-y-2 text-sm text-noir-400 leading-relaxed list-none pl-0">
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8226;</span><span><span class="text-noir-200">Compliance reporting.</span> A machine-readable artifact to demonstrate CNSA 2.0 progress.</span></li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8226;</span><span><span class="text-noir-200">Supply-chain visibility.</span> Surface quantum-vulnerable crypto pulled in by dependencies.</span></li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8226;</span><span><span class="text-noir-200">Tracking migration.</span> Diff CBOMs over time to watch quantum-vulnerable usage trend to zero.</span></li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8226;</span><span><span class="text-noir-200">Standard format.</span> CycloneDX 1.6 feeds existing toolchains rather than a bespoke schema.</span></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* 04 Migration readiness */}
+      <section class="mb-20 scroll-mt-20">
+        <h2 class="font-heading text-noir-50 text-xl sm:text-2xl mb-3 flex items-center gap-2">
+          <span class="text-fox-light font-mono text-sm">04</span>
+          Migration readiness
+        </h2>
+        <p class="text-noir-500 text-sm leading-relaxed mb-6 max-w-3xl">
+          Every <code class="text-noir-400">pqc</code> scan rolls up to one readiness level, so you can gate CI or report status
+          without reading every line. It's computed from the share of post-quantum findings with an unmet CNSA 2.0 deadline.
+        </p>
+        <div class="rounded-xl border border-noir-800 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left min-w-[520px]">
+              <thead>
+                <tr class="border-b border-noir-800 bg-noir-900/50">
+                  <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">Level</th>
+                  <th class="px-4 py-2.5 text-xs font-medium text-noir-500 uppercase tracking-wider">What it means</th>
+                </tr>
+              </thead>
+              <tbody>
+                {readinessLevels.map((r) => (
+                  <tr class="border-b border-noir-800/40 last:border-b-0">
+                    <td class="px-4 py-2.5 text-sm text-fox-light font-mono font-medium align-top whitespace-nowrap">{r.level}</td>
+                    <td class="px-4 py-2.5 text-sm text-noir-400 align-top">{r.meaning}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="text-noir-600 text-xs mt-4 max-w-3xl">
+          The scan also tallies findings per deadline year (e.g. how many fall under 2030 vs. 2033), so you can plan the
+          migration in the order the deadlines actually land.
+        </p>
+      </section>
+
+      {/* CTA */}
+      <section class="text-center">
+        <h2 class="font-heading text-noir-50 text-2xl sm:text-3xl mb-4">Audit your crypto before the deadline</h2>
+        <p class="text-noir-500 text-sm mb-6">Run one command. It's free and needs no configuration or signup.</p>
+        <div class="inline-flex rounded-xl border border-noir-800 overflow-hidden">
+          <code class="px-5 py-3 font-mono text-sm text-fox-light">foxguard pqc .</code>
+        </div>
+        <div class="flex items-center justify-center gap-4 mt-6">
+          <a href="/docs#pqc" class="text-sm text-noir-500 hover:text-noir-100 transition-colors no-underline">Read the PQC docs &#8594;</a>
+          <a href="/compare" class="text-sm text-noir-500 hover:text-noir-100 transition-colors no-underline">Compare with other scanners &#8594;</a>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <Footer />
+</Base>

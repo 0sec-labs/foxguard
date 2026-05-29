@@ -1,30 +1,16 @@
 ---
-import TerminalDemo from '../ui/TerminalDemo.astro';
 import SiteNav from '../ui/SiteNav.astro';
 import InstallTabs from '../ui/InstallTabs.astro';
 ---
 
-<section class="pt-0 pb-24">
-  <div class="max-w-5xl mx-auto px-6">
-
-    <div class="h-20"></div>
-
-    <!-- Headline -->
-    <div class="max-w-3xl mx-auto text-center mb-16">
-      <h1 class="font-heading text-noir-50 text-3xl sm:text-5xl lg:text-6xl leading-[1.1] tracking-tight mb-6">
-        A fast security scanner
-      </h1>
-      <p class="text-noir-400 text-sm sm:text-lg leading-relaxed mb-8 max-w-xl mx-auto">
-        Completely free. 10+ languages supported. Cross-file taint tracking for Python, JavaScript, and Go. Single Rust binary, sub-second scans.
-      </p>
-      <!-- Tabbed install -->
-      <div class="mb-8">
-        <InstallTabs id="hero" />
-      </div>
-    </div>
-
-    <!-- Terminal -->
-    <TerminalDemo />
-
+<section class="flex items-center justify-center text-center min-h-[calc(100svh-6rem)] px-6 pb-12">
+  <div class="max-w-3xl mx-auto">
+    <h1 class="font-heading text-noir-50 text-4xl sm:text-5xl lg:text-6xl leading-[1.1] tracking-tight mb-6">
+      An extremely fast security scanner, written in Rust.
+    </h1>
+    <p class="text-noir-400 text-sm sm:text-lg leading-relaxed mb-8 max-w-xl mx-auto">
+      Cross-file taint tracking, 196 built-in rules, and a post-quantum crypto audit in a single binary. Free and open source.
+    </p>
+    <InstallTabs id="hero" />
   </div>
 </section>

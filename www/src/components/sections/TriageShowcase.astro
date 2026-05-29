@@ -1,26 +1,38 @@
 ---
+import TerminalDemo from '../ui/TerminalDemo.astro';
 ---
 
 <section class="py-24" id="tui">
   <div class="max-w-5xl mx-auto px-6">
 
-    <h2 class="font-heading text-noir-50 text-3xl sm:text-4xl mb-4">Triage without leaving the terminal</h2>
-    <p class="text-noir-500 text-base mb-2">
-      <code class="text-noir-400">foxguard tui .</code> opens an interactive view over scan, diff, and secrets modes.
-    </p>
-    <p class="text-noir-500 text-base mb-12">
-      Browse findings, read full dataflow traces, and mark false positives or fixes in place &mdash; no context switching.
+    <h2 class="font-heading text-noir-50 text-3xl sm:text-4xl mb-4">Built for your terminal</h2>
+    <p class="text-noir-500 text-base mb-16 max-w-2xl">
+      Readable scan output, plus an interactive TUI. Run <code class="text-noir-400">foxguard tui .</code> to browse findings, read dataflow traces, and dismiss false positives.
     </p>
 
-    <!-- Screenshot -->
-    <div class="rounded-xl overflow-hidden border border-noir-800 bg-noir-950 mb-8">
-      <img
-        src="/tui/findings.png"
-        alt="foxguard TUI showing the findings list on the left and the full dataflow detail for a selected SQL injection on the right"
-        class="block w-full h-auto"
-        loading="lazy"
-        decoding="async"
-      />
+    <!-- Two terminal windows, layered -->
+    <div class="relative mb-8">
+      <!-- Scan output (back) -->
+      <div class="relative z-0 lg:w-[80%]">
+        <TerminalDemo />
+      </div>
+
+      <!-- TUI (front, overlapping bottom-right) -->
+      <div class="relative z-10 mt-6 lg:-mt-32 lg:ml-auto lg:w-[64%] rounded-xl overflow-hidden border border-noir-800 bg-noir-950 shadow-2xl shadow-black/60">
+        <div class="flex items-center gap-2 border-b border-noir-800 bg-noir-900/50 px-4 py-2.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-[#ef4444]/80"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-[#eab308]/80"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-[#22c55e]/80"></span>
+          <span class="font-mono text-[10px] text-noir-600 mx-auto tracking-wider">foxguard tui .</span>
+        </div>
+        <img
+          src="/tui/findings.png"
+          alt="foxguard TUI showing the findings list on the left and the full dataflow detail for a selected SQL injection on the right"
+          class="block w-full h-auto"
+          loading="lazy"
+          decoding="async"
+        />
+      </div>
     </div>
 
     <!-- Copy command -->

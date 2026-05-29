@@ -4,17 +4,18 @@ import SiteNav from '../components/ui/SiteNav.astro';
 import AnnouncementBar from '../components/ui/AnnouncementBar.astro';
 import InstallTabs from '../components/ui/InstallTabs.astro';
 import Hero from '../components/sections/Hero.astro';
-import WhatItCatches from '../components/sections/WhatItCatches.astro';
 import Speed from '../components/sections/Speed.astro';
+import WhatItCatches from '../components/sections/WhatItCatches.astro';
 import TriageShowcase from '../components/sections/TriageShowcase.astro';
 import Coverage from '../components/sections/Coverage.astro';
+import PostQuantum from '../components/sections/PostQuantum.astro';
 import Rules from '../components/sections/Rules.astro';
 import Footer from '../components/sections/Footer.astro';
 ---
 
 <Base
-  title="foxguard — A fast security scanner"
-  description="Completely free security scanner with 10+ languages supported, cross-file taint tracking, and sub-second scans. Single Rust binary."
+  title="foxguard — An extremely fast security scanner, written in Rust"
+  description="An extremely fast, free security scanner written in Rust. Cross-file taint tracking, 196 CWE-mapped rules, and a built-in post-quantum crypto audit — in a single binary that scans in milliseconds."
 >
   <div class="sticky top-0 z-40 bg-noir-950 border-b border-noir-800">
     <AnnouncementBar
@@ -29,20 +30,25 @@ import Footer from '../components/sections/Footer.astro';
   </div>
   <Hero />
   <div class="h-px bg-noir-800"></div>
-  <WhatItCatches />
-  <div class="h-px bg-noir-800"></div>
   <Speed />
+  <div class="h-px bg-noir-800"></div>
+  <WhatItCatches />
   <div class="h-px bg-noir-800"></div>
   <TriageShowcase />
   <div class="h-px bg-noir-800"></div>
   <Coverage />
+  <div class="h-px bg-noir-800"></div>
+  <PostQuantum />
   <div class="h-px bg-noir-800"></div>
   <Rules />
   <div class="h-px bg-noir-800"></div>
   <section class="py-24">
     <div class="max-w-5xl mx-auto px-6 text-center">
       <h2 class="font-heading text-noir-50 text-3xl sm:text-4xl mb-4">Try it on your codebase</h2>
-      <p class="text-noir-500 text-base mb-8">One command. No config. No signup.</p>
+      <p class="text-noir-500 text-base mb-2">One command, no setup.</p>
+      <p class="text-noir-500 text-base mb-8">
+        <code class="text-noir-400">foxguard secrets .</code> also catches leaked AWS, GitHub, Stripe, Slack, and private keys, redacted by default.
+      </p>
       <InstallTabs id="cta" />
       <div class="flex items-center justify-center gap-3 mt-8">
         <a

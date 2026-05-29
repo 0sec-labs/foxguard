@@ -1,43 +1,110 @@
 ---
 import { benchmarkRows, speedMultiplier } from '../../data/benchmarks';
 
-const maxTime = Math.max(...benchmarkRows.map(r => r.semgrep));
+// Bars share a real-time axis: width is proportional to elapsed seconds, scaled
+// to the slowest run. Each bar animates over its OWN measured duration, so when
+// a row starts both clocks together, foxguard's bar finishes near-instantly
+// while the others keep crawling — you watch the race in real time.
+const maxTime = Math.max(
+  ...benchmarkRows.flatMap((r) => r.tools.map((t) => t.seconds)),
+);
+const pct = (t: number) => Math.max((t / maxTime) * 100, 1.5);
+const decimalsFor = (winner?: boolean) => (winner ? 3 : 2);
+const barColor = (tool: string, winner?: boolean) =>
+  winner ? 'var(--color-fox,#d97706)' : tool === 'OpenGrep' ? '#6b6560' : tool === 'Semgrep' ? '#57534E' : '#4b4640';
 ---
 
-<div class="space-y-8">
-  {benchmarkRows.map((row) => {
-    const foxPct = Math.max((row.foxguard / maxTime) * 100, 4);
-    const semPct = (row.semgrep / maxTime) * 100;
-    return (
-      <div>
-        <div class="flex items-baseline justify-between mb-3">
-          <span class="text-noir-100 text-sm font-medium">{row.repo}</span>
-          <div class="flex items-center gap-3 text-xs">
-            <span class="text-fox font-medium">{speedMultiplier(row)}</span>
-            <span class="text-noir-600">{row.files} files</span>
-          </div>
-        </div>
-
-        <div class="flex items-center gap-3 mb-2">
-          <div class="w-14 sm:w-16 text-[10px] sm:text-xs text-noir-400 shrink-0">foxguard</div>
-          <div class="flex-1 rounded-full overflow-hidden" style="height:10px;background:rgba(41,37,36,0.5);">
-            <div style={`width:${foxPct}%;height:10px;background:#d97706;border-radius:9999px;`}></div>
-          </div>
-          <span class="text-xs font-mono text-fox shrink-0 w-14 text-right">{row.foxguard.toFixed(3)}s</span>
-        </div>
-
-        <div class="flex items-center gap-3">
-          <div class="w-14 sm:w-16 text-[10px] sm:text-xs text-noir-600 shrink-0">Semgrep</div>
-          <div class="flex-1 rounded-full overflow-hidden" style="height:10px;background:rgba(41,37,36,0.5);">
-            <div style={`width:${semPct}%;height:10px;background:#57534E;border-radius:9999px;`}></div>
-          </div>
-          <span class="text-xs font-mono text-noir-500 shrink-0 w-14 text-right">{row.semgrep.toFixed(1)}s</span>
-        </div>
+<div class="space-y-12">
+  {benchmarkRows.map((row) => (
+    <div class="bench-race">
+      <div class="text-noir-300 text-sm mb-5">
+        Scanning <span class="text-noir-100 font-medium">{row.repo}</span>, from scratch.
+        <span class="text-noir-600">· {row.files} files · </span>
+        <span class="text-fox font-medium">{speedMultiplier(row)} faster</span>
       </div>
-    );
-  })}
+
+      {row.tools.map((bar, i, arr) => (
+        <div class={`bench-line flex items-center gap-4 sm:gap-6 ${i < arr.length - 1 ? 'mb-5' : ''}`}>
+          <div class="flex-1 min-w-0">
+            <div class="bench-track h-2 rounded-sm overflow-hidden" style={`width:${pct(bar.seconds)}%;min-width:3px;background:rgba(68,64,60,0.45);`}>
+              <div
+                class="bench-bar h-full rounded-sm"
+                style={`width:0;${bar.winner ? 'box-shadow:0 0 12px rgba(217,119,6,0.45);' : ''}background:${barColor(bar.tool, bar.winner)};`}
+                data-seconds={bar.seconds}
+              ></div>
+            </div>
+            <div class={`font-mono text-[10px] tracking-[0.2em] uppercase mt-2.5 ${bar.winner ? 'text-fox-light' : 'text-noir-500'}`}>
+              {bar.tool}
+            </div>
+          </div>
+          <div class={`font-mono tabular-nums text-2xl sm:text-3xl shrink-0 text-right ${bar.winner ? 'text-fox' : 'text-noir-400'}`} style="min-width:5.5rem;">
+            <span class="bench-num" data-count-to={bar.seconds} data-decimals={decimalsFor(bar.winner)} data-seconds={bar.seconds}>{(0).toFixed(decimalsFor(bar.winner))}</span><span class="text-base text-noir-600">s</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  ))}
 </div>
 
-<p class="text-noir-600 text-xs mt-8">
-  foxguard built-ins vs Semgrep auto · <code class="text-noir-500">./benchmarks/run.sh</code> to reproduce
+<p class="text-noir-600 text-xs mt-10">
+  foxguard 0.8.1 built-ins vs Semgrep 1.156 &amp; OpenGrep 1.22 (<code class="text-noir-500">--config auto</code>, identical findings) · median of 3 runs, Apple Silicon · bars animate at true measured wall-clock time ·
+  <a href="/compare" class="text-noir-500 hover:text-fox transition-colors">full comparison vs CodeQL, Snyk &amp; SonarQube &#8594;</a>
 </p>
+
+<script>
+  // Animate one repo's race: all clocks start together; each bar + counter runs
+  // for its OWN measured number of seconds (real time), so the gap is felt.
+  function runRace(group: Element) {
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const bars = group.querySelectorAll<HTMLElement>('.bench-bar');
+    const nums = group.querySelectorAll<HTMLElement>('.bench-num');
+
+    bars.forEach((bar) => {
+      // The track is already sized to the final length; the fill races to 100% of it.
+      const seconds = parseFloat(bar.dataset.seconds || '0');
+      if (reduce || seconds <= 0) {
+        bar.style.width = '100%';
+        return;
+      }
+      const dur = seconds * 1000;
+      const start = performance.now();
+      function frame(now: number) {
+        const t = Math.min((now - start) / dur, 1);
+        bar.style.width = 100 * t + '%';
+        if (t < 1) requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    });
+
+    nums.forEach((num) => {
+      const to = parseFloat(num.dataset.countTo || '0');
+      const decimals = parseInt(num.dataset.decimals || '2', 10);
+      const seconds = parseFloat(num.dataset.seconds || '0');
+      if (reduce || seconds <= 0) {
+        num.textContent = to.toFixed(decimals);
+        return;
+      }
+      const dur = seconds * 1000;
+      const start = performance.now();
+      function frame(now: number) {
+        const t = Math.min((now - start) / dur, 1);
+        num.textContent = (to * t).toFixed(decimals);
+        if (t < 1) requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  const io = new IntersectionObserver(
+    (entries, obs) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          runRace(entry.target);
+          obs.unobserve(entry.target);
+        }
+      }
+    },
+    { threshold: 0.55 },
+  );
+  document.querySelectorAll('.bench-race').forEach((el) => io.observe(el));
+</script>

@@ -1,0 +1,56 @@
+---
+---
+
+<section class="py-24" id="post-quantum">
+  <div class="max-w-5xl mx-auto px-6">
+
+    <h2 class="font-heading text-noir-50 text-3xl sm:text-4xl mb-4">Post-quantum crypto audit, built in</h2>
+    <p class="text-noir-500 text-base mb-12">
+      One command flags RSA, ECDSA, ECDH, DH, and DSA across five languages, web-server configs, and six lockfile formats.
+    </p>
+
+    <!-- Copy command -->
+    <div class="flex items-center gap-3 mb-12">
+      <code class="flex-1 bg-noir-950 border border-noir-800 rounded-lg px-4 py-3 font-mono text-sm text-noir-300">
+        <span class="text-noir-600">$</span> foxguard pqc .
+      </code>
+      <button
+        type="button"
+        class="copy-btn rounded-lg border border-noir-700 px-4 py-3 text-sm text-noir-300 hover:border-noir-600 hover:text-noir-100 transition-colors"
+        data-copy="foxguard pqc ."
+        aria-label="Copy command"
+      >
+        <span class="copy-icon">copy</span>
+        <span class="check-icon hidden">copied!</span>
+      </button>
+    </div>
+
+    <!-- Features grid -->
+    <div class="grid sm:grid-cols-3 gap-8 mb-16">
+      <div>
+        <h3 class="text-noir-100 text-sm font-medium mb-2">CNSA 2.0 deadlines</h3>
+        <p class="text-noir-500 text-sm leading-relaxed">
+          Every finding carries its CNSA 2.0 migration deadline. Know what moves, and by when.
+        </p>
+      </div>
+      <div>
+        <h3 class="text-noir-100 text-sm font-medium mb-2">Migration readiness</h3>
+        <p class="text-noir-500 text-sm leading-relaxed">
+          A readiness score: how exposed you are, and where to start.
+        </p>
+      </div>
+      <div>
+        <h3 class="text-noir-100 text-sm font-medium mb-2">CycloneDX CBOM</h3>
+        <p class="text-noir-500 text-sm leading-relaxed">
+          <code class="text-noir-400">foxguard pqc . --format cbom</code> exports a CycloneDX cryptography bill of materials.
+        </p>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+      <a href="/post-quantum" class="text-fox-light hover:text-fox transition-colors no-underline">Learn about post-quantum readiness &rarr;</a>
+      <a href="/docs#pqc" class="text-noir-400 hover:text-noir-100 transition-colors no-underline">Read the PQC docs</a>
+    </div>
+
+  </div>
+</section>

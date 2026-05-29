@@ -11,11 +11,12 @@ const { href, label, detail, cta } = Astro.props;
 
 <a
   href={href}
-  class="block border-b border-fox/25 bg-fox/10 py-2 text-center no-underline transition-colors hover:bg-fox/15"
+  class="block bg-fox py-2 text-center no-underline transition-colors hover:bg-fox-light"
+  style="color:#1c1917;"
 >
   <span class="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-x-2 gap-y-1 px-6 text-xs sm:text-sm">
-    <span class="font-medium text-fox-light">{label}</span>
-    <span class="text-noir-400">{detail}</span>
-    <span class="text-fox-light">{cta}</span>
+    <span class="font-semibold">{label}</span>
+    <span class="opacity-80">{detail}</span>
+    <span class="font-semibold underline underline-offset-2">{cta}</span>
   </span>
 </a>

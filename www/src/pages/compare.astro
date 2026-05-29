@@ -21,7 +21,7 @@ const multiTables: { num: string; title: string; rows: MatrixRow[]; minW: string
     rows: matrixRows,
     minW: 'min-w-[820px]',
     footnote:
-      '✓ = supported out of the box; — = not available; short text = available with a caveat (paid tier, partial support, or a different mechanism). Competitor capabilities reflect their generally available, documented behavior — check each vendor for the latest.',
+      '✓ out of the box · — not available · text = caveat (paid tier / partial / different mechanism). Check each vendor for current details.',
   },
   {
     num: '02',
@@ -34,7 +34,7 @@ const multiTables: { num: string; title: string; rows: MatrixRow[]; minW: string
 
 <Base
   title="foxguard vs Semgrep, OpenGrep, CodeQL, Snyk Code & SonarQube"
-  description="How foxguard compares to Semgrep, OpenGrep, CodeQL, Snyk Code, and SonarQube on speed, taint analysis, post-quantum auditing, and price."
+  description="foxguard vs Semgrep, OpenGrep, CodeQL, Snyk Code, and SonarQube on speed, taint analysis, post-quantum auditing, and price."
 >
   <div class="sticky top-0 z-40 bg-noir-950 border-b border-noir-800">
     <div class="max-w-5xl mx-auto px-6">
@@ -48,8 +48,8 @@ const multiTables: { num: string; title: string; rows: MatrixRow[]; minW: string
       <header class="mb-12 max-w-3xl">
         <h1 class="font-heading text-3xl sm:text-4xl text-noir-50 tracking-tight mb-3">How foxguard compares</h1>
         <p class="text-noir-500 text-base leading-relaxed">
-          foxguard vs Semgrep, OpenGrep, CodeQL, Snyk Code, and SonarQube &mdash; on speed, taint analysis,
-          post-quantum readiness, and price. Facts only; verify the specifics with each vendor.
+          How foxguard compares with Semgrep, OpenGrep, CodeQL, Snyk Code, and SonarQube on speed,
+          taint analysis, post-quantum readiness, and price. Figures come from each vendor's docs.
         </p>
       </header>
 
@@ -137,9 +137,9 @@ const multiTables: { num: string; title: string; rows: MatrixRow[]; minW: string
           </div>
         </div>
         <p class="text-noir-600 text-xs mt-3">
-          Measured on the same hardware and rulesets; reproduce with <code class="text-noir-500">./benchmarks/run.sh</code>.
-          OpenGrep forks the Semgrep engine, so its numbers track Semgrep closely. CodeQL builds a database before it can
-          query, and SonarQube runs as a server &mdash; both are heavier-weight by design rather than sub-second local tools.
+          Same hardware and rulesets; reproduce with <code class="text-noir-500">./benchmarks/run.sh</code>.
+          OpenGrep forks the Semgrep engine, so its numbers track Semgrep. CodeQL builds a database before it can query
+          and SonarQube runs as a server. Both are heavier by design and are not sub-second local tools.
         </p>
       </section>
 
@@ -150,7 +150,7 @@ const multiTables: { num: string; title: string; rows: MatrixRow[]; minW: string
           Unique to foxguard
         </h2>
         <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-6 sm:p-8">
-          <p class="text-noir-500 text-sm mb-6">None of the other five tools ship these out of the box:</p>
+          <p class="text-noir-500 text-sm mb-6">None of the other five ship these out of the box:</p>
           <ul class="grid sm:grid-cols-2 gap-x-8 gap-y-5 list-none pl-0">
             {uniqueFeatures.map((f) => (
               <li>
@@ -200,7 +200,7 @@ const multiTables: { num: string; title: string; rows: MatrixRow[]; minW: string
           </div>
         </div>
         <p class="text-noir-600 text-xs mt-3">
-          Pricing and licensing terms change; figures are indicative of each vendor's published model, not a quote.
+          Terms change; figures reflect each vendor's published model, not a quote.
         </p>
       </section>
 
@@ -209,17 +209,17 @@ const multiTables: { num: string; title: string; rows: MatrixRow[]; minW: string
         <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-8">
           <h2 class="font-heading text-noir-50 text-xl mb-4">When to pick foxguard</h2>
           <ul class="space-y-2 text-sm text-noir-400 leading-relaxed list-none pl-0">
-            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You want a fast, free scanner with no login or token limits.</li>
+            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You want a fast, free scanner that runs without a login or token limits.</li>
             <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You need post-quantum crypto auditing (CNSA 2.0) or a CBOM.</li>
-            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You prefer a single static binary with no runtime or database build.</li>
-            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You want cross-file taint tracking (Python, JS, Go) without a paid license.</li>
+            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You want a single static binary that runs without a runtime or database build.</li>
+            <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#10003;</span>You need cross-file taint for Python, JS, and Go without a paid license.</li>
           </ul>
 
           <h2 class="font-heading text-noir-50 text-xl mt-8 mb-4">When another tool might fit better</h2>
           <ul class="space-y-2 text-sm text-noir-400 leading-relaxed list-none pl-0">
-            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span><span><span class="text-noir-300">Semgrep / OpenGrep</span> &mdash; you want a native custom-rule DSL or 30+ languages including Scala and Terraform.</span></li>
-            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span><span><span class="text-noir-300">CodeQL</span> &mdash; you live in GitHub Advanced Security and want deep QL queries with code scanning in the platform.</span></li>
-            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span><span><span class="text-noir-300">Snyk Code / SonarQube</span> &mdash; you want a managed SaaS or server with team dashboards, policy gates, and quality metrics.</span></li>
+            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span><span><span class="text-noir-300">Semgrep / OpenGrep</span> for a native custom-rule DSL, or 30+ languages including Scala and Terraform.</span></li>
+            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span><span><span class="text-noir-300">CodeQL</span> for GitHub Advanced Security with deep QL queries and in-platform code scanning.</span></li>
+            <li class="flex gap-3"><span class="text-noir-500 flex-shrink-0">&#8594;</span><span><span class="text-noir-300">Snyk Code / SonarQube</span> for a managed SaaS or server with team dashboards, policy gates, and quality metrics.</span></li>
           </ul>
         </div>
       </section>
@@ -227,7 +227,7 @@ const multiTables: { num: string; title: string; rows: MatrixRow[]; minW: string
       {/* CTA */}
       <section class="text-center">
         <h2 class="font-heading text-noir-50 text-2xl sm:text-3xl mb-4">Try foxguard on your codebase</h2>
-        <p class="text-noir-500 text-sm mb-6">One command. No config. No signup. No cost.</p>
+        <p class="text-noir-500 text-sm mb-6">Run one command to scan your code for free. No config or signup required.</p>
         <div class="inline-flex rounded-xl border border-noir-800 overflow-hidden">
           <code class="px-5 py-3 font-mono text-sm text-fox-light">npx foxguard .</code>
         </div>

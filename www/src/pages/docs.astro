@@ -7,7 +7,7 @@ import Footer from '../components/sections/Footer.astro';
 
 <Base
   title="Docs — foxguard"
-  description="foxguard documentation. Quick start, configuration reference, CI/CD integration, GitHub App setup, VS Code extension, and suppression guide."
+  description="Install it, configure it, and run it. Quick start, configuration, CI/CD, GitHub App, VS Code, suppression, and post-quantum audit."
 >
   <div class="sticky top-0 z-40 bg-noir-950 border-b border-noir-800">
     <div class="max-w-5xl mx-auto px-6">
@@ -21,7 +21,7 @@ import Footer from '../components/sections/Footer.astro';
       <header class="mb-12 max-w-3xl">
         <h1 class="font-heading text-3xl sm:text-4xl text-noir-50 tracking-tight mb-3">Documentation</h1>
         <p class="text-noir-500 text-base leading-relaxed">
-          Everything you need to install, configure, and integrate foxguard into your workflow.
+          Install it, configure it, and run it.
         </p>
       </header>
 
@@ -50,7 +50,7 @@ import Footer from '../components/sections/Footer.astro';
         <div class="space-y-6">
           <div>
             <h3 class="font-heading text-noir-100 text-base mb-3">Install</h3>
-            <p class="text-noir-400 text-sm mb-4">Pick whichever method you prefer. No runtime dependencies required.</p>
+            <p class="text-noir-400 text-sm mb-4">Pick a method. foxguard has no runtime dependencies.</p>
             <InstallTabs id="docs-install" />
           </div>
 
@@ -74,7 +74,7 @@ foxguard diff main
 foxguard pqc .
 
 # Generate a Cryptographic Bill of Materials
-foxguard pqc . --format cbom -o cbom.json
+foxguard pqc . --format cbom --output cbom.json
 
 # Interactive triage mode
 foxguard tui .`}</code></pre>
@@ -84,7 +84,7 @@ foxguard tui .`}</code></pre>
           <div>
             <h3 class="font-heading text-noir-100 text-base mb-3">What to expect</h3>
             <p class="text-noir-400 text-sm leading-relaxed">
-              foxguard scans your source code for security vulnerabilities, hardcoded secrets, and weak/pre-quantum cryptography. By default it prints findings to stdout grouped by severity. Exit code 0 means no findings; exit code 1 means findings were detected — useful for CI gating.
+              foxguard scans source for vulnerabilities, hardcoded secrets, and weak or pre-quantum crypto. Findings print to stdout, grouped by severity. Exit 0 means clean and exit 1 means findings, so you can gate CI on it.
             </p>
           </div>
         </div>
@@ -98,7 +98,7 @@ foxguard tui .`}</code></pre>
         </h2>
 
         <p class="text-noir-400 text-sm mb-6 leading-relaxed">
-          Create a <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">.foxguard.yml</code> in your project root to customize behavior. All fields are optional — foxguard works with zero config.
+          Drop a <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">.foxguard.yml</code> in your project root to customize behavior. Every field is optional, and foxguard runs with zero config.
         </p>
 
         <div class="rounded-xl border border-noir-800 overflow-hidden">
@@ -140,7 +140,7 @@ threads: 0`}</code></pre>
         <div class="mt-6 rounded-xl border border-noir-800 bg-noir-900/30 p-6">
           <h3 class="font-heading text-noir-100 text-sm mb-3">CLI flags override config</h3>
           <p class="text-noir-400 text-sm leading-relaxed">
-            Every config option has a corresponding CLI flag. Flags take precedence over <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">.foxguard.yml</code>. Run <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">foxguard --help</code> for the full list.
+            Every config option has a matching CLI flag, and flags win over <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">.foxguard.yml</code>. Run <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">foxguard --help</code> for the full list.
           </p>
         </div>
       </section>
@@ -154,7 +154,7 @@ threads: 0`}</code></pre>
 
         <div class="space-y-6">
           <p class="text-noir-400 text-sm leading-relaxed">
-            The foxguard GitHub App scans every PR automatically. No CI wiring needed — install the app, and findings appear as PR comments within seconds.
+            foxguard scans every PR automatically, with no CI wiring. Install the app and findings land as PR comments in seconds.
           </p>
 
           <div class="grid sm:grid-cols-3 gap-4">
@@ -166,19 +166,19 @@ threads: 0`}</code></pre>
             <div class="rounded-xl border border-noir-800 p-5">
               <div class="text-fox-light text-xl mb-2 font-mono">2</div>
               <h3 class="font-heading text-noir-100 text-sm mb-1">Open a PR</h3>
-              <p class="text-noir-500 text-xs leading-relaxed">foxguard scans the PR head ref. Most repos finish in under a second. Results are posted as a PR comment.</p>
+              <p class="text-noir-500 text-xs leading-relaxed">foxguard scans the PR head ref. Most repos finish in under a second. Results post as a PR comment.</p>
             </div>
             <div class="rounded-xl border border-noir-800 p-5">
               <div class="text-fox-light text-xl mb-2 font-mono">3</div>
               <h3 class="font-heading text-noir-100 text-sm mb-1">Fix and merge</h3>
-              <p class="text-noir-500 text-xs leading-relaxed">Push fixes, the scan re-runs automatically. No findings = clean comment. No configuration needed.</p>
+              <p class="text-noir-500 text-xs leading-relaxed">Push fixes and the scan re-runs automatically. A clean scan posts a clean comment. There is nothing to configure.</p>
             </div>
           </div>
 
           <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-6">
             <h3 class="font-heading text-noir-100 text-sm mb-2">Self-hosting</h3>
             <p class="text-noir-400 text-sm leading-relaxed mb-3">
-              For air-gapped or regulated environments, you can self-host the webhook receiver. Register your own GitHub App, point its webhook URL at your instance, and deploy with Docker:
+              For air-gapped or regulated environments, self-host the webhook receiver. Register your own GitHub App, point its webhook URL at your instance, and deploy with Docker:
             </p>
             <div class="rounded-lg border border-noir-800 overflow-hidden">
               <pre class="px-4 py-3 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`docker run --rm -p 8080:8080 \\
@@ -201,7 +201,7 @@ threads: 0`}</code></pre>
 
         <div class="space-y-4">
           <p class="text-noir-400 text-sm leading-relaxed">
-            The foxguard VS Code extension shows findings inline as you code. Install it from the Visual Studio Marketplace or from the command line:
+            See findings inline as you code. Install from the Visual Studio Marketplace or the command line:
           </p>
 
           <div class="rounded-xl border border-noir-800 overflow-hidden">
@@ -230,7 +230,7 @@ threads: 0`}</code></pre>
         </h2>
 
         <p class="text-noir-400 text-sm mb-6 leading-relaxed">
-          foxguard exits with code 1 when findings are detected, making it easy to gate merges. Use SARIF output for rich integration with GitHub Code Scanning, GitLab SAST, and other platforms.
+          foxguard exits 1 on findings, so gating merges is trivial. Use SARIF output for GitHub Code Scanning, GitLab SAST, and other platforms.
         </p>
 
         <!-- GitHub Actions -->
@@ -259,7 +259,7 @@ jobs:
         with:
           sarif_file: results.sarif`}</code></pre>
           </div>
-          <p class="text-noir-600 text-xs mt-2">Alternatively, use the <a href="/github" class="text-noir-400 hover:text-noir-100 transition-colors">GitHub App</a> — it does this automatically with no workflow file needed.</p>
+          <p class="text-noir-600 text-xs mt-2">Alternatively, use the <a href="/github" class="text-noir-400 hover:text-noir-100 transition-colors">GitHub App</a>, which does this automatically with no workflow file needed.</p>
         </div>
 
         <!-- GitLab CI -->
@@ -304,7 +304,7 @@ foxguard . --severity high
         </h2>
 
         <p class="text-noir-400 text-sm mb-6 leading-relaxed">
-          Not every finding is actionable. foxguard gives you multiple ways to suppress false positives without losing track of them.
+          Suppress false positives and pick the scope that fits.
         </p>
 
         <div class="space-y-6">
@@ -358,7 +358,7 @@ password = get_config("db_password")`}</code></pre>
           <div>
             <h3 class="font-heading text-noir-100 text-base mb-3">Baseline / diff-only mode</h3>
             <p class="text-noir-400 text-sm mb-3 leading-relaxed">
-              Only report new findings introduced since a baseline branch. Useful for gradually adopting foxguard on an existing codebase without drowning in pre-existing issues.
+              Report only findings introduced since a baseline branch. Adopt foxguard on an existing codebase without drowning in pre-existing issues.
             </p>
             <div class="rounded-xl border border-noir-800 overflow-hidden">
               <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
@@ -371,7 +371,7 @@ foxguard diff main`}</code></pre>
           <div>
             <h3 class="font-heading text-noir-100 text-base mb-3">TUI triage</h3>
             <p class="text-noir-400 text-sm mb-3 leading-relaxed">
-              Use the interactive terminal UI to review findings one by one, suppress with a keybinding, or export the remaining findings.
+              Review findings one by one in the terminal UI, suppress with a keybinding, or export what remains.
             </p>
             <div class="rounded-xl border border-noir-800 overflow-hidden">
               <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
@@ -416,16 +416,16 @@ foxguard diff main`}</code></pre>
 
         <div class="space-y-6">
           <p class="text-noir-400 text-sm leading-relaxed">
-            foxguard can audit your codebase for cryptographic primitives that will be broken by quantum computers. This maps to NSA CNSA 2.0 timelines — the transition deadlines are approaching fast.
+            Audit your codebase for crypto primitives that quantum computers will break, mapped to NSA CNSA 2.0 timelines. The transition deadlines are close.
           </p>
 
           <div class="rounded-xl border border-noir-800 bg-noir-900/30 p-6">
             <h3 class="font-heading text-noir-100 text-sm mb-3">What gets flagged</h3>
             <ul class="space-y-2 text-sm text-noir-400 leading-relaxed">
-              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">RSA</strong> — key exchange, signing, encryption (all key sizes)</li>
-              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">ECDSA / ECDH</strong> — elliptic curve operations (P-256, P-384, etc.)</li>
-              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">DH</strong> — classic Diffie-Hellman key exchange</li>
-              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">DSA</strong> — Digital Signature Algorithm</li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">RSA</strong>: key exchange, signing, encryption (all key sizes)</li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">ECDSA / ECDH</strong>: elliptic curve operations (P-256, P-384, etc.)</li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">DH</strong>: classic Diffie-Hellman key exchange</li>
+              <li class="flex gap-3"><span class="text-fox-light flex-shrink-0">&#8594;</span><strong class="text-noir-200">DSA</strong>: Digital Signature Algorithm</li>
             </ul>
           </div>
 
@@ -436,12 +436,12 @@ foxguard diff main`}</code></pre>
             </div>
             <div class="rounded-xl border border-noir-800 overflow-hidden">
               <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">CBOM generation</div>
-              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard pqc . --format cbom -o cbom.json`}</code></pre>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard pqc . --format cbom --output cbom.json`}</code></pre>
             </div>
           </div>
 
           <p class="text-noir-500 text-sm leading-relaxed">
-            The CBOM (Cryptographic Bill of Materials) inventories every crypto primitive in your codebase — useful for compliance reporting and tracking your migration to post-quantum algorithms.
+            The CBOM (Cryptographic Bill of Materials) inventories every crypto primitive in your codebase for compliance reporting and for tracking your migration to post-quantum algorithms.
           </p>
         </div>
       </section>
