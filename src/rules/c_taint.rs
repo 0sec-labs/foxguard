@@ -154,14 +154,17 @@ fn format_string_spec() -> TaintSpec {
                 canonical: "fprintf".into(),
                 description: "fprintf() with tainted format string".into(),
             },
-            NodeMatcher::Call {
-                canonical: "sprintf".into(),
-                description: "sprintf() with tainted format string".into(),
-            },
-            NodeMatcher::Call {
-                canonical: "snprintf".into(),
-                description: "snprintf() with tainted format string".into(),
-            },
+            // NOTE: sprintf()/snprintf() are intentionally NOT
+            // format-string sinks (T15). sprintf() doubles as a
+            // buffer-writing call (it propagates taint into its
+            // destination buffer for the buffer-overflow / SQL-injection
+            // rules); treating it as a format-string sink as well caused
+            // a tainted format to both fire here and re-trigger
+            // downstream off the destination buffer. snprintf() is
+            // additionally bounds-safe (truncates to its size argument),
+            // so a tainted format there does not warrant a Critical
+            // finding. Real format-string vulnerabilities still surface
+            // through printf()/fprintf()/syslog().
             NodeMatcher::Call {
                 canonical: "syslog".into(),
                 description: "syslog() with tainted format string".into(),
@@ -627,6 +630,18 @@ fn build_tainted_set(
                     });
                     if is_buffer_writing_call(callee) && !is_sanitizer {
                         if let Some(args) = n.child_by_field_name("arguments") {
+                            // T15: for sprintf/snprintf only propagate the
+                            // *data* arguments into the destination buffer
+                            // when the format string is a literal. A
+                            // tainted format string is a format-string
+                            // concern, not a clean data-into-buffer flow,
+                            // and propagating it would let it re-trigger
+                            // downstream off the destination buffer.
+                            if matches!(callee, "sprintf" | "snprintf")
+                                && !printf_like_format_is_literal(callee, args)
+                            {
+                                return;
+                            }
                             let arg_names = collect_arg_identifiers(args, s);
                             // The first argument is the destination buffer.
                             if let Some(dest_name) = arg_names.first() {
@@ -771,6 +786,48 @@ fn find_sinks(
                             });
                         }
                     }
+                } else if is_exec_call(callee) {
+                    // T13: exec*() command injection — only the *pathname*
+                    // (first argument) controls which program runs. A
+                    // tainted data argument (argv[N] passed to the child)
+                    // is not command injection, so only flag when the
+                    // first argument is tainted.
+                    let mut cursor = args.walk();
+                    let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+                    if let Some(path_arg) = arg_nodes.first() {
+                        if expr_uses_tainted_simple(*path_arg, s, tainted) {
+                            sinks.push(TaintSink {
+                                start_byte: n.start_byte(),
+                                end_byte: n.end_byte(),
+                                description: description.clone(),
+                            });
+                        }
+                    }
+                } else if is_sized_buffer_call(callee) {
+                    // T14: memcpy/memmove — a constant or sizeof() size
+                    // argument means the copy is bounded and not a
+                    // buffer overflow, even if src/dest are tainted.
+                    // Suppress unless the size argument is itself tainted
+                    // or a non-constant (dynamic) expression.
+                    let mut cursor = args.walk();
+                    let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+                    // A numeric literal, `sizeof(...)`, or constant
+                    // arithmetic evaluates to a compile-time constant
+                    // regardless of any tainted buffer it textually names
+                    // (e.g. `sizeof(buf)`), so it bounds the copy. A
+                    // tainted length is an `identifier`/dynamic expression,
+                    // which `is_constant_size_expr` rejects.
+                    let size_constant = arg_nodes
+                        .get(2)
+                        .map(|size_arg| is_constant_size_expr(*size_arg, s))
+                        .unwrap_or(false);
+                    if !size_constant && expr_uses_tainted_simple(args, s, tainted) {
+                        sinks.push(TaintSink {
+                            start_byte: n.start_byte(),
+                            end_byte: n.end_byte(),
+                            description: description.clone(),
+                        });
+                    }
                 } else {
                     // General sinks: any tainted argument triggers.
                     if expr_uses_tainted_simple(args, s, tainted) {
@@ -815,11 +872,76 @@ fn expr_uses_tainted_simple(node: Node<'_>, src: &str, tainted: &HashSet<String>
 
 /// Whether a callee is a format-string function where only the format
 /// argument should be checked (not arbitrary arguments).
+///
+/// `sprintf`/`snprintf` are intentionally excluded (T15): see the note in
+/// [`format_string_spec`].
 fn is_format_string_sink(callee: &str) -> bool {
+    matches!(callee, "printf" | "fprintf" | "syslog")
+}
+
+/// Whether a callee is an `exec*` family call where command injection is
+/// only meaningful when the pathname (first argument) is tainted (T13).
+fn is_exec_call(callee: &str) -> bool {
     matches!(
         callee,
-        "printf" | "fprintf" | "sprintf" | "snprintf" | "syslog"
+        "execl" | "execlp" | "execle" | "execv" | "execvp" | "execve"
     )
+}
+
+/// Whether a callee is a fixed-size buffer copy whose third argument is
+/// the byte count (T14).
+fn is_sized_buffer_call(callee: &str) -> bool {
+    matches!(callee, "memcpy" | "memmove")
+}
+
+/// Whether the format argument of a `sprintf`/`snprintf` call is a string
+/// literal. For `sprintf(dest, fmt, ...)` the format is arg index 1; for
+/// `snprintf(dest, size, fmt, ...)` it is arg index 2.
+fn printf_like_format_is_literal(callee: &str, args: Node<'_>) -> bool {
+    let fmt_idx = match callee {
+        "snprintf" => 2,
+        _ => 1,
+    };
+    let mut cursor = args.walk();
+    let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+    arg_nodes
+        .get(fmt_idx)
+        .map(|fmt| fmt.kind() == "string_literal")
+        .unwrap_or(false)
+}
+
+/// Whether a size-argument expression is a compile-time constant: a
+/// numeric literal or a `sizeof(...)` expression (possibly combined with
+/// constant arithmetic, e.g. `sizeof(buf) - 1`). Such bounds make the
+/// copy safe regardless of source taint.
+fn is_constant_size_expr(node: Node<'_>, src: &str) -> bool {
+    match node.kind() {
+        "number_literal" => true,
+        // `sizeof buf` / `sizeof(buf)`
+        "sizeof_expression" => true,
+        // Parenthesised: `(sizeof(buf) - 1)`
+        "parenthesized_expression" => node
+            .named_child(0)
+            .map(|c| is_constant_size_expr(c, src))
+            .unwrap_or(false),
+        // Constant arithmetic: both operands must be constant.
+        "binary_expression" => {
+            let left = node.child_by_field_name("left");
+            let right = node.child_by_field_name("right");
+            match (left, right) {
+                (Some(l), Some(r)) => {
+                    is_constant_size_expr(l, src) && is_constant_size_expr(r, src)
+                }
+                _ => false,
+            }
+        }
+        // Unary on a constant (e.g. `-1`).
+        "unary_expression" => node
+            .named_child(0)
+            .map(|c| is_constant_size_expr(c, src))
+            .unwrap_or(false),
+        _ => false,
+    }
 }
 
 /// Index of the format argument for format-string sinks.
@@ -1130,6 +1252,171 @@ void handler() {
         assert!(
             !findings.is_empty(),
             "should detect transitive taint: {:?}",
+            findings
+        );
+    }
+
+    // -- T13: exec* command injection is path-argument-driven ---------------
+
+    #[test]
+    fn execv_literal_path_tainted_arg_is_safe() {
+        let src = r#"
+#include <unistd.h>
+#include <stdlib.h>
+
+void handler() {
+    char *arg = getenv("ARG");
+    char *argv[] = {"cat", arg, NULL};
+    execv("/bin/cat", argv);
+}
+"#;
+        let findings = analyze(src, &command_injection_spec());
+        assert!(
+            findings.is_empty(),
+            "execv with a literal path is safe even with a tainted data arg: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn execl_tainted_path_still_flags() {
+        let src = r#"
+#include <unistd.h>
+#include <stdlib.h>
+
+void handler() {
+    char *path = getenv("PATH_INPUT");
+    execl(path, "x", NULL);
+}
+"#;
+        let findings = analyze(src, &command_injection_spec());
+        assert!(
+            !findings.is_empty(),
+            "execl with a tainted pathname must still flag: {:?}",
+            findings
+        );
+    }
+
+    // -- T14: memcpy with a constant/sizeof size is bounded -----------------
+
+    #[test]
+    fn memcpy_literal_size_is_safe() {
+        let src = r#"
+#include <string.h>
+#include <stdlib.h>
+
+void handler() {
+    char *src = getenv("DATA");
+    char buf[64];
+    memcpy(buf, src, 64);
+}
+"#;
+        let findings = analyze(src, &buffer_overflow_spec());
+        assert!(
+            findings.is_empty(),
+            "memcpy with a constant size should not flag: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn memcpy_sizeof_size_is_safe() {
+        let src = r#"
+#include <string.h>
+#include <stdlib.h>
+
+void handler() {
+    char *src = getenv("DATA");
+    char buf[64];
+    memcpy(buf, src, sizeof(buf));
+}
+"#;
+        let findings = analyze(src, &buffer_overflow_spec());
+        assert!(
+            findings.is_empty(),
+            "memcpy with a sizeof() size should not flag: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn memcpy_tainted_size_still_flags() {
+        let src = r#"
+#include <string.h>
+#include <stdlib.h>
+
+void handler() {
+    char *input = getenv("DATA");
+    char dest[64];
+    memcpy(dest, input, strlen(input));
+}
+"#;
+        let findings = analyze(src, &buffer_overflow_spec());
+        assert!(
+            !findings.is_empty(),
+            "memcpy with a tainted/dynamic length must still flag: {:?}",
+            findings
+        );
+    }
+
+    // -- T15: sprintf/snprintf format-string collision ----------------------
+
+    #[test]
+    fn sprintf_untrusted_format_no_double_fire() {
+        let src = r#"
+#include <stdio.h>
+#include <stdlib.h>
+
+void handler() {
+    char *fmt = getenv("FMT");
+    char dest[64];
+    sprintf(dest, fmt, "x");
+    printf("%s", dest);
+}
+"#;
+        let findings = analyze(src, &format_string_spec());
+        assert!(
+            findings.is_empty(),
+            "tainted sprintf format must not re-fire via the dest buffer: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn snprintf_untrusted_format_not_flagged() {
+        let src = r#"
+#include <stdio.h>
+#include <stdlib.h>
+
+void handler() {
+    char *fmt = getenv("FMT");
+    char buf[64];
+    snprintf(buf, sizeof(buf), fmt, "x");
+}
+"#;
+        let findings = analyze(src, &format_string_spec());
+        assert!(
+            findings.is_empty(),
+            "snprintf is bounds-safe and not a format-string sink: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn printf_tainted_format_still_flags() {
+        let src = r#"
+#include <stdio.h>
+#include <stdlib.h>
+
+void handler() {
+    char *fmt = getenv("FMT");
+    printf(fmt);
+}
+"#;
+        let findings = analyze(src, &format_string_spec());
+        assert!(
+            !findings.is_empty(),
+            "printf with a tainted format must still flag: {:?}",
             findings
         );
     }
