@@ -13,9 +13,46 @@ use crate::{Language, Severity};
 fn php_preg_e_modifier_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"['"][^'"]*/.*/[a-z]*e[a-z]*['"]"#)
+        // Match a PHP regex literal whose *trailing modifier flags* (the
+        // characters after the final pattern delimiter) include `e`. The
+        // pattern body is captured non-greedily so the final `/` is the
+        // closing delimiter, and the modifier run is anchored to the end of
+        // the string literal. This avoids matching an `e` that merely appears
+        // inside the pattern body (e.g. `/foo/i`, `/he/`).
+        Regex::new(r#"['"]/.*/[a-zA-Z]*e[a-zA-Z]*['"]$"#)
             .expect("static PHP preg_replace regex should compile")
     })
+}
+
+/// Returns `true` when an `encapsed_string` node contains *actual* variable
+/// interpolation (`$var`, `${expr}`, `{$obj->prop}`), as opposed to being a
+/// purely literal double-quoted string. tree-sitter-php classifies every
+/// double-quoted string as an `encapsed_string`, so the node kind alone is not
+/// enough to distinguish `"SELECT ... $id"` from `"SELECT ... 1"`.
+fn encapsed_string_has_interpolation(node: tree_sitter::Node) -> bool {
+    if node.kind() != "encapsed_string" {
+        return false;
+    }
+    let mut cursor = node.walk();
+    let interpolates = node.children(&mut cursor).any(|child| {
+        matches!(
+            child.kind(),
+            "variable_name"
+                | "dynamic_variable_name"
+                | "member_access_expression"
+                | "subscript_expression"
+                | "nullsafe_member_access_expression"
+                | "function_call_expression"
+        )
+    });
+    interpolates
+}
+
+/// Names of PHP functions that yield values not directly controlled by the
+/// HTTP request — environment lookups and configuration accessors. Used by the
+/// SSRF rule to avoid flagging URLs sourced from these.
+fn is_known_safe_source(func_name: &str) -> bool {
+    matches!(func_name, "getenv" | "constant" | "config" | "env")
 }
 
 // ─── Rule 1: no-eval ──────────────────────────────────────────────────────────
@@ -79,17 +116,26 @@ impl_rule! {
                         func_text,
                         "exec" | "system" | "passthru" | "shell_exec" | "popen" | "proc_open"
                     ) {
-                        findings.push(make_finding(
-                            _self.id(),
-                            _self.severity(),
-                            _self.cwe(),
-                            &format!(
-                                "{}() executes shell commands — risk of command injection",
-                                func_text
-                            ),
-                            node,
-                            src,
-                        ));
+                        // Suppress when the command argument is sanitized through
+                        // escapeshellarg()/escapeshellcmd() (or is a pure literal).
+                        let sanitized = node
+                            .child_by_field_name("arguments")
+                            .and_then(|args| args.named_child(0))
+                            .map(|arg| Self::command_arg_is_sanitized(arg, src))
+                            .unwrap_or(false);
+                        if !sanitized {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "{}() executes shell commands — risk of command injection",
+                                    func_text
+                                ),
+                                node,
+                                src,
+                            ));
+                        }
                     }
                 }
             }
@@ -108,6 +154,56 @@ impl_rule! {
         });
         findings
 
+    }
+}
+
+impl NoCommandInjection {
+    /// Returns `true` when the command argument is considered sanitized:
+    /// either a pure string literal with no interpolation, or an expression
+    /// where every dynamic component is wrapped in `escapeshellarg()` /
+    /// `escapeshellcmd()`.
+    fn command_arg_is_sanitized(node: tree_sitter::Node, src: &str) -> bool {
+        match node.kind() {
+            // `arguments` wrap each argument in an `argument` node; unwrap it.
+            "argument" => node
+                .named_child(0)
+                .map(|inner| Self::command_arg_is_sanitized(inner, src))
+                .unwrap_or(false),
+
+            // Plain literals carry no taint.
+            "string" | "integer" | "float" | "boolean" => true,
+
+            // Double-quoted string: safe only if it does not interpolate.
+            "encapsed_string" => !encapsed_string_has_interpolation(node),
+
+            // escapeshellarg()/escapeshellcmd() sanitize their argument.
+            "function_call_expression" => node
+                .child_by_field_name("function")
+                .map(|f| matches!(&src[f.byte_range()], "escapeshellarg" | "escapeshellcmd"))
+                .unwrap_or(false),
+
+            // Parenthesized expression: look through it.
+            "parenthesized_expression" => node
+                .named_child(0)
+                .map(|inner| Self::command_arg_is_sanitized(inner, src))
+                .unwrap_or(false),
+
+            // Concatenation is safe only if *both* sides are sanitized.
+            "binary_expression" => {
+                let lhs = node.child_by_field_name("left");
+                let rhs = node.child_by_field_name("right");
+                match (lhs, rhs) {
+                    (Some(l), Some(r)) => {
+                        Self::command_arg_is_sanitized(l, src)
+                            && Self::command_arg_is_sanitized(r, src)
+                    }
+                    _ => false,
+                }
+            }
+
+            // Anything else (bare variables, array access, etc.) is unsafe.
+            _ => false,
+        }
     }
 }
 
@@ -134,21 +230,7 @@ impl_rule! {
                     let func_text = &src[func.byte_range()];
                     if sql_funcs.contains(&func_text) {
                         if let Some(args) = node.child_by_field_name("arguments") {
-                            let arg_text = &src[args.byte_range()];
                             if Self::has_interpolation_or_concat(args) {
-                                findings.push(make_finding(
-                                    _self.id(),
-                                    _self.severity(),
-                                    _self.cwe(),
-                                    &format!(
-                                        "{}() with dynamic query — use parameterized queries",
-                                        func_text
-                                    ),
-                                    node,
-                                    src,
-                                ));
-                            } else if arg_text.contains('$') || arg_text.contains('.') {
-                                // Rough heuristic for interpolated or concatenated strings
                                 findings.push(make_finding(
                                     _self.id(),
                                     _self.severity(),
@@ -196,8 +278,13 @@ impl NoSqlInjection {
     fn has_interpolation_or_concat(args_node: tree_sitter::Node) -> bool {
         let mut cursor = args_node.walk();
         for child in args_node.children(&mut cursor) {
+            // Only flag a double-quoted string when it actually interpolates a
+            // variable/expression; a purely literal query string is safe.
             if child.kind() == "encapsed_string" {
-                return true;
+                if encapsed_string_has_interpolation(child) {
+                    return true;
+                }
+                continue;
             }
             if child.kind() == "binary_expression" {
                 // Check for string concatenation with .
@@ -308,8 +395,14 @@ impl NoFileInclusion {
             if child.kind() == "variable_name" {
                 return true;
             }
+            // A double-quoted string is only dangerous when it interpolates a
+            // variable/expression; a literal path such as
+            // `include "vendor/autoload.php"` is safe.
             if child.kind() == "encapsed_string" {
-                return true;
+                if encapsed_string_has_interpolation(child) {
+                    return true;
+                }
+                continue;
             }
             if Self::has_variable_child(child) {
                 return true;
@@ -435,8 +528,11 @@ impl_rule! {
                     if func_text == "file_get_contents" || func_text == "curl_init" {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
-                                // Flag if the argument is not a string literal
-                                if first_arg.kind() != "string" {
+                                // `named_child(0)` yields the wrapping `argument`
+                                // node; unwrap to the actual URL expression.
+                                let url_expr =
+                                    first_arg.named_child(0).unwrap_or(first_arg);
+                                if !Self::url_arg_is_safe(url_expr, src) {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),
@@ -457,6 +553,27 @@ impl_rule! {
         });
         findings
 
+    }
+}
+
+impl NoSsrf {
+    /// Returns `true` when the URL argument is considered safe: a string
+    /// literal with no interpolation, or a value sourced from a known-safe
+    /// accessor such as `getenv()`.
+    fn url_arg_is_safe(node: tree_sitter::Node, src: &str) -> bool {
+        match node.kind() {
+            "string" => true,
+            "encapsed_string" => !encapsed_string_has_interpolation(node),
+            "function_call_expression" => node
+                .child_by_field_name("function")
+                .map(|f| is_known_safe_source(&src[f.byte_range()]))
+                .unwrap_or(false),
+            "parenthesized_expression" => node
+                .named_child(0)
+                .map(|inner| Self::url_arg_is_safe(inner, src))
+                .unwrap_or(false),
+            _ => false,
+        }
     }
 }
 
@@ -539,5 +656,88 @@ impl_rule! {
         });
         findings
 
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::parser::parse_file;
+    use crate::rules::Rule;
+    use crate::Language;
+
+    fn run<R: Rule>(rule: &R, src: &str) -> usize {
+        let tree = parse_file(src, Language::Php).expect("PHP source should parse");
+        rule.check(src, &tree).len()
+    }
+
+    // ── False-positive (safe) cases — must produce ZERO findings ──────────
+
+    #[test]
+    fn literal_sql_string_not_flagged() {
+        let src = r#"<?php mysqli_query($c, "SELECT * FROM users WHERE active = 1");"#;
+        assert_eq!(run(&NoSqlInjection, src), 0);
+    }
+
+    #[test]
+    fn literal_include_not_flagged() {
+        let src = r#"<?php include "vendor/autoload.php";"#;
+        assert_eq!(run(&NoFileInclusion, src), 0);
+    }
+
+    #[test]
+    fn getenv_url_not_flagged() {
+        let src = r#"<?php file_get_contents(getenv('SAFE_URL'));"#;
+        assert_eq!(run(&NoSsrf, src), 0);
+    }
+
+    #[test]
+    fn literal_url_not_flagged() {
+        let src = r#"<?php file_get_contents("https://example.com/feed");"#;
+        assert_eq!(run(&NoSsrf, src), 0);
+    }
+
+    #[test]
+    fn escapeshell_wrapped_not_flagged() {
+        let src = r#"<?php exec(escapeshellcmd($x)); system(escapeshellarg($y));"#;
+        assert_eq!(run(&NoCommandInjection, src), 0);
+    }
+
+    #[test]
+    fn preg_e_in_body_not_flagged() {
+        let src = r#"<?php preg_replace('/foo/i', 'x', $y); preg_replace('/header/', 'x', $y);"#;
+        assert_eq!(run(&NoPregEval, src), 0);
+    }
+
+    // ── True-positive cases — must STILL flag ─────────────────────────────
+
+    #[test]
+    fn interpolated_sql_still_flagged() {
+        let src = r#"<?php mysqli_query($c, "SELECT * FROM users WHERE id = $id");"#;
+        assert_eq!(run(&NoSqlInjection, src), 1);
+    }
+
+    #[test]
+    fn variable_include_still_flagged() {
+        let src = r#"<?php include $_GET['p'];"#;
+        assert_eq!(run(&NoFileInclusion, src), 1);
+    }
+
+    #[test]
+    fn dynamic_url_still_flagged() {
+        let src = r#"<?php file_get_contents($_GET['url']);"#;
+        assert_eq!(run(&NoSsrf, src), 1);
+    }
+
+    #[test]
+    fn unsanitized_exec_still_flagged() {
+        let src = r#"<?php exec($_GET['cmd']);"#;
+        assert_eq!(run(&NoCommandInjection, src), 1);
+    }
+
+    #[test]
+    fn real_preg_e_modifier_still_flagged() {
+        let src = r#"<?php preg_replace('/x/e', $code);"#;
+        assert_eq!(run(&NoPregEval, src), 1);
     }
 }
