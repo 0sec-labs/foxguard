@@ -914,6 +914,7 @@ fn printf_like_format_is_literal(callee: &str, args: Node<'_>) -> bool {
 /// numeric literal or a `sizeof(...)` expression (possibly combined with
 /// constant arithmetic, e.g. `sizeof(buf) - 1`). Such bounds make the
 /// copy safe regardless of source taint.
+#[allow(clippy::only_used_in_recursion)]
 fn is_constant_size_expr(node: Node<'_>, src: &str) -> bool {
     match node.kind() {
         "number_literal" => true,
