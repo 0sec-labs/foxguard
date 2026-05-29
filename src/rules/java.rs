@@ -43,14 +43,6 @@ fn java_xxe_secure_re() -> &'static Regex {
     })
 }
 
-fn java_csrf_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"\.csrf\(\s*\)\s*\.\s*disable\(\s*\)|csrf\s*\([^)]*\.\s*disable\(\s*\)\s*\)")
-            .expect("static Java CSRF regex should compile")
-    })
-}
-
 fn java_cors_wildcard_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -85,6 +77,205 @@ fn has_string_concat(node: tree_sitter::Node, src: &str) -> bool {
         }
     }
     false
+}
+
+/// Collect a map of local-variable / parameter / field names to their declared
+/// type text (e.g. `ois` -> `ObjectInputStream`). Used to apply type-aware
+/// checks to bare identifier receivers (e.g. `ois.readObject()`).
+fn collect_declared_types(
+    node: tree_sitter::Node,
+    src: &str,
+) -> std::collections::HashMap<String, String> {
+    use std::collections::HashMap;
+    let mut map: HashMap<String, String> = HashMap::new();
+    walk_tree(node, src, &mut |n, s| {
+        match n.kind() {
+            // local_variable_declaration / field_declaration both have a `type`
+            // field and one or more `variable_declarator` children with `name`.
+            "local_variable_declaration" | "field_declaration" => {
+                if let Some(type_node) = n.child_by_field_name("type") {
+                    let type_text = type_text_base(&s[type_node.byte_range()]);
+                    let mut cursor = n.walk();
+                    for child in n.children(&mut cursor) {
+                        if child.kind() == "variable_declarator" {
+                            if let Some(name_node) = child.child_by_field_name("name") {
+                                map.insert(
+                                    s[name_node.byte_range()].to_string(),
+                                    type_text.clone(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            // formal parameters: `void m(ObjectInputStream ois)`
+            "formal_parameter" => {
+                if let (Some(type_node), Some(name_node)) =
+                    (n.child_by_field_name("type"), n.child_by_field_name("name"))
+                {
+                    map.insert(
+                        s[name_node.byte_range()].to_string(),
+                        type_text_base(&s[type_node.byte_range()]),
+                    );
+                }
+            }
+            _ => {}
+        }
+    });
+    map
+}
+
+/// Normalize a declared type to its simple base name, stripping generics and
+/// package qualifiers (e.g. `java.io.ObjectInputStream` -> `ObjectInputStream`,
+/// `List<String>` -> `List`).
+fn type_text_base(t: &str) -> String {
+    let t = t.trim();
+    let base = t.split('<').next().unwrap_or(t).trim();
+    base.rsplit('.').next().unwrap_or(base).trim().to_string()
+}
+
+/// Given a `csrf(...)` method-invocation node, return true if the CSRF
+/// protection is being disabled, either as `csrf().disable()` (the csrf() call
+/// is the receiver/object of a sibling `.disable()` invocation) or as
+/// `csrf(c -> c.disable())` (a `disable` invocation appears within the csrf()
+/// call's arguments).
+fn csrf_chain_disables(csrf_node: tree_sitter::Node, src: &str) -> bool {
+    // Case A: csrf(...).disable() — parent is a method_invocation named
+    // `disable` whose `object` is this csrf node.
+    if let Some(parent) = csrf_node.parent() {
+        if parent.kind() == "method_invocation" {
+            if let Some(pname) = parent.child_by_field_name("name") {
+                if &src[pname.byte_range()] == "disable" {
+                    if let Some(pobj) = parent.child_by_field_name("object") {
+                        if pobj.id() == csrf_node.id() {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Case B: csrf(c -> c.disable()) — a `disable` invocation inside the args.
+    if let Some(args) = csrf_node.child_by_field_name("arguments") {
+        if invokes_named_method(args, "disable", src) {
+            return true;
+        }
+    }
+    false
+}
+
+/// True if any descendant of `node` is a `method_invocation` whose name is
+/// `method`.
+fn invokes_named_method(node: tree_sitter::Node, method: &str, src: &str) -> bool {
+    if node.kind() == "method_invocation" {
+        if let Some(name) = node.child_by_field_name("name") {
+            if &src[name.byte_range()] == method {
+                return true;
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if invokes_named_method(child, method, src) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Walk down the `object` chain from a method invocation to its root receiver
+/// and decide whether it is a Spring `HttpSecurity` builder.
+///
+/// Recognizes:
+///   * a root identifier whose declared type is `HttpSecurity`,
+///   * a root identifier conventionally named `http` / `httpSecurity`,
+///   * any receiver text mentioning `HttpSecurity` (e.g. a cast or a
+///     fluent return like `httpSecurity.authorizeHttpRequests(...)`).
+fn chain_root_is_http_security(
+    node: tree_sitter::Node,
+    src: &str,
+    declared_types: &std::collections::HashMap<String, String>,
+) -> bool {
+    // Descend through `object` fields to the base receiver.
+    let mut current = node;
+    while let Some(obj) = current.child_by_field_name("object") {
+        current = obj;
+    }
+    let root_text = src[current.byte_range()].trim();
+    if root_text.contains("HttpSecurity") {
+        return true;
+    }
+    // Bare identifier root: check declared type and conventional names.
+    if current.kind() == "identifier" {
+        if let Some(ty) = declared_types.get(root_text) {
+            if ty == "HttpSecurity" {
+                return true;
+            }
+        }
+        if root_text == "http" || root_text == "httpSecurity" {
+            return true;
+        }
+    }
+    false
+}
+
+/// True if an annotation node's simple name equals `name` (ignores any
+/// package qualifier such as `@org.springframework.web.bind.annotation.CrossOrigin`).
+fn annotation_name_is(node: tree_sitter::Node, name: &str, src: &str) -> bool {
+    if let Some(name_node) = node.child_by_field_name("name") {
+        let text = &src[name_node.byte_range()];
+        return text == name || text.rsplit('.').next() == Some(name);
+    }
+    false
+}
+
+/// For an `@CrossOrigin(...)` annotation node, return true only when the
+/// `origins` parameter is exactly a single wildcard string literal (`"*"`).
+///
+/// Handles both the named form `@CrossOrigin(origins = "*")` and the positional
+/// shorthand `@CrossOrigin("*")` (where the single value maps to `origins`).
+/// Arrays such as `{"*"}`, specific origins, and any other value return false.
+fn cross_origin_value_is_wildcard(node: tree_sitter::Node, src: &str) -> bool {
+    let Some(args) = node.child_by_field_name("arguments") else {
+        return false;
+    };
+    let mut cursor = args.walk();
+    let mut found_named_origins = false;
+    let mut positional_value: Option<tree_sitter::Node> = None;
+    for child in args.children(&mut cursor) {
+        match child.kind() {
+            "element_value_pair" => {
+                let key = child.child_by_field_name("key");
+                let value = child.child_by_field_name("value");
+                if let (Some(key), Some(value)) = (key, value) {
+                    if &src[key.byte_range()] == "origins" {
+                        found_named_origins = true;
+                        if value_is_single_wildcard(value, src) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            // A bare value (positional argument) — `@CrossOrigin("*")`.
+            "string_literal" | "array_initializer" => {
+                positional_value = Some(child);
+            }
+            _ => {}
+        }
+    }
+    // Positional shorthand only applies when there is no explicit `origins =`.
+    if !found_named_origins {
+        if let Some(value) = positional_value {
+            return value_is_single_wildcard(value, src);
+        }
+    }
+    false
+}
+
+/// True if `node` is exactly the string literal `"*"` (not an array, not any
+/// other string).
+fn value_is_single_wildcard(node: tree_sitter::Node, src: &str) -> bool {
+    node.kind() == "string_literal" && src[node.byte_range()].trim() == "\"*\""
 }
 
 fn contains_kind(node: tree_sitter::Node, kind: &str) -> bool {
@@ -246,6 +437,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
+        let declared_types = collect_declared_types(tree.root_node(), source);
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "method_invocation" {
@@ -256,11 +448,18 @@ impl_rule! {
                     if name_text == "readObject" {
                         if let Some(obj) = node.child_by_field_name("object") {
                             let obj_text = &src[obj.byte_range()];
-                            if obj_text.contains("ObjectInputStream")
+                            // Receiver references the dangerous type directly (e.g.
+                            // `new ObjectInputStream(is).readObject()` or
+                            // `objectInputStream.readObject()`), or it's a bare
+                            // identifier whose declared type is one of the unsafe
+                            // deserialization classes.
+                            let receiver_is_unsafe = obj_text.contains("ObjectInputStream")
                                 || obj_text.contains("XMLDecoder")
-                                // Also match variable references that may be an ObjectInputStream
-                                || !obj_text.contains('.')
-                            {
+                                || declared_types
+                                    .get(obj_text)
+                                    .map(|ty| ty == "ObjectInputStream" || ty == "XMLDecoder")
+                                    .unwrap_or(false);
+                            if receiver_is_unsafe {
                                 findings.push(make_finding(
                                     _self.id(),
                                     _self.severity(),
@@ -311,6 +510,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
+        let declared_types = collect_declared_types(tree.root_node(), source);
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // new URL(variable)
@@ -348,10 +548,19 @@ impl_rule! {
                     {
                         if let Some(obj) = node.child_by_field_name("object") {
                             let obj_text = &src[obj.byte_range()];
-                            if obj_text.contains("restTemplate")
-                                || obj_text.contains("RestTemplate")
-                                || obj_text.contains("template")
-                            {
+                            // Require an actual RestTemplate receiver: a direct
+                            // `new RestTemplate()...`, a receiver whose text
+                            // contains `RestTemplate`, or a bare identifier whose
+                            // declared type is exactly `RestTemplate`. Generic
+                            // `*Template` receivers (e.g. `jdbcTemplate`,
+                            // `myTemplate`) are not flagged.
+                            let receiver_is_rest_template = obj_text.contains("RestTemplate")
+                                || obj_text == "restTemplate"
+                                || declared_types
+                                    .get(obj_text)
+                                    .map(|ty| ty == "RestTemplate")
+                                    .unwrap_or(false);
+                            if receiver_is_rest_template {
                                 if let Some(args) = node.child_by_field_name("arguments") {
                                     if let Some(first_arg) = args.named_child(0) {
                                         if !is_literal(first_arg) {
@@ -767,23 +976,49 @@ impl_rule! {
     cwe = Some("CWE-352"),
     description = "Spring Security CSRF protection is disabled",
     language = Language::Java,
-    fn check(_self, source, _tree) {
+    fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
-        // .csrf().disable() or csrf(csrf -> csrf.disable()) or csrf(c -> c.disable())
-        let csrf_pattern = java_csrf_re();
+        let declared_types = collect_declared_types(tree.root_node(), source);
 
-        for matched in csrf_pattern.find_iter(source) {
-            findings.push(make_finding_from_offsets(
+        // Flag `http.csrf().disable()` / `http.csrf(c -> c.disable())` only when
+        // the builder chain is rooted in a verified Spring `HttpSecurity`
+        // instance. This avoids flagging unrelated `disable()` calls such as
+        // `myCsrfHelper(config.disable())`.
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "method_invocation" {
+                return;
+            }
+            let Some(name) = node.child_by_field_name("name") else {
+                return;
+            };
+            // Only consider `csrf(...)` invocations — the structural anchor of
+            // the Spring Security DSL.
+            if &src[name.byte_range()] != "csrf" {
+                return;
+            }
+            // The csrf(...) call must be part of a chain that disables it:
+            // either `http.csrf().disable()` (csrf() is the receiver of a
+            // `.disable()` call) or `http.csrf(c -> c.disable())` (a `disable`
+            // call appears inside the csrf(...) arguments).
+            let disabled = csrf_chain_disables(node, src);
+            if !disabled {
+                return;
+            }
+            // Verify the chain root is an HttpSecurity instance.
+            if !chain_root_is_http_security(node, src, &declared_types) {
+                return;
+            }
+            findings.push(make_finding(
                 _self.id(),
                 _self.severity(),
                 _self.cwe(),
                 "CSRF protection is disabled — enable CSRF unless this is a stateless API with token auth",
-                source,
-                matched.start(),
-                matched.end(),
+                node,
+                src,
             ));
-        }
+        });
+
         findings
 
     }
@@ -960,25 +1195,35 @@ impl_rule! {
             ));
         }
 
-        // @CrossOrigin with wildcard or no origin restriction
+        // @CrossOrigin with a wildcard origin or no origin restriction.
         walk_tree(tree.root_node(), source, &mut |node, src| {
-            if node.kind() == "annotation" || node.kind() == "marker_annotation" {
-                let text = &src[node.byte_range()];
-                if text.contains("CrossOrigin") {
-                    // @CrossOrigin without arguments defaults to *, or with explicit "*"
-                    if text == "@CrossOrigin"
-                        || text.contains("\"*\"")
-                        || text.contains("origins = \"*\"")
-                    {
-                        findings.push(make_finding(
-                            _self.id(),
-                            _self.severity(),
-                            _self.cwe(),
-                            "@CrossOrigin with wildcard origin — restrict to trusted domains",
-                            node,
-                            src,
-                        ));
-                    }
+            // Bare `@CrossOrigin` (no args) defaults to allowing all origins.
+            if node.kind() == "marker_annotation" {
+                if annotation_name_is(node, "CrossOrigin", src) {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "@CrossOrigin with wildcard origin — restrict to trusted domains",
+                        node,
+                        src,
+                    ));
+                }
+                return;
+            }
+            if node.kind() == "annotation" && annotation_name_is(node, "CrossOrigin", src) {
+                // Flag only when the `origins` value is exactly the single
+                // wildcard string literal "*". An array (`{"*"}`), a specific
+                // origin, or a non-string value is not flagged here.
+                if cross_origin_value_is_wildcard(node, src) {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "@CrossOrigin with wildcard origin — restrict to trusted domains",
+                        node,
+                        src,
+                    ));
                 }
             }
         });
