@@ -1,0 +1,8 @@
+/Users/peak/coding/0sec-labs/foxguard/.fp-check-target/debug/deps/tree_sitter_c-14058123d516312c.d: /Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/lib.rs /Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/../../src/node-types.json /Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/../../queries/highlights.scm /Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/../../queries/tags.scm
+
+/Users/peak/coding/0sec-labs/foxguard/.fp-check-target/debug/deps/libtree_sitter_c-14058123d516312c.rmeta: /Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/lib.rs /Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/../../src/node-types.json /Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/../../queries/highlights.scm /Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/../../queries/tags.scm
+
+/Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/lib.rs:
+/Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/../../src/node-types.json:
+/Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/../../queries/highlights.scm:
+/Users/peak/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-c-0.24.2/bindings/rust/../../queries/tags.scm:

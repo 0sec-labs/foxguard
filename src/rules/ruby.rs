@@ -1119,7 +1119,10 @@ mod tests {
         );
         // Real-looking secret still fires.
         assert_eq!(
-            count(NoHardcodedSecret, r#"API_KEY = "prodkey9f8a7b6c5d4e3f2a1b0c4d5e6f""#),
+            count(
+                NoHardcodedSecret,
+                r#"API_KEY = "prodkey9f8a7b6c5d4e3f2a1b0c4d5e6f""#
+            ),
             1
         );
     }
