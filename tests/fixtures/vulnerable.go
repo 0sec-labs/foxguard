@@ -42,10 +42,14 @@ func vulnerable() {
 	// 8. go/net-http-no-timeout (Medium)
 	http.ListenAndServe(":8080", nil)
 
-	// 9. go/insecure-tls-skip-verify (High) + go/missing-ssl-minversion (Medium)
+	// 9. go/insecure-tls-skip-verify (High)
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
+
+	// 9b. go/missing-ssl-minversion (Medium) — separate config so it is not
+	// masked by the InsecureSkipVerify same-literal skip.
+	tlsConfig := &tls.Config{ServerName: "example.com"}
 
 	// 10. go/cookie-missing-secure (Medium)
 	http.SetCookie(w, &http.Cookie{Name: "sid", Value: userInput, HttpOnly: true})
@@ -76,6 +80,7 @@ func vulnerable() {
 	_ = query2
 	_ = apiKey
 	_ = transport
+	_ = tlsConfig
 	_ = insecureCode
 	_ = dec
 }

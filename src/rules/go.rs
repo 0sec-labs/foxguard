@@ -77,6 +77,29 @@ fn go_hardcoded_byte_re() -> &'static Regex {
     })
 }
 
+/// Go test and benchmark files (`*_test.go`) are not production code paths and
+/// routinely use dynamic URLs against `httptest` servers or set
+/// `InsecureSkipVerify` against self-signed certs. Skip them for the
+/// network-facing FP-prone rules (`go/no-ssrf`, `go/missing-ssl-minversion`).
+fn go_is_test_file(path: &std::path::Path) -> bool {
+    let Some(name) = path.file_name().and_then(|f| f.to_str()) else {
+        return false;
+    };
+    name.ends_with("_test.go") || name.ends_with("_bench.go")
+}
+
+/// Recognize URL expressions that resolve to an `httptest` test server, which
+/// is not a real SSRF sink. Matches the common `httptest` conventions
+/// (`ts.URL`, `srv.URL`, `server.URL`). Loopback literals (`localhost`,
+/// `127.0.0.1`) are intentionally NOT treated as safe: loopback SSRF is a real
+/// vulnerability and must remain flaggable. Works on the raw argument text so
+/// it is independent of the file path (the test-file skip does not apply to
+/// fixtures named `safe.go`).
+fn go_url_arg_is_local_test_server(arg_text: &str) -> bool {
+    const NEEDLES: [&str; 3] = ["ts.URL", "srv.URL", "server.URL"];
+    NEEDLES.iter().any(|needle| arg_text.contains(needle))
+}
+
 fn go_composite_literal_type_text<'a>(
     node: tree_sitter::Node<'_>,
     source: &'a str,
@@ -638,15 +661,30 @@ impl_rule! {
 
 pub struct NoSsrf;
 
-impl_rule! {
-    NoSsrf,
-    id = "go/no-ssrf",
-    severity = Severity::High,
-    cwe = Some("CWE-918"),
-    description = "Potential SSRF via http.Get/http.Post with variable URL",
-    language = Language::Go,
-    fn check(_self, source, tree) {
+impl crate::rules::Rule for NoSsrf {
+    fn id(&self) -> &str {
+        "go/no-ssrf"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-918")
+    }
+    fn description(&self) -> &str {
+        "Potential SSRF via http.Get/http.Post with variable URL"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
 
+    /// Test and benchmark files routinely fetch dynamic `httptest` server URLs;
+    /// these are not real SSRF sinks, so skip them entirely.
+    fn applies_to_path(&self, path: &std::path::Path) -> bool {
+        !go_is_test_file(path)
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
         let mut findings = Vec::new();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
@@ -670,14 +708,17 @@ impl_rule! {
                             };
 
                             if let Some(first_arg) = url_arg {
-                                // Flag if URL arg is not a string literal
+                                let arg_text = &src[first_arg.byte_range()];
+                                // Flag if URL arg is not a string literal and is
+                                // not a recognized local test-server / loopback URL.
                                 if first_arg.kind() != "interpreted_string_literal"
                                     && first_arg.kind() != "raw_string_literal"
+                                    && !go_url_arg_is_local_test_server(arg_text)
                                 {
                                     findings.push(make_finding(
-                                        _self.id(),
-                                        _self.severity(),
-                                        _self.cwe(),
+                                        self.id(),
+                                        self.severity(),
+                                        self.cwe(),
                                         &format!(
                                             "{} called with dynamic URL — validate and allowlist target hosts to prevent SSRF",
                                             func_text
@@ -693,7 +734,6 @@ impl_rule! {
             }
         });
         findings
-
     }
 }
 
@@ -734,15 +774,44 @@ impl_rule! {
 
 pub struct MissingSslMinVersion;
 
-impl_rule! {
-    MissingSslMinVersion,
-    id = "go/missing-ssl-minversion",
-    severity = Severity::Medium,
-    cwe = Some("CWE-326"),
-    description = "tls.Config is missing an explicit MinVersion",
-    language = Language::Go,
-    fn check_with_context(_self, source, tree, ctx) {
+impl crate::rules::Rule for MissingSslMinVersion {
+    fn id(&self) -> &str {
+        "go/missing-ssl-minversion"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Medium
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-326")
+    }
+    fn description(&self) -> &str {
+        "tls.Config is missing an explicit MinVersion"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
 
+    /// Test and benchmark files commonly construct ad-hoc `tls.Config` values
+    /// (often with `InsecureSkipVerify`) against self-signed certs; these are
+    /// not production TLS configs, so skip them entirely.
+    fn applies_to_path(&self, path: &std::path::Path) -> bool {
+        !go_is_test_file(path)
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn ast_analysis_requirement(&self) -> crate::rules::AstAnalysisRequirement {
+        crate::rules::AstAnalysisRequirement::FileContext
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
         let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
             Some(go_aliases_from_tree(source, tree))
         } else {
@@ -750,6 +819,7 @@ impl_rule! {
         };
         let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
         let min_version_re = go_min_version_re();
+        let insecure_skip_verify_re = go_insecure_skip_verify_re();
 
         let mut findings = Vec::new();
 
@@ -770,10 +840,17 @@ impl_rule! {
                 return;
             }
 
+            // `InsecureSkipVerify: true` in the same literal is a test/dev
+            // marker (already flagged by go/insecure-tls-skip-verify). Don't
+            // also flag missing MinVersion on the same config.
+            if insecure_skip_verify_re.is_match(literal_text) {
+                return;
+            }
+
             findings.push(make_finding(
-                _self.id(),
-                _self.severity(),
-                _self.cwe(),
+                self.id(),
+                self.severity(),
+                self.cwe(),
                 "tls.Config without MinVersion permits legacy TLS versions — set MinVersion to tls.VersionTLS12 or higher",
                 node,
                 src,
@@ -781,7 +858,6 @@ impl_rule! {
         });
 
         findings
-
     }
 }
 
@@ -1953,4 +2029,124 @@ pub fn run_go_taint_batched(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod fp_tests {
+    use super::*;
+    use crate::rules::Rule;
+    use std::path::Path;
+
+    fn parse_go(source: &str) -> tree_sitter::Tree {
+        match crate::engine::parser::parse_file(source, Language::Go) {
+            Some(tree) => tree,
+            None => panic!("Go source should parse into a tree"),
+        }
+    }
+
+    // ── go/no-ssrf ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn ssrf_skips_test_files() {
+        assert!(!NoSsrf.applies_to_path(Path::new("gin_test.go")));
+        assert!(!NoSsrf.applies_to_path(Path::new("foo/bar/server_test.go")));
+        assert!(!NoSsrf.applies_to_path(Path::new("benchmarks_bench.go")));
+        assert!(NoSsrf.applies_to_path(Path::new("server.go")));
+    }
+
+    #[test]
+    fn ssrf_recognizes_local_test_servers() {
+        let src = r#"
+package main
+import "net/http"
+func f(ts T, srv T, server T) {
+    http.Get(ts.URL + "/x")
+    http.Get(srv.URL + "/y")
+    http.Get(server.URL)
+}
+"#;
+        let tree = parse_go(src);
+        assert!(
+            NoSsrf.check(src, &tree).is_empty(),
+            "httptest server URLs must not be flagged as SSRF"
+        );
+    }
+
+    #[test]
+    fn ssrf_flags_dynamic_loopback_target() {
+        // Loopback is a real SSRF target: a dynamic URL built from a loopback
+        // host must still be flagged (only httptest server URLs are exempt).
+        let src = r#"
+package main
+import "net/http"
+func f(host string) {
+    http.Get("http://" + host + ":8080/admin")
+}
+"#;
+        let tree = parse_go(src);
+        assert_eq!(
+            NoSsrf.check(src, &tree).len(),
+            1,
+            "dynamic loopback-style URL must still be flagged as SSRF"
+        );
+    }
+
+    #[test]
+    fn ssrf_still_flags_real_dynamic_url() {
+        let src = r#"
+package main
+import "net/http"
+func f(userInput string) {
+    http.Get(userInput)
+}
+"#;
+        let tree = parse_go(src);
+        assert_eq!(
+            NoSsrf.check(src, &tree).len(),
+            1,
+            "dynamic non-local URL must still be flagged as SSRF"
+        );
+    }
+
+    // ── go/missing-ssl-minversion ───────────────────────────────────────────
+
+    #[test]
+    fn min_version_skips_test_files() {
+        assert!(!MissingSslMinVersion.applies_to_path(Path::new("gin_integration_test.go")));
+        assert!(!MissingSslMinVersion.applies_to_path(Path::new("x_bench.go")));
+        assert!(MissingSslMinVersion.applies_to_path(Path::new("tls.go")));
+    }
+
+    #[test]
+    fn min_version_skips_insecure_skip_verify_literal() {
+        let src = r#"
+package main
+import "crypto/tls"
+func f() {
+    _ = &tls.Config{InsecureSkipVerify: true}
+}
+"#;
+        let tree = parse_go(src);
+        assert!(
+            MissingSslMinVersion.check(src, &tree).is_empty(),
+            "tls.Config with InsecureSkipVerify: true must not also flag missing MinVersion"
+        );
+    }
+
+    #[test]
+    fn min_version_still_flags_production_config() {
+        let src = r#"
+package main
+import "crypto/tls"
+func f() {
+    _ = &tls.Config{ServerName: "example.com"}
+}
+"#;
+        let tree = parse_go(src);
+        assert_eq!(
+            MissingSslMinVersion.check(src, &tree).len(),
+            1,
+            "production tls.Config without MinVersion must still be flagged"
+        );
+    }
 }
