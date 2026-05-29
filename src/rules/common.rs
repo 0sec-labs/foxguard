@@ -58,12 +58,23 @@ pub fn shannon_entropy(s: &str) -> f32 {
 /// Each language rule file should use this constant (or
 /// [`CSHARP_HARDCODED_SECRET_PATTERN`] for C#) instead of inlining its
 /// own copy of the pattern.
-pub const HARDCODED_SECRET_PATTERN: &str =
-    r"(?i)(password|secret|api_?key|token|auth|credential|private_?key)";
+///
+/// Identifier-component boundaries (`(?:^|[^A-Za-z])` … `(?:$|[^A-Za-z])`)
+/// wrap the keyword group so a secret keyword only matches when it is a
+/// whole component of an identifier — i.e. at the start/end of the name or
+/// adjacent to a non-letter such as `_`, `.`, or a digit. The `regex` crate
+/// has no look-around, so the boundaries are written as ordinary
+/// (consuming) sub-patterns; that is fine because rules only ever call
+/// `is_match` on this regex. This prevents substring false positives like
+/// `author` → `auth`, `tokenizer` → `token`, or `passwordField` →
+/// `password`, while still matching `SECRET_KEY`, `api_token`, `apiKey`
+/// (the whole `api_?key` keyword), etc.
+pub const HARDCODED_SECRET_PATTERN: &str = r"(?i)(?:^|[^A-Za-z])(password|secret|api_?key|token|auth|credential|private_?key)(?:s?(?:$|[^A-Za-z]))";
 
 /// Extended variant for C# that adds `connection_?string` /
-/// `connectionstring` to the base keyword set.
-pub const CSHARP_HARDCODED_SECRET_PATTERN: &str = r"(?i)(password|secret|api_?key|token|auth|credential|private_?key|connection_?string|connectionstring)";
+/// `connectionstring` to the base keyword set. Uses the same
+/// identifier-component boundaries as [`HARDCODED_SECRET_PATTERN`].
+pub const CSHARP_HARDCODED_SECRET_PATTERN: &str = r"(?i)(?:^|[^A-Za-z])(password|secret|api_?key|token|auth|credential|private_?key|connection_?string|connectionstring)(?:s?(?:$|[^A-Za-z]))";
 
 /// Pre-compiled [`HARDCODED_SECRET_PATTERN`] regex (compiled once).
 pub fn hardcoded_secret_re() -> &'static Regex {
@@ -152,20 +163,70 @@ pub fn looks_like_secret_value(inner: &str) -> bool {
     true
 }
 
+/// Split an identifier into its lowercased word components, treating
+/// non-alphanumeric characters (`_`, `.`, `-`, …) and lower→upper case
+/// transitions (camelCase / PascalCase) as boundaries. A trailing plural
+/// `s` is stripped from each component so `passwords` → `password`.
+///
+/// Examples:
+///   `SECRET_KEY`         → ["secret", "key"]
+///   `apiKeyValue`        → ["api", "key", "value"]
+///   `app.secret_token`   → ["app", "secret", "token"]
+///   `author`             → ["author"]
+fn identifier_components(name: &str) -> Vec<String> {
+    let mut components = Vec::new();
+    let mut current = String::new();
+    let mut prev_lower = false;
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            // camelCase boundary: a lowercase letter immediately followed
+            // by an uppercase letter starts a new component.
+            if prev_lower && ch.is_ascii_uppercase() && !current.is_empty() {
+                components.push(std::mem::take(&mut current));
+            }
+            current.push(ch.to_ascii_lowercase());
+            prev_lower = ch.is_ascii_lowercase();
+        } else {
+            if !current.is_empty() {
+                components.push(std::mem::take(&mut current));
+            }
+            prev_lower = false;
+        }
+    }
+    if !current.is_empty() {
+        components.push(current);
+    }
+    // Strip a single trailing plural `s` so `passwords` matches `password`.
+    for c in &mut components {
+        if c.len() > 1 && c.ends_with('s') {
+            c.pop();
+        }
+    }
+    components
+}
+
 /// Returns `true` when the variable name is high-signal enough that we
 /// should flag the value even if it doesn't look secret-shaped (e.g.
 /// passphrases with spaces). Low-signal names like `auth` or `token`
 /// need the value to also pass `looks_like_secret_value`.
+///
+/// Matching is component-aware: the strong keyword must appear as a whole
+/// component of the identifier (`password`, `secret`, `apiKey`, …) rather
+/// than as a substring, so benign names such as `passwordField`'s
+/// neighbours or `secretarial` are not treated as high-signal.
 pub fn is_high_signal_secret_name(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    lower.contains("password")
-        || lower.contains("passwd")
-        || lower.contains("secret")
-        || lower.contains("api_key")
-        || lower.contains("apikey")
-        || lower.contains("credential")
-        || lower.contains("private_key")
-        || lower.contains("privatekey")
+    // `apikey` / `privatekey` / `apiKey` collapse to the joined components
+    // `api`+`key` / `private`+`key`; detect those pairs as well as the
+    // single-token strong names.
+    let components = identifier_components(name);
+    let has = |kw: &str| components.iter().any(|c| c == kw);
+    if has("password") || has("passwd") || has("secret") || has("credential") {
+        return true;
+    }
+    // Adjacent component pairs: api+key, private+key.
+    components
+        .windows(2)
+        .any(|w| w[1] == "key" && (w[0] == "api" || w[0] == "private"))
 }
 
 /// Shared per-file import alias table.
@@ -427,5 +488,119 @@ mod tests {
             assert!(!base.is_match(kw), "base should NOT match {kw}");
             assert!(extended.is_match(kw), "csharp should match {kw}");
         }
+    }
+
+    #[test]
+    fn secret_pattern_ignores_benign_substring_names() {
+        let re = hardcoded_secret_re();
+        // These contain a secret keyword as a *substring* of a larger
+        // identifier component and must NOT match (false positives the
+        // word-boundary fix removes).
+        for name in &[
+            "author",
+            "authors",
+            "authored",
+            "authenticate",
+            "authenticated",
+            "authentication",
+            "authorize",
+            "authorization",
+            "tokenizer",
+            "tokenize",
+            "retokenize",
+            "passwordField",
+            "secretarial",
+            "credentialsHelper", // `credentials` then letters -> no boundary
+        ] {
+            assert!(
+                !re.is_match(name),
+                "benign name {name:?} should NOT match the secret pattern"
+            );
+        }
+    }
+
+    #[test]
+    fn secret_pattern_still_matches_real_secret_names() {
+        let re = hardcoded_secret_re();
+        // Whole-component keyword matches that must keep firing.
+        for name in &[
+            "password",
+            "SECRET_KEY",
+            "secret_key",
+            "secret_token",
+            "api_key",
+            "apiKey", // the whole `api_?key` keyword
+            "api_token",
+            "token",
+            "auth",
+            "credential",
+            "credentials", // plural still matches
+            "secrets",     // plural still matches
+            "private_key",
+            "app.secret_key",
+            "user_password",
+        ] {
+            assert!(
+                re.is_match(name),
+                "real secret name {name:?} should still match the secret pattern"
+            );
+        }
+    }
+
+    #[test]
+    fn high_signal_name_is_component_aware() {
+        // Strong names (whole component) -> high signal.
+        for name in &[
+            "password",
+            "PASSWORD",
+            "userPassword",
+            "passwd",
+            "SECRET_KEY",
+            "secret",
+            "apiKey",
+            "api_key",
+            "API_KEY",
+            "credential",
+            "credentials",
+            "private_key",
+            "privateKey",
+        ] {
+            assert!(
+                is_high_signal_secret_name(name),
+                "{name:?} should be high-signal"
+            );
+        }
+        // Low-signal or benign substrings -> NOT high signal (value must
+        // then pass `looks_like_secret_value`).
+        for name in &[
+            "auth",
+            "token",
+            "author",
+            "authenticated",
+            "tokenizer",
+            "secretarial",
+            "api",
+            "key",
+        ] {
+            assert!(
+                !is_high_signal_secret_name(name),
+                "{name:?} should NOT be high-signal"
+            );
+        }
+    }
+
+    #[test]
+    fn identifier_components_splits_on_case_and_separators() {
+        assert_eq!(identifier_components("SECRET_KEY"), vec!["secret", "key"]);
+        assert_eq!(
+            identifier_components("apiKeyValue"),
+            vec!["api", "key", "value"]
+        );
+        assert_eq!(
+            identifier_components("app.secret_token"),
+            vec!["app", "secret", "token"]
+        );
+        assert_eq!(identifier_components("author"), vec!["author"]);
+        assert_eq!(identifier_components("passwords"), vec!["password"]);
     }
 }
