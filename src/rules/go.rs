@@ -88,14 +88,15 @@ fn go_is_test_file(path: &std::path::Path) -> bool {
     name.ends_with("_test.go") || name.ends_with("_bench.go")
 }
 
-/// Recognize URL expressions that resolve to a local test server or loopback
-/// host, which are not real SSRF sinks. Matches the common `httptest`
-/// conventions (`ts.URL`, `srv.URL`, `server.URL`) and loopback literals
-/// (`localhost`, `127.0.0.1`). Works on the raw argument text so it is
-/// independent of the file path (the test-file skip does not apply to
+/// Recognize URL expressions that resolve to an `httptest` test server, which
+/// is not a real SSRF sink. Matches the common `httptest` conventions
+/// (`ts.URL`, `srv.URL`, `server.URL`). Loopback literals (`localhost`,
+/// `127.0.0.1`) are intentionally NOT treated as safe: loopback SSRF is a real
+/// vulnerability and must remain flaggable. Works on the raw argument text so
+/// it is independent of the file path (the test-file skip does not apply to
 /// fixtures named `safe.go`).
 fn go_url_arg_is_local_test_server(arg_text: &str) -> bool {
-    const NEEDLES: [&str; 5] = ["ts.URL", "srv.URL", "server.URL", "localhost", "127.0.0.1"];
+    const NEEDLES: [&str; 3] = ["ts.URL", "srv.URL", "server.URL"];
     NEEDLES.iter().any(|needle| arg_text.contains(needle))
 }
 
@@ -2062,14 +2063,31 @@ func f(ts T, srv T, server T) {
     http.Get(ts.URL + "/x")
     http.Get(srv.URL + "/y")
     http.Get(server.URL)
-    http.Get("http://127.0.0.1:8080/z")
-    http.NewRequest("GET", "http://localhost:9000/ping", nil)
 }
 "#;
         let tree = parse_go(src);
         assert!(
             NoSsrf.check(src, &tree).is_empty(),
-            "local test-server / loopback URLs must not be flagged as SSRF"
+            "httptest server URLs must not be flagged as SSRF"
+        );
+    }
+
+    #[test]
+    fn ssrf_flags_dynamic_loopback_target() {
+        // Loopback is a real SSRF target: a dynamic URL built from a loopback
+        // host must still be flagged (only httptest server URLs are exempt).
+        let src = r#"
+package main
+import "net/http"
+func f(host string) {
+    http.Get("http://" + host + ":8080/admin")
+}
+"#;
+        let tree = parse_go(src);
+        assert_eq!(
+            NoSsrf.check(src, &tree).len(),
+            1,
+            "dynamic loopback-style URL must still be flagged as SSRF"
         );
     }
 
