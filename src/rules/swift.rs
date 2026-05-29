@@ -75,6 +75,150 @@ fn swift_tls_disable_eval_re() -> &'static Regex {
     })
 }
 
+// ─── Constant-folding support ────────────────────────────────────────────────
+//
+// Several of the dynamic-argument rules below (command injection, eval-js,
+// path traversal, SSRF) used to flag any call whose argument was not an inline
+// quoted string literal. That produced false positives whenever the argument
+// was a `let`-bound string-literal constant declared earlier in scope, e.g.
+//
+//     let cmd = "/bin/ls"
+//     Process().launchPath = cmd   // <- constant, not user input
+//
+// `swift_const_string_names` does a cheap source-level pre-pass to collect the
+// names of simple `let NAME = "literal"` (and `let NAME: Type = "literal"`)
+// declarations whose right-hand side is a plain, non-interpolated string
+// literal. Rules can then treat references to these names as safe constants.
+
+fn swift_const_decl_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // `let NAME` or `let NAME: Type`, then `=`, then a double-quoted string
+        // up to the closing quote. We reject interpolation (`\(`) afterwards.
+        Regex::new(r#"(?m)\blet\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*[^=\n]+?)?=\s*"([^"\\]*)""#)
+            .expect("static Swift const decl regex should compile")
+    })
+}
+
+/// Collect names of `let`-bound, non-interpolated string-literal constants.
+fn swift_const_string_names(source: &str) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    for caps in swift_const_decl_re().captures_iter(source) {
+        // caps[2] is the (already interpolation-free, since `\` is excluded
+        // from the body) string contents. The regex body class `[^"\\]*`
+        // rejects both embedded quotes and backslashes, so `\(...)`
+        // interpolation never matches here.
+        if let Some(name) = caps.get(1) {
+            names.insert(name.as_str().to_string());
+        }
+    }
+    names
+}
+
+/// Extract the textual contents between the first `(` and the matching final
+/// `)` of a call expression's source text. Falls back to the full text if no
+/// parentheses are present. Used to feed argument text to `swift_arg_is_constant`.
+fn call_args(text: &str) -> &str {
+    match (text.find('('), text.rfind(')')) {
+        (Some(open), Some(close)) if close > open => &text[open + 1..close],
+        _ => text,
+    }
+}
+
+/// Extract the value text following a labeled argument such as `atPath:` or
+/// `path:`, up to the next top-level comma or the end of the call text.
+/// Returns `None` if the label is not present.
+fn labeled_arg_value<'a>(text: &'a str, label: &str) -> Option<&'a str> {
+    let start = text.find(label)? + label.len();
+    let rest = &text[start..];
+    Some(first_arg(rest))
+}
+
+/// Return the first comma-separated argument from a call argument string,
+/// ignoring commas nested inside parentheses or brackets. Used to isolate the
+/// first positional argument (e.g. the JS string in
+/// `evaluateJavaScript(script, completionHandler:)`).
+fn first_arg(args: &str) -> &str {
+    let mut depth = 0i32;
+    for (i, c) in args.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => return &args[..i],
+            _ => {}
+        }
+    }
+    args
+}
+
+/// Given the textual contents of a call argument list (or assignment RHS),
+/// decide whether every "operand" is safe: i.e. a string literal or a known
+/// string constant. Returns `false` (unsafe) if the text contains string
+/// interpolation, or references an identifier that is not a known constant.
+///
+/// This is intentionally conservative on the unsafe side: anything we cannot
+/// confidently classify as a literal/constant is treated as dynamic.
+fn swift_arg_is_constant(arg: &str, consts: &std::collections::HashSet<String>) -> bool {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    // Interpolation is always dynamic.
+    if trimmed.contains("\\(") {
+        return false;
+    }
+    // Split on `+` (concatenation) and `,` (array/argument elements), then
+    // evaluate each operand independently. Every operand must be either an
+    // inline string literal or a known string constant.
+    for raw_operand in trimmed.split(['+', ',']) {
+        // Strip surrounding whitespace and any leading/trailing grouping or
+        // collection delimiters left over from slicing inside a larger
+        // expression (e.g. `myPath)` from `removeItem(atPath: myPath)` or
+        // `["-la"]` from a `process.arguments` assignment).
+        let mut operand = raw_operand
+            .trim()
+            .trim_start_matches(['(', '[', '{'])
+            .trim_end_matches([')', ']', '}'])
+            .trim();
+        if operand.is_empty() {
+            continue;
+        }
+        // Strip a leading argument label (`name:`) so that
+        // `arguments: [safeCmd]` is evaluated as `safeCmd`. Only strip when
+        // the prefix is a plain identifier followed by a colon (not `::` and
+        // not part of a string literal).
+        if let Some((label, rest)) = operand.split_once(':') {
+            if !label.is_empty()
+                && label.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && !rest.starts_with(':')
+            {
+                operand = rest
+                    .trim()
+                    .trim_start_matches(['(', '[', '{'])
+                    .trim_end_matches([')', ']', '}'])
+                    .trim();
+            }
+        }
+        if operand.is_empty() {
+            continue;
+        }
+        // Inline string literal operand.
+        if operand.starts_with('"') {
+            continue;
+        }
+        // Bare identifier operand — safe only if it is a known constant.
+        let ident: String = operand
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if !ident.is_empty() && operand.len() == ident.len() && consts.contains(&ident) {
+            continue;
+        }
+        return false;
+    }
+    true
+}
+
 // ─── Rule 1: no-hardcoded-secret ────────────────────────────────────────────
 
 pub struct NoHardcodedSecret;
@@ -189,36 +333,48 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
+        let consts = swift_const_string_names(source);
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
                 let text = &src[node.byte_range()];
                 if text.starts_with("Process(") || text.starts_with("NSTask(") {
-                    findings.push(make_finding(
-                        _self.id(),
-                        _self.severity(),
-                        _self.cwe(),
-                        "Process/NSTask created — ensure arguments are not user-controlled to prevent command injection",
-                        node,
-                        src,
-                    ));
+                    // A bare constructor (`Process()`) or one whose arguments are
+                    // all string literals / known constants is not, by itself,
+                    // command injection. Only flag when an argument is dynamic
+                    // (interpolation, concatenation with a non-constant, or a
+                    // bare non-constant identifier).
+                    let args = call_args(text);
+                    if !swift_arg_is_constant(args, &consts) {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "Process/NSTask created with dynamic arguments — ensure arguments are not user-controlled to prevent command injection",
+                            node,
+                            src,
+                        ));
+                    }
                 }
             }
 
             // Detect .launchPath or .arguments assignment with non-literal values
             if node.kind() == "assignment" {
                 let text = &src[node.byte_range()];
-                if (text.contains(".launchPath") || text.contains(".arguments"))
-                    && !text.contains('"')
-                {
-                    findings.push(make_finding(
-                        _self.id(),
-                        _self.severity(),
-                        _self.cwe(),
-                        "Process arguments set with dynamic value — risk of command injection",
-                        node,
-                        src,
-                    ));
+                if text.contains(".launchPath") || text.contains(".arguments") {
+                    // The RHS is what matters: flag only if it is dynamic and
+                    // not a known string constant.
+                    let rhs = text.split_once('=').map(|x| x.1).unwrap_or(text);
+                    if !swift_arg_is_constant(rhs, &consts) {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "Process arguments set with dynamic value — risk of command injection",
+                            node,
+                            src,
+                        ));
+                    }
                 }
             }
         });
@@ -319,15 +475,18 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
+        let consts = swift_const_string_names(source);
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
                 let text = &src[node.byte_range()];
                 if text.contains("evaluateJavaScript") {
-                    // Check if the argument is a string literal or interpolated
-                    let has_interpolation = text.contains("\\(");
-                    let is_variable_arg =
-                        !text.contains("evaluateJavaScript(\"") || has_interpolation;
+                    // Extract the argument(s) to evaluateJavaScript(...) and flag
+                    // only when dynamic: interpolation, concatenation with a
+                    // non-constant, or a bare non-constant identifier. An inline
+                    // literal or a known string constant is safe.
+                    let args = first_arg(call_args(text));
+                    let is_variable_arg = !swift_arg_is_constant(args, &consts);
                     if is_variable_arg {
                         findings.push(make_finding(
                             _self.id(),
@@ -496,6 +655,7 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let mut reported_lines = std::collections::HashSet::new();
+        let consts = swift_const_string_names(source);
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
@@ -512,11 +672,15 @@ impl_rule! {
                 ];
                 let has_fm_op = fm_ops.iter().any(|op| text.contains(op));
                 if has_fm_op {
-                    // Check if path argument is dynamic (not a string literal)
-                    // Look for atPath: or path: arguments that are not string literals
-                    let has_dynamic_path = (text.contains("atPath:") || text.contains("path:"))
-                        && !text.contains("atPath: \"")
-                        && !text.contains("path: \"");
+                    // Check the value passed to atPath:/path:. It is dynamic
+                    // only if it is neither an inline literal nor a known
+                    // string constant.
+                    let path_value = labeled_arg_value(text, "atPath:")
+                        .or_else(|| labeled_arg_value(text, "path:"));
+                    let has_dynamic_path = match path_value {
+                        Some(v) => !swift_arg_is_constant(v, &consts),
+                        None => false,
+                    };
                     if has_dynamic_path {
                         let line = node.start_position().row;
                         if reported_lines.insert(line) {
@@ -554,6 +718,7 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let mut reported_lines = std::collections::HashSet::new();
+        let consts = swift_const_string_names(source);
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
@@ -561,10 +726,10 @@ impl_rule! {
 
                 // Detect URL(string: variable)
                 if text.starts_with("URL(string:") || text.starts_with("URL(string :") {
-                    // Check if argument is not a string literal
-                    let after_colon = text.split_once(':').map(|x| x.1).unwrap_or("");
-                    let trimmed = after_colon.trim();
-                    if !trimmed.starts_with('"') && !trimmed.starts_with("\"") {
+                    // The string: value is dynamic only if it is neither an
+                    // inline literal nor a known string constant.
+                    let value = text.split_once(':').map(|x| x.1).unwrap_or("");
+                    if !swift_arg_is_constant(first_arg(value), &consts) {
                         let line = node.start_position().row;
                         if reported_lines.insert(line) {
                             findings.push(make_finding(
@@ -581,9 +746,15 @@ impl_rule! {
 
                 // Detect URLSession.shared.dataTask with non-literal URL
                 if text.contains("dataTask") && text.contains("url") {
-                    // If the URL is from a variable (not inline literal)
+                    // Dynamic unless an inline http literal or a known string
+                    // constant is referenced in the call.
                     let line = node.start_position().row;
-                    if !text.contains("\"http") && reported_lines.insert(line) {
+                    let mentions_const = consts.iter().any(|c| {
+                        // word-boundary-ish containment check
+                        text.split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+                            .any(|w| w == c)
+                    });
+                    if !text.contains("\"http") && !mentions_const && reported_lines.insert(line) {
                         findings.push(make_finding(
                             _self.id(),
                             _self.severity(),
