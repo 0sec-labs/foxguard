@@ -12,6 +12,34 @@ func recordStaticCommand() {
     print(command)
 }
 
+// Process with a constant launch path — not user-controlled, must not flag.
+func runStaticProcess() {
+    let cmd = "/bin/ls"
+    let process = Process()
+    process.launchPath = cmd
+    process.arguments = ["-la"]
+    try? process.run()
+}
+
+// URL built from a constant string — not SSRF.
+func fetchConstantURL() {
+    let url = "https://api.example.com"
+    _ = URL(string: url)
+}
+
+// FileManager with a constant path — not path traversal.
+func readConstantPath() {
+    let p = "/safe/path"
+    let fileManager = FileManager.default
+    _ = fileManager.fileExists(atPath: p)
+}
+
+// evaluateJavaScript with a constant script — not injection.
+func runConstantScript(webView: WKWebView) {
+    let script = "document.body.style.backgroundColor = 'white';"
+    webView.evaluateJavaScript(script)
+}
+
 func hashData(data: Data) {
     let digest = SHA256.hash(data: data)
     print(digest)
