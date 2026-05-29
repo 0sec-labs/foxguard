@@ -625,6 +625,33 @@ mod python {
 
         assert_eq!(findings.len(), 0, "safe.py should have 0 findings");
     }
+
+    /// False-positive regression guard. Each construct in `safe_py_fp.py` is a
+    /// benign shape that the conservative Python rules used to over-report:
+    /// `redirect(url_for(...))`, `open(os.path.join(...))`, `yaml.load` with an
+    /// explicit safe `Loader=`, constant-folded SSRF/command sinks, and
+    /// debug-mode toggles guarded by `if __name__ == "__main__"`.
+    #[test]
+    fn test_safe_py_fp_no_findings() {
+        let output = foxguard_cmd_isolated()
+            .args(["tests/fixtures/safe_py_fp.py", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        assert!(output.status.success(), "safe_py_fp.py should exit zero");
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+
+        assert_eq!(
+            findings.len(),
+            0,
+            "safe_py_fp.py should have 0 findings, got {:?}",
+            findings
+                .iter()
+                .map(|f| f["rule_id"].as_str().unwrap_or("?"))
+                .collect::<Vec<_>>()
+        );
+    }
 }
 
 // ─── JavaScript ─────────────────────────────────────────────────────────────

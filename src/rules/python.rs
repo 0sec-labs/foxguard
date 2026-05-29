@@ -35,6 +35,154 @@ fn resolve_callee<'a>(func_text: &'a str, ctx: &'a FileContext<'_>) -> Cow<'a, s
     }
 }
 
+// ─── False-positive reduction helpers ────────────────────────────────────────
+
+/// True when an expression node is a "constant" value that cannot carry
+/// untrusted input: plain (non-f) string/number/boolean/None literals.
+fn is_constant_literal(node: tree_sitter::Node, src: &str) -> bool {
+    match node.kind() {
+        "string" => {
+            let text = &src[node.byte_range()];
+            // f-strings can interpolate tainted data; treat them as dynamic.
+            !(text.starts_with("f\"")
+                || text.starts_with("f'")
+                || text.starts_with("rf\"")
+                || text.starts_with("rf'")
+                || text.starts_with("F\"")
+                || text.starts_with("F'"))
+        }
+        "concatenated_string" => {
+            // Adjacent string literals (no f-string component) are still constant.
+            let mut cursor = node.walk();
+            let all_const = node
+                .named_children(&mut cursor)
+                .all(|c| is_constant_literal(c, src));
+            all_const
+        }
+        "integer" | "float" | "true" | "false" | "none" => true,
+        _ => false,
+    }
+}
+
+/// True when a call node resolves to `os.path.join` / `pathlib.Path.joinpath`
+/// (or a bare `.joinpath(...)` method call). Results of these joins still need
+/// component sanitization in theory, but flagging them produces the documented
+/// `open_resource()`-style false positives; the conservative path-traversal
+/// rule intentionally treats them as sanitized.
+fn is_safe_join_call(node: tree_sitter::Node, src: &str) -> bool {
+    if node.kind() != "call" {
+        return false;
+    }
+    let Some(func) = node.child_by_field_name("function") else {
+        return false;
+    };
+    let func_text = &src[func.byte_range()];
+    if func_text == "os.path.join" {
+        return true;
+    }
+    // Match any `.joinpath(...)` attribute call (pathlib.Path(...).joinpath(...)).
+    if func.kind() == "attribute" {
+        if let Some(attr) = func.child_by_field_name("attribute") {
+            if &src[attr.byte_range()] == "joinpath" {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Collects names of local/module identifiers that are *only ever* assigned
+/// constant literals. Such names cannot carry tainted input, so flagging a
+/// sink that receives one is a false positive. An identifier is excluded the
+/// moment any assignment gives it a non-constant RHS, so function parameters
+/// and dynamically-reassigned names are never considered constant.
+fn collect_constant_bindings(
+    root: tree_sitter::Node,
+    src: &str,
+) -> std::collections::HashSet<String> {
+    let mut constant: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut dynamic: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    walk_tree(root, src, &mut |node, s| {
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        // Only simple single-name targets (`x = ...`).
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_constant_literal(right, s) {
+            constant.insert(name);
+        } else {
+            dynamic.insert(name);
+        }
+    });
+
+    constant.retain(|n| !dynamic.contains(n));
+    constant
+}
+
+/// Collects names of identifiers that are *only ever* assigned the result of a
+/// safe path join (`os.path.join` / `.joinpath`). Used by the path-traversal
+/// rule to treat such identifiers as sanitized.
+fn collect_safe_join_bindings(
+    root: tree_sitter::Node,
+    src: &str,
+) -> std::collections::HashSet<String> {
+    let mut safe: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut other: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    walk_tree(root, src, &mut |node, s| {
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_safe_join_call(right, s) {
+            safe.insert(name);
+        } else {
+            other.insert(name);
+        }
+    });
+
+    safe.retain(|n| !other.contains(n));
+    safe
+}
+
+/// True when `node` is contained within an `if __name__ == "__main__":` block.
+/// Walks ancestors looking for an `if_statement` whose condition compares
+/// `__name__` to `"__main__"`.
+fn is_under_main_guard(node: tree_sitter::Node, src: &str) -> bool {
+    let mut current = node.parent();
+    while let Some(n) = current {
+        if n.kind() == "if_statement" {
+            if let Some(cond) = n.child_by_field_name("condition") {
+                let cond_text = &src[cond.byte_range()];
+                if cond_text.contains("__name__") && cond_text.contains("__main__") {
+                    return true;
+                }
+            }
+        }
+        current = n.parent();
+    }
+    false
+}
+
 // ─── Rule 1: no-eval ─────────────────────────────────────────────────────────
 
 pub struct NoEval;
@@ -270,6 +418,9 @@ impl_rule! {
             "subprocess.check_call",
         ];
 
+        // Identifiers proven to hold only constant literals are not tainted.
+        let const_names = collect_constant_bindings(tree.root_node(), source);
+
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call" {
                 if let Some(func) = node.child_by_field_name("function") {
@@ -284,10 +435,11 @@ impl_rule! {
                                         let text = &src[first_arg.byte_range()];
                                         text.starts_with("f\"") || text.starts_with("f'")
                                     }
-                                    "concatenated_string"
-                                    | "binary_operator"
-                                    | "identifier"
-                                    | "call" => true,
+                                    // Identifier folded to a constant literal is safe.
+                                    "identifier" => {
+                                        !const_names.contains(&src[first_arg.byte_range()])
+                                    }
+                                    "concatenated_string" | "binary_operator" | "call" => true,
                                     _ => false,
                                 };
                                 if is_dynamic {
@@ -329,6 +481,11 @@ impl_rule! {
 
         let mut findings = Vec::new();
 
+        // Identifiers proven constant, and identifiers assigned from a safe
+        // path join (os.path.join / .joinpath), are treated as sanitized.
+        let const_names = collect_constant_bindings(tree.root_node(), source);
+        let safe_join_names = collect_safe_join_bindings(tree.root_node(), source);
+
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call" {
                 if let Some(func) = node.child_by_field_name("function") {
@@ -340,8 +497,11 @@ impl_rule! {
                             if let Some(first_arg) = args.named_child(0) {
                                 // Flag if path uses concatenation or f-string
                                 let is_dynamic = match first_arg.kind() {
-                                    "binary_operator" | "concatenated_string" | "identifier" => {
-                                        true
+                                    "binary_operator" | "concatenated_string" => true,
+                                    "identifier" => {
+                                        let name = &src[first_arg.byte_range()];
+                                        !const_names.contains(name)
+                                            && !safe_join_names.contains(name)
                                     }
                                     "string" => {
                                         let text = &src[first_arg.byte_range()];
@@ -403,6 +563,10 @@ impl_rule! {
             "urllib.request.urlopen",
         ];
 
+        // Identifiers proven to hold only constant literals (e.g. a module-level
+        // BASE_URL) are not user-controlled.
+        let const_names = collect_constant_bindings(tree.root_node(), source);
+
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() != "call" {
                 return;
@@ -437,7 +601,8 @@ impl_rule! {
                     let text = &src[url_arg.byte_range()];
                     text.starts_with("f\"") || text.starts_with("f'")
                 }
-                "identifier" | "call" | "subscript" | "attribute" | "binary_operator" => true,
+                "identifier" => !const_names.contains(&src[url_arg.byte_range()]),
+                "call" | "subscript" | "attribute" | "binary_operator" => true,
                 _ => false,
             };
 
@@ -687,13 +852,42 @@ impl_rule! {
                     let func_text = &src[func.byte_range()];
                     let resolved = resolve_callee(func_text, ctx);
                     if resolved.as_ref() == "yaml.load" {
-                        // Check if SafeLoader or safe_load is used
+                        // Parse the `Loader=` keyword argument via the AST and
+                        // check whether its value is a recognised safe loader,
+                        // rather than substring-matching the raw argument text.
                         if let Some(args) = node.child_by_field_name("arguments") {
-                            let args_text = &src[args.byte_range()];
-                            if !args_text.contains("SafeLoader")
-                                && !args_text.contains("safe_load")
-                                && !args_text.contains("BaseLoader")
-                            {
+                            let mut safe_loader = false;
+                            let mut cursor = args.walk();
+                            for arg in args.named_children(&mut cursor) {
+                                if arg.kind() != "keyword_argument" {
+                                    continue;
+                                }
+                                let (Some(name), Some(value)) = (
+                                    arg.child_by_field_name("name"),
+                                    arg.child_by_field_name("value"),
+                                ) else {
+                                    continue;
+                                };
+                                if &src[name.byte_range()] != "Loader" {
+                                    continue;
+                                }
+                                // Resolve the loader value through the alias
+                                // table and inspect its trailing attribute, so
+                                // `yaml.SafeLoader`, `SafeLoader`, and aliased
+                                // imports all resolve correctly.
+                                let value_text = &src[value.byte_range()];
+                                let resolved_loader = resolve_callee(value_text, ctx);
+                                let leaf = resolved_loader
+                                    .as_ref()
+                                    .rsplit('.')
+                                    .next()
+                                    .unwrap_or(resolved_loader.as_ref());
+                                if matches!(leaf, "SafeLoader" | "BaseLoader" | "CSafeLoader") {
+                                    safe_loader = true;
+                                    break;
+                                }
+                            }
+                            if !safe_loader {
                                 findings.push(make_finding(
                                     _self.id(),
                                     _self.severity(),
@@ -737,7 +931,10 @@ impl_rule! {
                 ) {
                     let left_text = &src[left.byte_range()];
                     let right_text = &src[right.byte_range()];
-                    if left_text == "DEBUG" && right_text == "True" {
+                    if left_text == "DEBUG"
+                        && right_text == "True"
+                        && !is_under_main_guard(node, src)
+                    {
                         findings.push(make_finding(
                             _self.id(),
                             _self.severity(),
@@ -779,8 +976,9 @@ impl_rule! {
                             if &src[attr.byte_range()] == "run" {
                                 if let Some(args) = node.child_by_field_name("arguments") {
                                     let args_text = &src[args.byte_range()];
-                                    if args_text.contains("debug=True")
-                                        || args_text.contains("debug = True")
+                                    if (args_text.contains("debug=True")
+                                        || args_text.contains("debug = True"))
+                                        && !is_under_main_guard(node, src)
                                     {
                                         findings.push(make_finding(
                                             _self.id(),
@@ -806,7 +1004,10 @@ impl_rule! {
                 ) {
                     let left_text = &src[left.byte_range()];
                     let right_text = &src[right.byte_range()];
-                    if left_text.ends_with(".debug") && right_text == "True" {
+                    if left_text.ends_with(".debug")
+                        && right_text == "True"
+                        && !is_under_main_guard(node, src)
+                    {
                         findings.push(make_finding(
                             _self.id(),
                             _self.severity(),
@@ -884,6 +1085,18 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let redirect_fns = ["redirect", "HttpResponseRedirect"];
+        // Framework helpers that build a safe, server-controlled URL from a
+        // route/view name. A redirect to their result is not user-controlled.
+        let safe_url_builders = [
+            "url_for",
+            "url_for_external",
+            "reverse",
+            "reverse_lazy",
+            "get_absolute_url",
+        ];
+
+        // Identifiers proven to hold only constant literals are not dynamic.
+        let const_names = collect_constant_bindings(tree.root_node(), source);
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call" {
@@ -899,8 +1112,19 @@ impl_rule! {
                                         let text = &src[first_arg.byte_range()];
                                         text.starts_with("f\"") || text.starts_with("f'")
                                     }
-                                    "identifier" | "call" | "subscript" | "attribute"
-                                    | "binary_operator" => true,
+                                    "identifier" => {
+                                        !const_names.contains(&src[first_arg.byte_range()])
+                                    }
+                                    // redirect(url_for("x.y")) and friends are safe.
+                                    "call" => first_arg
+                                        .child_by_field_name("function")
+                                        .map(|inner| {
+                                            let t = &src[inner.byte_range()];
+                                            let leaf = t.rsplit('.').next().unwrap_or(t);
+                                            !safe_url_builders.contains(&leaf)
+                                        })
+                                        .unwrap_or(true),
+                                    "subscript" | "attribute" | "binary_operator" => true,
                                     _ => false,
                                 };
                                 if is_dynamic {
