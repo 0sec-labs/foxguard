@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -25,8 +26,11 @@ fn js_sql_re() -> &'static Regex {
 fn js_redos_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(\([^)]*[+*][^)]*\)[+*]|\([^)]*\|[^)]*\)[+*])")
-            .expect("static ReDoS regex should compile")
+        // Only flag a quantified group that itself contains a quantifier, i.e.
+        // a genuine nested quantifier like `(a+)+` / `(a*)*` / `(\d+)+`. Plain
+        // alternation groups such as `(a|b)+` are not catastrophic on their own,
+        // so we no longer flag them (false-positive reduction).
+        Regex::new(r"\([^)]*[+*][^)]*\)[+*]").expect("static ReDoS regex should compile")
     })
 }
 
@@ -46,6 +50,106 @@ fn js_sanitize_re() -> &'static Regex {
         )
         .expect("static JavaScript sanitizer regex should compile")
     })
+}
+
+// ─── False-positive reduction helpers ────────────────────────────────────────
+
+/// Collect identifiers that are assigned a constant string value via
+/// `const`/`let`/`var x = "literal"` (or a template string with no
+/// interpolation). These are effectively static and safe to treat as such
+/// when passed to URL/redirect/HTML sinks.
+fn collect_const_string_idents(root: tree_sitter::Node, source: &str) -> HashSet<String> {
+    let mut consts = HashSet::new();
+    walk_tree(root, source, &mut |node, src| {
+        if node.kind() != "variable_declarator" {
+            return;
+        }
+        let (Some(name_node), Some(value_node)) = (
+            node.child_by_field_name("name"),
+            node.child_by_field_name("value"),
+        ) else {
+            return;
+        };
+        if name_node.kind() != "identifier" {
+            return;
+        }
+        if value_is_static_string(value_node) {
+            consts.insert(src[name_node.byte_range()].to_string());
+        }
+    });
+    consts
+}
+
+/// True if the node is a plain string literal, or a template string with no
+/// interpolation (i.e. a compile-time-constant string).
+fn value_is_static_string(node: tree_sitter::Node) -> bool {
+    match node.kind() {
+        "string" => true,
+        "template_string" => {
+            let mut cursor = node.walk();
+            let has_sub = node
+                .children(&mut cursor)
+                .any(|c| c.kind() == "template_substitution");
+            !has_sub
+        }
+        _ => false,
+    }
+}
+
+/// True if the call expression node is a recognized sanitizer/encoder call
+/// (e.g. `DOMPurify.sanitize(...)`, `escapeHtml(...)`, `encodeURIComponent(...)`).
+fn is_sanitizer_call(node: tree_sitter::Node, src: &str) -> bool {
+    if node.kind() != "call_expression" {
+        return false;
+    }
+    let Some(func) = node.child_by_field_name("function") else {
+        return false;
+    };
+    js_sanitize_re().is_match(&format!("{}(", &src[func.byte_range()]))
+}
+
+/// True if an argument/value expression is statically safe: a string literal,
+/// a non-interpolated template string, an identifier known to hold a constant
+/// string, or a sanitizer call. Used to suppress URL/redirect/HTML findings.
+fn expr_is_safe(node: tree_sitter::Node, src: &str, consts: &HashSet<String>) -> bool {
+    match node.kind() {
+        "string" => true,
+        "template_string" => value_is_static_string(node),
+        "identifier" => consts.contains(&src[node.byte_range()]),
+        "call_expression" => is_sanitizer_call(node, src),
+        _ => false,
+    }
+}
+
+/// True if a node (typically a template string) interpolates a known-unsafe
+/// user-controlled source such as `req.query`/`req.body`/`req.params`.
+fn interpolates_user_input(node: tree_sitter::Node, src: &str) -> bool {
+    let text = &src[node.byte_range()];
+    text.contains("req.query")
+        || text.contains("req.body")
+        || text.contains("req.params")
+        || text.contains("req.headers")
+}
+
+/// Walk the parent chain from a node looking for an enclosing
+/// `call_expression` whose callee name (last `.`-segment) contains "session"
+/// (case-insensitive). Used so the session-secret rule only fires for an
+/// object pair that is actually an argument to `session({ ... })`.
+fn inside_session_call(node: tree_sitter::Node, src: &str) -> bool {
+    let mut current = node.parent();
+    while let Some(n) = current {
+        if n.kind() == "call_expression" {
+            if let Some(func) = n.child_by_field_name("function") {
+                let func_text = &src[func.byte_range()];
+                let callee = func_text.rsplit('.').next().unwrap_or(func_text);
+                if callee.to_ascii_lowercase().contains("session") {
+                    return true;
+                }
+            }
+        }
+        current = n.parent();
+    }
+    false
 }
 
 // ─── Rule 1: no-eval ─────────────────────────────────────────────────────────
@@ -257,6 +361,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
+        let consts = collect_const_string_idents(tree.root_node(), source);
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // assignment_expression where left side ends with .innerHTML
             if node.kind() == "assignment_expression" {
@@ -265,9 +370,12 @@ impl_rule! {
                         if let Some(prop) = left.child_by_field_name("property") {
                             let prop_text = &src[prop.byte_range()];
                             if prop_text == "innerHTML" || prop_text == "outerHTML" {
-                                // Check if right side is NOT a string literal (string literals are usually safe)
+                                // Flag only if the right side is not statically
+                                // safe: string literal, const-bound identifier,
+                                // non-interpolated template, or sanitizer call
+                                // (e.g. DOMPurify.sanitize(...)).
                                 if let Some(right) = node.child_by_field_name("right") {
-                                    if right.kind() != "string" {
+                                    if !expr_is_safe(right, src, &consts) {
                                         findings.push(make_finding(
                                             _self.id(),
                                             _self.severity(),
@@ -428,6 +536,7 @@ impl_rule! {
     fn check(_self, source, tree) {
 
         let mut findings = Vec::new();
+        let consts = collect_const_string_idents(tree.root_node(), source);
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "assignment_expression" {
                 if let Some(left) = node.child_by_field_name("left") {
@@ -439,8 +548,9 @@ impl_rule! {
                         || left_text == "document.location.href"
                     {
                         if let Some(right) = node.child_by_field_name("right") {
-                            // Flag if right side is not a string literal
-                            if right.kind() != "string" {
+                            // Flag if right side is not statically safe (string
+                            // literal, const-bound identifier, or sanitizer call).
+                            if !expr_is_safe(right, src, &consts) {
                                 findings.push(make_finding(
                                     _self.id(),
                                     _self.severity(),
@@ -809,6 +919,9 @@ impl_rule! {
             "https.request",
         ];
 
+        // Identifiers proven to hold a constant string are not SSRF sinks.
+        let consts = collect_const_string_idents(tree.root_node(), source);
+
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() != "call_expression" {
                 return;
@@ -831,6 +944,12 @@ impl_rule! {
 
             let is_dynamic = match first_arg.kind() {
                 "string" => false,
+                // Identifier bound to a constant string or a sanitizer call: safe.
+                "identifier" | "call_expression"
+                    if expr_is_safe(first_arg, src, &consts) =>
+                {
+                    false
+                }
                 "object" => {
                     let arg_text = &src[first_arg.byte_range()];
                     arg_text.contains("url:")
@@ -1007,11 +1126,12 @@ impl_rule! {
                     let key_text = &src[key.byte_range()];
                     let key_inner = key_text.trim_matches(|c| c == '"' || c == '\'');
                     if key_inner == "secret" && value.kind() == "string" {
-                        // Check the context: is this inside a call_expression that looks like session()?
-                        // Walk up to check if we're in an arguments > object > call_expression chain
+                        // Only flag when this pair is actually an argument to a
+                        // session(...) call — a bare `{ secret: "..." }` object
+                        // (e.g. mock data) is not a session-secret finding.
                         let val = &src[value.byte_range()];
                         let inner = val.trim_matches(|c| c == '"' || c == '\'');
-                        if is_secret_value_long_enough(inner) {
+                        if is_secret_value_long_enough(inner) && inside_session_call(node, src) {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
@@ -1770,7 +1890,10 @@ impl_rule! {
                             let mut cursor = args.walk();
                             for arg in args.children(&mut cursor) {
                                 if arg.kind() == "template_string" {
-                                    // Check if template string has interpolation
+                                    // Only flag when the template interpolates a
+                                    // known user-controlled source (req.query /
+                                    // req.body / req.params / req.headers).
+                                    // Interpolating arbitrary locals is benign.
                                     let mut has_interpolation = false;
                                     let mut inner_cursor = arg.walk();
                                     for child in arg.children(&mut inner_cursor) {
@@ -1779,7 +1902,7 @@ impl_rule! {
                                             break;
                                         }
                                     }
-                                    if has_interpolation {
+                                    if has_interpolation && interpolates_user_input(arg, src) {
                                         findings.push(make_finding(
                                             _self.id(),
                                             _self.severity(),

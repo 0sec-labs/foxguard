@@ -20,7 +20,7 @@ const query2 = `SELECT * FROM users WHERE id = ${userId}`;
 
 // 5. js/no-xss-innerhtml (High)
 const el = document.getElementById("app");
-el.innerHTML = userInput;
+el.innerHTML = req.body.html;
 
 // 6. js/no-command-injection (Critical)
 exec(userInput);
@@ -29,7 +29,7 @@ exec(userInput);
 document.write("<h1>Hello</h1>");
 
 // 8. js/no-open-redirect (Medium)
-window.location.href = userInput;
+window.location.href = req.query.next;
 
 // 9. js/no-weak-crypto (Medium)
 const hash = crypto.createHash("md5");
@@ -41,7 +41,7 @@ const hmac = crypto.createHmac("sha256", key);
 fs.readFileSync(`/data/${userInput}`);
 
 // 11. js/no-ssrf (High)
-fetch(userInput);
+fetch(req.query.url);
 
 // 12. js/no-path-traversal (High) through response file send
 res.sendFile(userInput);
@@ -59,7 +59,7 @@ const re = /(a+)+$/;
 const cors = { origin: "*" };
 
 // 16. js/express-no-hardcoded-session-secret (High)
-const sessionConfig = { secret: "keyboard-cat-secret" };
+app.use(session({ secret: "keyboard-cat-secret" }));
 
 // 17. js/express-cookie-no-secure (Medium)
 const cookieOpts = { cookie: { maxAge: 86400 } };
