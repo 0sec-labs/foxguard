@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os/exec"
 )
 
@@ -24,6 +25,14 @@ func safeOperations(db *sql.DB) {
 	// Safe: static URL
 	http.Get("https://api.example.com/health")
 	http.NewRequest("GET", "https://api.example.com/health", nil)
+
+	// Safe: dynamic URL targeting a local test server / loopback host is not
+	// an SSRF sink (httptest.Server.URL and loopback literals).
+	ts := httptest.NewServer(nil)
+	defer ts.Close()
+	http.Get(ts.URL + "/x")
+	http.Get("http://127.0.0.1:8080/healthz")
+	http.NewRequest("GET", "http://localhost:9000/ping", nil)
 
 	// Safe: TLS verification remains enabled
 	_ = &tls.Config{MinVersion: tls.VersionTLS12}
