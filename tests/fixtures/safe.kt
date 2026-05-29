@@ -41,3 +41,27 @@ fun cors(config: CorsRegistry) {
 fun noEval(script: String) {
     println(script.length)
 }
+
+// readObject() on a non-deserialization receiver — not unsafe deserialization.
+fun safeReadObject(mySafe: SafeReader) {
+    mySafe.readObject()
+}
+
+// Custom header that merely contains the CORS header substring — not a real
+// Access-Control-Allow-Origin wildcard.
+fun customHeader(response: HttpServletResponse) {
+    response.setHeader("X-Access-Control-Allow-Origin", "*")
+}
+
+// Parameterized prepared statement with a placeholder, value bound via setString.
+fun parameterizedPrepared(conn: Connection, call: ApplicationCall) {
+    val id = call.request.queryParameters["id"]
+    val stmt = conn.prepareStatement("SELECT * FROM users WHERE id = ?")
+    stmt.setString(1, id)
+}
+
+// Fully literal SQL string — no dynamic operand or interpolation.
+fun literalSql(db: Database) {
+    db.executeQuery("SELECT * FROM users WHERE active = true")
+    db.executeQuery("SELECT " + "id" + " FROM users")
+}
