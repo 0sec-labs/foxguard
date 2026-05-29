@@ -599,6 +599,33 @@ fn find_sinks(
         let Some(args) = call_arguments(n) else {
             return;
         };
+
+        // Parameterized-binding setters bind their value to a placeholder
+        // (`?`) in an already-prepared statement; they are NOT injection
+        // sinks. Treat them as taint-stopping no-ops so a tainted value
+        // passed to e.g. `setString(1, tainted)` does not flag.
+        if matches!(method, Some("setString" | "setInt" | "setObject")) {
+            return;
+        }
+
+        // `prepareStatement(sql, ...)` only executes its FIRST (SQL)
+        // argument; trailing arguments (e.g. result-set type flags) are
+        // not part of the query. Only treat it as a sink when the SQL
+        // string itself is tainted.
+        if method == Some("prepareStatement") {
+            let first_tainted = first_argument(args)
+                .map(|first| expr_uses_tainted(first, s, tainted))
+                .unwrap_or(false);
+            if first_tainted {
+                sinks.push(TaintSink {
+                    start_byte: n.start_byte(),
+                    end_byte: n.end_byte(),
+                    description: "prepareStatement() with tainted argument".into(),
+                });
+            }
+            return;
+        }
+
         if !expr_uses_tainted(args, s, tainted) {
             return;
         }
@@ -698,6 +725,17 @@ fn call_arguments(node: Node<'_>) -> Option<Node<'_>> {
                     return Some(grandchild);
                 }
             }
+        }
+    }
+    None
+}
+
+/// First actual argument expression from a `value_arguments` node.
+fn first_argument(args_node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = args_node.walk();
+    for child in args_node.children(&mut cursor) {
+        if child.kind() == "value_argument" {
+            return child.child(0);
         }
     }
     None
@@ -839,6 +877,43 @@ fun handler(call: ApplicationCall) {
         assert!(
             findings.is_empty(),
             "literal command should not trigger taint: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn prepared_statement_with_binding_is_clean() {
+        // Tainted value bound via setString to a placeholder is safe; the
+        // prepareStatement SQL string itself is a constant literal.
+        let src = r#"
+fun handler(call: ApplicationCall, conn: Connection) {
+    val id = call.request.queryParameters["id"]
+    val stmt = conn.prepareStatement("SELECT * FROM users WHERE id = ?")
+    stmt.setString(1, id)
+}
+"#;
+        let findings = analyze(src, &sql_injection_spec());
+        assert!(
+            findings.is_empty(),
+            "parameterized prepared statement should not flag: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn prepared_statement_with_tainted_sql_flags() {
+        // Tainted value concatenated directly into the SQL string passed to
+        // prepareStatement must still flag.
+        let src = r#"
+fun handler(call: ApplicationCall, conn: Connection) {
+    val id = call.request.queryParameters["id"]
+    val stmt = conn.prepareStatement("SELECT * FROM users WHERE id = " + id)
+}
+"#;
+        let findings = analyze(src, &sql_injection_spec());
+        assert!(
+            !findings.is_empty(),
+            "tainted SQL in prepareStatement should flag: {:?}",
             findings
         );
     }

@@ -163,13 +163,78 @@ fn is_string_literal(node: tree_sitter::Node) -> bool {
     )
 }
 
-/// Check whether a node or any of its descendants contains string concatenation.
+/// Check whether a string_literal node contains a real interpolation
+/// of a (non-literal) expression, i.e. `"…${expr}…"` or `"…$ident…"`.
+fn string_has_interpolation(node: tree_sitter::Node) -> bool {
+    if node.kind() != "string_literal" {
+        return false;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        // tree-sitter-kotlin represents `${expr}` as `interpolated_expression`
+        // and `$ident` as `interpolated_identifier`.
+        if child.kind() == "interpolated_expression" || child.kind() == "interpolated_identifier" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether an expression is a compile-time-constant string, i.e. a plain
+/// literal (no interpolation) or a concatenation of such constants like
+/// `"a" + "b" + "c"`. Used to distinguish dynamic SQL from constant SQL.
+fn is_constant_string_expr(node: tree_sitter::Node) -> bool {
+    match node.kind() {
+        "string_literal" => !string_has_interpolation(node),
+        // Numeric/boolean literals are also constant.
+        "integer_literal" | "long_literal" | "real_literal" | "boolean_literal"
+        | "character_literal" => true,
+        "additive_expression" => {
+            let mut cursor = node.walk();
+            let result = node
+                .children(&mut cursor)
+                .filter(|c| c.kind() != "+")
+                .all(is_constant_string_expr);
+            result
+        }
+        // Parenthesised / wrapper nodes: unwrap a single meaningful child.
+        "parenthesized_expression" => {
+            let mut cursor = node.walk();
+            let result = node
+                .children(&mut cursor)
+                .filter(|c| !matches!(c.kind(), "(" | ")"))
+                .all(is_constant_string_expr);
+            result
+        }
+        _ => false,
+    }
+}
+
+/// Check whether a node or any of its descendants builds a dynamic SQL
+/// string: either string concatenation (`+`) with a non-literal operand,
+/// or a string template with a real interpolation. A purely constant
+/// expression (including `"a" + "b"`) does NOT count.
 fn has_string_concat(node: tree_sitter::Node, src: &str) -> bool {
+    // String-template interpolation: `"… $x …"`.
+    if string_has_interpolation(node) {
+        return true;
+    }
+
     if node.kind() == "additive_expression" {
         let text = &src[node.byte_range()];
-        // Must contain a string literal and a + operator
+        // Must look like string concatenation: a quote and a `+`.
         if text.contains('"') && text.contains('+') {
-            return true;
+            // Require at least one operand that is not a constant string
+            // (otherwise it is a constant query, e.g. `"a" + "b"`).
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "+" {
+                    continue;
+                }
+                if !is_constant_string_expr(child) {
+                    return true;
+                }
+            }
         }
     }
     let mut cursor = node.walk();
@@ -304,6 +369,34 @@ impl_rule! {
 
         let mut findings = Vec::new();
 
+        // Pre-pass: collect variables initialized from an
+        // ObjectInputStream/XMLDecoder constructor so that a later
+        // `variable.readObject()` is still flagged (true positive),
+        // while readObject() on unrelated receivers is not.
+        let mut unsafe_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "property_declaration" {
+                let mut var_name: Option<&str> = None;
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "variable_declaration" {
+                        let mut c2 = child.walk();
+                        for gc in child.children(&mut c2) {
+                            if gc.kind() == "simple_identifier" {
+                                var_name = Some(&src[gc.byte_range()]);
+                            }
+                        }
+                    }
+                }
+                if let Some(name) = var_name {
+                    let init_text = &src[node.byte_range()];
+                    if init_text.contains("ObjectInputStream") || init_text.contains("XMLDecoder") {
+                        unsafe_vars.insert(name.to_string());
+                    }
+                }
+            }
+        });
+
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call_expression" {
                 if let Some(name) = call_method_name(node, src) {
@@ -312,7 +405,7 @@ impl_rule! {
                         if let Some(receiver) = call_receiver_text(node, src) {
                             if receiver.contains("ObjectInputStream")
                                 || receiver.contains("XMLDecoder")
-                                || !receiver.contains('.')
+                                || unsafe_vars.contains(receiver)
                             {
                                 findings.push(make_finding(
                                     _self.id(),
@@ -719,10 +812,14 @@ impl_rule! {
                         if let Some(args) = call_arguments(node) {
                             if let Some(first) = first_argument(args) {
                                 let first_text = &src[first.byte_range()];
-                                if first_text.contains("Access-Control-Allow-Origin") {
+                                // Require exact header-name equality (case-insensitive),
+                                // not a substring like `X-Access-Control-Allow-Origin`.
+                                let header_name = first_text.trim().trim_matches('"');
+                                if header_name.eq_ignore_ascii_case("Access-Control-Allow-Origin") {
                                     if let Some(second) = nth_argument(args, 1) {
                                         let second_text = &src[second.byte_range()];
-                                        if second_text.contains('*') {
+                                        // Require the value itself to be the wildcard `*`.
+                                        if second_text.trim().trim_matches('"').trim() == "*" {
                                             findings.push(make_finding(
                                                 _self.id(),
                                                 _self.severity(),
@@ -1062,6 +1159,50 @@ fun getUser(id: String) {
         assert!(findings.is_empty(), "parameterized query should be clean");
     }
 
+    #[test]
+    fn sql_injection_clean_constant_concat() {
+        // Concatenation of only string literals is a constant query.
+        let src = r#"
+fun q(db: Database) {
+    db.executeQuery("SELECT " + "id" + " FROM users")
+    db.executeQuery("SELECT * FROM users WHERE active = true")
+}
+"#;
+        let findings = check_rule(&NoSqlInjection, src);
+        assert!(
+            findings.is_empty(),
+            "constant string concat should be clean: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn sql_injection_string_interpolation() {
+        let src = r#"
+fun q(db: Database, userInput: String) {
+    db.executeQuery("SELECT * FROM users WHERE id = $userInput")
+}
+"#;
+        let findings = check_rule(&NoSqlInjection, src);
+        assert!(
+            !findings.is_empty(),
+            "interpolated SQL should flag: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn sql_injection_create_statement_execute() {
+        let src = r#"
+fun q(conn: Connection, userInput: String) {
+    conn.createStatement().execute("SELECT * FROM users WHERE id = " + userInput)
+}
+"#;
+        let findings = check_rule(&NoSqlInjection, src);
+        assert!(
+            !findings.is_empty(),
+            "createStatement().execute with concat should flag: {findings:?}"
+        );
+    }
+
     // ─── Command Injection ────────────────────────────────────────────────
 
     #[test]
@@ -1126,6 +1267,21 @@ fun parse(json: String) {
 "#;
         let findings = check_rule(&NoUnsafeDeserialization, src);
         assert!(findings.is_empty(), "Gson should be clean");
+    }
+
+    #[test]
+    fn unsafe_deserialization_benign_read_object() {
+        // readObject() on an unrelated receiver is not unsafe deserialization.
+        let src = r#"
+fun parse(mySafe: SafeReader) {
+    mySafe.readObject()
+}
+"#;
+        let findings = check_rule(&NoUnsafeDeserialization, src);
+        assert!(
+            findings.is_empty(),
+            "readObject on benign receiver should be clean: {findings:?}"
+        );
     }
 
     // ─── SSRF ─────────────────────────────────────────────────────────────
@@ -1311,6 +1467,22 @@ fun handler(response: HttpServletResponse) {
 "#;
         let findings = check_rule(&NoCorsStar, src);
         assert!(findings.is_empty(), "specific origin should be clean");
+    }
+
+    #[test]
+    fn cors_clean_custom_header() {
+        // A custom header that merely *contains* the CORS header name must
+        // not be flagged — requires exact header-name equality.
+        let src = r#"
+fun handler(response: HttpServletResponse) {
+    response.setHeader("X-Access-Control-Allow-Origin", "*")
+}
+"#;
+        let findings = check_rule(&NoCorsStar, src);
+        assert!(
+            findings.is_empty(),
+            "custom header should be clean: {findings:?}"
+        );
     }
 
     // ─── Eval ─────────────────────────────────────────────────────────────
