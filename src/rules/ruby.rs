@@ -1,6 +1,7 @@
 use crate::impl_rule;
 use crate::rules::common::{
-    hardcoded_secret_re, is_secret_value_long_enough, make_finding, walk_tree,
+    hardcoded_secret_re, is_secret_value_long_enough, looks_like_secret_value, make_finding,
+    walk_tree,
 };
 use crate::{Language, Severity};
 
@@ -16,6 +17,70 @@ fn has_interpolation(string_node: tree_sitter::Node) -> bool {
         }
     }
     false
+}
+
+/// Extracts the first argument node of a `call` or `command` node, handling
+/// both the `arguments` field and a positional `argument_list` named child
+/// (mirrors the extraction used by `rb/no-ssrf`).
+fn first_call_arg(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+    node.child_by_field_name("arguments")
+        .and_then(|a| a.named_child(0))
+        .or_else(|| {
+            node.named_child(1).and_then(|c| {
+                if c.kind() == "argument_list" {
+                    c.named_child(0)
+                } else {
+                    Some(c)
+                }
+            })
+        })
+}
+
+/// Returns `true` if a `string` node contains at least one interpolation
+/// segment whose expression references *dynamic* input (a local variable,
+/// instance/global variable, method call, or element reference such as
+/// `params[:id]`). Interpolations that only reference constants (e.g.
+/// `#{CONST}` or `#{Foo::BAR}`) are considered static/benign.
+fn interpolation_is_dynamic(string_node: tree_sitter::Node) -> bool {
+    let mut cursor = string_node.walk();
+    for child in string_node.children(&mut cursor) {
+        if child.kind() != "interpolation" {
+            continue;
+        }
+        // Inspect the interpolated expression(s). A constant-only
+        // interpolation is benign; anything else is treated as dynamic.
+        let mut inner = child.walk();
+        for expr in child.named_children(&mut inner) {
+            match expr.kind() {
+                // Constants and namespaced constants are static.
+                "constant" => {}
+                "scope_resolution" => {}
+                // Everything else (identifier, instance_variable,
+                // global_variable, element_reference, call, ...) is dynamic.
+                _ => return true,
+            }
+        }
+    }
+    false
+}
+
+/// Returns `true` if `name` is a Rails URL helper that produces a
+/// framework-controlled (non-user) URL, so passing its result to
+/// `redirect_to` is not an open-redirect risk. Recognizes `url_for` and the
+/// generated route helpers ending in `_path` / `_url` (e.g. `user_path`,
+/// `root_url`).
+fn is_url_helper(name: &str) -> bool {
+    name == "url_for" || name.ends_with("_path") || name.ends_with("_url")
+}
+
+/// Returns `true` if `name` is a Rails helper that already returns
+/// HTML-escaped / sanitized output, so wrapping it in `raw()` does not
+/// introduce XSS.
+fn is_safe_html_helper(name: &str) -> bool {
+    matches!(
+        name,
+        "sanitize" | "link_to" | "render" | "image_tag" | "content_tag"
+    )
 }
 
 // ─── Rule 1: no-eval ──────────────────────────────────────────────────────────
@@ -195,9 +260,15 @@ impl_rule! {
 
             if let Some(name) = method_name {
                 if name == "where" || name == "find_by_sql" || name == "execute" {
-                    // Check if any argument contains string interpolation
-                    let node_text = &src[node.byte_range()];
-                    if node_text.contains("#{") {
+                    // Only flag when the first argument is a string literal whose
+                    // interpolation references dynamic input (variables, params,
+                    // method calls). Constant-only interpolation (e.g. a table
+                    // name from a `#{CONST}`) is treated as benign, and
+                    // parameterized calls like `where("x = ?", id)` never match.
+                    let flag = first_call_arg(node).is_some_and(|arg| {
+                        arg.kind() == "string" && interpolation_is_dynamic(arg)
+                    });
+                    if flag {
                         findings.push(make_finding(
                             _self.id(),
                             _self.severity(),
@@ -331,15 +402,31 @@ impl_rule! {
             };
 
             if is_redirect {
-                // Check if the argument is a string literal (safe) or dynamic (unsafe)
-                let node_text = &src[node.byte_range()];
-                // If it contains variable interpolation or is not a simple string, flag it
-                let has_literal_only = node_text.contains("redirect_to \"")
-                    || node_text.contains("redirect_to '")
-                    || node_text.contains("redirect_to(\"")
-                    || node_text.contains("redirect_to('");
+                // Inspect the first argument (mirrors `rb/no-ssrf`). Safe forms:
+                //   * string literals: `redirect_to "/home"`
+                //   * a string literal whose interpolation is constant-only
+                //   * Rails URL helpers: `redirect_to url_for(...)`,
+                //     `redirect_to user_path(@u)`, `redirect_to root_url`
+                // Dynamic/user-controlled args (e.g. `redirect_to params[:url]`)
+                // are flagged.
+                let is_safe = first_call_arg(node).is_some_and(|arg| match arg.kind() {
+                    "string" => !interpolation_is_dynamic(arg),
+                    // A bare/called URL helper. The method name is the first
+                    // identifier child of the call.
+                    "call" | "identifier" => {
+                        let helper = if arg.kind() == "identifier" {
+                            Some(&src[arg.byte_range()])
+                        } else {
+                            arg.child_by_field_name("method")
+                                .or_else(|| arg.named_child(0))
+                                .map(|m| &src[m.byte_range()])
+                        };
+                        helper.is_some_and(is_url_helper)
+                    }
+                    _ => false,
+                });
 
-                if !has_literal_only {
+                if !is_safe {
                     findings.push(make_finding(
                         _self.id(),
                         _self.severity(),
@@ -455,14 +542,37 @@ impl_rule! {
             };
 
             if is_raw {
-                findings.push(make_finding(
-                    _self.id(),
-                    _self.severity(),
-                    _self.cwe(),
-                    "raw() bypasses HTML escaping — risk of XSS",
-                    node,
-                    src,
-                ));
+                // Inspect the first argument. Safe forms:
+                //   * string literals (constant-only interpolation):
+                //     `raw("<b>ok</b>")`
+                //   * known-safe helpers that already escape/sanitize:
+                //     `raw(link_to("a", "/b"))`, `raw(sanitize(html))`
+                // Dynamic content (e.g. `raw(params[:html])`) is flagged.
+                let is_safe = first_call_arg(node).is_some_and(|arg| match arg.kind() {
+                    "string" => !interpolation_is_dynamic(arg),
+                    "call" | "identifier" => {
+                        let helper = if arg.kind() == "identifier" {
+                            Some(&src[arg.byte_range()])
+                        } else {
+                            arg.child_by_field_name("method")
+                                .or_else(|| arg.named_child(0))
+                                .map(|m| &src[m.byte_range()])
+                        };
+                        helper.is_some_and(is_safe_html_helper)
+                    }
+                    _ => false,
+                });
+
+                if !is_safe {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "raw() bypasses HTML escaping — risk of XSS",
+                        node,
+                        src,
+                    ));
+                }
             }
         });
         findings
@@ -500,7 +610,7 @@ impl_rule! {
                         let inner = val
                             .trim_start_matches(['"', '\''])
                             .trim_end_matches(['"', '\'']);
-                        if is_secret_value_long_enough(inner) {
+                        if is_secret_value_long_enough(inner) && looks_like_secret_value(inner) {
                             findings.push(make_finding(
                                 _self.id(),
                                 _self.severity(),
@@ -942,6 +1052,75 @@ mod tests {
             findings.len(),
             0,
             "exec() with a plain string literal should NOT fire"
+        );
+    }
+
+    fn count<R: Rule>(rule: R, source: &str) -> usize {
+        let tree = parse_ruby(source);
+        rule.check(source, &tree).len()
+    }
+
+    // ── open-redirect ──
+    #[test]
+    fn test_open_redirect_safe_cases() {
+        assert_eq!(count(NoOpenRedirect, r#"redirect_to "/home""#), 0);
+        assert_eq!(count(NoOpenRedirect, "redirect_to url_for(:home)"), 0);
+        assert_eq!(count(NoOpenRedirect, "redirect_to user_path(@user)"), 0);
+        assert_eq!(count(NoOpenRedirect, "redirect_to root_url"), 0);
+    }
+
+    #[test]
+    fn test_open_redirect_flags_dynamic() {
+        assert_eq!(count(NoOpenRedirect, "redirect_to params[:url]"), 1);
+        assert_eq!(count(NoOpenRedirect, "redirect_to user_supplied"), 1);
+    }
+
+    // ── sql-injection ──
+    #[test]
+    fn test_sql_injection_safe_cases() {
+        assert_eq!(count(NoSqlInjection, r##"where("x = #{CONST}")"##), 0);
+        assert_eq!(count(NoSqlInjection, r#"where("active = ?", true)"#), 0);
+        assert_eq!(count(NoSqlInjection, r#"where(active: true)"#), 0);
+    }
+
+    #[test]
+    fn test_sql_injection_flags_dynamic() {
+        assert_eq!(count(NoSqlInjection, r##"where("x = #{params[:id]}")"##), 1);
+        assert_eq!(
+            count(
+                NoSqlInjection,
+                r##"execute("SELECT * FROM t WHERE id = #{id}")"##
+            ),
+            1
+        );
+    }
+
+    // ── raw() / html_safe ──
+    #[test]
+    fn test_raw_safe_cases() {
+        assert_eq!(count(NoHtmlSafe, r#"raw(link_to("a", "/b"))"#), 0);
+        assert_eq!(count(NoHtmlSafe, r#"raw("<b>ok</b>")"#), 0);
+        assert_eq!(count(NoHtmlSafe, "raw(sanitize(html))"), 0);
+    }
+
+    #[test]
+    fn test_raw_flags_dynamic() {
+        assert_eq!(count(NoHtmlSafe, "raw(params[:html])"), 1);
+        assert_eq!(count(NoHtmlSafe, "raw(user_content)"), 1);
+    }
+
+    // ── hardcoded-secret value gate ──
+    #[test]
+    fn test_secret_value_gate() {
+        // Secret-named var with a non-secret-shaped value must NOT fire.
+        assert_eq!(
+            count(NoHardcodedSecret, r#"api_key = "see README for setup""#),
+            0
+        );
+        // Real-looking secret still fires.
+        assert_eq!(
+            count(NoHardcodedSecret, r#"API_KEY = "AKIAIOSFODNN7EXAMPLE""#),
+            1
         );
     }
 }
