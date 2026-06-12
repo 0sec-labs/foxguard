@@ -1,8 +1,6 @@
 //! Pull request review posting for the GitHub App receiver.
 
-use crate::report::github_pr::{
-    review_body_for_findings, review_comments_for_commentable_lines, COMMENT_MARKER,
-};
+use crate::report::github_pr::{format_comment_body, COMMENT_MARKER};
 use crate::{Finding, Severity};
 use reqwest::Url;
 use serde::Deserialize;
@@ -59,10 +57,9 @@ impl GitHubReviewClient {
         Ok(Self { http, api_base_url })
     }
 
-    /// Fetch the set of commentable lines (added or context lines) for
-    /// each file in a pull request. This is the same data used to filter
-    /// inline review comments; callers may also use it to scope check-run
-    /// annotations and conclusions to PR-introduced findings only.
+    /// Fetch the set of added lines for each file in a pull request.
+    /// Callers use this to scope review comments and check-run output
+    /// to findings the PR actually introduced.
     pub async fn pull_request_changed_lines(
         &self,
         repo_full_name: &str,
@@ -110,8 +107,7 @@ impl GitHubReviewClient {
             }
         };
         let review_findings = filter_findings_to_changed_lines(findings, commentable_lines);
-        let comments =
-            review_comments_for_commentable_lines(&review_findings, commentable_lines, scan_root);
+        let comments = review_comment_payloads(&review_findings, commentable_lines, scan_root);
         if comments.is_empty() {
             let deleted_comments = self
                 .delete_foxguard_comment_ids(&repo, &existing_comment_ids, installation_token)
@@ -123,15 +119,8 @@ impl GitHubReviewClient {
         }
 
         let posted_comments = comments.len();
-        self.post_review(
-            &repo,
-            pr_number,
-            head_sha,
-            &review_findings,
-            comments,
-            installation_token,
-        )
-        .await?;
+        self.post_review_comments(&repo, pr_number, head_sha, comments, installation_token)
+            .await?;
 
         let deleted_comments = self
             .delete_foxguard_comment_ids(&repo, &existing_comment_ids, installation_token)
@@ -152,24 +141,27 @@ impl GitHubReviewClient {
         changed_lines: Option<&HashMap<String, HashSet<usize>>>,
     ) -> Result<PostCheckRunOutcome, ReviewError> {
         let repo = RepositoryPath::parse(repo_full_name)?;
-        let pr_findings: Vec<Finding>;
         let effective_findings = if let Some(lines) = changed_lines {
-            pr_findings = filter_findings_to_changed_lines(findings, lines);
-            &pr_findings
+            filter_findings_to_changed_lines(findings, lines)
         } else {
-            findings
+            findings.to_vec()
         };
-        let annotations = check_run_annotations(effective_findings);
+        let annotation_findings: Vec<Finding> = effective_findings
+            .iter()
+            .filter(|finding| !is_summary_only_finding(finding))
+            .cloned()
+            .collect();
+        let annotations = check_run_annotations(&annotation_findings);
         let annotation_count = annotations.len();
         let url = self.endpoint(&format!("repos/{}/{}/check-runs", repo.owner, repo.name))?;
         let body = serde_json::json!({
             "name": "foxguard",
             "head_sha": head_sha,
             "status": "completed",
-            "conclusion": check_run_conclusion(effective_findings),
+            "conclusion": check_run_conclusion(&effective_findings),
             "output": {
-                "title": check_run_title(effective_findings),
-                "summary": check_run_summary(effective_findings, annotation_count),
+                "title": check_run_title(&effective_findings),
+                "summary": check_run_summary(&effective_findings, annotation_count),
                 "annotations": annotations,
             },
         });
@@ -258,37 +250,40 @@ impl GitHubReviewClient {
         Ok(files
             .into_iter()
             .filter_map(|file| {
-                let lines = commentable_lines_from_patch(file.patch.as_deref())?;
+                let lines = added_lines_from_patch(file.patch.as_deref())?;
                 Some((file.filename, lines))
             })
             .collect())
     }
 
-    async fn post_review(
+    async fn post_review_comments(
         &self,
         repo: &RepositoryPath,
         pr_number: u64,
         head_sha: &str,
-        findings: &[Finding],
         comments: Vec<Value>,
         installation_token: &str,
     ) -> Result<(), ReviewError> {
         let url = self.endpoint(&format!(
-            "repos/{}/{}/pulls/{pr_number}/reviews",
+            "repos/{}/{}/pulls/{pr_number}/comments",
             repo.owner, repo.name
         ))?;
-        let body = review_request_body(head_sha, findings, comments);
-        // URL construction is restricted to a validated GitHub API base URL plus
-        // repository path segments parsed by `RepositoryPath::parse`.
-        let request = self.http.post(url); // foxguard: ignore[rs/no-ssrf]
-        request
-            .bearer_auth(installation_token)
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-            .json(&body)
-            .send()
-            .await?
-            .error_for_status()?;
+        for mut comment in comments {
+            if let Some(object) = comment.as_object_mut() {
+                object.insert("commit_id".to_string(), Value::String(head_sha.to_string()));
+            }
+            // URL construction is restricted to a validated GitHub API base URL plus
+            // repository path segments parsed by `RepositoryPath::parse`.
+            let request = self.http.post(url.clone()); // foxguard: ignore[rs/no-ssrf]
+            request
+                .bearer_auth(installation_token)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+                .json(&comment)
+                .send()
+                .await?
+                .error_for_status()?;
+        }
         Ok(())
     }
 
@@ -453,7 +448,7 @@ fn link_header_has_next(header_value: &str) -> bool {
     false
 }
 
-fn commentable_lines_from_patch(patch: Option<&str>) -> Option<HashSet<usize>> {
+fn added_lines_from_patch(patch: Option<&str>) -> Option<HashSet<usize>> {
     let patch = patch?;
     let mut lines = HashSet::new();
     let mut new_line = None;
@@ -466,8 +461,10 @@ fn commentable_lines_from_patch(patch: Option<&str>) -> Option<HashSet<usize>> {
         let Some(current_line) = new_line.as_mut() else {
             continue;
         };
-        if line.starts_with('+') || line.starts_with(' ') {
+        if line.starts_with('+') {
             lines.insert(*current_line);
+            *current_line += 1;
+        } else if line.starts_with(' ') {
             *current_line += 1;
         }
     }
@@ -544,10 +541,34 @@ fn check_run_summary(findings: &[Finding], annotation_count: usize) -> String {
         "foxguard found {} issue(s): {critical} critical, {high} high, {medium} medium, {low} low.",
         findings.len()
     );
-    if annotation_count < findings.len() {
+    let annotation_eligible_count = findings
+        .iter()
+        .filter(|finding| !is_summary_only_finding(finding) && finding.line > 0)
+        .count();
+    if annotation_count < annotation_eligible_count {
         summary.push_str(&format!(
             " Showing the first {annotation_count} as check annotations."
         ));
+    }
+    let summary_only_findings: Vec<&Finding> = findings
+        .iter()
+        .filter(|finding| is_summary_only_finding(finding))
+        .collect();
+    if !summary_only_findings.is_empty() {
+        summary.push_str(&format!(
+            " {} dependency finding(s) are summarized below without inline PR comments or check annotations.",
+            summary_only_findings.len()
+        ));
+        summary.push_str("\n\nDependency findings (summary only):");
+        for finding in summary_only_findings.iter().take(10) {
+            summary.push_str(&format!("\n- {}", dependency_summary_line(finding)));
+        }
+        if summary_only_findings.len() > 10 {
+            summary.push_str(&format!(
+                "\n- ... {} more dependency finding(s)",
+                summary_only_findings.len() - 10
+            ));
+        }
     }
     summary
 }
@@ -572,14 +593,6 @@ fn check_run_annotations(findings: &[Finding]) -> Vec<Value> {
         .collect()
 }
 
-fn review_request_body(head_sha: &str, findings: &[Finding], comments: Vec<Value>) -> Value {
-    let mut body = review_body_for_findings(findings, comments);
-    if let Some(object) = body.as_object_mut() {
-        object.insert("commit_id".to_string(), Value::String(head_sha.to_string()));
-    }
-    body
-}
-
 fn annotation_level(severity: Severity) -> &'static str {
     match severity {
         Severity::Low => "notice",
@@ -598,6 +611,56 @@ fn truncate(value: &str, max_chars: usize) -> String {
     let mut truncated: String = value.chars().take(max_chars - 3).collect();
     truncated.push_str("...");
     truncated
+}
+
+fn review_comment_payloads(
+    findings: &[Finding],
+    changed_lines: &HashMap<String, HashSet<usize>>,
+    scan_root: Option<&Path>,
+) -> Vec<Value> {
+    findings
+        .iter()
+        .filter(|finding| !is_summary_only_finding(finding))
+        .filter_map(|finding| {
+            let path = crate::report::github_pr::relative_path(&finding.file, scan_root);
+            if !changed_lines
+                .get(&path)
+                .is_some_and(|lines| lines.contains(&finding.line))
+            {
+                return None;
+            }
+            Some(serde_json::json!({
+                "path": path,
+                "line": finding.line,
+                "side": "RIGHT",
+                "body": format_comment_body(finding),
+            }))
+        })
+        .collect()
+}
+
+fn is_summary_only_finding(finding: &Finding) -> bool {
+    finding.dep_name.is_some()
+}
+
+fn dependency_summary_line(finding: &Finding) -> String {
+    let package = match (finding.dep_name.as_deref(), finding.dep_version.as_deref()) {
+        (Some(name), Some(version)) => format!("`{name}@{version}`"),
+        (Some(name), None) => format!("`{name}`"),
+        _ => format!("`{}`", finding.rule_id),
+    };
+    let location = format!("in `{}`", finding.file);
+    let advisory = finding
+        .dep_vulnerability_id
+        .as_deref()
+        .map(|id| format!(" affected by `{id}`"))
+        .unwrap_or_default();
+    let fix = finding
+        .dep_fixed_version
+        .as_deref()
+        .map(|version| format!("; upgrade to `{version}` or later"))
+        .unwrap_or_default();
+    format!("{package} {location}{advisory}{fix}")
 }
 
 #[cfg(test)]
@@ -647,24 +710,24 @@ mod tests {
     }
 
     #[test]
-    fn commentable_lines_include_added_and_context_lines() {
-        let lines = match commentable_lines_from_patch(Some(
+    fn added_lines_include_added_lines_only() {
+        let lines = match added_lines_from_patch(Some(
             "@@ -10,4 +20,5 @@ fn demo() {\n context\n-old\n+new\n keep\n+added",
         )) {
             Some(lines) => lines,
             None => panic!("patch should parse"),
         };
 
-        assert!(lines.contains(&20));
         assert!(lines.contains(&21));
-        assert!(lines.contains(&22));
         assert!(lines.contains(&23));
+        assert!(!lines.contains(&20));
+        assert!(!lines.contains(&22));
         assert!(!lines.contains(&24));
     }
 
     #[test]
-    fn commentable_lines_returns_none_without_patch() {
-        assert!(commentable_lines_from_patch(None).is_none());
+    fn added_lines_returns_none_without_patch() {
+        assert!(added_lines_from_patch(None).is_none());
     }
 
     fn finding(severity: Severity, line: usize) -> Finding {
@@ -710,6 +773,17 @@ mod tests {
         }
     }
 
+    fn dependency_finding(line: usize) -> Finding {
+        let mut finding = finding(Severity::High, line);
+        finding.rule_id = "manifest/osv-vulnerable-dep".to_string();
+        finding.file = "package-lock.json".to_string();
+        finding.dep_name = Some("elliptic".to_string());
+        finding.dep_version = Some("6.5.4".to_string());
+        finding.dep_vulnerability_id = Some("GHSA-r9p9-mrjm-926w".to_string());
+        finding.dep_fixed_version = Some("6.6.0".to_string());
+        finding
+    }
+
     #[test]
     fn check_run_conclusion_matches_severity() {
         assert_eq!(check_run_conclusion(&[]), "success");
@@ -737,35 +811,21 @@ mod tests {
     }
 
     #[test]
-    fn review_request_body_bundles_comments_into_single_review() {
-        let findings = vec![
-            finding(Severity::High, 10),
-            finding_in_file(Severity::Medium, "src/other.js", 12),
-        ];
-        let comments = vec![
-            serde_json::json!({
-                "path": "src/app.js",
-                "line": 10,
-                "side": "RIGHT",
-                "body": "<!-- foxguard:pr-review -->\n\none",
-            }),
-            serde_json::json!({
-                "path": "src/other.js",
-                "line": 12,
-                "side": "RIGHT",
-                "body": "<!-- foxguard:pr-review -->\n\ntwo",
-            }),
-        ];
+    fn review_comment_payloads_skip_dependency_findings() {
+        let findings = vec![finding(Severity::High, 10), dependency_finding(11)];
+        let changed_lines = HashMap::from([(String::from("src/app.js"), HashSet::from([10usize]))]);
 
-        let body = review_request_body("deadbeef", &findings, comments);
-        assert_eq!(body["event"], "COMMENT");
-        assert_eq!(body["commit_id"], "deadbeef");
-        assert_eq!(body["comments"].as_array().map(Vec::len), Some(2));
-        let summary = body["body"]
-            .as_str()
-            .unwrap_or_else(|| panic!("review summary should be a string"));
-        assert!(summary.contains("**By class**"));
-        assert!(summary.contains("**By severity**"));
+        let comments = review_comment_payloads(&findings, &changed_lines, None);
+
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0]["path"], "src/app.js");
+        assert_eq!(comments[0]["line"], 10);
+        assert_eq!(
+            comments[0]["body"]
+                .as_str()
+                .map(|body| body.contains(COMMENT_MARKER)),
+            Some(true)
+        );
     }
 
     #[test]
@@ -777,6 +837,16 @@ mod tests {
 
         assert!(summary.contains("60 issue(s)"));
         assert!(summary.contains("Showing the first 50"));
+    }
+
+    #[test]
+    fn check_run_summary_mentions_dependency_findings_without_annotations() {
+        let findings = vec![dependency_finding(12)];
+        let summary = check_run_summary(&findings, 0);
+
+        assert!(summary.contains("1 dependency finding(s)"));
+        assert!(summary.contains("GHSA-r9p9-mrjm-926w"));
+        assert!(summary.contains("`elliptic@6.5.4`"));
     }
 
     #[test]

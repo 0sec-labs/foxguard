@@ -167,7 +167,7 @@ pub fn review_comments_for_commentable_lines(
         .collect()
 }
 
-/// Findings that land on a commentable (added/context) line of the PR diff.
+/// Findings that land on an added line of the PR diff.
 pub fn findings_on_commentable_lines(
     findings: &[Finding],
     commentable_lines: &HashMap<String, HashSet<usize>>,
@@ -336,8 +336,10 @@ fn commentable_lines_from_patch(patch: Option<&str>) -> Option<HashSet<usize>> {
         let Some(current_line) = new_line.as_mut() else {
             continue;
         };
-        if line.starts_with('+') || line.starts_with(' ') {
+        if line.starts_with('+') {
             lines.insert(*current_line);
+            *current_line += 1;
+        } else if line.starts_with(' ') {
             *current_line += 1;
         }
     }
@@ -608,16 +610,16 @@ mod tests {
     }
 
     #[test]
-    fn test_commentable_lines_from_patch_includes_added_and_context_lines() {
+    fn test_commentable_lines_from_patch_includes_added_lines_only() {
         let lines = commentable_lines_from_patch(Some(
             "@@ -10,4 +20,5 @@ fn demo() {\n context\n-old\n+new\n keep\n+added",
         ))
         .unwrap_or_else(|| panic!("patch should parse"));
 
-        assert!(lines.contains(&20));
         assert!(lines.contains(&21));
-        assert!(lines.contains(&22));
         assert!(lines.contains(&23));
+        assert!(!lines.contains(&20));
+        assert!(!lines.contains(&22));
         assert!(!lines.contains(&24));
     }
 
@@ -631,8 +633,8 @@ mod tests {
         let lines = commentable_lines_by_file(stdout)
             .unwrap_or_else(|error| panic!("failed to parse PR files: {error}"));
 
-        assert_eq!(lines["src/app.py"], HashSet::from([1, 2]));
-        assert_eq!(lines["src/other.py"], HashSet::from([8, 9]));
+        assert_eq!(lines["src/app.py"], HashSet::from([2]));
+        assert_eq!(lines["src/other.py"], HashSet::from([9]));
     }
 
     #[test]

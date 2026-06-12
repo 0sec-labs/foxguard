@@ -258,10 +258,12 @@ async fn webhook(
         },
         EventKind::PullRequest => match parse_webhook_payload(&body) {
             Ok(payload) => {
-                if let Some(installation) = payload.installation {
+                let action = payload.action.unwrap_or_else(|| "?".to_string());
+                if !should_process_pull_request_action(&action) {
+                    tracing::debug!(delivery, action, "pull_request action ignored");
+                } else if let Some(installation) = payload.installation {
                     let state_for_task = state.clone();
                     let delivery = delivery.to_string();
-                    let action = payload.action.unwrap_or_else(|| "?".to_string());
                     let installation_id = installation.id;
                     let pull_request = payload.pull_request;
                     let repository = payload.repository;
@@ -319,6 +321,13 @@ async fn webhook(
 
 fn parse_webhook_payload(body: &[u8]) -> Result<GitHubWebhookPayload, serde_json::Error> {
     serde_json::from_slice(body)
+}
+
+fn should_process_pull_request_action(action: &str) -> bool {
+    matches!(
+        action,
+        "opened" | "reopened" | "synchronize" | "ready_for_review"
+    )
 }
 
 fn persist_installation_event(
@@ -867,6 +876,17 @@ mod tests {
 
         assert_eq!(payload.action.as_deref(), Some("synchronize"));
         assert!(payload.installation.is_none());
+    }
+
+    #[test]
+    fn pull_request_action_filter_matches_code_changing_events() {
+        assert!(should_process_pull_request_action("opened"));
+        assert!(should_process_pull_request_action("reopened"));
+        assert!(should_process_pull_request_action("synchronize"));
+        assert!(should_process_pull_request_action("ready_for_review"));
+        assert!(!should_process_pull_request_action("edited"));
+        assert!(!should_process_pull_request_action("labeled"));
+        assert!(!should_process_pull_request_action("?"));
     }
 
     #[test]
