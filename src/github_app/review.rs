@@ -623,6 +623,8 @@ fn review_comment_payloads(
         .filter(|finding| !is_summary_only_finding(finding))
         .filter_map(|finding| {
             let path = crate::report::github_pr::relative_path(&finding.file, scan_root);
+            // HashMap::get on the local changed-lines map; not a network call.
+            // foxguard: ignore[rs/no-ssrf]
             if !changed_lines
                 .get(&path)
                 .is_some_and(|lines| lines.contains(&finding.line))
