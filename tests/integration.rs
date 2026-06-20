@@ -2901,6 +2901,90 @@ rules:
     }
 
     #[test]
+    fn test_internal_add_scan_ignore_rule_handles_flow_mapping_config() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config_file(repo.path(), ".foxguard.yml", "scan: {}\n");
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([
+                "internal",
+                "add-scan-ignore-rule",
+                "--scan-path",
+                ".",
+                "--config",
+                ".foxguard.yml",
+                "--file",
+                "src/app.js",
+                "--rule-id",
+                "js/no-eval",
+            ])
+            .output()
+            .expect("failed to execute internal add-scan-ignore-rule");
+
+        assert!(output.status.success(), "internal config edit should succeed");
+
+        let response: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("expected JSON response");
+        assert_eq!(response["added"], true, "rule should be newly added");
+
+        let config = fs::read_to_string(repo.path().join(".foxguard.yml"))
+            .expect("failed to read rewritten config");
+        let value: serde_json::Value =
+            serde_yaml_ng::from_str(&config).expect("rewritten config should stay valid YAML");
+
+        assert_eq!(value["scan"]["ignore_rules"][0]["path"], "src/app.js");
+        assert_eq!(value["scan"]["ignore_rules"][0]["rules"][0], "js/no-eval");
+    }
+
+    #[test]
+    fn test_internal_add_scan_ignore_rule_reports_duplicate_without_rewriting() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        write_config_file(
+            repo.path(),
+            ".foxguard.yml",
+            "scan:\n  ignore_rules:\n    - path: src/app.js\n      rules:\n        - js/no-eval\n",
+        );
+
+        let output = foxguard_cmd()
+            .current_dir(repo.path())
+            .args([
+                "internal",
+                "add-scan-ignore-rule",
+                "--scan-path",
+                ".",
+                "--config",
+                ".foxguard.yml",
+                "--file",
+                "src/app.js",
+                "--rule-id",
+                "js/no-eval",
+            ])
+            .output()
+            .expect("failed to execute duplicate internal add-scan-ignore-rule");
+
+        assert!(output.status.success(), "duplicate config edit should succeed");
+
+        let response: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("expected JSON response");
+        assert_eq!(response["added"], false, "duplicate rule should not be re-added");
+
+        let config = fs::read_to_string(repo.path().join(".foxguard.yml"))
+            .expect("failed to read config");
+        let ignore_rules = serde_yaml_ng::from_str::<serde_json::Value>(&config)
+            .expect("config should stay valid YAML")["scan"]["ignore_rules"]
+            .as_array()
+            .expect("ignore_rules should be a list")
+            .to_vec();
+        assert_eq!(ignore_rules.len(), 1, "duplicate write should not add a new entry");
+        assert_eq!(
+            ignore_rules[0]["rules"].as_array().expect("rules should be a list").len(),
+            1,
+            "duplicate write should not append the same rule twice"
+        );
+    }
+
+    #[test]
     fn test_diff_uses_explicit_config_for_rule_filtering() {
         let repo = setup_diff_repo_with_vulnerable_python();
         let config = write_config_file(

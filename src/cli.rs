@@ -576,6 +576,38 @@ pub struct ScaArgs {
     pub sca_cache: Option<String>,
 }
 
+#[derive(Args, Debug, Clone)]
+pub struct InternalAddScanIgnoreRuleArgs {
+    /// Scan root used to resolve relative finding paths.
+    #[arg(long)]
+    pub scan_path: String,
+
+    /// Explicit config path to edit.
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Repository-relative file path for the finding to suppress.
+    #[arg(long)]
+    pub file: String,
+
+    /// Rule ID to add under scan.ignore_rules.
+    #[arg(long)]
+    pub rule_id: String,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum InternalCommand {
+    /// Internal helper: add a scan.ignore_rules entry using the Rust config editor.
+    #[command(hide = true, name = "add-scan-ignore-rule")]
+    AddScanIgnoreRule(InternalAddScanIgnoreRuleArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct InternalArgs {
+    #[command(subcommand)]
+    pub command: InternalCommand,
+}
+
 impl PqcArgs {
     /// Convert to `ScanArgs` with `pq_mode` enabled.
     pub fn to_scan_args(&self) -> ScanArgs {
@@ -692,6 +724,9 @@ pub enum Command {
     Pqc(PqcArgs),
     /// Dependency vulnerability audit using OSV
     Sca(ScaArgs),
+    /// Internal machine-facing helpers used by editor integrations.
+    #[command(hide = true, name = "internal")]
+    Internal(InternalArgs),
 }
 
 #[derive(Parser, Debug)]

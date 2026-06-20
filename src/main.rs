@@ -5,10 +5,14 @@ use foxguard::app::{
 };
 use foxguard::baseline::write_baseline_at_root;
 use foxguard::cli::{
-    BaselineArgs, BaselineScanArgs, ChangeModeArgs, Cli, Command, DiffArgs, InitArgs, OutputFormat,
-    PqcArgs, ScaArgs, ScanArgs, SecretsArgs, TuiArgs,
+    BaselineArgs, BaselineScanArgs, ChangeModeArgs, Cli, Command, DiffArgs, InitArgs,
+    InternalAddScanIgnoreRuleArgs, InternalArgs, InternalCommand, OutputFormat, PqcArgs, ScaArgs,
+    ScanArgs, SecretsArgs, TuiArgs,
 };
+use foxguard::config::add_scan_ignore_rule;
 use foxguard::config::load_for_scan;
+use foxguard::Finding;
+use serde::Serialize;
 use foxguard::tui::run_scan_tui;
 use std::path::Path;
 
@@ -27,6 +31,7 @@ fn main() {
         Some(Command::Tui(args)) => run_tui(&args),
         Some(Command::Pqc(args)) => run_pqc(&args),
         Some(Command::Sca(args)) => run_sca(&args),
+        Some(Command::Internal(args)) => run_internal(&args),
         None => run_scan(&cli.scan),
     };
 
@@ -417,6 +422,90 @@ fn run_init(args: &InitArgs) -> i32 {
     }
     eprintln!("Installed pre-commit hook at {}", hook_path.display());
     0
+}
+
+#[derive(Serialize)]
+struct InternalAddScanIgnoreRuleResult {
+    config_path: String,
+    added: bool,
+}
+
+fn run_internal(args: &InternalArgs) -> i32 {
+    match &args.command {
+        InternalCommand::AddScanIgnoreRule(args) => run_internal_add_scan_ignore_rule(args),
+    }
+}
+
+fn run_internal_add_scan_ignore_rule(args: &InternalAddScanIgnoreRuleArgs) -> i32 {
+    let scan_root = Path::new(&args.scan_path);
+    let finding_file = {
+        let file_path = Path::new(&args.file);
+        if file_path.is_absolute() {
+            file_path.to_path_buf()
+        } else {
+            scan_root.join(file_path)
+        }
+    };
+
+    let finding = Finding {
+        rule_id: args.rule_id.clone(),
+        severity: foxguard::Severity::Low,
+        cwe: None,
+        description: String::new(),
+        file: finding_file.display().to_string(),
+        line: 1,
+        column: 1,
+        end_line: 1,
+        end_column: 1,
+        snippet: String::new(),
+        source_line: None,
+        source_description: None,
+        sink_line: None,
+        sink_description: None,
+        fix_suggestion: None,
+        sink_start_byte: None,
+        sink_end_byte: None,
+        confidence: 1.0,
+        taint_hops: None,
+        tags: Vec::new(),
+        crypto_algorithm: None,
+        cnsa2_deadline: None,
+        dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: Vec::new(),
+    };
+
+    let result = match add_scan_ignore_rule(
+        scan_root,
+        args.config.as_deref(),
+        &finding,
+    ) {
+        Ok((config_path, added)) => InternalAddScanIgnoreRuleResult {
+            config_path: config_path.display().to_string(),
+            added,
+        },
+        Err(error) => {
+            eprintln!("Error: {error}");
+            return 2;
+        }
+    };
+
+    match serde_json::to_string(&result) {
+        Ok(json) => {
+            println!("{json}");
+            0
+        }
+        Err(error) => {
+            eprintln!("Error: failed to serialize internal response: {error}");
+            2
+        }
+    }
 }
 
 fn ensure_init_config(args: &InitArgs, config_path: &Path) -> Result<bool, String> {
