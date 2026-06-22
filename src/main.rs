@@ -11,9 +11,9 @@ use foxguard::cli::{
 };
 use foxguard::config::add_scan_ignore_rule;
 use foxguard::config::load_for_scan;
+use foxguard::tui::run_scan_tui;
 use foxguard::Finding;
 use serde::Serialize;
-use foxguard::tui::run_scan_tui;
 use std::path::Path;
 
 fn main() {
@@ -481,11 +481,7 @@ fn run_internal_add_scan_ignore_rule(args: &InternalAddScanIgnoreRuleArgs) -> i3
         dep_path: Vec::new(),
     };
 
-    let result = match add_scan_ignore_rule(
-        scan_root,
-        args.config.as_deref(),
-        &finding,
-    ) {
+    let result = match add_scan_ignore_rule(scan_root, args.config.as_deref(), &finding) {
         Ok((config_path, added)) => InternalAddScanIgnoreRuleResult {
             config_path: config_path.display().to_string(),
             added,

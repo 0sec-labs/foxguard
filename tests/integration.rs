@@ -2922,7 +2922,10 @@ rules:
             .output()
             .expect("failed to execute internal add-scan-ignore-rule");
 
-        assert!(output.status.success(), "internal config edit should succeed");
+        assert!(
+            output.status.success(),
+            "internal config edit should succeed"
+        );
 
         let response: serde_json::Value =
             serde_json::from_slice(&output.stdout).expect("expected JSON response");
@@ -2963,22 +2966,35 @@ rules:
             .output()
             .expect("failed to execute duplicate internal add-scan-ignore-rule");
 
-        assert!(output.status.success(), "duplicate config edit should succeed");
+        assert!(
+            output.status.success(),
+            "duplicate config edit should succeed"
+        );
 
         let response: serde_json::Value =
             serde_json::from_slice(&output.stdout).expect("expected JSON response");
-        assert_eq!(response["added"], false, "duplicate rule should not be re-added");
+        assert_eq!(
+            response["added"], false,
+            "duplicate rule should not be re-added"
+        );
 
-        let config = fs::read_to_string(repo.path().join(".foxguard.yml"))
-            .expect("failed to read config");
+        let config =
+            fs::read_to_string(repo.path().join(".foxguard.yml")).expect("failed to read config");
         let ignore_rules = serde_yaml_ng::from_str::<serde_json::Value>(&config)
             .expect("config should stay valid YAML")["scan"]["ignore_rules"]
             .as_array()
             .expect("ignore_rules should be a list")
             .to_vec();
-        assert_eq!(ignore_rules.len(), 1, "duplicate write should not add a new entry");
         assert_eq!(
-            ignore_rules[0]["rules"].as_array().expect("rules should be a list").len(),
+            ignore_rules.len(),
+            1,
+            "duplicate write should not add a new entry"
+        );
+        assert_eq!(
+            ignore_rules[0]["rules"]
+                .as_array()
+                .expect("rules should be a list")
+                .len(),
             1,
             "duplicate write should not append the same rule twice"
         );
