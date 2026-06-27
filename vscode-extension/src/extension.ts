@@ -509,19 +509,30 @@ export function activate(context: vscode.ExtensionContext): void {
         const configPath = path.join(rootPath, ".foxguard.yml");
         const relPath = path.relative(rootPath, uri.fsPath);
 
-        const added = addIgnoreRuleToConfig(configPath, relPath, ruleId);
-        if (added) {
-          outputChannel.appendLine(
-            `Suppressed ${ruleId} for ${relPath} in ${configPath}`,
-          );
-          vscode.window.showInformationMessage(
-            `foxguard: added ${ruleId} ignore for ${relPath} to .foxguard.yml`,
-          );
-        } else {
-          vscode.window.showInformationMessage(
-            `foxguard: ${ruleId} already suppressed for ${relPath}`,
-          );
+        const binary = await resolveBinary();
+        let adapterCmd = "foxguard-adapter";
+        let args: string[] = [];
+        if (binary && binary !== "foxguard") {
+          adapterCmd = binary.replace(/foxguard(\.exe)?$/, "foxguard-adapter$1");
         }
+
+        const child = execFile(adapterCmd, args, { timeout: 5000 }, (error, stdout) => {
+          const out = stdout.toString();
+          if (!error && out.includes('"ok": true')) {
+            vscode.window.showInformationMessage(
+              `foxguard: added ${ruleId} ignore for ${relPath} to .foxguard.yml`,
+            );
+          } else {
+            vscode.window.showErrorMessage(`foxguard: failed to suppress: ${error || out}`);
+          }
+        });
+        child.stdin?.write(JSON.stringify({
+          command: "suppress",
+          suppression: "config",
+          path: rootPath,
+          finding: { rule_id: ruleId, file: relPath }
+        }));
+        child.stdin?.end();
       },
     ),
   );

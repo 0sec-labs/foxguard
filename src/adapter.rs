@@ -401,6 +401,13 @@ fn suppress_response(request: &AdapterRequest) -> AdapterResponse {
         .unwrap_or(AdapterSuppressionKind::Inline);
     let suggestion = suppression_suggestion(kind, rule_id, file, finding.line);
 
+    if kind == AdapterSuppressionKind::Config {
+        let scan_path = std::path::Path::new(request.path.as_deref().unwrap_or("."));
+        if let Err(e) = crate::config::add_scan_ignore_rule(scan_path, request.config.as_deref(), finding) {
+            return request_error(request, e);
+        }
+    }
+
     success_response(
         request,
         0,

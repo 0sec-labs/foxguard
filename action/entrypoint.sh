@@ -136,7 +136,14 @@ else:
     print(report.get('finding_counts', {}).get('total', len(report.get('findings', []))))
 " 2>/dev/null || echo "0")
     else
-        FINDINGS_COUNT="${EXIT_CODE}"
+        if [ "${EXIT_CODE}" -eq 2 ]; then
+            # Execution error
+            FINDINGS_COUNT=""
+        else
+            # We cannot extract a real count for terminal/markdown,
+            # so we leave it empty instead of returning EXIT_CODE (1)
+            FINDINGS_COUNT=""
+        fi
     fi
 fi
 
@@ -144,21 +151,29 @@ echo "::endgroup::"
 
 # ─── Set outputs ─────────────────────────────────────────────────────────────
 
-echo "findings-count=${FINDINGS_COUNT}" >> "${GITHUB_OUTPUT:-/dev/null}"
+if [ -n "${FINDINGS_COUNT}" ]; then
+    echo "findings-count=${FINDINGS_COUNT}" >> "${GITHUB_OUTPUT:-/dev/null}"
+    echo "Findings: ${FINDINGS_COUNT}"
+fi
 echo "sarif-file=${SARIF_FILE}" >> "${GITHUB_OUTPUT:-/dev/null}"
-
-echo "Findings: ${FINDINGS_COUNT}"
 
 # ─── Generate badge JSON (shields.io endpoint format) ────────────────────────
 
 BADGE_LABEL="${INPUT_BADGE_LABEL:-foxguard}"
 BADGE_FILE="${RUNNER_TEMP:-/tmp}/foxguard-badge.json"
 
-if [ "${FINDINGS_COUNT}" = "0" ]; then
+if [ -z "${FINDINGS_COUNT}" ] && [ "${EXIT_CODE}" -eq 2 ]; then
+    BADGE_MESSAGE="error"
+    BADGE_COLOR="red"
+elif [ "${FINDINGS_COUNT}" = "0" ] || ( [ -z "${FINDINGS_COUNT}" ] && [ "${EXIT_CODE}" -eq 0 ] ); then
     BADGE_MESSAGE="clean"
     BADGE_COLOR="2dd4bf"
 else
-    BADGE_MESSAGE="${FINDINGS_COUNT} issue(s)"
+    if [ -n "${FINDINGS_COUNT}" ]; then
+        BADGE_MESSAGE="${FINDINGS_COUNT} issue(s)"
+    else
+        BADGE_MESSAGE="issues found"
+    fi
     BADGE_COLOR="f59e0b"
 fi
 
@@ -200,7 +215,14 @@ fi
 
 # ─── Fail check if configured ───────────────────────────────────────────────
 
-if [ "${FAIL_ON_FINDINGS}" = "true" ] && [ "${EXIT_CODE}" -ne 0 ]; then
-    echo "::error::Foxguard found ${FINDINGS_COUNT} security issue(s) at severity '${SEVERITY}' or above"
+if [ "${EXIT_CODE}" -eq 2 ]; then
+    echo "::error::Foxguard execution failed"
+    exit 2
+elif [ "${FAIL_ON_FINDINGS}" = "true" ] && [ "${EXIT_CODE}" -ne 0 ]; then
+    if [ -n "${FINDINGS_COUNT}" ]; then
+        echo "::error::Foxguard found ${FINDINGS_COUNT} security issue(s) at severity '${SEVERITY}' or above"
+    else
+        echo "::error::Foxguard found security issue(s) at severity '${SEVERITY}' or above"
+    fi
     exit 1
 fi
