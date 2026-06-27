@@ -403,7 +403,26 @@ fn suppress_response(request: &AdapterRequest) -> AdapterResponse {
 
     if kind == AdapterSuppressionKind::Config {
         let scan_path = std::path::Path::new(request.path.as_deref().unwrap_or("."));
-        if let Err(e) = crate::config::add_scan_ignore_rule(scan_path, request.config.as_deref(), finding) {
+        let dummy = crate::Finding {
+            rule_id: finding.rule_id.clone().unwrap_or_default(),
+            severity: crate::Severity::Medium,
+            cwe: None,
+            description: String::new(),
+            file: finding.file.clone().unwrap_or_default(),
+            line: finding.line.unwrap_or(0),
+            column: 0,
+            end_line: 0,
+            end_column: 0,
+            snippet: String::new(),
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+        };
+        if let Err(e) = crate::config::add_scan_ignore_rule(scan_path, request.config.as_deref(), &dummy) {
             return request_error(request, e);
         }
     }
