@@ -45,8 +45,18 @@ function getCacheDir() {
   }
 }
 
-function getBinaryName() {
-  return os.platform() === "win32" ? "foxguard.exe" : "foxguard";
+function getBinaryName(platform = os.platform()) {
+  return platform === "win32" ? "foxguard.exe" : "foxguard";
+}
+
+function getCachePaths(target, platform = os.platform(), cacheRoot = getCacheDir()) {
+  const targetCacheDir = path.join(cacheRoot, target);
+  fs.mkdirSync(targetCacheDir, { recursive: true });
+  return {
+    cacheDir: targetCacheDir,
+    cachedBin: path.join(targetCacheDir, getBinaryName(platform)),
+    versionFile: path.join(targetCacheDir, ".version"),
+  };
 }
 
 function download(url) {
@@ -91,11 +101,8 @@ function sha256(buffer) {
 
 async function downloadBinary() {
   const target = getPlatformKey();
-  const cacheDir = getCacheDir();
-  const cachedBin = path.join(cacheDir, getBinaryName());
+  const { cachedBin, versionFile } = getCachePaths(target);
 
-  // Check version marker
-  const versionFile = path.join(cacheDir, ".version");
   if (fs.existsSync(cachedBin) && fs.existsSync(versionFile)) {
     const cached = fs.readFileSync(versionFile, "utf8").trim();
     if (cached === VERSION) {
@@ -174,4 +181,13 @@ async function main() {
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  getBinaryName,
+  getCachePaths,
+  getPlatformKey,
+  PLATFORM_MAP,
+};
