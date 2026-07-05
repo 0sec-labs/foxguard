@@ -3,6 +3,7 @@ import { spawn } from "child_process";
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { isSupportedFile } from "./supportedFiles";
 
 /** Mirrors the JSON output of `foxguard --format json`. */
 interface Finding {
@@ -150,20 +151,6 @@ function extractFindings(parsed: ReportEnvelope | Finding[]): Finding[] {
   }
   return parsed.findings ?? [];      // versioned envelope
 }
-
-/** File extensions foxguard supports. */
-const SUPPORTED_EXTENSIONS = new Set([
-  ".js", ".jsx", ".mjs", ".cjs",
-  ".ts", ".tsx", ".mts", ".cts",
-  ".py", ".pyw",
-  ".go",
-  ".rb", ".rake",
-  ".java",
-  ".php",
-  ".rs",
-  ".cs",
-  ".swift",
-]);
 
 const SEVERITY_ORDER: Record<string, number> = {
   low: 0, medium: 1, high: 2, critical: 3,
@@ -648,11 +635,6 @@ function setStatusDone(count: number): void {
 // ---------------------------------------------------------------------------
 // Core scanning logic
 // ---------------------------------------------------------------------------
-
-function isSupportedFile(filePath: string): boolean {
-  const ext = path.extname(filePath).toLowerCase();
-  return SUPPORTED_EXTENSIONS.has(ext);
-}
 
 function mapSeverity(severity: string): vscode.DiagnosticSeverity {
   switch (severity) {
