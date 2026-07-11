@@ -178,6 +178,10 @@ jobs:
       - run: bash -n benchmarks/precision/run.sh
       - run: bash -n benchmarks/run.sh
       - run: bash -n scripts/linux-codeql-dirty-frag.sh
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: node --test scripts/verify-vscode-marketplace.test.mjs
       - run: bash -n scripts/release.sh
 
   precision-corpus-metadata:

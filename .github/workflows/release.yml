@@ -261,6 +261,9 @@ jobs:
           fi
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - name: Verify Marketplace propagation
+        run: VSCODE_MARKETPLACE_VERSION="${GITHUB_REF_NAME#v}" node ../scripts/verify-vscode-marketplace.mjs
+
 
   publish-ghcr-github-app:
     name: Publish foxguard-github-app image (GHCR)
