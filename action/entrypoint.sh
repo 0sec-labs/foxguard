@@ -136,11 +136,19 @@ else:
     print(report.get('finding_counts', {}).get('total', len(report.get('findings', []))))
 " 2>/dev/null || echo "0")
     else
-        FINDINGS_COUNT="${EXIT_CODE}"
+        FINDINGS_COUNT=$(printf '%s\n' "${OUTPUT}" | python3 "${GITHUB_ACTION_PATH:-$(dirname "$0")}/count-terminal-findings.py")
     fi
 fi
 
 echo "::endgroup::"
+
+# Foxguard reserves exit code 1 for findings and uses 2 for execution errors.
+# Never turn an execution failure into a finding count (or hide it when
+# fail-on-findings is disabled).
+if [ "${EXIT_CODE}" -gt 1 ]; then
+    echo "::error::Foxguard failed with exit code ${EXIT_CODE}"
+    exit "${EXIT_CODE}"
+fi
 
 # ─── Set outputs ─────────────────────────────────────────────────────────────
 
