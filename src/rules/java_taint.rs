@@ -17,7 +17,9 @@
 
 use crate::rules::common::{walk_tree, AliasTable};
 use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary, ParamSinkFlow};
-use crate::rules::taint_engine::cross_file_taint_finding;
+use crate::rules::taint_engine::{
+    cross_file_taint_finding, walk_scope_nodes as walk_taint_scope_nodes,
+};
 pub use crate::rules::taint_engine::{
     LabelPolicy, NodeMatcher, Propagator, TaintFinding, TaintSpec,
 };
@@ -1626,21 +1628,7 @@ fn taint_finding_for_node(
 }
 
 fn walk_scope_nodes(scope: Node<'_>, source: &str, visitor: &mut impl FnMut(Node<'_>, &str)) {
-    let mut cursor = scope.walk();
-    for child in scope.children(&mut cursor) {
-        walk_scope_node(child, source, visitor);
-    }
-}
-
-fn walk_scope_node(node: Node<'_>, source: &str, visitor: &mut impl FnMut(Node<'_>, &str)) {
-    if is_scope_node(node.kind()) {
-        return;
-    }
-    visitor(node, source);
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_scope_node(child, source, visitor);
-    }
+    walk_taint_scope_nodes(scope, source, is_scope_node, visitor);
 }
 
 fn is_scope_node(kind: &str) -> bool {

@@ -42,7 +42,7 @@
 //!   produces a clean value.
 
 use crate::rules::common::{walk_tree, AliasTable};
-use crate::rules::taint_engine::node_text;
+use crate::rules::taint_engine::{node_text, walk_scope_nodes as walk_taint_scope_nodes};
 pub use crate::rules::taint_engine::{NodeMatcher, TaintFinding, TaintSpec};
 use std::collections::HashMap;
 use tree_sitter::Node;
@@ -464,21 +464,7 @@ fn taint_finding_for_node(
 // ─── AST helpers ─────────────────────────────────────────────────────────────
 
 fn walk_scope_nodes(scope: Node<'_>, source: &str, visitor: &mut impl FnMut(Node<'_>, &str)) {
-    let mut cursor = scope.walk();
-    for child in scope.children(&mut cursor) {
-        walk_scope_node(child, source, visitor);
-    }
-}
-
-fn walk_scope_node(node: Node<'_>, source: &str, visitor: &mut impl FnMut(Node<'_>, &str)) {
-    if is_scope_node(node.kind()) {
-        return;
-    }
-    visitor(node, source);
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        walk_scope_node(child, source, visitor);
-    }
+    walk_taint_scope_nodes(scope, source, is_scope_node, visitor);
 }
 
 fn is_scope_node(kind: &str) -> bool {

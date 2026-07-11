@@ -8,6 +8,41 @@ use crate::rules::cross_file::{FunctionTaintSummary, ParamSinkFlow};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use tree_sitter::Node;
 
+/// Visit descendants of `scope` without crossing nested language scopes.
+///
+/// Language engines provide their own scope-boundary predicate because the
+/// relevant tree-sitter node kinds differ between grammars. The scope node
+/// itself is not visited; nested scope nodes and their descendants are
+/// skipped. This keeps intra-procedural taint walks from leaking into nested
+/// functions, methods, constructors, or lambdas.
+pub(crate) fn walk_scope_nodes<'tree>(
+    scope: Node<'tree>,
+    source: &str,
+    is_scope_node: impl Fn(&str) -> bool + Copy,
+    visitor: &mut impl FnMut(Node<'tree>, &str),
+) {
+    fn walk_node<'tree>(
+        node: Node<'tree>,
+        source: &str,
+        is_scope_node: impl Fn(&str) -> bool + Copy,
+        visitor: &mut impl FnMut(Node<'tree>, &str),
+    ) {
+        if is_scope_node(node.kind()) {
+            return;
+        }
+        visitor(node, source);
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            walk_node(child, source, is_scope_node, visitor);
+        }
+    }
+
+    let mut cursor = scope.walk();
+    for child in scope.children(&mut cursor) {
+        walk_node(child, source, is_scope_node, visitor);
+    }
+}
+
 // ─── Core types ──────────────────────────────────────────────────────────
 
 /// A pattern that matches an AST node for taint analysis.
