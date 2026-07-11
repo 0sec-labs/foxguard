@@ -1,4 +1,4 @@
-use crate::{Finding, Severity};
+use crate::{Finding, Severity, FINDING_SCHEMA_VERSION};
 use serde::Serialize;
 use std::time::Duration;
 
@@ -30,6 +30,7 @@ pub struct JsonTargetMetadata<'a> {
 #[derive(Debug, Serialize)]
 struct JsonReportEnvelope<'a> {
     schema_version: &'static str,
+    finding_schema_version: &'static str,
     scanner: ScannerMetadata<'a>,
     config: ConfigMetadata<'a>,
     target: TargetMetadata<'a>,
@@ -88,6 +89,7 @@ pub fn build_json_report(
     let counts = finding_counts(findings);
     let envelope = JsonReportEnvelope {
         schema_version: JSON_SCHEMA_VERSION,
+        finding_schema_version: FINDING_SCHEMA_VERSION,
         scanner: ScannerMetadata {
             name: "foxguard",
             version: env!("CARGO_PKG_VERSION"),
@@ -203,6 +205,10 @@ mod tests {
         );
 
         assert_eq!(report["schema_version"].as_str(), Some(JSON_SCHEMA_VERSION));
+        assert_eq!(
+            report["finding_schema_version"].as_str(),
+            Some(FINDING_SCHEMA_VERSION)
+        );
         assert_eq!(report["scanner"]["name"].as_str(), Some("foxguard"));
         assert_eq!(report["scanner"]["command"].as_str(), Some("scan"));
         assert_eq!(report["config"]["source"].as_str(), Some("explicit"));
@@ -219,5 +225,50 @@ mod tests {
             Some(1)
         );
         assert_eq!(report["findings"].as_array().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn native_v1_contract_fixture_deserializes_as_current_finding() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/contracts/native-report-v1.json"))
+                .expect("native v1 contract fixture must be valid JSON");
+
+        assert_eq!(fixture["schema_version"], JSON_SCHEMA_VERSION);
+        assert_eq!(fixture["finding_schema_version"], FINDING_SCHEMA_VERSION);
+        let finding: Finding = serde_json::from_value(fixture["findings"][0].clone())
+            .expect("native v1 fixture must deserialize as Finding");
+        assert_eq!(finding.rule_id, "js/taint-command-injection");
+        assert_eq!(finding.source_line, Some(8));
+        assert_eq!(
+            finding.dep_purl.as_deref(),
+            Some("pkg:npm/example-package@1.2.3")
+        );
+
+        let mut serialized = serde_json::to_value(finding).expect("Finding must serialize");
+        let mut fixture_finding = fixture["findings"][0].clone();
+        let serialized_confidence = serialized["confidence"]
+            .as_f64()
+            .expect("serialized confidence must be numeric");
+        assert!((serialized_confidence - 0.91).abs() < 0.001);
+        serialized
+            .as_object_mut()
+            .expect("serialized Finding must be an object")
+            .remove("confidence");
+        fixture_finding
+            .as_object_mut()
+            .expect("fixture Finding must be an object")
+            .remove("confidence");
+        assert_eq!(serialized, fixture_finding);
+    }
+
+    #[test]
+    fn finding_v1_json_schema_is_valid_json_and_tracks_version() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../../schemas/finding-v1.schema.json"))
+                .expect("finding v1 schema must be valid JSON");
+        assert_eq!(schema["title"], "Foxguard Finding v1");
+        assert!(schema["$id"]
+            .as_str()
+            .is_some_and(|id| id.ends_with("finding-v1.schema.json")));
     }
 }

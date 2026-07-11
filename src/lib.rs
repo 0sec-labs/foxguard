@@ -128,6 +128,13 @@ pub fn default_confidence() -> f32 {
     1.0
 }
 
+/// Version of the serialized [`Finding`] contract shared by native JSON
+/// reports and consumers such as the GitHub App and VS Code extension.
+///
+/// Additive optional fields do not require a major bump. Removing a field,
+/// changing its type, or changing its meaning does.
+pub const FINDING_SCHEMA_VERSION: &str = "1.0.0";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub rule_id: String,

@@ -2923,6 +2923,7 @@ mod output_formats {
 
         assert!(!findings.is_empty());
         assert_eq!(report["schema_version"].as_str(), Some("1.0.0"));
+        assert_eq!(report["finding_schema_version"].as_str(), Some("1.0.0"));
         assert_eq!(report["scanner"]["name"].as_str(), Some("foxguard"));
         assert!(
             report["scanner"]["version"].is_string(),

@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0.0",
+  "finding_schema_version": "1.0.0",
+  "scanner": {
+    "name": "foxguard",
+    "version": "0.11.0",
+    "command": "scan"
+  },
+  "config": {
+    "source": "default"
+  },
+  "target": {
+    "path": "fixtures/app.js",
+    "kind": "file",
+    "changed_only": false,
+    "files_scanned": 1
+  },
+  "timing": {
+    "duration_ms": 7
+  },
+  "finding_counts": {
+    "total": 1,
+    "by_severity": {
+      "low": 0,
+      "medium": 0,
+      "high": 0,
+      "critical": 1
+    }
+  },
+  "findings": [
+    {
+      "rule_id": "js/taint-command-injection",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "description": "Untrusted input reaches a command execution sink",
+      "file": "fixtures/app.js",
+      "line": 12,
+      "column": 3,
+      "end_line": 12,
+      "end_column": 21,
+      "snippet": "exec(request.query.cmd)",
+      "source_line": 8,
+      "source_description": "HTTP query parameter",
+      "sink_line": 12,
+      "sink_description": "child_process.exec",
+      "fix_suggestion": "Use an allowlist and execFile with argument arrays",
+      "sink_start_byte": 144,
+      "sink_end_byte": 167,
+      "confidence": 0.91,
+      "taint_hops": 2,
+      "tags": ["security", "injection"],
+      "crypto_algorithm": "RSA",
+      "cnsa2_deadline": "2030",
+      "dep_name": "example-package",
+      "dep_version": "1.2.3",
+      "dep_ecosystem": "npm",
+      "dep_purl": "pkg:npm/example-package@1.2.3",
+      "dep_vulnerability_id": "CVE-2026-0001",
+      "dep_fixed_version": "1.2.4",
+      "dep_source": "OSV",
+      "dep_vulnerability_severity": "HIGH",
+      "dep_path": ["root", "example-package"]
+    }
+  ]
+}
