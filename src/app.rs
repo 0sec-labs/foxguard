@@ -410,7 +410,7 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
             let file_count = files.len();
             let started = std::time::Instant::now();
             let (findings, notices) =
-                scan_paths_with_config_and_notices(scan_path, &files, &config, args.max_file_size);
+                scan_paths_with_config_and_notices(scan_path, files, &config, args.max_file_size);
             (findings, notices, file_count, started.elapsed())
         }
         None => {
