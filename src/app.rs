@@ -7,12 +7,12 @@ use crate::config::{
 use crate::deps::{scan_dependency_vulnerabilities, DependencyScanOptions};
 use crate::diff::run_diff_with_coccinelle_warnings;
 use crate::engine::{
-    coccinelle, codeql, scan_directory_with_notices, scan_paths_with_root_with_notices,
-    PathExcludeMatcher, ScanResult, ScanStats,
+    coccinelle, codeql, scan_directory_with_notices, scan_paths_with_root_with_notices, ScanResult,
+    ScanStats,
 };
-use crate::git::changed_files;
 use crate::rules::semgrep_compat::load_semgrep_rules;
 use crate::rules::RuleRegistry;
+use crate::scan_plan::{ScanPlan, ScanTargetRequest};
 use crate::secrets::{
     scan_directory_with_config_and_notices, scan_paths_with_config_and_notices, SecretScanConfig,
 };
@@ -132,15 +132,24 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
             }
         }
     }
-    let excludes = PathExcludeMatcher::new(&scan.exclude)?;
-    let targets = if let Some(list_file) = scan.changed_files_from.as_deref() {
+    let target_request = if let Some(list_file) = scan.changed_files_from.as_deref() {
         // Explicit changed-file list (e.g. from the GitHub App): scan only
         // these paths but keep `scan.path` as the analysis root so cross-file
         // taint context is preserved. Precedence over the change-mode flags.
-        Some(resolve_changed_files_from(&scan.path, list_file)?)
+        ScanTargetRequest::ChangedFilesList(PathBuf::from(list_file)) // foxguard: ignore[rs/no-path-traversal] -- validated scan input
+    } else if let Some(selection) = scan.changes.selection() {
+        ScanTargetRequest::GitChanges(selection)
     } else {
-        collect_changed_targets(&scan.path, scan.changes.selection())?
+        ScanTargetRequest::FullTree
     };
+    let plan = ScanPlan::resolve(
+        &scan.path,
+        target_request,
+        scan.exclude.clone(),
+        scan.max_file_size,
+    )?;
+    let excludes = plan.exclude_matcher()?;
+    let targets = plan.paths();
     let coccinelle_rule_ids = coccinelle::rule_ids(&coccinelle_rules);
     let codeql_rule_ids = codeql::rule_ids(&codeql_rules);
 
@@ -195,7 +204,7 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
             },
             Vec::new(),
         )
-    } else if let Some(files) = targets.as_ref() {
+    } else if let Some(files) = targets {
         scan_paths_with_root_with_notices(
             Path::new(&scan.path),
             files,
@@ -231,7 +240,7 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
     let mut codeql_candidate_rules = 0;
 
     if !coccinelle_rules.is_empty() {
-        let coccinelle_result = if let Some(files) = targets.as_ref() {
+        let coccinelle_result = if let Some(files) = targets {
             coccinelle::scan_paths_with_notices(
                 Path::new(&scan.path),
                 files,
@@ -286,7 +295,7 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
         };
         let sca_result = scan_dependency_vulnerabilities(
             Path::new(&scan.path),
-            targets.as_deref(),
+            targets,
             Some(&excludes),
             scan.max_file_size,
             &sca_options,
@@ -390,27 +399,28 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
         &args.ignored_rules,
     )?;
 
-    let (mut findings, mut notices, files_scanned, duration) =
-        match collect_changed_targets(&args.path, args.changes.selection())? {
-            Some(files) => {
-                let file_count = files.len();
-                let started = std::time::Instant::now();
-                let (findings, notices) = scan_paths_with_config_and_notices(
-                    scan_path,
-                    &files,
-                    &config,
-                    args.max_file_size,
-                );
-                (findings, notices, file_count, started.elapsed())
-            }
-            None => {
-                let started = std::time::Instant::now();
-                let (findings, notices) =
-                    scan_directory_with_config_and_notices(&args.path, &config, args.max_file_size);
-                let files_scanned = count_secret_files(scan_path);
-                (findings, notices, files_scanned, started.elapsed())
-            }
-        };
+    let target_request = args
+        .changes
+        .selection()
+        .map(ScanTargetRequest::GitChanges)
+        .unwrap_or(ScanTargetRequest::FullTree);
+    let plan = ScanPlan::resolve(&args.path, target_request, vec![], args.max_file_size)?;
+    let (mut findings, mut notices, files_scanned, duration) = match plan.paths() {
+        Some(files) => {
+            let file_count = files.len();
+            let started = std::time::Instant::now();
+            let (findings, notices) =
+                scan_paths_with_config_and_notices(scan_path, &files, &config, args.max_file_size);
+            (findings, notices, file_count, started.elapsed())
+        }
+        None => {
+            let started = std::time::Instant::now();
+            let (findings, notices) =
+                scan_directory_with_config_and_notices(&args.path, &config, args.max_file_size);
+            let files_scanned = count_secret_files(scan_path);
+            (findings, notices, files_scanned, started.elapsed())
+        }
+    };
 
     if let Some(ref path) = args.write_baseline {
         write_baseline_at_root(Path::new(path), &findings, &identity_root)?;
@@ -776,48 +786,6 @@ fn is_pq_rule_id(id: &str) -> bool {
         || id == "config/dockerfile-insecure-tls-env"
 }
 
-fn collect_changed_targets(
-    path: &str,
-    selection: Option<crate::git::ChangeSelection>,
-) -> Result<Option<Vec<PathBuf>>, String> {
-    let Some(selection) = selection else {
-        return Ok(None);
-    };
-
-    let scan_root = Path::new(path);
-    let files = changed_files(scan_root, selection)
-        .map_err(|e| format!("failed to resolve changed files: {}", e))?;
-    Ok(Some(files))
-}
-
-/// Resolve an explicit changed-file list (newline-delimited, repo-root-relative
-/// paths) into scan targets rooted at `scan_path`. Blank lines and comments
-/// (`#`) are ignored, and paths that no longer exist on disk (e.g. files a PR
-/// deleted) are skipped. Returned paths are kept relative to `scan_path` so the
-/// exclude matcher sees repo-root-relative paths. An empty resolved list is a
-/// valid result: the caller scans nothing and reports zero findings rather than
-/// falling back to a full-tree scan.
-fn resolve_changed_files_from(scan_path: &str, list_file: &str) -> Result<Vec<PathBuf>, String> {
-    let contents = std::fs::read_to_string(list_file)
-        .map_err(|e| format!("failed to read changed-files list '{}': {}", list_file, e))?;
-
-    let root = Path::new(scan_path);
-    let mut files = Vec::new();
-    for line in contents.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let candidate = root.join(line);
-        // A PR can delete files; skip anything that is not a present file so we
-        // never error out or scan phantom paths.
-        if candidate.is_file() {
-            files.push(candidate);
-        }
-    }
-    Ok(files)
-}
-
 fn count_secret_files(scan_path: &Path) -> usize {
     if scan_path.is_file() {
         return 1;
@@ -848,42 +816,5 @@ mod tests {
 
         assert!(ids.contains(&"kernel/pq-vulnerable-cocci".to_string()));
         assert!(!ids.contains(&"kernel/non-pq-cocci".to_string()));
-    }
-
-    #[test]
-    fn resolve_changed_files_from_skips_missing_and_comments() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        std::fs::write(root.join("a.py"), "print(1)\n").unwrap();
-        std::fs::create_dir(root.join("sub")).unwrap();
-        std::fs::write(root.join("sub").join("b.py"), "print(2)\n").unwrap();
-
-        let list = root.join("changed.txt");
-        std::fs::write(&list, "# comment\n\na.py\nsub/b.py\ndeleted/gone.py\n").unwrap();
-
-        let files = resolve_changed_files_from(root.to_str().unwrap(), list.to_str().unwrap())
-            .expect("resolve");
-
-        // Existing files resolve (rooted at scan path); the missing/deleted
-        // path and the comment/blank lines are dropped.
-        assert_eq!(files.len(), 2, "got {files:?}");
-        assert!(files.contains(&root.join("a.py")));
-        assert!(files.contains(&root.join("sub").join("b.py")));
-    }
-
-    #[test]
-    fn resolve_changed_files_from_empty_list_is_empty_not_full_tree() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        std::fs::write(root.join("a.py"), "print(1)\n").unwrap();
-        let list = root.join("changed.txt");
-        std::fs::write(&list, "\n  \n# only comments\n").unwrap();
-
-        let files = resolve_changed_files_from(root.to_str().unwrap(), list.to_str().unwrap())
-            .expect("resolve");
-        assert!(
-            files.is_empty(),
-            "empty list must not fall back to full tree; got {files:?}"
-        );
     }
 }

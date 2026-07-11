@@ -15,6 +15,7 @@ pub mod output;
 pub mod path_identity;
 pub mod report;
 pub mod rules;
+pub mod scan_plan;
 pub mod secrets;
 pub mod tui;
 
