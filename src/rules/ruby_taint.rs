@@ -948,11 +948,7 @@ fn leftmost_receiver_text<'a>(mut node: Node<'_>, source: &'a str) -> Option<&'a
             "identifier" | "constant" => return Some(node_text(node, source)),
             "call" => {
                 // Attribute access: call with receiver but no arguments.
-                if let Some(recv) = node.child_by_field_name("receiver") {
-                    node = recv;
-                } else {
-                    return None;
-                }
+                node = node.child_by_field_name("receiver")?;
             }
             _ => return None,
         }

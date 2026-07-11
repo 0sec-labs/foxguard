@@ -70,10 +70,9 @@ pub fn fix_javascript(
     // Rewrite exec -> execFile with separate args
     let new_func = if let Some(prefix) = func_text.strip_suffix("execSync") {
         format!("{prefix}execFileSync")
-    } else if let Some(prefix) = func_text.strip_suffix("exec") {
-        format!("{prefix}execFile")
     } else {
-        return None;
+        let prefix = func_text.strip_suffix("exec")?;
+        format!("{prefix}execFile")
     };
 
     let (cmd, cmd_args) = split_command_parts(&parts)?;

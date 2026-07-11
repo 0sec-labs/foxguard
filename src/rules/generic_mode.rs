@@ -405,10 +405,9 @@ fn parse_generic_comparison(comparison: &str) -> Option<(String, CmpOp, f64, boo
             let rhs = s[idx + op_str.len()..].trim();
             let (metavar_side, literal_str, literal_is_lhs) = if let Some(g) = capture_name(lhs) {
                 (g, rhs, false)
-            } else if let Some(g) = capture_name(rhs) {
-                (g, lhs, true)
             } else {
-                return None;
+                let g = capture_name(rhs)?;
+                (g, lhs, true)
             };
             let literal = parse_numeric(literal_str.trim())?;
             return Some((metavar_side, *op, literal, literal_is_lhs));
