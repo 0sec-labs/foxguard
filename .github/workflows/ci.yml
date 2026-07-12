@@ -178,6 +178,7 @@ jobs:
       - run: bash -n benchmarks/precision/run.sh
       - run: bash -n benchmarks/run.sh
       - run: bash -n scripts/linux-codeql-dirty-frag.sh
+      - run: bash -n scripts/smoke-github-app-image.sh
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}

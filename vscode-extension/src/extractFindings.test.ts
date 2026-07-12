@@ -6,6 +6,8 @@
  */
 
 import * as assert from "assert";
+import * as fs from "fs";
+import * as path from "path";
 
 // ── Inline copies of types + function (no VS Code dep) ──────────────
 
@@ -25,6 +27,7 @@ interface Finding {
 
 interface ReportEnvelope {
   schema_version: string;
+  finding_schema_version?: string;
   findings: Finding[];
 }
 
@@ -52,8 +55,16 @@ const SAMPLE_FINDING: Finding = {
 
 const ENVELOPE_OUTPUT: ReportEnvelope = {
   schema_version: "1.0.0",
+  finding_schema_version: "1.0.0",
   findings: [SAMPLE_FINDING],
 };
+
+const CONTRACT_FIXTURE = JSON.parse(
+  fs.readFileSync(
+    path.resolve(__dirname, "../../tests/contracts/native-report-v1.json"),
+    "utf8"
+  )
+) as ReportEnvelope;
 
 // ── Tests ────────────────────────────────────────────────────────────
 
@@ -62,6 +73,17 @@ const ENVELOPE_OUTPUT: ReportEnvelope = {
   const result = extractFindings(ENVELOPE_OUTPUT);
   assert.strictEqual(result.length, 1);
   assert.strictEqual(result[0].rule_id, "js/no-eval");
+}
+
+// The repository-level fixture is the contract shared with non-Rust clients.
+{
+  assert.strictEqual(CONTRACT_FIXTURE.schema_version, "1.0.0");
+  assert.strictEqual(CONTRACT_FIXTURE.finding_schema_version, "1.0.0");
+  const result = extractFindings(CONTRACT_FIXTURE);
+  assert.strictEqual(result.length, 1);
+  assert.strictEqual(result[0].rule_id, "js/taint-command-injection");
+  assert.strictEqual(result[0].severity, "critical");
+  assert.strictEqual(result[0].line, 12);
 }
 
 // Legacy bare array (older CLI)

@@ -303,6 +303,21 @@ jobs:
         with:
           context: .
           file: Dockerfile.github-app
+          load: true
+          push: false
+          tags: foxguard-github-app:release-smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test GitHub App container
+        if: steps.check.outputs.exists == 'true'
+        run: scripts/smoke-github-app-image.sh foxguard-github-app:release-smoke
+
+      - uses: docker/build-push-action@v6
+        if: steps.check.outputs.exists == 'true'
+        with:
+          context: .
+          file: Dockerfile.github-app
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |

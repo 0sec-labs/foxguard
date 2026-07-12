@@ -315,7 +315,62 @@ fn print_cnsa2_summary(findings: &[Finding]) {
             .collect();
         println!("  {}", bullets.join("  \u{00b7}  ").dimmed());
     }
+
+    print_pq_readiness(&report);
     println!();
+}
+
+/// Post-quantum migration scorecard: quantum-vulnerable vs post-quantum asset
+/// counts, the algorithms detected, and an honest readiness signal. Shown
+/// alongside the CNSA block so `foxguard pqc` reports migration *progress*, not
+/// just risk. Rendered only when some crypto (vulnerable or PQ) was found.
+fn print_pq_readiness(report: &MigrationReport) {
+    let vulnerable = report.annotated;
+    let pq = report.pq_ready;
+    if vulnerable == 0 && pq == 0 {
+        return;
+    }
+
+    let (state_label, state) = if pq == 0 {
+        (
+            " not started ".on_red().white().bold(),
+            "migration not started",
+        )
+    } else if vulnerable == 0 {
+        (
+            " post-quantum ".on_green().black().bold(),
+            "post-quantum only",
+        )
+    } else {
+        (
+            " in progress ".on_blue().white().bold(),
+            "migration in progress",
+        )
+    };
+
+    let readiness = report
+        .readiness_percent()
+        .map(|p| format!(" ({p}% ready)"))
+        .unwrap_or_default();
+
+    println!();
+    println!(
+        "  {} {}  {}",
+        "Post-quantum".truecolor(52, 211, 153).bold(),
+        state_label,
+        format!(
+            "{} quantum-vulnerable, {} post-quantum{}  \u{2014}  {}",
+            vulnerable, pq, readiness, state
+        )
+        .dimmed(),
+    );
+
+    if !report.pq_algorithms.is_empty() {
+        println!(
+            "  {}",
+            format!("post-quantum: {}", report.pq_algorithms.join(" \u{00b7} ")).dimmed(),
+        );
+    }
 }
 
 fn print_summary(findings: &[Finding], files_scanned: usize, duration: std::time::Duration) {

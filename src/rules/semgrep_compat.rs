@@ -911,6 +911,7 @@ impl Rule for SemgrepRule {
                 dep_source: None,
                 dep_vulnerability_severity: None,
                 dep_path: vec![],
+                crypto_material: None,
             });
         }
 
@@ -2400,6 +2401,7 @@ impl Rule for RegexModeRule {
                 dep_source: None,
                 dep_vulnerability_severity: None,
                 dep_path: vec![],
+                crypto_material: None,
             })
             .collect()
     }

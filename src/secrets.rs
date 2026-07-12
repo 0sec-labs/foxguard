@@ -298,6 +298,7 @@ pub fn scan_paths_with_config_and_notices(
                         dep_source: None,
                         dep_vulnerability_severity: None,
                         dep_path: vec![],
+                        crypto_material: None,
                     });
                 }
             }

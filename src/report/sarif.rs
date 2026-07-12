@@ -392,6 +392,7 @@ mod tests {
             dep_source: None,
             dep_vulnerability_severity: None,
             dep_path: vec![],
+            crypto_material: None,
         }
     }
 
@@ -513,5 +514,30 @@ mod tests {
         assert!(result["partialFingerprints"]["primaryLocationLineHash"]
             .as_str()
             .is_some_and(|value| !value.is_empty()));
+    }
+
+    #[test]
+    fn sarif_preserves_the_native_v1_contract_fixture() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../../tests/contracts/native-report-v1.json"))
+                .expect("native v1 contract fixture must be valid JSON");
+        let finding: Finding = serde_json::from_value(fixture["findings"][0].clone())
+            .expect("native v1 fixture must deserialize as Finding");
+        let sarif = build_sarif(&[finding]);
+        let result = &sarif["runs"][0]["results"][0];
+
+        assert_eq!(sarif["version"], "2.1.0");
+        assert_eq!(result["ruleId"], "js/taint-command-injection");
+        assert_eq!(result["level"], "error");
+        let confidence = result["properties"]["confidence"]
+            .as_f64()
+            .expect("SARIF confidence must be numeric");
+        assert!((confidence - 0.91).abs() < 0.001);
+        assert_eq!(result["properties"]["depName"], "example-package");
+        assert_eq!(
+            result["codeFlows"][0]["threadFlows"][0]["locations"][0]["location"]
+                ["physicalLocation"]["region"]["startLine"],
+            8
+        );
     }
 }

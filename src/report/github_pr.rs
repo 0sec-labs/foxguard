@@ -506,7 +506,7 @@ mod tests {
             dep_fixed_version: None,
             dep_source: None,
             dep_vulnerability_severity: None,
-            dep_path: vec![],
+            dep_path: vec![], crypto_material: None,
         }
     }
 
