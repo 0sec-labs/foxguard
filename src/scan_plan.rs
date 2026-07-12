@@ -87,7 +87,7 @@ fn resolve_changed_files_list(root: &Path, list_file: &Path) -> Result<Vec<PathB
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let relative = Path::new(line);
+        let relative: &Path = line.as_ref();
         if relative.is_absolute()
             || relative.components().any(|component| {
                 matches!(
