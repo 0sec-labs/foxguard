@@ -170,6 +170,13 @@ pub struct MigrationReport {
     pub by_deadline: HashMap<String, usize>,
     /// Computed migration level. See [`MigrationLevel`] for the thresholds.
     pub level: MigrationLevel,
+    /// Number of informational post-quantum-ready findings (see
+    /// [`crate::PQ_READY_TAG`]) — the *migration-target* inventory. These
+    /// carry no CNSA deadline and are therefore never part of `annotated`.
+    pub pq_ready: usize,
+    /// Distinct post-quantum algorithm names detected (e.g. `["ML-KEM",
+    /// "X25519MLKEM768"]`), sorted. Drives the readiness summary line.
+    pub pq_algorithms: Vec<String>,
 }
 
 impl MigrationReport {
@@ -201,12 +208,27 @@ impl MigrationReport {
     pub fn from_findings(findings: &[Finding]) -> Self {
         let mut annotated = 0usize;
         let mut by_deadline: HashMap<String, usize> = HashMap::new();
+        let mut pq_ready = 0usize;
+        let mut pq_algorithms: Vec<String> = Vec::new();
         for f in findings {
+            if f.is_pq_ready() {
+                pq_ready += 1;
+                if let Some(algo) = &f.crypto_algorithm {
+                    if !pq_algorithms.iter().any(|a| a == algo) {
+                        pq_algorithms.push(algo.clone());
+                    }
+                }
+                // A post-quantum-ready finding is a positive inventory entry,
+                // never a deadline-bearing vulnerability — skip the deadline
+                // tally so it can't inflate the quantum-vulnerable count.
+                continue;
+            }
             if let Some(d) = &f.cnsa2_deadline {
                 annotated += 1;
                 *by_deadline.entry(d.clone()).or_insert(0) += 1;
             }
         }
+        pq_algorithms.sort();
 
         let pq_total = annotated;
 
@@ -226,7 +248,26 @@ impl MigrationReport {
             pq_total,
             by_deadline,
             level,
+            pq_ready,
+            pq_algorithms,
         }
+    }
+
+    /// Migration-readiness percentage: `pq_ready / (pq_ready + quantum-vulnerable)`,
+    /// as a whole-number percent. `None` when no crypto assets (vulnerable or
+    /// post-quantum) were found, so the caller can suppress the signal rather
+    /// than print a meaningless `0%`.
+    ///
+    /// Defensible by construction: the denominator is exactly the crypto
+    /// assets the audit classified, and the numerator is the subset already
+    /// migrated. Counting findings (not distinct algorithms) keeps it simple
+    /// and monotonic — adopting one more PQ call can only raise the ratio.
+    pub fn readiness_percent(&self) -> Option<u32> {
+        let total = self.pq_ready + self.annotated;
+        if total == 0 {
+            return None;
+        }
+        Some(((self.pq_ready as f64 / total as f64) * 100.0).round() as u32)
     }
 }
 
@@ -268,6 +309,7 @@ mod tests {
             dep_source: None,
             dep_vulnerability_severity: None,
             dep_path: vec![],
+            crypto_material: None,
         }
     }
 
@@ -382,6 +424,53 @@ mod tests {
         assert_eq!(report.annotated, 3);
         assert_eq!(report.by_deadline.get("2033").copied(), Some(2));
         assert_eq!(report.by_deadline.get("2030").copied(), Some(1));
+    }
+
+    fn mk_pq_ready(algo: &str) -> Finding {
+        let mut f = mk("py/pq-ready-crypto", None);
+        f.tags = vec![crate::PQ_READY_TAG.to_string()];
+        f.crypto_algorithm = Some(algo.to_string());
+        f
+    }
+
+    #[test]
+    fn pq_ready_findings_counted_separately_from_vulnerable() {
+        let findings = vec![
+            mk("py/pq-vulnerable-crypto", Some("2033")),
+            mk_pq_ready("ML-KEM"),
+            mk_pq_ready("ML-KEM"),
+            mk_pq_ready("X25519MLKEM768"),
+        ];
+        let report = MigrationReport::from_findings(&findings);
+        // The vulnerable tally is unaffected by PQ-ready findings.
+        assert_eq!(report.annotated, 1);
+        assert_eq!(report.pq_ready, 3);
+        // Distinct algorithms, sorted.
+        assert_eq!(report.pq_algorithms, vec!["ML-KEM", "X25519MLKEM768"]);
+        // 3 / (3 + 1) = 75%.
+        assert_eq!(report.readiness_percent(), Some(75));
+    }
+
+    #[test]
+    fn readiness_is_none_without_any_crypto() {
+        let report = MigrationReport::from_findings(&[mk("py/no-eval", None)]);
+        assert_eq!(report.pq_ready, 0);
+        assert_eq!(report.readiness_percent(), None);
+    }
+
+    #[test]
+    fn readiness_is_full_when_only_post_quantum() {
+        let report = MigrationReport::from_findings(&[mk_pq_ready("ML-KEM")]);
+        assert_eq!(report.annotated, 0);
+        assert_eq!(report.readiness_percent(), Some(100));
+        // No deadline-bearing findings → still "clean" on the CNSA axis.
+        assert_eq!(report.level, MigrationLevel::Clean);
+    }
+
+    #[test]
+    fn readiness_is_zero_when_migration_not_started() {
+        let report = MigrationReport::from_findings(&[mk("py/pq-vulnerable-crypto", Some("2033"))]);
+        assert_eq!(report.readiness_percent(), Some(0));
     }
 
     #[test]

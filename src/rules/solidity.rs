@@ -128,6 +128,7 @@ fn map_solidity_taint_finding(
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     }
 }
 

@@ -21,6 +21,7 @@ pub mod kotlin_taint;
 pub mod manifest;
 pub mod php;
 pub mod php_taint;
+pub mod pq;
 pub mod python;
 pub mod python_aliases;
 pub mod python_taint;
@@ -213,6 +214,37 @@ macro_rules! impl_rule {
             fn description(&self) -> &str { $desc }
             fn language(&self) -> $crate::Language { $lang }
             fn cnsa2_deadline(&self) -> Option<&'static str> { Some($deadline) }
+            fn applies_to_path(&self, path: &std::path::Path) -> bool {
+                path.file_name().and_then(|f| f.to_str()) == Some($filename)
+            }
+            fn check(&self, $src: &str, $tree: &tree_sitter::Tree) -> Vec<$crate::Finding> {
+                let $self_ = self;
+                $($check_body)*
+            }
+        }
+    };
+
+    // ── Variant 1d: check only, with applies_to_filename (no cnsa2) ──────
+    //
+    // For informational manifest rules (e.g. the post-quantum-ready dep
+    // detectors) that fire on a specific basename but declare no CNSA 2.0
+    // deadline — a quantum-resistant dependency is not on a transition clock.
+    (
+        $struct:ty,
+        id = $id:expr,
+        severity = $sev:expr,
+        cwe = $cwe:expr,
+        description = $desc:expr,
+        language = $lang:expr,
+        applies_to_filename = $filename:expr,
+        fn check($self_:ident, $src:ident, $tree:ident) { $($check_body:tt)* }
+    ) => {
+        impl $crate::rules::Rule for $struct {
+            fn id(&self) -> &str { $id }
+            fn severity(&self) -> $crate::Severity { $sev }
+            fn cwe(&self) -> Option<&str> { $cwe }
+            fn description(&self) -> &str { $desc }
+            fn language(&self) -> $crate::Language { $lang }
             fn applies_to_path(&self, path: &std::path::Path) -> bool {
                 path.file_name().and_then(|f| f.to_str()) == Some($filename)
             }
@@ -472,6 +504,7 @@ impl RuleRegistry {
             ]
         );
         registry.register_opt_in(Box::new(javascript::HardcodedCryptoAlgorithm));
+        registry.register_opt_in(Box::new(javascript::PqReadyCrypto));
         register_rules!(registry, [javascript::TaintNosqlInjection]);
 
         register_rules!(
@@ -520,6 +553,7 @@ impl RuleRegistry {
             ]
         );
         registry.register_opt_in(Box::new(python::HardcodedCryptoAlgorithm));
+        registry.register_opt_in(Box::new(python::PqReadyCrypto));
         register_rules!(registry, [python::TaintNosqlInjection]);
 
         register_rules!(
@@ -552,6 +586,7 @@ impl RuleRegistry {
                 go::TaintPathTraversal,
             ]
         );
+        registry.register_opt_in(Box::new(go::PqReadyCrypto));
 
         register_rules!(
             registry,
@@ -575,6 +610,7 @@ impl RuleRegistry {
             ]
         );
         registry.register_opt_in(Box::new(java::HardcodedCryptoAlgorithm));
+        registry.register_opt_in(Box::new(java::PqReadyCrypto));
 
         register_rules!(
             registry,
@@ -747,6 +783,7 @@ impl RuleRegistry {
                 rust_lang::NoUnwrapInLib,
             ]
         );
+        registry.register_opt_in(Box::new(rust_lang::PqReadyCrypto));
 
         register_rules!(
             registry,
@@ -764,6 +801,14 @@ impl RuleRegistry {
                 manifest::PackageLockPqCrypto,
             ]
         );
+        // Informational post-quantum-ready detectors (opt-in; activated by the
+        // `foxguard pqc` audit via the PQ rule allowlist). Kept out of the
+        // default scan so a repository already using ML-KEM is not flagged.
+        registry.register_opt_in(Box::new(config::NginxPqReadyTls));
+        registry.register_opt_in(Box::new(config::ApachePqReadyTls));
+        registry.register_opt_in(Box::new(config::HAProxyPqReadyTls));
+        registry.register_opt_in(Box::new(manifest::CargoLockPqReadyCrypto));
+        registry.register_opt_in(Box::new(manifest::RequirementsTxtPqReadyCrypto));
 
         // Register bundled YAML rule packs (currently the kernel
         // dirty-frag-class pack). These ship inside the binary via the

@@ -482,6 +482,7 @@ fn run_internal_add_scan_ignore_rule(args: &InternalAddScanIgnoreRuleArgs) -> i3
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: Vec::new(),
+        crypto_material: None,
     };
 
     let result = match add_scan_ignore_rule(scan_root, args.config.as_deref(), &finding) {
