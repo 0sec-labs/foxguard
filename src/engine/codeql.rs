@@ -501,6 +501,7 @@ fn finding_from_sarif_result(rule: &CodeQlRule, result: &JsonValue) -> Option<Fi
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     })
 }
 

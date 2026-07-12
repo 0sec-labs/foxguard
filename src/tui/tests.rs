@@ -76,6 +76,7 @@ fn source_context_finding() -> Finding {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     }
 }
 
@@ -402,6 +403,7 @@ fn compare_findings_prioritizes_higher_severity() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
     let medium = Finding {
         severity: Severity::Medium,
@@ -458,6 +460,7 @@ fn dataflow_lines_render_path_when_source_and_sink_are_present() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -512,6 +515,7 @@ fn dataflow_lines_render_locations_without_descriptions() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -561,6 +565,7 @@ fn dataflow_lines_render_descriptions_without_locations() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let rendered = dataflow_lines(&finding, OpenFocus::Finding)
@@ -617,6 +622,7 @@ fn dataflow_lines_show_fallback_when_no_trace_exists() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     assert_eq!(
@@ -662,6 +668,7 @@ fn open_target_lines_show_finding_even_without_trace_details() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let rendered = open_target_lines(&finding, OpenFocus::Finding)
@@ -711,6 +718,7 @@ fn render_source_context_includes_surrounding_lines_and_caret() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let rendered = render_source_context(
@@ -771,6 +779,7 @@ fn render_source_context_aligns_caret_after_wide_glyphs() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let caret = render_source_context("😀exec(cmd);\n", &finding, 0)
@@ -819,6 +828,7 @@ fn render_source_context_aligns_caret_after_tabs() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let caret = render_source_context("\texec(cmd);\n", &finding, 0)
@@ -867,6 +877,7 @@ fn render_source_context_aligns_caret_after_combining_marks() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let caret = render_source_context("e\u{301}exec(cmd);\n", &finding, 0)
@@ -915,6 +926,7 @@ fn render_source_context_uses_single_cell_width_for_combined_glyph_selection() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let caret = render_source_context("e\u{301}x\n", &finding, 0)
@@ -1125,6 +1137,7 @@ fn available_open_focuses_include_source_and_sink_when_present() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     assert_eq!(
@@ -1167,6 +1180,7 @@ fn available_open_focuses_include_description_only_source_and_sink() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     assert_eq!(
@@ -1238,6 +1252,7 @@ fn cycle_open_focus_advances_through_available_targets() {
             dep_source: None,
             dep_vulnerability_severity: None,
             dep_path: vec![],
+            crypto_material: None,
         }],
         files_scanned: 1,
         duration: Duration::from_secs(1),
@@ -1328,6 +1343,7 @@ fn open_action_menu_is_available_in_scan_mode() {
             dep_source: None,
             dep_vulnerability_severity: None,
             dep_path: vec![],
+            crypto_material: None,
         }],
         files_scanned: 1,
         duration: Duration::from_secs(1),
@@ -1398,6 +1414,7 @@ fn open_action_menu_is_available_in_secrets_mode() {
             dep_source: None,
             dep_vulnerability_severity: None,
             dep_path: vec![],
+            crypto_material: None,
         }],
         files_scanned: 1,
         duration: Duration::from_secs(1),
@@ -1494,6 +1511,7 @@ fn apply_action_review_state_is_session_only() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
     app.result = Some(TuiExecution {
         mode: TuiMode::Scan,
@@ -1547,6 +1565,7 @@ fn dataflow_lines_highlight_active_open_target() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let rendered = dataflow_lines(&finding, OpenFocus::Source)
@@ -1599,6 +1618,7 @@ fn render_source_context_marks_each_line_of_multiline_findings() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let rendered = render_source_context(
@@ -1754,6 +1774,7 @@ fn confidence_sort_places_high_confidence_before_low_regardless_of_severity() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
     let low_conf_high_sev = Finding {
         severity: Severity::Critical,
@@ -1831,6 +1852,7 @@ fn session_confidence_filter_hides_low_confidence_findings() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
     let low_conf = Finding {
         confidence: 0.5,
@@ -1913,6 +1935,7 @@ fn open_action_menu_in_scan_mode_exposes_new_triage_actions() {
             dep_source: None,
             dep_vulnerability_severity: None,
             dep_path: vec![],
+            crypto_material: None,
         }],
         files_scanned: 1,
         duration: Duration::from_secs(1),
@@ -1978,6 +2001,7 @@ fn apply_action_lower_severity_writes_override_and_replaces() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
     app.result = Some(TuiExecution {
         mode: TuiMode::Scan,
@@ -2050,6 +2074,7 @@ fn apply_action_disable_rule_globally_appends_and_detects_duplicate() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
     app.result = Some(TuiExecution {
         mode: TuiMode::Scan,
@@ -2113,6 +2138,7 @@ fn render_source_context_truncates_long_lines_around_selected_range() {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
 
     let rendered = render_source_context(
@@ -2179,6 +2205,7 @@ fn cnsa_finding(rule_id: &str, deadline: Option<&str>) -> Finding {
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     }
 }
 
@@ -2222,6 +2249,7 @@ fn app_with_single_finding(
         dep_source: None,
         dep_vulnerability_severity: None,
         dep_path: vec![],
+        crypto_material: None,
     };
     let mut app = tui_app_with_findings(vec![finding]);
     app.show_launch = false;

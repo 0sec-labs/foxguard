@@ -44,6 +44,7 @@ const jsRules: Rule[] = [
   { id: 'js/no-unsafe-regex', cwe: 'CWE-1333', desc: 'Potentially catastrophic backtracking regex pattern', severity: 'medium' },
   { id: 'js/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic hash (MD5/SHA1)', severity: 'medium' },
   { id: 'js/no-xss-innerhtml', cwe: 'CWE-79', desc: 'Assignment to innerHTML may lead to XSS', severity: 'high' },
+  { id: 'js/pq-ready-crypto', cwe: '', desc: 'Post-quantum / hybrid cryptographic algorithm in use (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or hybrid KEM)', severity: 'low' },
   { id: 'js/pq-vulnerable-crypto', cwe: 'CWE-327', desc: 'Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DH/Ed25519)', severity: 'high' },
   { id: 'js/taint-command-injection', cwe: 'CWE-78', desc: 'Untrusted input reaches a command execution sink — OS command injection', severity: 'critical' },
   { id: 'js/taint-eval', cwe: 'CWE-95', desc: 'Untrusted input reaches eval or Function — arbitrary code execution', severity: 'critical' },
@@ -82,6 +83,7 @@ const pyRules: Rule[] = [
   { id: 'py/no-ssrf', cwe: 'CWE-918', desc: 'Potential SSRF via dynamic outbound request URL', severity: 'high' },
   { id: 'py/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic hash (MD5/SHA1)', severity: 'medium' },
   { id: 'py/no-yaml-load', cwe: 'CWE-502', desc: 'yaml.load() without SafeLoader can execute arbitrary code', severity: 'high' },
+  { id: 'py/pq-ready-crypto', cwe: '', desc: 'Post-quantum / hybrid cryptographic algorithm in use (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or hybrid KEM)', severity: 'low' },
   { id: 'py/pq-vulnerable-crypto', cwe: 'CWE-327', desc: 'Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519/X25519)', severity: 'high' },
   { id: 'py/secure-ssl-redirect-disabled', cwe: 'CWE-319', desc: 'Django SECURE_SSL_REDIRECT disabled in source code', severity: 'medium' },
   { id: 'py/session-cookie-httponly-disabled', cwe: 'CWE-1004', desc: 'SESSION_COOKIE_HTTPONLY disabled in source code', severity: 'medium' },
@@ -119,6 +121,7 @@ const goRules: Rule[] = [
   { id: 'go/no-ssrf', cwe: 'CWE-918', desc: 'Potential SSRF via http.Get/http.Post with variable URL', severity: 'high' },
   { id: 'go/no-unsafe-deserialization', cwe: 'CWE-502', desc: 'Unsafe deserialization via gob or yaml.Unmarshal into interface{}/any', severity: 'high' },
   { id: 'go/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic hash (MD5/SHA1)', severity: 'medium' },
+  { id: 'go/pq-ready-crypto', cwe: '', desc: 'Post-quantum / hybrid cryptographic algorithm in use (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or hybrid KEM)', severity: 'low' },
   { id: 'go/pq-vulnerable-crypto', cwe: 'CWE-327', desc: 'Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519)', severity: 'high' },
   { id: 'go/taint-command-injection', cwe: 'CWE-78', desc: 'Untrusted input reaches os/exec command execution sink', severity: 'critical' },
   { id: 'go/taint-ldap-injection', cwe: 'CWE-90', desc: 'Untrusted input reaches LDAP search sink (potential LDAP injection)', severity: 'high' },
@@ -162,6 +165,7 @@ const javaRules: Rule[] = [
   { id: 'java/no-weak-crypto', cwe: 'CWE-327', desc: 'Use of weak cryptographic algorithm', severity: 'medium' },
   { id: 'java/no-xss', cwe: 'CWE-79', desc: 'Potential XSS via direct write of user input to HTTP response', severity: 'high' },
   { id: 'java/no-xxe', cwe: 'CWE-611', desc: 'XML parser created without disabling external entities (XXE)', severity: 'high' },
+  { id: 'java/pq-ready-crypto', cwe: '', desc: 'Post-quantum / hybrid cryptographic algorithm in use (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or hybrid KEM)', severity: 'low' },
   { id: 'java/pq-vulnerable-crypto', cwe: 'CWE-327', desc: 'Use of quantum-vulnerable cryptographic algorithm (RSA/EC/DSA/DH/Ed25519/X25519)', severity: 'high' },
   { id: 'java/spring-cors-permissive', cwe: 'CWE-942', desc: 'Permissive CORS configuration allows any origin', severity: 'medium' },
   { id: 'java/spring-csrf-disabled', cwe: 'CWE-352', desc: 'Spring Security CSRF protection is disabled', severity: 'high' },
@@ -197,6 +201,7 @@ const rustRules: Rule[] = [
   { id: 'rs/no-ssrf', cwe: 'CWE-918', desc: 'Potential SSRF via reqwest with dynamic URL', severity: 'high' },
   { id: 'rs/no-unwrap-in-lib', cwe: 'CWE-248', desc: 'Use of .unwrap() or .expect() can cause panics in production', severity: 'medium' },
   { id: 'rs/no-weak-hash', cwe: 'CWE-328', desc: 'Use of weak cryptographic hash (MD5/SHA1)', severity: 'medium' },
+  { id: 'rs/pq-ready-crypto', cwe: '', desc: 'Post-quantum / hybrid cryptographic algorithm in use (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or hybrid KEM)', severity: 'low' },
   { id: 'rs/pq-vulnerable-crypto', cwe: 'CWE-327', desc: 'Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/Ed25519/X25519)', severity: 'high' },
   { id: 'rs/tls-verify-disabled', cwe: 'CWE-295', desc: 'TLS certificate verification disabled with danger_accept_invalid_certs', severity: 'high' },
   { id: 'rs/transmute-usage', cwe: 'CWE-843', desc: 'Use of std::mem::transmute can cause type confusion and undefined behavior', severity: 'high' },
@@ -271,14 +276,17 @@ const haskellRules: Rule[] = [
 ];
 
 const nginxconfRules: Rule[] = [
+  { id: 'config/nginx-pq-ready-tls', cwe: '', desc: 'Nginx TLS configuration negotiates a post-quantum / hybrid key exchange (X25519MLKEM768)', severity: 'low' },
   { id: 'config/nginx-pq-vulnerable-tls', cwe: 'CWE-327', desc: 'Nginx TLS configuration uses quantum-vulnerable protocols or ciphers', severity: 'medium' },
 ];
 
 const apacheconfRules: Rule[] = [
+  { id: 'config/apache-pq-ready-tls', cwe: '', desc: 'Apache TLS configuration negotiates a post-quantum / hybrid key exchange (X25519MLKEM768)', severity: 'low' },
   { id: 'config/apache-pq-vulnerable-tls', cwe: 'CWE-327', desc: 'Apache TLS configuration uses quantum-vulnerable protocols or ciphers', severity: 'medium' },
 ];
 
 const haproxyconfRules: Rule[] = [
+  { id: 'config/haproxy-pq-ready-tls', cwe: '', desc: 'HAProxy TLS configuration negotiates a post-quantum / hybrid key exchange (X25519MLKEM768)', severity: 'low' },
   { id: 'config/haproxy-pq-vulnerable-tls', cwe: 'CWE-327', desc: 'HAProxy TLS configuration uses quantum-vulnerable protocols or ciphers', severity: 'medium' },
 ];
 
@@ -287,9 +295,11 @@ const dockerfileRules: Rule[] = [
 ];
 
 const manifestRules: Rule[] = [
+  { id: 'manifest/cargo-pq-ready-dep', cwe: '', desc: 'Manifest declares a post-quantum cryptographic dependency (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or liboqs)', severity: 'low' },
   { id: 'manifest/cargo-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm (dev-dependencies not distinguished)', severity: 'high' },
   { id: 'manifest/npm-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm', severity: 'high' },
   { id: 'manifest/osv-vulnerable-dep', cwe: 'CWE-937', desc: 'Dependency is affected by a known OSV vulnerability', severity: 'high' },
+  { id: 'manifest/pip-pq-ready-dep', cwe: '', desc: 'Manifest declares a post-quantum cryptographic dependency (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or liboqs)', severity: 'low' },
   { id: 'manifest/pip-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm', severity: 'high' },
   { id: 'manifest/pipfile-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm', severity: 'high' },
   { id: 'manifest/pnpm-pq-vulnerable-dep', cwe: 'CWE-327', desc: 'Dependency uses quantum-vulnerable cryptographic algorithm', severity: 'high' },

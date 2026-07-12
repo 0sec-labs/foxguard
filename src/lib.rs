@@ -1,6 +1,7 @@
 pub mod adapter;
 pub mod app;
 pub mod baseline;
+pub mod certscan;
 pub mod cli;
 pub mod compliance;
 pub mod config;
@@ -15,6 +16,7 @@ pub mod output;
 pub mod path_identity;
 pub mod report;
 pub mod rules;
+pub mod scan_plan;
 pub mod secrets;
 pub mod tui;
 
@@ -135,6 +137,18 @@ pub fn default_confidence() -> f32 {
 /// changing its type, or changing its meaning does.
 pub const FINDING_SCHEMA_VERSION: &str = "1.0.0";
 
+/// Tag applied to informational "post-quantum ready" findings.
+///
+/// The vulnerable side of the PQC audit tags findings `"PQ"` (see the
+/// `pq-vulnerable-crypto` rules). The migration-target side tags findings
+/// with this marker instead. A finding carrying [`PQ_READY_TAG`] describes a
+/// *post-quantum / quantum-resistant* algorithm already in use — it is a
+/// positive inventory entry, **not** a vulnerability. Modeling this as a tag
+/// (rather than a new `Finding` field) keeps it symmetric with the existing
+/// `"PQ"` marker, serializes for free, and lets the CBOM / migration
+/// scorecard partition findings without a schema change.
+pub const PQ_READY_TAG: &str = "PQ-READY";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub rule_id: String,
@@ -211,4 +225,50 @@ pub struct Finding {
     /// Dependency path from manifest root to vulnerable package when known.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dep_path: Vec<String>,
+    /// Parsed cryptographic material (X.509 certificate or standalone key)
+    /// backing this finding. Populated only by the certificate/key scan pass
+    /// (`foxguard pqc`); `None` for source-, config-, and dependency-level
+    /// findings. Carries algorithm identity + metadata ONLY — never key bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crypto_material: Option<CryptoMaterial>,
+}
+
+/// Cryptographic material extracted from a real certificate or key file.
+///
+/// Emitted by the `foxguard pqc` cert/key scan pass and consumed by the CBOM
+/// formatter to build CycloneDX `certificate` / `related-crypto-material`
+/// assets. Contains only algorithm identity and public metadata — **never**
+/// private-key bytes or other secret material.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CryptoMaterial {
+    /// CBOM asset type: `"certificate"` for a parsed X.509 cert, or
+    /// `"related-crypto-material"` for a standalone public/private key.
+    pub asset_kind: String,
+    /// Human-readable subject public-key algorithm identity, e.g.
+    /// `"RSA-2048"`, `"ECDSA P-256"`, `"Ed25519"`, `"DSA-1024"`, `"ML-DSA"`.
+    pub subject_public_key_algorithm: String,
+    /// Certificate signature algorithm (present for full certs), e.g.
+    /// `"sha256WithRSAEncryption"`. `None` for standalone keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_algorithm: Option<String>,
+    /// Encoding the material was parsed from: `"PEM"` or `"DER"`.
+    pub format: String,
+    /// Certificate `notValidAfter` timestamp in RFC 3339 / ISO-8601 form,
+    /// when available. `None` for standalone keys or unparseable validity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_valid_after: Option<String>,
+    /// Whether this material's public-key algorithm is quantum-vulnerable
+    /// (classical RSA/EC/DSA). Post-quantum material (ML-DSA/ML-KEM) is
+    /// `false`.
+    pub quantum_vulnerable: bool,
+}
+
+impl Finding {
+    /// `true` when this finding is an informational post-quantum inventory
+    /// entry (see [`PQ_READY_TAG`]) rather than a vulnerability. Used by the
+    /// CBOM formatter and migration scorecard to keep quantum-resistant
+    /// algorithms out of the vulnerability set.
+    pub fn is_pq_ready(&self) -> bool {
+        self.tags.iter().any(|t| t == PQ_READY_TAG)
+    }
 }

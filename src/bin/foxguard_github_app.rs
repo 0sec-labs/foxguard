@@ -12,7 +12,7 @@
 //! Run:      `FOXGUARD_WEBHOOK_SECRET=xxx FOXGUARD_BIND=0.0.0.0:8080 foxguard-github-app`
 //! Docker:   `docker build -f Dockerfile.github-app -t ghcr.io/0sec-labs/foxguard-github-app .`
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -46,6 +46,9 @@ use tracing_subscriber::EnvFilter;
 /// headroom while making it cheap to reject anything weaponised.
 const MAX_BODY_BYTES: usize = 1 << 20; // 1 MiB
 const MAX_REPO_BYTES: u64 = 1_000_000_000; // 1 GB
+const DEFAULT_PR_QUEUE_CAPACITY: usize = 128;
+const DEFAULT_PR_WORKERS: usize = 4;
+const RECENT_DELIVERY_CAPACITY: usize = 4096;
 /// Wall-clock timeout applied to each `git` clone and each `foxguard` scan
 /// during a pull-request review, configurable via the
 /// `FOXGUARD_SCAN_TIMEOUT_SECS` environment variable (default `60`).
@@ -69,6 +72,76 @@ fn parse_scan_timeout(value: Option<String>) -> Duration {
     Duration::from_secs(secs)
 }
 
+fn parse_positive_usize(value: Option<String>, default: usize) -> usize {
+    value
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|&value| value > 0)
+        .unwrap_or(default)
+}
+
+impl PullRequestDispatcher {
+    fn new(capacity: usize) -> (Self, tokio::sync::mpsc::Receiver<PullRequestJob>) {
+        let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
+        (
+            Self {
+                sender,
+                admission: Arc::new(Mutex::new(PullRequestAdmission::default())),
+            },
+            receiver,
+        )
+    }
+
+    fn try_dispatch(&self, job: PullRequestJob) -> DispatchOutcome {
+        let mut admission = self.admission.lock().unwrap_or_else(|e| e.into_inner());
+        if admission.recent_deliveries.contains(&job.delivery) {
+            return DispatchOutcome::DuplicateDelivery;
+        }
+        if admission.outstanding.contains(&job.key) {
+            admission.remember_delivery(job.delivery.clone());
+            admission.coalesced.insert(job.key.clone(), job);
+            return DispatchOutcome::Coalesced;
+        }
+
+        admission.outstanding.insert(job.key.clone());
+        let delivery = job.delivery.clone();
+        match self.sender.try_send(job) {
+            Ok(()) => {
+                admission.remember_delivery(delivery);
+                DispatchOutcome::Enqueued
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Full(job)) => {
+                admission.outstanding.remove(&job.key);
+                DispatchOutcome::QueueFull
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(job)) => {
+                admission.outstanding.remove(&job.key);
+                DispatchOutcome::QueueClosed
+            }
+        }
+    }
+
+    fn complete(&self, key: &PullRequestKey) -> Option<PullRequestJob> {
+        let mut admission = self.admission.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(job) = admission.coalesced.remove(key) {
+            return Some(job);
+        }
+        admission.outstanding.remove(key);
+        None
+    }
+}
+
+impl PullRequestAdmission {
+    fn remember_delivery(&mut self, delivery: String) {
+        self.recent_deliveries.insert(delivery.clone());
+        self.delivery_order.push_back(delivery);
+        while self.delivery_order.len() > RECENT_DELIVERY_CAPACITY {
+            if let Some(expired) = self.delivery_order.pop_front() {
+                self.recent_deliveries.remove(&expired);
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 struct AppState {
     webhook_secret: Vec<u8>,
@@ -90,6 +163,46 @@ struct AppState {
     /// startup so a persistence failure can be logged with the exact
     /// location an operator needs to fix (e.g. a read-only volume).
     installations_path: Arc<Path>,
+    pull_request_dispatcher: PullRequestDispatcher,
+}
+
+#[derive(Clone)]
+struct PullRequestDispatcher {
+    sender: tokio::sync::mpsc::Sender<PullRequestJob>,
+    admission: Arc<Mutex<PullRequestAdmission>>,
+}
+
+#[derive(Default)]
+struct PullRequestAdmission {
+    outstanding: HashSet<PullRequestKey>,
+    coalesced: HashMap<PullRequestKey, PullRequestJob>,
+    recent_deliveries: HashSet<String>,
+    delivery_order: VecDeque<String>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct PullRequestKey {
+    repository: String,
+    number: u64,
+}
+
+#[derive(Debug)]
+struct PullRequestJob {
+    delivery: String,
+    action: String,
+    installation_id: u64,
+    pull_request: Option<GitHubPullRequest>,
+    repository: Option<GitHubRepository>,
+    key: PullRequestKey,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum DispatchOutcome {
+    Enqueued,
+    DuplicateDelivery,
+    Coalesced,
+    QueueFull,
+    QueueClosed,
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,6 +280,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let installations = InstallationStore::from_env_or_default()?;
     let installations_path: Arc<Path> = Arc::from(installations.path());
     info!(path = %installations_path.display(), "installation store ready");
+    let queue_capacity = parse_positive_usize(
+        std::env::var("FOXGUARD_PR_QUEUE_CAPACITY").ok(),
+        DEFAULT_PR_QUEUE_CAPACITY,
+    );
+    let worker_count = parse_positive_usize(
+        std::env::var("FOXGUARD_PR_WORKERS").ok(),
+        DEFAULT_PR_WORKERS,
+    );
+    let (pull_request_dispatcher, pull_request_receiver) =
+        PullRequestDispatcher::new(queue_capacity);
     let state = AppState {
         webhook_secret: secret.into_bytes(),
         auth: GitHubAppAuthClient::new(credentials)?,
@@ -175,7 +298,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         installation_token_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         installations: Arc::new(Mutex::new(installations)),
         installations_path,
+        pull_request_dispatcher,
     };
+    start_pull_request_workers(state.clone(), pull_request_receiver, worker_count);
+    info!(queue_capacity, worker_count, "pull_request workers ready");
 
     let app = Router::new()
         .route("/healthz", get(healthz))
@@ -207,6 +333,81 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+fn start_pull_request_workers(
+    state: AppState,
+    receiver: tokio::sync::mpsc::Receiver<PullRequestJob>,
+    worker_count: usize,
+) {
+    let receiver = Arc::new(tokio::sync::Mutex::new(receiver));
+    for worker_id in 0..worker_count {
+        let state = state.clone();
+        let receiver = Arc::clone(&receiver);
+        std::mem::drop(tokio::spawn(async move {
+            loop {
+                let job = {
+                    let mut receiver = receiver.lock().await;
+                    receiver.recv().await
+                };
+                let Some(mut job) = job else {
+                    break;
+                };
+
+                loop {
+                    match process_pull_request_delivery(
+                        state.clone(),
+                        job.installation_id,
+                        job.pull_request,
+                        job.repository,
+                    )
+                    .await
+                    {
+                        Ok(result) => {
+                            info!(
+                                delivery = job.delivery,
+                                worker_id,
+                                installation_id = job.installation_id,
+                                action = job.action,
+                                pr_number = result.pr_number,
+                                repo = result.repo,
+                                findings = result.findings.len(),
+                                posted_comments = result.posted_comments,
+                                deleted_comments = result.deleted_comments,
+                                posted_check_annotations = result.posted_check_annotations,
+                                "pull_request scan complete and GitHub surfaces updated"
+                            );
+                        }
+                        Err(error) => {
+                            warn!(
+                                delivery = job.delivery,
+                                worker_id,
+                                installation_id = job.installation_id,
+                                %error,
+                                "failed to process pull_request delivery"
+                            );
+                        }
+                    }
+                    match state.pull_request_dispatcher.complete(&job.key) {
+                        Some(coalesced) => job = coalesced,
+                        None => break,
+                    }
+                }
+            }
+        }));
+    }
+}
+
+fn pull_request_key(payload: &GitHubWebhookPayload) -> Option<PullRequestKey> {
+    let pull_request = payload.pull_request.as_ref()?;
+    let repository = payload
+        .repository
+        .as_ref()
+        .unwrap_or(&pull_request.head.repo);
+    Some(PullRequestKey {
+        repository: repository.full_name.clone(),
+        number: pull_request.number,
+    })
 }
 
 /// Webhook handler. Verifies the GitHub HMAC, parses the event type
@@ -299,48 +500,58 @@ async fn webhook(
         },
         EventKind::PullRequest => match parse_webhook_payload(&body) {
             Ok(payload) => {
-                let action = payload.action.unwrap_or_else(|| "?".to_string());
+                let action = payload.action.clone().unwrap_or_else(|| "?".to_string());
                 if !should_process_pull_request_action(&action) {
                     tracing::debug!(delivery, action, "pull_request action ignored");
-                } else if let Some(installation) = payload.installation {
-                    let state_for_task = state.clone();
-                    let delivery = delivery.to_string();
+                } else if let Some(installation) = payload.installation.as_ref() {
                     let installation_id = installation.id;
-                    let pull_request = payload.pull_request;
-                    let repository = payload.repository;
-                    std::mem::drop(tokio::spawn(async move {
-                        match process_pull_request_delivery(
-                            state_for_task,
+                    if let Some(key) = pull_request_key(&payload) {
+                        let repo = key.repository.clone();
+                        let pr_number = key.number;
+                        let outcome = state.pull_request_dispatcher.try_dispatch(PullRequestJob {
+                            delivery: delivery.to_string(),
+                            action,
                             installation_id,
-                            pull_request,
-                            repository,
-                        )
-                        .await
-                        {
-                            Ok(result) => {
-                                info!(
-                                    delivery,
-                                    installation_id,
-                                    action,
-                                    pr_number = result.pr_number,
-                                    repo = result.repo,
-                                    findings = result.findings.len(),
-                                    posted_comments = result.posted_comments,
-                                    deleted_comments = result.deleted_comments,
-                                    posted_check_annotations = result.posted_check_annotations,
-                                    "pull_request scan complete and GitHub surfaces updated"
-                                );
-                            }
-                            Err(error) => {
-                                warn!(
-                                    delivery,
-                                    installation_id,
-                                    %error,
-                                    "failed to prepare pull_request auth"
-                                );
-                            }
+                            pull_request: payload.pull_request,
+                            repository: payload.repository,
+                            key,
+                        });
+                        match outcome {
+                            DispatchOutcome::Enqueued => info!(
+                                delivery,
+                                installation_id,
+                                repo,
+                                pr_number,
+                                "pull_request delivery queued"
+                            ),
+                            DispatchOutcome::DuplicateDelivery => tracing::debug!(
+                                delivery,
+                                repo,
+                                pr_number,
+                                "duplicate pull_request delivery acknowledged"
+                            ),
+                            DispatchOutcome::Coalesced => info!(
+                                delivery,
+                                repo,
+                                pr_number,
+                                "pull_request delivery coalesced behind active scan"
+                            ),
+                            DispatchOutcome::QueueFull => warn!(
+                                delivery,
+                                repo,
+                                pr_number,
+                                "pull_request queue full; delivery acknowledged without enqueue"
+                            ),
+                            DispatchOutcome::QueueClosed => error!(
+                                delivery,
+                                repo,
+                                pr_number,
+                                "pull_request queue unavailable; delivery acknowledged without enqueue"
+                            ),
                         }
-                    }));
+                    } else {
+                        warn!(delivery, "pull_request event missing PR or repository data");
+                    }
                 } else {
                     warn!(delivery, "pull_request event missing installation.id");
                 }
@@ -976,6 +1187,99 @@ async fn remove_cached_installation_token(state: &AppState, installation_id: u64
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pull_request_job(delivery: &str, repository: &str, number: u64) -> PullRequestJob {
+        PullRequestJob {
+            delivery: delivery.to_string(),
+            action: "synchronize".to_string(),
+            installation_id: 1,
+            pull_request: None,
+            repository: None,
+            key: PullRequestKey {
+                repository: repository.to_string(),
+                number,
+            },
+        }
+    }
+
+    #[test]
+    fn pull_request_dispatcher_applies_backpressure_without_leaking_admission() {
+        let (dispatcher, mut receiver) = PullRequestDispatcher::new(1);
+        assert_eq!(
+            dispatcher.try_dispatch(pull_request_job("delivery-1", "owner/repo", 1)),
+            DispatchOutcome::Enqueued
+        );
+        assert_eq!(
+            dispatcher.try_dispatch(pull_request_job("delivery-2", "owner/repo", 2)),
+            DispatchOutcome::QueueFull
+        );
+
+        let first = receiver.try_recv().expect("first job should be queued");
+        assert!(dispatcher.complete(&first.key).is_none());
+        assert_eq!(
+            dispatcher.try_dispatch(pull_request_job("delivery-2", "owner/repo", 2)),
+            DispatchOutcome::Enqueued,
+            "a queue-full rejection must release its admission key"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn pull_request_dispatcher_dedupes_concurrent_repository_pr_jobs() {
+        let (dispatcher, mut receiver) = PullRequestDispatcher::new(32);
+        let barrier = Arc::new(tokio::sync::Barrier::new(17));
+        let mut handles = Vec::new();
+        for index in 0..16 {
+            let dispatcher = dispatcher.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                dispatcher.try_dispatch(pull_request_job(
+                    &format!("delivery-{index}"),
+                    "owner/repo",
+                    7,
+                ))
+            }));
+        }
+        barrier.wait().await;
+
+        let mut enqueued = 0;
+        let mut coalesced = 0;
+        for handle in handles {
+            match handle.await.expect("dispatch task should not panic") {
+                DispatchOutcome::Enqueued => enqueued += 1,
+                DispatchOutcome::Coalesced => coalesced += 1,
+                outcome => panic!("unexpected dispatch outcome: {outcome:?}"),
+            }
+        }
+        assert_eq!(enqueued, 1);
+        assert_eq!(coalesced, 15);
+        let first = receiver.try_recv().expect("one job should enter the queue");
+        assert!(receiver.try_recv().is_err());
+        let latest = dispatcher
+            .complete(&first.key)
+            .expect("concurrent updates should coalesce into one follow-up");
+        assert_eq!(latest.key, first.key);
+        assert!(dispatcher.complete(&latest.key).is_none());
+    }
+
+    #[test]
+    fn pull_request_dispatcher_remembers_completed_delivery_ids() {
+        let (dispatcher, mut receiver) = PullRequestDispatcher::new(2);
+        let original = pull_request_job("same-delivery", "owner/repo", 7);
+        assert_eq!(dispatcher.try_dispatch(original), DispatchOutcome::Enqueued);
+        let completed = receiver.try_recv().expect("job should be queued");
+        assert!(dispatcher.complete(&completed.key).is_none());
+
+        assert_eq!(
+            dispatcher.try_dispatch(pull_request_job("same-delivery", "owner/repo", 7)),
+            DispatchOutcome::DuplicateDelivery
+        );
+        assert_eq!(
+            dispatcher.try_dispatch(pull_request_job("new-delivery", "owner/repo", 7)),
+            DispatchOutcome::Enqueued,
+            "a newer delivery may rescan a completed PR"
+        );
+    }
 
     #[test]
     fn parses_installation_id_from_pull_request_payload() {

@@ -104,7 +104,7 @@ foxguard pqc .
 foxguard --rules ./semgrep-rules .
 ```
 
-SCA supports `Cargo.lock`, `package-lock.json`, `pnpm-lock.yaml`, `requirements.txt`, `poetry.lock`, and `Pipfile.lock`. PQC findings carry CNSA 2.0 migration deadlines and can export CycloneDX 1.6 CBOMs.
+SCA supports `Cargo.lock`, `package-lock.json`, `pnpm-lock.yaml`, `requirements.txt`, `poetry.lock`, and `Pipfile.lock`. The PQC audit is a two-sided scorecard: it flags quantum-vulnerable primitives (RSA, ECDSA/DSA, ECDH/DH) with CNSA 2.0 migration deadlines, and it also detects post-quantum algorithms already in use (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, and hybrids like X25519MLKEM768) as informational, quantum-resistant inventory — reporting a migration-readiness percentage. Both sides export to a CycloneDX 1.6 CBOM, where post-quantum algorithms appear as quantum-resistant assets rather than vulnerabilities.
 
 ## Configuration
 

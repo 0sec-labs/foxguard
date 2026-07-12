@@ -871,6 +871,48 @@ impl_rule! {
     }
 }
 
+// ─── PQ-ready dependency detection (informational) ──────────────────────────
+//
+// Positive counterparts to the `*-pq-vulnerable-dep` rules: they fire when a
+// manifest declares a post-quantum crate/package (e.g. `ml-kem`, `pqcrypto`,
+// `kyber-py`, `liboqs-python`). Findings are informational (`Severity::Low`,
+// tagged `PQ-READY`), declare no CNSA deadline, and carry the canonical
+// algorithm name so the CBOM lists it as a quantum-resistant asset. Detection
+// reuses the shared spelling matcher, so Cargo.lock and requirements.txt
+// entries are covered; poetry / Pipfile / npm PQ-ready detection is
+// intentionally out of scope for now. (Only the lockfiles the scanner already
+// classifies as manifests are scanned — Cargo.toml is not one of them.)
+
+pub struct CargoLockPqReadyCrypto;
+
+impl_rule! {
+    CargoLockPqReadyCrypto,
+    id = "manifest/cargo-pq-ready-dep",
+    severity = Severity::Low,
+    cwe = None,
+    description = "Manifest declares a post-quantum cryptographic dependency (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or liboqs)",
+    language = Language::Manifest,
+    applies_to_filename = "Cargo.lock",
+    fn check(_self, source, _tree) {
+        crate::rules::pq::pq_ready_findings(_self.id(), source)
+    }
+}
+
+pub struct RequirementsTxtPqReadyCrypto;
+
+impl_rule! {
+    RequirementsTxtPqReadyCrypto,
+    id = "manifest/pip-pq-ready-dep",
+    severity = Severity::Low,
+    cwe = None,
+    description = "Manifest declares a post-quantum cryptographic dependency (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or liboqs)",
+    language = Language::Manifest,
+    applies_to_filename = "requirements.txt",
+    fn check(_self, source, _tree) {
+        crate::rules::pq::pq_ready_findings(_self.id(), source)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

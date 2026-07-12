@@ -53,6 +53,11 @@ include_dir = "0.7"
 reqwest = { version = "0.13.3", default-features = false, features = ["blocking", "json", "rustls"] }
 semver = "1"
 pep440_rs = "0.7"
+# X.509 certificate / key parsing for the `foxguard pqc` cert-scan pass.
+# Pure-Rust, no OpenSSL; used only to extract algorithm identity + public
+# metadata (never private-key bytes). See src/certscan.rs.
+x509-parser = "0.16"
+pem = "3"
 
 # Optional deps for the GitHub App webhook receiver (gated behind the
 # `github-app` feature). Off by default so the core scanner build stays
