@@ -312,6 +312,29 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
         });
     }
 
+    // PQ audit: also open the ACTUAL cryptographic material in the repo
+    // (X.509 certs and keys) and emit real crypto findings. This is only run
+    // for `foxguard pqc` (pq_mode); it complements the pattern-matching rules
+    // by parsing the deployed certs/keys directly. Defensive: never crashes on
+    // malformed material — bad files are skipped.
+    if scan.pq_mode {
+        let cert_result = crate::certscan::scan_certificates(
+            Path::new(&scan.path),
+            Path::new(&scan.path),
+            Some(&excludes),
+        );
+        files_scanned += cert_result.files_scanned;
+        notices.extend(cert_result.notices);
+        findings.extend(cert_result.findings);
+        findings.sort_by(|a, b| {
+            a.file
+                .cmp(&b.file)
+                .then(a.line.cmp(&b.line))
+                .then(a.column.cmp(&b.column))
+                .then(a.rule_id.cmp(&b.rule_id))
+        });
+    }
+
     let duration = scan_started.elapsed();
     append_scan_stats_notice(&mut notices, &stats);
 
@@ -782,6 +805,10 @@ fn validate_rules_path(rules: Option<&str>) -> Result<(), String> {
 /// Returns `true` if the rule ID belongs to the PQ audit rule set.
 fn is_pq_rule_id(id: &str) -> bool {
     id.contains("pq-vulnerable")
+        // Informational post-quantum-ready detectors: the migration-target
+        // side of the audit. Included so `foxguard pqc` activates them (they
+        // are opt-in and therefore dormant in a normal scan).
+        || id.contains("pq-ready")
         || id.contains("hardcoded-crypto-algorithm")
         || id == "config/dockerfile-insecure-tls-env"
 }

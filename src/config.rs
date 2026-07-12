@@ -1134,6 +1134,7 @@ mod tests {
             dep_source: None,
             dep_vulnerability_severity: None,
             dep_path: vec![],
+            crypto_material: None,
         }
     }
 
@@ -1420,6 +1421,7 @@ mod tests {
             dep_source: None,
             dep_vulnerability_severity: None,
             dep_path: vec![],
+            crypto_material: None,
         }
     }
 
@@ -1949,6 +1951,7 @@ mod tests {
             dep_source: None,
             dep_vulnerability_severity: None,
             dep_path: vec![],
+            crypto_material: None,
         }
     }
 

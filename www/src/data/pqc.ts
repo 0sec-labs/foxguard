@@ -2,15 +2,30 @@
 //
 // Every claim here is verified against the foxguard Rust source:
 //   - src/compliance.rs       — CNSA 2.0 deadline constants + MigrationLevel
-//                               (clean / on-track / at-risk) scoring.
-//   - src/report/cbom.rs      — CycloneDX 1.6 CBOM output; flagged primitives
-//                               (RSA, ECDSA/DSA, ECDH/DH) mapped to crypto
-//                               asset properties.
+//                               (clean / on-track / at-risk) scoring, plus the
+//                               post-quantum readiness percentage.
+//   - src/rules/pq.rs         — post-quantum algorithm table (ML-KEM, ML-DSA,
+//                               SLH-DSA, FN-DSA, HQC, hybrids, liboqs) and the
+//                               shared spelling matcher (`pq-ready-crypto`).
+//   - src/report/cbom.rs      — CycloneDX 1.6 CBOM output. Vulnerable primitives
+//                               (RSA, ECDSA/DSA, ECDH/DH) mapped to crypto asset
+//                               properties + a vulnerability entry; post-quantum
+//                               algorithms emitted as quantum-resistant assets
+//                               with NO vulnerability entry.
 //   - src/cli.rs (PqcArgs)    — `foxguard pqc .` subcommand and flags.
 //   - src/rules/manifest.rs   — 6 lockfile formats parsed for PQ-vulnerable deps.
 //
-// PQ source-code detection covers 5 languages (Python, JavaScript, Go, Java,
-// Rust) plus web-server configs, plus 6 lockfile formats. Do NOT widen this.
+// The audit is now a two-sided SCORECARD: it detects both the quantum-VULNERABLE
+// inventory AND the post-quantum migration TARGETS already in use, and reports a
+// readiness percentage.
+//
+// - Quantum-vulnerable detection: 5 source languages (Python, JavaScript, Go,
+//   Java, Rust) + web-server configs + 6 lockfile formats.
+// - Post-quantum-ready detection (informational, never flagged as insecure):
+//   the same 5 source languages, nginx/apache/haproxy TLS configs, and the
+//   Cargo.lock + requirements.txt manifests. These rules are opt-in and run
+//   only under `foxguard pqc`. Do NOT widen this beyond what src/rules/pq.rs
+//   and the `pq-ready-crypto` rules actually implement.
 
 // ---------------------------------------------------------------------------
 // Quantum-vulnerable primitives that foxguard flags
@@ -50,6 +65,64 @@ export const primitives: Primitive[] = [
     name: 'DSA',
     role: 'Finite-field signatures',
     risk: 'Same discrete-log foundation as DH, so signatures can be forged.',
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Post-quantum migration TARGETS that foxguard recognises as already-in-use.
+//
+// Mirrors the table in src/rules/pq.rs. Detection is informational: a repo
+// using these is AHEAD on migration, never flagged as insecure. They appear in
+// the CBOM as quantum-resistant assets and count toward the readiness score.
+// ---------------------------------------------------------------------------
+
+export interface PqTarget {
+  /** Canonical NIST/FIPS name as it appears in findings / the CBOM. */
+  name: string;
+  /** Standardisation identity. */
+  standard: string;
+  /** Legacy / common name, or '' when there is none. */
+  aka: string;
+  /** What the algorithm is used for. */
+  role: string;
+}
+
+export const pqTargets: PqTarget[] = [
+  {
+    name: 'ML-KEM',
+    standard: 'FIPS 203',
+    aka: 'Kyber',
+    role: 'Key encapsulation (KEM)',
+  },
+  {
+    name: 'ML-DSA',
+    standard: 'FIPS 204',
+    aka: 'Dilithium',
+    role: 'Digital signatures',
+  },
+  {
+    name: 'SLH-DSA',
+    standard: 'FIPS 205',
+    aka: 'SPHINCS+',
+    role: 'Stateless hash-based signatures',
+  },
+  {
+    name: 'FN-DSA',
+    standard: 'FIPS 206 (draft)',
+    aka: 'Falcon',
+    role: 'Lattice signatures',
+  },
+  {
+    name: 'HQC',
+    standard: 'NIST 5th selection (draft)',
+    aka: '',
+    role: 'Code-based key encapsulation',
+  },
+  {
+    name: 'X25519MLKEM768',
+    standard: 'FIPS 203 hybrid (RFC 9370)',
+    aka: 'X25519 + ML-KEM-768',
+    role: 'Hybrid TLS key exchange',
   },
 ];
 

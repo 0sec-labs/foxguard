@@ -261,6 +261,9 @@ jobs:
           fi
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - name: Verify Marketplace propagation
+        run: VSCODE_MARKETPLACE_VERSION="${GITHUB_REF_NAME#v}" node ../scripts/verify-vscode-marketplace.mjs
+
 
   publish-ghcr-github-app:
     name: Publish foxguard-github-app image (GHCR)
@@ -294,6 +297,21 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        if: steps.check.outputs.exists == 'true'
+        with:
+          context: .
+          file: Dockerfile.github-app
+          load: true
+          push: false
+          tags: foxguard-github-app:release-smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test GitHub App container
+        if: steps.check.outputs.exists == 'true'
+        run: scripts/smoke-github-app-image.sh foxguard-github-app:release-smoke
 
       - uses: docker/build-push-action@v6
         if: steps.check.outputs.exists == 'true'

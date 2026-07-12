@@ -1040,6 +1040,7 @@ fn finding_for_vulnerability(package: &PackageRef, vuln: &OsvVulnerability) -> F
         dep_source: Some(OSV_SOURCE.to_string()),
         dep_vulnerability_severity: advisory_severity,
         dep_path: package.dep_path.clone(),
+        crypto_material: None,
     }
 }
 

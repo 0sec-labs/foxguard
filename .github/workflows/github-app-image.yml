@@ -8,6 +8,17 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "Dockerfile.github-app"
+      - "scripts/smoke-github-app-image.sh"
+      - ".github/workflows/github-app-image.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Dockerfile.github-app"
+      - "scripts/smoke-github-app-image.sh"
+      - ".github/workflows/github-app-image.yml"
   workflow_dispatch:
 
 permissions:
@@ -24,6 +35,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -33,9 +45,19 @@ jobs:
         with:
           context: .
           file: Dockerfile.github-app
-          push: true
+          load: true
+          push: false
           tags: |
             ghcr.io/0sec-labs/foxguard-github-app:latest
             ghcr.io/0sec-labs/foxguard-github-app:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Smoke test GitHub App container
+        run: scripts/smoke-github-app-image.sh ghcr.io/0sec-labs/foxguard-github-app:${{ github.sha }}
+
+      - name: Push verified GitHub App image
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          docker push ghcr.io/0sec-labs/foxguard-github-app:${GITHUB_SHA}
+          docker push ghcr.io/0sec-labs/foxguard-github-app:latest

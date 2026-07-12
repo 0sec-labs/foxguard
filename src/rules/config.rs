@@ -284,6 +284,56 @@ impl_rule! {
     }
 }
 
+// ─── Rules: PQ-ready TLS (informational) ─────────────────────────────────────
+//
+// Positive counterparts to the `*-pq-vulnerable-tls` rules above: they fire
+// when a TLS config already negotiates a hybrid post-quantum key exchange
+// (e.g. `ssl_ecdh_curve X25519MLKEM768;`). Findings are informational
+// (`Severity::Low`, tagged `PQ-READY`) and declare no CNSA deadline — a server
+// offering PQ key exchange is ahead on migration, not misconfigured.
+
+pub struct NginxPqReadyTls;
+
+impl_rule! {
+    NginxPqReadyTls,
+    id = "config/nginx-pq-ready-tls",
+    severity = Severity::Low,
+    cwe = None,
+    description = "Nginx TLS configuration negotiates a post-quantum / hybrid key exchange (X25519MLKEM768)",
+    language = Language::NginxConf,
+    fn check(_self, source, _tree) {
+        crate::rules::pq::pq_ready_findings(_self.id(), &strip_comments(source))
+    }
+}
+
+pub struct ApachePqReadyTls;
+
+impl_rule! {
+    ApachePqReadyTls,
+    id = "config/apache-pq-ready-tls",
+    severity = Severity::Low,
+    cwe = None,
+    description = "Apache TLS configuration negotiates a post-quantum / hybrid key exchange (X25519MLKEM768)",
+    language = Language::ApacheConf,
+    fn check(_self, source, _tree) {
+        crate::rules::pq::pq_ready_findings(_self.id(), &strip_comments(source))
+    }
+}
+
+pub struct HAProxyPqReadyTls;
+
+impl_rule! {
+    HAProxyPqReadyTls,
+    id = "config/haproxy-pq-ready-tls",
+    severity = Severity::Low,
+    cwe = None,
+    description = "HAProxy TLS configuration negotiates a post-quantum / hybrid key exchange (X25519MLKEM768)",
+    language = Language::HAProxyConf,
+    fn check(_self, source, _tree) {
+        crate::rules::pq::pq_ready_findings(_self.id(), &strip_comments(source))
+    }
+}
+
 // ─── Rule 4: Dockerfile insecure TLS environment ─────────────────────────────
 
 pub struct DockerfileInsecureTlsEnv;

@@ -5532,6 +5532,7 @@ fn pqc_on_safe_fixture_returns_zero_findings() {
             let rule_id = f["rule_id"].as_str().unwrap_or("");
             assert!(
                 rule_id.contains("pq-vulnerable")
+                    || rule_id.contains("pq-ready")
                     || rule_id.contains("hardcoded-crypto-algorithm")
                     || rule_id.starts_with("config/"),
                 "pqc subcommand should only return PQ rules, got: {rule_id}"
