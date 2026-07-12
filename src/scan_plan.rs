@@ -6,7 +6,7 @@
 
 use crate::engine::PathExcludeMatcher;
 use crate::git::{changed_files, ChangeSelection};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScanTargetRequest {
@@ -79,14 +79,41 @@ fn resolve_changed_files_list(root: &Path, list_file: &Path) -> Result<Vec<PathB
         )
     })?;
 
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve scan root '{}': {error}", root.display()))?;
     let mut files = Vec::new();
     for line in contents.lines().map(str::trim) {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let candidate = root.join(line);
+        let relative = Path::new(line);
+        if relative.is_absolute()
+            || relative.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            return Err(format!(
+                "changed-files entry must stay relative to the scan root: '{line}'"
+            ));
+        }
+        let candidate = root.join(relative);
         // Deleted paths in a PR are expected; only present files are targets.
         if candidate.is_file() {
+            let canonical_candidate = candidate.canonicalize().map_err(|error| {
+                format!(
+                    "failed to resolve changed-files entry '{}': {error}",
+                    candidate.display()
+                )
+            })?;
+            if !canonical_candidate.starts_with(&canonical_root) {
+                return Err(format!(
+                    "changed-files entry escapes the scan root: '{line}'"
+                ));
+            }
             files.push(candidate);
         }
     }
@@ -130,5 +157,52 @@ mod tests {
         let error =
             ScanPlan::resolve(".", ScanTargetRequest::FullTree, vec!["[".into()], 1).unwrap_err();
         assert!(error.contains("Invalid exclude glob"), "{error}");
+    }
+
+    #[test]
+    fn changed_file_list_rejects_parent_and_absolute_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let list = dir.path().join("changed.txt");
+        std::fs::write(&list, "../outside.rs\n").unwrap();
+        let error = ScanPlan::resolve(
+            dir.path(),
+            ScanTargetRequest::ChangedFilesList(list.clone()),
+            vec![],
+            42,
+        )
+        .unwrap_err();
+        assert!(error.contains("must stay relative"), "{error}");
+
+        std::fs::write(&list, "/tmp/outside.rs\n").unwrap();
+        let error = ScanPlan::resolve(
+            dir.path(),
+            ScanTargetRequest::ChangedFilesList(list),
+            vec![],
+            42,
+        )
+        .unwrap_err();
+        assert!(error.contains("must stay relative"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn changed_file_list_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("outside.rs"), "fn main() {}").unwrap();
+        symlink(outside.path(), root.path().join("linked")).unwrap();
+        let list = root.path().join("changed.txt");
+        std::fs::write(&list, "linked/outside.rs\n").unwrap();
+
+        let error = ScanPlan::resolve(
+            root.path(),
+            ScanTargetRequest::ChangedFilesList(list),
+            vec![],
+            42,
+        )
+        .unwrap_err();
+        assert!(error.contains("escapes the scan root"), "{error}");
     }
 }

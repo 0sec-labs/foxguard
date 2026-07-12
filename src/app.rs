@@ -136,7 +136,7 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
         // Explicit changed-file list (e.g. from the GitHub App): scan only
         // these paths but keep `scan.path` as the analysis root so cross-file
         // taint context is preserved. Precedence over the change-mode flags.
-        ScanTargetRequest::ChangedFilesList(PathBuf::from(list_file)) // foxguard: ignore[rs/no-path-traversal] -- validated scan input
+        ScanTargetRequest::ChangedFilesList(list_file.into())
     } else if let Some(selection) = scan.changes.selection() {
         ScanTargetRequest::GitChanges(selection)
     } else {
