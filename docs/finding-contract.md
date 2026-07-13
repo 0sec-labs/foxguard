@@ -21,6 +21,12 @@ that predate the native envelope.
 | GitHub Action | Uses terminal output for the summary and SARIF for code scanning; it does not parse native findings |
 | 0sec monorepo | Pins the latest healthy Foxguard `main` commit through an automated pull request, adapts native v1 findings into its ingest contract, and exercises release binary → HTTP ingest → tenant-scoped persistence in CI |
 
+The 0sec integration deliberately keeps two gates separate. Its submodule
+contract validates the exact source pin and requires it to descend from the
+declared release tag. Its cross-tool E2E downloads that declared release's
+published binary, so source-only changes do not silently redefine the released
+finding contract before the next version is published.
+
 The canonical full-field fixture is
 [`tests/contracts/native-report-v1.json`](../tests/contracts/native-report-v1.json).
 Rust and VS Code tests consume this fixture. Any breaking change to required
