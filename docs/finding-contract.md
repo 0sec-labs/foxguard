@@ -19,7 +19,7 @@ that predate the native envelope.
 | GitHub App | Reads native `findings`; retains legacy bare-array compatibility |
 | VS Code extension | Reads native `findings`; retains legacy bare-array compatibility |
 | GitHub Action | Uses terminal output for the summary and SARIF for code scanning; it does not parse native findings |
-| 0sec monorepo | Pins Foxguard as a submodule and validates its release; it does not currently ingest native Foxguard findings directly |
+| 0sec monorepo | Pins the latest healthy Foxguard `main` commit through an automated pull request, adapts native v1 findings into its ingest contract, and exercises release binary → HTTP ingest → tenant-scoped persistence in CI |
 
 The canonical full-field fixture is
 [`tests/contracts/native-report-v1.json`](../tests/contracts/native-report-v1.json).
