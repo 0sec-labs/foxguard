@@ -46,7 +46,7 @@ Prebuilt installs verify release binaries against `checksums.txt`. Release binar
 **GitHub Action:**
 
 ```yaml
-- uses: 0sec-labs/foxguard/action@v0.11.0
+- uses: 0sec-labs/foxguard/action@v0.12.0
   with:
     path: .
     severity: medium
@@ -59,7 +59,7 @@ Prebuilt installs verify release binaries against `checksums.txt`. Release binar
 ```yaml
 repos:
   - repo: https://github.com/0sec-labs/foxguard
-    rev: v0.11.0
+    rev: v0.12.0
     hooks:
       - id: foxguard
 ```
