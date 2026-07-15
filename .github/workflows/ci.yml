@@ -198,6 +198,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 benchmarks/precision/precision.py validate
+      - run: python3 benchmarks/precision/test_zero_research.py
 
   readme-version-refs:
     name: README Version Refs

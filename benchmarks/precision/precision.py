@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from zero_research import control_corpus_digest, control_evaluator_digest
+
 try:
     import tomllib  # type: ignore[import-not-found]
 except ModuleNotFoundError:  # Python < 3.11
@@ -617,6 +619,10 @@ def run(args: argparse.Namespace) -> int:
 
     all_findings, missing, stale = apply_labels(all_findings, labels)
     metrics = build_metrics(all_findings, repos)
+    metrics["negative_control_corpus_digest"] = control_corpus_digest(
+        args.manifest, args.labels
+    )
+    metrics["evaluator_digest"] = control_evaluator_digest(Path(__file__).resolve())
     metrics["duration_s"] = round(time.perf_counter() - start, 3)
     metrics["missing_labels"] = len(missing)
     metrics["stale_labels"] = len(stale)
