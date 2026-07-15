@@ -129,6 +129,507 @@ fn collect_constant_bindings(
     constant
 }
 
+/// Visit nodes in one Python function scope without borrowing assignments or
+/// returns from nested function/class definitions.
+fn walk_python_function_scope<'tree>(
+    root: tree_sitter::Node<'tree>,
+    visit: &mut impl FnMut(tree_sitter::Node<'tree>),
+) {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        visit(node);
+        let mut cursor = node.walk();
+        let children = node.children(&mut cursor).collect::<Vec<_>>();
+        for child in children.into_iter().rev() {
+            if child != root
+                && matches!(
+                    child.kind(),
+                    "function_definition" | "class_definition" | "lambda"
+                )
+            {
+                continue;
+            }
+            stack.push(child);
+        }
+    }
+}
+
+/// Prove that every explicit return in a typed argv builder produces a
+/// non-empty list/tuple whose executable is a local constant. A return
+/// annotation alone is not proof: `def argv(x) -> list[str]: return [x]`
+/// must remain an unsafe dynamic executable.
+fn function_returns_safe_argv(function: tree_sitter::Node, src: &str) -> bool {
+    let mut constant = std::collections::HashSet::new();
+    let mut dynamic = std::collections::HashSet::new();
+    walk_python_function_scope(function, &mut |node| {
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_constant_literal(right, src) {
+            constant.insert(name);
+        } else {
+            dynamic.insert(name);
+        }
+    });
+    let parameter_names = collect_scope_parameter_names(function, src);
+    constant.retain(|name| !dynamic.contains(name) && !parameter_names.contains(name));
+
+    let mut argv_bindings = std::collections::HashSet::new();
+    let mut other_bindings = std::collections::HashSet::new();
+    walk_python_function_scope(function, &mut |node| {
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_safe_argv_container(right, src, &constant) {
+            argv_bindings.insert(name);
+        } else if !is_constant_literal(right, src) {
+            other_bindings.insert(name);
+        }
+    });
+    argv_bindings.retain(|name| !other_bindings.contains(name) && !parameter_names.contains(name));
+    invalidate_non_tail_argv_mutations(function, src, &mut argv_bindings, true, None);
+
+    let mut saw_return = false;
+    let mut all_returns_safe = true;
+    walk_python_function_scope(function, &mut |node| {
+        if node.kind() != "return_statement" {
+            return;
+        }
+        saw_return = true;
+        let Some(value) = node.named_child(0) else {
+            all_returns_safe = false;
+            return;
+        };
+        let safe = is_safe_argv_container(value, src, &constant)
+            || (value.kind() == "identifier" && argv_bindings.contains(&src[value.byte_range()]));
+        all_returns_safe &= safe;
+    });
+    saw_return && all_returns_safe
+}
+
+/// Keep argv provenance only while its constant executable head cannot be
+/// replaced. `+=` and `.append`/`.extend` preserve the head; indexed writes,
+/// deletes, and other in-place mutations do not.
+fn invalidate_non_tail_argv_mutations(
+    root: tree_sitter::Node,
+    src: &str,
+    argv: &mut std::collections::HashSet<String>,
+    function_scope: bool,
+    before_byte: Option<usize>,
+) {
+    let mut invalid = std::collections::HashSet::new();
+    let mut inspect = |node: tree_sitter::Node| {
+        if before_byte.is_some_and(|cutoff| node.start_byte() >= cutoff) {
+            return;
+        }
+        match node.kind() {
+            "assignment" => {
+                if let (Some(left), Some(right)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("right"),
+                ) {
+                    if left.kind() == "subscript" {
+                        if let Some(value) = left.child_by_field_name("value") {
+                            if value.kind() == "identifier" {
+                                invalid.insert(src[value.byte_range()].to_string());
+                            }
+                        }
+                    }
+                    if right.kind() == "identifier" {
+                        let source_name = &src[right.byte_range()];
+                        if argv.contains(source_name) && &src[left.byte_range()] != source_name {
+                            invalid.insert(source_name.to_string());
+                        }
+                    }
+                }
+            }
+            "augmented_assignment" => {
+                if let Some(left) = node.child_by_field_name("left") {
+                    if left.kind() == "identifier" && !src[node.byte_range()].contains("+=") {
+                        invalid.insert(src[left.byte_range()].to_string());
+                    }
+                }
+            }
+            "delete_statement" => {
+                let text = src[node.byte_range()].trim_start_matches("del").trim();
+                if let Some((name, _)) = text.split_once('[') {
+                    invalid.insert(name.trim().to_string());
+                }
+            }
+            "call" => {
+                let Some(function) = node.child_by_field_name("function") else {
+                    return;
+                };
+                let function_text = &src[function.byte_range()];
+                let is_subprocess_sink = matches!(
+                    function_text,
+                    "subprocess.call"
+                        | "subprocess.run"
+                        | "subprocess.Popen"
+                        | "subprocess.check_output"
+                        | "subprocess.check_call"
+                );
+                if function.kind() != "attribute" {
+                    if !is_subprocess_sink {
+                        if let Some(arguments) = node.child_by_field_name("arguments") {
+                            let mut cursor = arguments.walk();
+                            for argument in arguments.named_children(&mut cursor) {
+                                if argument.kind() == "identifier"
+                                    && argv.contains(&src[argument.byte_range()])
+                                {
+                                    invalid.insert(src[argument.byte_range()].to_string());
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+                let (Some(object), Some(attribute)) = (
+                    function.child_by_field_name("object"),
+                    function.child_by_field_name("attribute"),
+                ) else {
+                    return;
+                };
+                if object.kind() != "identifier" {
+                    if !is_subprocess_sink {
+                        if let Some(arguments) = node.child_by_field_name("arguments") {
+                            let mut cursor = arguments.walk();
+                            for argument in arguments.named_children(&mut cursor) {
+                                if argument.kind() == "identifier"
+                                    && argv.contains(&src[argument.byte_range()])
+                                {
+                                    invalid.insert(src[argument.byte_range()].to_string());
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+                let method = &src[attribute.byte_range()];
+                if !is_subprocess_sink && !matches!(method, "append" | "extend") {
+                    invalid.insert(src[object.byte_range()].to_string());
+                }
+                if !is_subprocess_sink && !matches!(method, "append" | "extend") {
+                    if let Some(arguments) = node.child_by_field_name("arguments") {
+                        let mut cursor = arguments.walk();
+                        for argument in arguments.named_children(&mut cursor) {
+                            if argument.kind() == "identifier"
+                                && argv.contains(&src[argument.byte_range()])
+                            {
+                                invalid.insert(src[argument.byte_range()].to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    };
+    if function_scope {
+        walk_python_function_scope(root, &mut inspect);
+    } else {
+        walk_tree(root, src, &mut |node, _| inspect(node));
+    }
+    argv.retain(|name| !invalid.contains(name));
+}
+
+/// Collect in-file functions and methods whose return annotation explicitly
+/// declares a list/tuple of strings. The annotation is a static promise that
+/// callers receive an argv container rather than a shell command string.
+#[derive(Default)]
+struct ArgvBuilders {
+    methods: std::collections::HashSet<(String, String)>,
+}
+
+fn enclosing_class_name(node: tree_sitter::Node, src: &str) -> Option<String> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "class_definition" {
+            return parent
+                .child_by_field_name("name")
+                .map(|name| src[name.byte_range()].to_string());
+        }
+        current = parent.parent();
+    }
+    None
+}
+
+fn collect_argv_builders(root: tree_sitter::Node, src: &str) -> ArgvBuilders {
+    let mut builders = ArgvBuilders::default();
+
+    walk_tree(root, src, &mut |node, s| {
+        if node.kind() != "function_definition" {
+            return;
+        }
+        let (Some(name), Some(return_type)) = (
+            node.child_by_field_name("name"),
+            node.child_by_field_name("return_type"),
+        ) else {
+            return;
+        };
+        let annotation = s[return_type.byte_range()]
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>();
+        let annotation = annotation.as_str();
+        let is_argv =
+            ["list[str]", "List[str]", "tuple[str,...]", "Tuple[str,...]"].contains(&annotation);
+        if is_argv && function_returns_safe_argv(node, s) {
+            let method = s[name.byte_range()].to_string();
+            if let Some(class_name) = enclosing_class_name(node, s) {
+                builders.methods.insert((class_name, method));
+            }
+        }
+    });
+
+    builders
+}
+
+fn enclosing_function_receiver_type(
+    call: tree_sitter::Node,
+    receiver: &str,
+    src: &str,
+) -> Option<String> {
+    let mut current = call.parent();
+    let function = loop {
+        let node = current?;
+        if node.kind() == "function_definition" {
+            break node;
+        }
+        current = node.parent();
+    };
+    let parameters = function.child_by_field_name("parameters")?;
+    let mut result = None;
+    walk_tree(parameters, src, &mut |node, source| {
+        if !matches!(node.kind(), "typed_parameter" | "typed_default_parameter") {
+            return;
+        }
+        let text = &source[node.byte_range()];
+        let Some((name, annotation)) = text.split_once(':') else {
+            return;
+        };
+        let name = name.trim().trim_start_matches('*');
+        let annotation = annotation.split('=').next().unwrap_or("").trim();
+        if name == receiver
+            && !annotation.is_empty()
+            && annotation
+                .chars()
+                .all(|c| c == '_' || c == '.' || c.is_ascii_alphanumeric())
+        {
+            result = Some(annotation.to_string());
+        }
+    });
+    result
+}
+
+fn is_safe_argv_container(
+    node: tree_sitter::Node,
+    src: &str,
+    const_names: &std::collections::HashSet<String>,
+) -> bool {
+    if !matches!(node.kind(), "list" | "tuple") {
+        return false;
+    }
+    let Some(executable) = node.named_child(0) else {
+        return false;
+    };
+    is_constant_literal(executable, src)
+        || (executable.kind() == "identifier"
+            && const_names.contains(&src[executable.byte_range()]))
+}
+
+fn is_argv_builder_call(node: tree_sitter::Node, src: &str, builders: &ArgvBuilders) -> bool {
+    if node.kind() != "call" {
+        return false;
+    }
+    let Some(function) = node.child_by_field_name("function") else {
+        return false;
+    };
+    if function.kind() != "attribute" {
+        return false;
+    }
+    let (Some(object), Some(attribute)) = (
+        function.child_by_field_name("object"),
+        function.child_by_field_name("attribute"),
+    ) else {
+        return false;
+    };
+    if object.kind() != "identifier" {
+        return false;
+    }
+    let Some(receiver_type) =
+        enclosing_function_receiver_type(node, &src[object.byte_range()], src)
+    else {
+        return false;
+    };
+    builders
+        .methods
+        .contains(&(receiver_type, src[attribute.byte_range()].to_string()))
+}
+
+/// Collect identifiers whose only simple assignments are statically evident
+/// argv containers or calls to in-file argv builders. This deliberately does
+/// not bless arbitrary call results: an untyped `args = build(user_input)`
+/// remains a conservative command-injection finding.
+fn collect_argv_bindings(
+    root: tree_sitter::Node,
+    src: &str,
+    builders: &ArgvBuilders,
+    const_names: &std::collections::HashSet<String>,
+    before_byte: usize,
+) -> std::collections::HashSet<String> {
+    let mut argv = std::collections::HashSet::new();
+    let mut other = std::collections::HashSet::new();
+
+    walk_python_function_scope(root, &mut |node| {
+        if node.start_byte() >= before_byte {
+            return;
+        }
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_safe_argv_container(right, src, const_names)
+            || is_argv_builder_call(right, src, builders)
+        {
+            argv.insert(name);
+        } else {
+            other.insert(name);
+        }
+    });
+
+    let parameter_names = collect_scope_parameter_names(root, src);
+    argv.retain(|name| !other.contains(name) && !parameter_names.contains(name));
+    invalidate_non_tail_argv_mutations(root, src, &mut argv, true, Some(before_byte));
+    argv
+}
+
+fn enclosing_python_scope(mut node: tree_sitter::Node) -> tree_sitter::Node {
+    loop {
+        if node.kind() == "function_definition" {
+            return node;
+        }
+        let Some(parent) = node.parent() else {
+            return node;
+        };
+        node = parent;
+    }
+}
+
+fn python_module_root(mut node: tree_sitter::Node) -> tree_sitter::Node {
+    while let Some(parent) = node.parent() {
+        node = parent;
+    }
+    node
+}
+
+fn collect_scope_constant_bindings(
+    scope: tree_sitter::Node,
+    src: &str,
+    before_byte: usize,
+) -> std::collections::HashSet<String> {
+    let mut constant = std::collections::HashSet::new();
+    let mut dynamic = std::collections::HashSet::new();
+    walk_python_function_scope(scope, &mut |node| {
+        if node.start_byte() >= before_byte {
+            return;
+        }
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_constant_literal(right, src) {
+            constant.insert(name);
+        } else {
+            dynamic.insert(name);
+        }
+    });
+    let parameter_names = collect_scope_parameter_names(scope, src);
+    constant.retain(|name| !dynamic.contains(name) && !parameter_names.contains(name));
+    constant
+}
+
+fn collect_scope_parameter_names(
+    scope: tree_sitter::Node,
+    src: &str,
+) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    let Some(parameters) = scope.child_by_field_name("parameters") else {
+        return names;
+    };
+    let mut cursor = parameters.walk();
+    for parameter in parameters.named_children(&mut cursor) {
+        if parameter.kind() == "identifier" {
+            names.insert(src[parameter.byte_range()].to_string());
+        } else if let Some(name) = parameter.child_by_field_name("name") {
+            if name.kind() == "identifier" {
+                names.insert(src[name.byte_range()].to_string());
+            }
+        }
+    }
+    names
+}
+
+/// `shell` defaults to false for subprocess APIs. An explicit value is safe
+/// only when it is literally `False`; `True` and dynamic expressions remain
+/// findings even when argv is otherwise a list.
+fn subprocess_shell_is_absent_or_false(arguments: tree_sitter::Node, src: &str) -> bool {
+    let mut cursor = arguments.walk();
+    for argument in arguments.named_children(&mut cursor) {
+        if argument.kind() != "keyword_argument" {
+            continue;
+        }
+        let (Some(name), Some(value)) = (
+            argument.child_by_field_name("name"),
+            argument.child_by_field_name("value"),
+        ) else {
+            continue;
+        };
+        if &src[name.byte_range()] == "shell" {
+            return &src[value.byte_range()] == "False";
+        }
+    }
+    true
+}
+
 /// Collects names of identifiers that are *only ever* assigned the result of a
 /// safe path join (`os.path.join` / `.joinpath`). Used by the path-traversal
 /// rule to treat such identifiers as sanitized.
@@ -418,8 +919,7 @@ impl_rule! {
             "subprocess.check_call",
         ];
 
-        // Identifiers proven to hold only constant literals are not tainted.
-        let const_names = collect_constant_bindings(tree.root_node(), source);
+        let argv_builders = collect_argv_builders(tree.root_node(), source);
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() == "call" {
@@ -429,19 +929,60 @@ impl_rule! {
                     if dangerous_fns.contains(&resolved.as_ref()) {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
+                                let scope = enclosing_python_scope(node);
+                                let mut scope_const_names =
+                                    collect_scope_constant_bindings(scope, src, node.start_byte());
+                                if scope.kind() == "function_definition" {
+                                    scope_const_names.extend(collect_scope_constant_bindings(
+                                        python_module_root(node),
+                                        src,
+                                        node.start_byte(),
+                                    ));
+                                    let parameter_names = collect_scope_parameter_names(scope, src);
+                                    scope_const_names
+                                        .retain(|name| !parameter_names.contains(name));
+                                }
+                                let argv_names = collect_argv_bindings(
+                                    scope,
+                                    src,
+                                    &argv_builders,
+                                    &scope_const_names,
+                                    node.start_byte(),
+                                );
+                                let is_subprocess = resolved.starts_with("subprocess.");
+                                let shell_is_safe =
+                                    subprocess_shell_is_absent_or_false(args, src);
+                                let safe_argv = is_subprocess
+                                    && shell_is_safe
+                                    && (is_safe_argv_container(
+                                        first_arg,
+                                        src,
+                                        &scope_const_names,
+                                    )
+                                        || (first_arg.kind() == "identifier"
+                                            && argv_names.contains(&src[first_arg.byte_range()]))
+                                        || is_argv_builder_call(first_arg, src, &argv_builders));
+                                let first_arg_is_static_string = first_arg.kind() == "string"
+                                    && is_constant_literal(first_arg, src);
                                 // Flag if argument is not a plain string literal
-                                let is_dynamic = match first_arg.kind() {
-                                    "string" => {
-                                        let text = &src[first_arg.byte_range()];
-                                        text.starts_with("f\"") || text.starts_with("f'")
-                                    }
-                                    // Identifier folded to a constant literal is safe.
-                                    "identifier" => {
-                                        !const_names.contains(&src[first_arg.byte_range()])
-                                    }
-                                    "concatenated_string" | "binary_operator" | "call" => true,
-                                    _ => false,
-                                };
+                                let is_dynamic = (is_subprocess
+                                    && !shell_is_safe
+                                    && !first_arg_is_static_string)
+                                    || (!safe_argv
+                                        && match first_arg.kind() {
+                                            "string" => {
+                                                let text = &src[first_arg.byte_range()];
+                                                text.starts_with("f\"") || text.starts_with("f'")
+                                            }
+                                            // Identifier folded to a constant literal is safe.
+                                            "identifier" => !scope_const_names
+                                                .contains(&src[first_arg.byte_range()]),
+                                            "concatenated_string" | "binary_operator" | "call" => {
+                                                true
+                                            }
+                                            "list" | "tuple" => true,
+                                            _ => false,
+                                        });
                                 if is_dynamic {
                                     findings.push(make_finding(
                                         _self.id(),

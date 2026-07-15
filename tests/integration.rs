@@ -613,6 +613,51 @@ mod python {
     }
 
     #[test]
+    fn test_safe_python_subprocess_argv_has_no_command_injection_findings() {
+        let output = foxguard_cmd_isolated()
+            .args([
+                "tests/fixtures/safe_python_subprocess_argv.py",
+                "-f",
+                "json",
+            ])
+            .output()
+            .expect("failed to execute foxguard");
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+        let command_findings: Vec<_> = findings
+            .iter()
+            .filter(|finding| finding["rule_id"] == "py/no-command-injection")
+            .collect();
+        assert!(
+            command_findings.is_empty(),
+            "statically evident shell-free argv calls must be safe, got {command_findings:?}"
+        );
+    }
+
+    #[test]
+    fn test_unsafe_python_subprocess_shapes_remain_command_injection_findings() {
+        let output = foxguard_cmd_isolated()
+            .args([
+                "tests/fixtures/vulnerable_python_subprocess_argv.py",
+                "-f",
+                "json",
+            ])
+            .output()
+            .expect("failed to execute foxguard");
+
+        let findings: Vec<serde_json::Value> = scan_json_findings_from_slice(&output.stdout);
+        let command_findings: Vec<_> = findings
+            .iter()
+            .filter(|finding| finding["rule_id"] == "py/no-command-injection")
+            .collect();
+        assert_eq!(
+            command_findings.len(),
+            17,
+            "unknown commands, shell=True/dynamic, and shell strings must remain findings: {command_findings:?}"
+        );
+    }
+
+    #[test]
     fn test_safe_py_no_findings() {
         let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/safe.py", "-f", "json"])
