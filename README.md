@@ -26,12 +26,12 @@ npx foxguard .
 
 ## Why
 
-- 200+ built-in rules across 12 source languages, plus config and manifest checks
-- Taint tracking for 14 languages, with cross-file analysis for Python, JavaScript, Go, Java, Ruby, PHP, C#, and Kotlin
-- Fast local and CI scans, with diff mode for “what did this branch add?”
-- Secrets scanning, OSV-backed dependency scanning, and post-quantum crypto audit
-- Semgrep/OpenGrep-compatible YAML bridge that loads ~98% of the public registry ([coverage report](docs/parity/registry-coverage.md))
-- Terminal, JSON, SARIF, CycloneDX 1.6 CBOM, and Semgrep-compatible JSON output
+- <img height="14" src="https://raw.githubusercontent.com/0sec-labs/.github/main/profile/assets/icons/checklist.png" alt="">&nbsp; 200+ built-in rules across 12 source languages, plus config and manifest checks
+- <img height="14" src="https://raw.githubusercontent.com/0sec-labs/.github/main/profile/assets/icons/git-branch.png" alt="">&nbsp; Taint tracking for 14 languages, with cross-file analysis for Python, JavaScript, Go, Java, Ruby, PHP, C#, and Kotlin
+- <img height="14" src="https://raw.githubusercontent.com/0sec-labs/.github/main/profile/assets/icons/zap.png" alt="">&nbsp; Fast local and CI scans, with diff mode for “what did this branch add?”
+- <img height="14" src="https://raw.githubusercontent.com/0sec-labs/.github/main/profile/assets/icons/key.png" alt="">&nbsp; Secrets scanning, OSV-backed dependency scanning, and post-quantum crypto audit
+- <img height="14" src="https://raw.githubusercontent.com/0sec-labs/.github/main/profile/assets/icons/plug.png" alt="">&nbsp; Semgrep/OpenGrep-compatible YAML bridge that loads ~98% of the public registry ([coverage report](docs/parity/registry-coverage.md))
+- <img height="14" src="https://raw.githubusercontent.com/0sec-labs/.github/main/profile/assets/icons/file-code.png" alt="">&nbsp; Terminal, JSON, SARIF, CycloneDX 1.6 CBOM, and Semgrep-compatible JSON output
 
 ## Install
 
