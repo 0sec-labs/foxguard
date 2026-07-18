@@ -1,0 +1,26 @@
+{
+  "caseIds": [
+    "0bd72769cb34b5a26d6c",
+    "10d7816dc58fcea16601",
+    "11109ce9c8ed62527296",
+    "22e0bd5b21d922c2a570",
+    "2cdbd5c77a8692973742",
+    "2d38edb5e23f2536aaf4",
+    "3066268b81c21e30ff08",
+    "31f2bd3379eca7707974",
+    "37ab25c93ab6b4dcec3a",
+    "53fb0df303901b505308",
+    "55f523d5c4f944f2b9d1",
+    "756c9ccb52629123adb3",
+    "86c147a722d8251bca23",
+    "88824f58ed94658e15e8",
+    "97a8b3f2029a5a2f3224",
+    "9f995cd16c3db0a5ca5b",
+    "dc510257d6269955ff93",
+    "dee6a804fa26391f9a92",
+    "e9368de99e6e661c543f",
+    "ef56fda8ee6aa4250ddb"
+  ],
+  "id": "foxguard-reviewed-false-positives-v2",
+  "schemaVersion": 2
+}

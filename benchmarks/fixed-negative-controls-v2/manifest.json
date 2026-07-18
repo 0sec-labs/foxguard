@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "id": "safe-go-crypto-random-v1",
+      "knownNegative": true,
+      "path": "fixtures/safe-go-crypto-random"
+    },
+    {
+      "id": "safe-js-parameterized-query-v1",
+      "knownNegative": true,
+      "path": "fixtures/safe-js-parameterized-query"
+    },
+    {
+      "id": "safe-js-static-path-v1",
+      "knownNegative": true,
+      "path": "fixtures/safe-js-static-path"
+    },
+    {
+      "id": "safe-python-sha256-v1",
+      "knownNegative": true,
+      "path": "fixtures/safe-python-sha256"
+    }
+  ],
+  "id": "foxguard-fixed-negative-controls-v2",
+  "schemaVersion": 2
+}

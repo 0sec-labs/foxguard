@@ -60,6 +60,21 @@ jobs:
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-test-
       - run: cargo test --all-features
+      - name: Run sealed 0research negative controls
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cargo build --bin foxguard
+          ref=$(python3 benchmarks/fixed-negative-controls-v2/fixed_controls.py run \
+            --candidate-id "ci-${GITHUB_SHA}" \
+            --champion-binary target/debug/foxguard \
+            --challenger-binary target/debug/foxguard \
+            --champion-source-root . \
+            --challenger-source-root . \
+            --results-dir /tmp/foxguard-negative-controls/raw \
+            --output /tmp/foxguard-negative-controls/evidence.json)
+          python3 benchmarks/fixed-negative-controls-v2/fixed_controls.py verify \
+            --artifact /tmp/foxguard-negative-controls/evidence.json \
+            --ref "$ref"
 
   rule-inventory-check:
     name: Rule Inventory
@@ -198,7 +213,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 benchmarks/precision/precision.py validate
-      - run: python3 benchmarks/precision/test_zero_research.py
+      - run: python3 -m unittest benchmarks/precision/test_zero_research.py benchmarks/precision/test_fixed_cases_v2.py
+      - run: python3 -m unittest discover -s benchmarks/fixed-negative-controls-v2 -p 'test_*.py'
 
   readme-version-refs:
     name: README Version Refs
