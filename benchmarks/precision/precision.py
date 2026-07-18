@@ -12,8 +12,10 @@ import argparse
 import hashlib
 import json
 import re
+import resource
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +43,8 @@ DEFAULT_EXPECTED = PRECISION_DIR / "expected.json"
 DEFAULT_RESULTS = PRECISION_DIR / "results"
 DEFAULT_WORKDIR = PRECISION_DIR / "clones"
 LABELS = {"true_positive", "false_positive", "unsure"}
+MAX_CAPTURE_BYTES = 1024 * 1024
+MAX_SCANNER_FILE_BYTES = 16 * 1024 * 1024
 
 
 @dataclass
@@ -91,23 +95,53 @@ class NormalizedFinding:
     justification: str | None = None
 
 
-def run_process(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+def child_file_limit(max_file_bytes: int) -> Any:
+    def apply_limit() -> None:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (max_file_bytes, max_file_bytes))
+
+    return apply_limit
+
+
+def read_capture(handle: Any) -> tuple[str, bool]:
+    handle.seek(0)
+    value = handle.read(MAX_CAPTURE_BYTES + 1)
+    exceeded = len(value) > MAX_CAPTURE_BYTES
+    if exceeded:
+        value = value[:MAX_CAPTURE_BYTES]
+    return value.decode(errors="replace"), exceeded
+
+
+def run_process(
+    args: list[str], cwd: Path | None = None, max_file_bytes: int | None = None,
+) -> subprocess.CompletedProcess[str]:
     try:
         # Commands come from the pinned corpus manifest or the explicit
         # --foxguard binary path, never from scanned repository contents.
-        return subprocess.run(  # noqa: S603  # foxguard: ignore[py/no-command-injection]
-            args,
-            cwd=cwd,
-            text=True,
-            capture_output=True,
-        )
+        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+            process = subprocess.run(  # noqa: S603  # foxguard: ignore[py/no-command-injection]
+                args,
+                cwd=cwd,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                preexec_fn=child_file_limit(max_file_bytes) if max_file_bytes else None,
+            )
+            stdout, stdout_exceeded = read_capture(stdout_file)
+            stderr, stderr_exceeded = read_capture(stderr_file)
+            returncode = process.returncode
+            if stdout_exceeded or stderr_exceeded:
+                returncode = 2
+                stderr += "\nerror: subprocess output exceeded the capture limit\n"
+            return subprocess.CompletedProcess(args, returncode, stdout, stderr)
     except OSError as exc:
         command = args[0] if args else "<empty command>"
         raise SystemExit(f"error: failed to run {command!r}: {exc}") from exc
 
 
-def run_cmd(args: list[str], cwd: Path | None = None, allow_findings: bool = False) -> str:
-    proc = run_process(args, cwd=cwd)
+def run_cmd(
+    args: list[str], cwd: Path | None = None, allow_findings: bool = False,
+    max_file_bytes: int | None = None,
+) -> str:
+    proc = run_process(args, cwd=cwd, max_file_bytes=max_file_bytes)
     if proc.returncode == 0 or (allow_findings and proc.returncode == 1):
         return proc.stdout
     sys.stderr.write(proc.stdout)
@@ -246,7 +280,10 @@ def scan_repo(repo: RepoEntry, repo_dir: Path, foxguard: Path, results_dir: Path
     ]
     for pattern in repo.exclude:
         args.extend(["--exclude", pattern])
-    run_cmd(args, allow_findings=True)
+    run_cmd(args, allow_findings=True, max_file_bytes=MAX_SCANNER_FILE_BYTES)
+
+    if not out_path.is_file() or out_path.stat().st_size > MAX_SCANNER_FILE_BYTES:
+        raise SystemExit(f"error: scanner report is missing or exceeds {MAX_SCANNER_FILE_BYTES} bytes")
 
     report = json.loads(out_path.read_text())
     raw_findings = report.get("findings", [])
