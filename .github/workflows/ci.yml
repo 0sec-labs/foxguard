@@ -215,6 +215,7 @@ jobs:
       - run: python3 benchmarks/precision/precision.py validate
       - run: python3 -m unittest benchmarks/precision/test_zero_research.py benchmarks/precision/test_fixed_cases_v2.py
       - run: python3 -m unittest discover -s benchmarks/fixed-negative-controls-v2 -p 'test_*.py'
+      - run: python3 -m unittest discover -s benchmarks/held-out-capability-v1 -p 'test_*.py'
 
   readme-version-refs:
     name: README Version Refs
