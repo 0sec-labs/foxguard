@@ -246,7 +246,7 @@ class HeldOutTests(unittest.TestCase):
             value = artifact(manifest)
             case = value["arms"]["challenger"]["cases"][0]
             case["nativeReport"]["value"] += "AAAA"
-            with self.assertRaisesRegex(ValueError, "native report JSON"):
+            with self.assertRaisesRegex(ValueError, r"native report (encoding|JSON)"):
                 held.validate_artifact(value, manifest, require_trusted=False)
 
     def test_arm_id_cannot_escape_results_directory(self) -> None:
