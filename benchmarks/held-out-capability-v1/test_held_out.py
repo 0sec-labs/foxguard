@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import base64
 import copy
 import importlib.util
 import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("held_out.py")
@@ -276,6 +279,17 @@ class HeldOutTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "exact case ids"):
                 held.validate_artifact(value, manifest, require_trusted=False)
 
+    def test_cross_case_native_report_substitution_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = write_manifest(Path(directory))
+            value = artifact(manifest)
+            cases = value["arms"]["challenger"]["cases"]
+            cases[0]["nativeReport"] = copy.deepcopy(cases[1]["nativeReport"])
+            report_bytes = base64.b64decode(cases[0]["nativeReport"]["value"])
+            cases[0]["execution"]["reportDigest"] = held.sha256_bytes(report_bytes)
+            with self.assertRaisesRegex(ValueError, "expected arm and case"):
+                held.validate_artifact(value, manifest, require_trusted=False)
+
     def test_expected_finding_change_breaks_oracle_binding(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             manifest = write_manifest(Path(directory))
@@ -312,6 +326,223 @@ class HeldOutTests(unittest.TestCase):
             before = held.artifact_ref(output)
             output.write_bytes(output.read_bytes() + b" ")
             self.assertNotEqual(before, held.artifact_ref(output))
+
+    def test_artifact_reference_rejects_oversized_bytes(self) -> None:
+        with mock.patch.object(held, "MAX_ARTIFACT_BYTES", 3):
+            with self.assertRaisesRegex(ValueError, "artifact exceeds its byte limit"):
+                held.artifact_ref_bytes(b"1234")
+
+    def test_verifier_uses_captured_artifact_bytes_for_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = write_manifest(root, calibration=True)
+            output = root / "evidence.json"
+            artifact_bytes = held.canonical_bytes(artifact(manifest))
+            output.write_bytes(artifact_bytes)
+            retained_ref = held.artifact_ref_bytes(artifact_bytes)
+
+            def mutate_after_validation(*_args, **_kwargs):
+                output.write_bytes(b"replaced after validation\n")
+
+            with mock.patch.object(held, "validate_artifact", side_effect=mutate_after_validation):
+                self.assertEqual(
+                    held.verify_command(
+                        SimpleNamespace(
+                            artifact=output, manifest=manifest, ref=retained_ref
+                        )
+                    ),
+                    0,
+                )
+
+    def test_verifier_rejects_manifest_swap_after_calibration_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = write_manifest(root)
+            promoted_artifact = held.canonical_bytes(artifact(manifest))
+            non_calibration_bytes = manifest.read_bytes()
+            calibration_manifest = json.loads(non_calibration_bytes)
+            calibration_manifest["calibration"] = True
+            manifest.write_bytes(held.canonical_bytes(calibration_manifest))
+            output = root / "evidence.json"
+            output.write_bytes(promoted_artifact)
+            validate = held.validate_artifact
+
+            def swap_then_validate(*args, **kwargs):
+                manifest.write_bytes(non_calibration_bytes)
+                return validate(*args, **kwargs)
+
+            with mock.patch.object(
+                held, "validate_artifact", side_effect=swap_then_validate
+            ):
+                with self.assertRaisesRegex(ValueError, "local corpus"):
+                    held.verify_command(
+                        SimpleNamespace(artifact=output, manifest=manifest, ref=None)
+                    )
+
+    def test_producer_stops_before_output_on_unbounded_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = write_manifest(root, calibration=True)
+            champion_binary = root / "champion"
+            challenger_binary = root / "challenger"
+            champion_binary.write_bytes(b"champion")
+            challenger_binary.write_bytes(b"challenger")
+            champion = identity()
+            challenger = challenger_identity()
+            champion["binaryDigest"] = held.sha256_file(champion_binary)
+            challenger["binaryDigest"] = held.sha256_file(challenger_binary)
+            output = root / "evidence.json"
+
+            def report_for_fixture(_binary, fixture, _report, _timeout):
+                return held.canonical_bytes(native_report(fixture)), 1
+
+            with (
+                mock.patch.object(held, "MAX_ARTIFACT_BYTES", 1_000),
+                mock.patch.object(
+                    held, "scan_case", side_effect=report_for_fixture
+                ) as scan,
+                mock.patch.object(
+                    held,
+                    "producer_from_paths",
+                    side_effect=[champion, challenger],
+                ),
+            ):
+                with self.assertRaisesRegex(ValueError, "retained byte budget"):
+                    held.run_command(
+                        SimpleNamespace(
+                            candidate_id="candidate-1",
+                            champion_id="champion",
+                            challenger_id="challenger",
+                            champion_binary=champion_binary,
+                            challenger_binary=challenger_binary,
+                            champion_source_root=root / "champion-source",
+                            challenger_source_root=root / "challenger-source",
+                            manifest=manifest,
+                            output=output,
+                            results_dir=root / "results",
+                            timeout_seconds=1,
+                        )
+                    )
+            self.assertEqual(scan.call_count, 1)
+            self.assertFalse(output.exists())
+
+    def test_evaluator_executes_captured_fixture_not_mutated_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = write_manifest(root, calibration=True)
+            captured = held.capture_corpus(manifest, require_trusted=False)
+            (root / "fixtures" / "case-1" / "fixture.py").write_text("mutated()\n")
+            binary = root / "foxguard"
+            binary.write_bytes(b"captured binary")
+            producer = identity()
+            producer["binaryDigest"] = held.sha256_file(binary)
+
+            def inspect_snapshot(_binary, fixture, _report, _timeout):
+                self.assertEqual(
+                    (fixture / "fixture.py").read_text(), "dangerous(value)\n"
+                )
+                return held.canonical_bytes(native_report(fixture)), 1
+
+            with (
+                mock.patch.object(
+                    held, "scan_case", side_effect=inspect_snapshot
+                ) as scan,
+                mock.patch.object(
+                    held,
+                    "assert_execution_snapshot",
+                    wraps=held.assert_execution_snapshot,
+                ) as full_seal,
+                mock.patch.object(
+                    held,
+                    "assert_execution_case",
+                    wraps=held.assert_execution_case,
+                ) as case_seal,
+            ):
+                arm = held.evaluate_arm(
+                    arm_id="champion",
+                    binary=binary,
+                    producer=producer,
+                    manifest_path=manifest,
+                    results_dir=root / "results",
+                    timeout_seconds=1,
+                    require_trusted=False,
+                    captured_corpus=captured,
+                )
+            self.assertEqual(scan.call_count, 4)
+            self.assertEqual(full_seal.call_count, 2)
+            self.assertEqual(case_seal.call_count, 8)
+            self.assertEqual(arm["score"]["detected"], 4)
+
+    def test_evaluator_rejects_execution_binary_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = write_manifest(root, calibration=True)
+            captured = held.capture_corpus(manifest, require_trusted=False)
+            binary = root / "foxguard"
+            binary.write_bytes(b"captured binary")
+            producer = identity()
+            producer["binaryDigest"] = held.sha256_file(binary)
+
+            def mutate_snapshot(snapshot_binary, fixture, _report, _timeout):
+                snapshot_binary.chmod(0o700)
+                snapshot_binary.write_bytes(b"swapped binary")
+                return held.canonical_bytes(native_report(fixture)), 1
+
+            with mock.patch.object(
+                held, "scan_case", side_effect=mutate_snapshot
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "snapshot (root|metadata)|binary.*changed"
+                ):
+                    held.evaluate_arm(
+                        arm_id="champion",
+                        binary=binary,
+                        producer=producer,
+                        manifest_path=manifest,
+                        results_dir=root / "results",
+                        timeout_seconds=1,
+                        require_trusted=False,
+                        captured_corpus=captured,
+                    )
+
+    def test_fixture_capture_enforces_entry_file_byte_and_depth_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "a").write_bytes(b"1234")
+            (root / "b").write_bytes(b"5")
+            with mock.patch.object(held, "MAX_FIXTURE_ENTRIES", 1):
+                with self.assertRaisesRegex(ValueError, "entry limit"):
+                    held.capture_directory(root)
+            with mock.patch.object(held, "MAX_FIXTURE_FILES", 1):
+                with self.assertRaisesRegex(ValueError, "file limit"):
+                    held.capture_directory(root)
+            with mock.patch.object(held, "MAX_FIXTURE_BYTES", 3):
+                with self.assertRaisesRegex(ValueError, "byte limit"):
+                    held.capture_directory(root)
+            nested = root / "nested"
+            nested.mkdir()
+            (nested / "leaf").write_bytes(b"leaf")
+            with mock.patch.object(held, "MAX_FIXTURE_DEPTH", 0):
+                with self.assertRaisesRegex(ValueError, "depth limit"):
+                    held.capture_directory(root)
+
+    def test_manifest_enforces_case_and_aggregate_corpus_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = write_manifest(Path(directory))
+            with mock.patch.object(held, "MAX_CASES", 3):
+                with self.assertRaisesRegex(ValueError, "3-case limit"):
+                    held.load_manifest(manifest, require_trusted=False)
+            with mock.patch.object(held, "MAX_FIXTURE_FILES", 3):
+                with self.assertRaisesRegex(ValueError, "corpus exceeds its file limit"):
+                    held.load_manifest(manifest, require_trusted=False)
+            with mock.patch.object(held, "MAX_FIXTURE_ENTRIES", 3):
+                with self.assertRaisesRegex(ValueError, "corpus exceeds its entry limit"):
+                    held.load_manifest(manifest, require_trusted=False)
+            with mock.patch.object(held, "MAX_FIXTURE_BYTES", 20):
+                with self.assertRaisesRegex(
+                    ValueError, "corpus exceeds its aggregate byte limit"
+                ):
+                    held.load_manifest(manifest, require_trusted=False)
 
     def test_fixture_symlink_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
