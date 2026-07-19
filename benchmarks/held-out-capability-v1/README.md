@@ -53,6 +53,42 @@ marks both `ciVerified` and `buildVerified` false. It proves their identities,
 not their truth. Only 0brain may upgrade those provenance gates after checking
 signed controller build receipts and the exact GitHub check set.
 
+## Private provenance custody v2
+
+`provenance_v2.py` wraps the exact v1 capability and source-change artifacts
+with every retained replay preimage: the private manifest, fixtures, oracle
+preimages, raw reports, champion and challenger binaries, Foxguard Git bundle,
+evaluator and build-input bytes, toolchain output, receipts, signatures, and
+historical allowed-signers policies. Every payload path, type, size, and digest
+is included in one canonical tree manifest signed under the distinct
+`foxguard-held-out-provenance-v2:package-root` SSH namespace.
+
+Verification requires a caller-supplied allowed-signers policy whose captured
+bytes exactly match the retained evidence policy. A policy stored only inside
+the package is never a trust root. The verifier captures and bounds the entire
+package once, validates cross-artifact candidate, corpus, oracle, report,
+binary, evaluator, source, and policy bindings, and returns an immutable byte
+view; consumers do not reopen package paths. It uses fixed trusted local Git to
+verify and unbundle into a bounded bare repository without fetching or checking
+out a worktree. Before Git runs, a streaming pack preflight bounds object count,
+declared and delta-result sizes, and aggregate expansion on both Linux and
+Darwin; a second Git inventory runs under process/output limits. All replay
+commands use a fixed minimal environment, then check the exact base and head
+objects and reapply the retained patch to reproduce the head tree. It never
+executes retained binaries, scripts, evaluators, controller material, or build
+commands.
+
+The package is a private quarantined evidence vault. Its exact authority allows
+private retention and offline audit only. Execution, provider access, spend,
+promotion, training, global-corpus eligibility, model or GitHub writes, draft
+PRs, merge, deployment, publication, and disclosure are all false. Presence of
+an opaque controller receipt is recorded as presence, while the exact raw CI
+receipt is descriptor-bound but remains explicitly not independently verified.
+Neither becomes a verified external claim without a separately caller-trusted
+role policy.
+Private fixture, oracle, and report bytes must never enter the global training
+corpus or leave the evidence root without a separate disclosure decision.
+
 ```sh
 python3 held_out.py calibrate \
   --candidate-id "$CANDIDATE_ID" \
