@@ -31,6 +31,16 @@ reach the network, or access sibling/controller state. Retain its manifest,
 fixtures, raw reports, evidence, executed-change descriptor, and signatures in
 the private evidence root. Nothing here publishes, discloses, or uploads them.
 
+The native verifier captures artifact bytes once and derives both validation
+and the printed reference from that same bounded snapshot. Fixture traversal is
+descriptor-relative and capped by total files, bytes, entries, and depth before
+content is retained. Calibration executes owner-private, read-only copies made
+from that captured fixture and binary byte view, and checks their complete
+byte/identity seals before and after every scan. These controls are
+prerequisites for the private
+`foxguard-held-out-provenance-v2` custody package; the v1 evidence JSON is not
+itself self-contained, signed, or eligible for a global training corpus.
+
 `source_change.py` separately binds the candidate to clean base/head commits,
 Git tree OIDs, content-tree digests, canonical full-index binary patch bytes,
 the allowed changed paths (`src/rules/**` plus tests), both executed binaries,
