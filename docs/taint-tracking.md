@@ -306,7 +306,7 @@ The taint engines run only for languages with enabled taint-backed rules. Each w
 
 ## Semgrep-compatible YAML bridge
 
-Issue #17 added a narrow YAML bridge so existing Semgrep `mode: taint` rules can be loaded with `--rules` and compiled into the same `TaintSpec` that native rules build by hand. The bridge lives in [`src/rules/semgrep_taint.rs`](../src/rules/semgrep_taint.rs); see [COMPATIBILITY.md](../COMPATIBILITY.md) for the exact subset of Semgrep's taint schema that is supported and what falls back to "skip with warning".
+Issue #17 added a narrow YAML bridge so existing Semgrep `mode: taint` rules can be loaded with `--rules` and compiled into the same `TaintSpec` that native rules build by hand. The bridge lives in [`src/rules/semgrep_taint.rs`](../src/rules/semgrep_taint.rs); see the [compatibility reference](./compatibility.md) for the exact subset of Semgrep's taint schema that is supported and what falls back to "skip with warning".
 
 A minimum working YAML rule looks like this:
 

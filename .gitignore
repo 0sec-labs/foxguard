@@ -19,6 +19,8 @@ www/.astro/
 
 # Local
 .omx/
+.local/
+.playwright-mcp/
 *.local.md
 benchmarks/repos/
 benchmarks/results*.md
@@ -35,12 +37,8 @@ benchmarks/results*.md
 .terminalizer-bin/
 assets/terminalizer/
 assets/foxguard-terminalizer*.gif
-www/public/foxguard-logo.png
 
 # Local togi mutation-test artifacts
 .togi-cache/
 .togi.lock
 togi.toml
-
-# Local semgrep-rules registry snapshot used for ad-hoc coverage checks
-.registry-snapshot/

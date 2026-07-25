@@ -561,7 +561,7 @@ impl<'a> TaintLanguageAdapter<CrossFileInfo<'a>> for GoTaintAdapter {
                 handle_var_spec(node, ctx, state);
             }
             "assignment_statement" => {
-                handle_assignment(node, ctx, state, findings);
+                handle_assignment(node, ctx, state);
             }
             "call_expression" => {
                 handle_call(node, ctx, state, findings);
@@ -822,12 +822,7 @@ fn handle_var_spec(node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
 }
 
 /// Handle `x = ...`, `x, y = ...`, `x += ...`.
-fn handle_assignment(
-    node: Node<'_>,
-    ctx: &GoCtx<'_>,
-    state: &mut TaintState,
-    _findings: &mut Vec<TaintFinding>,
-) {
+fn handle_assignment(node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
     let (Some(left), Some(right)) = (
         node.child_by_field_name("left"),
         node.child_by_field_name("right"),

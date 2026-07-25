@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" width="128" alt="foxguard" />
+  <img src="www/public/foxguard-logo.png" width="128" alt="foxguard" />
 </p>
 
 <h1 align="center">foxguard</h1>
@@ -120,6 +120,10 @@ secrets:
 ```
 
 Suppress an accepted finding inline with `// foxguard: ignore[rule-id]`.
+
+## Documentation
+
+Start with the [documentation index](./docs/README.md). Key references: [architecture](./docs/architecture.md), [Semgrep/OpenGrep compatibility](./docs/compatibility.md), and the [release runbook](./docs/releasing.md).
 
 ## Benchmarks
 

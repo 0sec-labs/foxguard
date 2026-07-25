@@ -40,7 +40,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-clippy-
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   test:
     name: Test
@@ -59,7 +59,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-test-
-      - run: cargo test --all-features
+      - run: cargo test --locked --all-features
       - name: Run sealed 0research negative controls
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -262,8 +262,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
         with:
+          toolchain: "1.88.0"
           targets: x86_64-unknown-linux-musl
       - name: Install musl tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools

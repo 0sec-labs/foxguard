@@ -70,7 +70,7 @@ const STRUCTURAL_KEYS: &[&str] = &[
 ];
 
 /// Pattern operators the compat loader implements (see `build_matcher` in
-/// `src/rules/semgrep_compat.rs` and COMPATIBILITY.md).
+/// `src/rules/semgrep_compat.rs` and `docs/compatibility.md`).
 const SUPPORTED_PATTERN_OPERATORS: &[&str] = &[
     "pattern",
     "pattern-regex",
@@ -341,7 +341,7 @@ fn classify_rule(rule: &Yaml) -> Outcome {
             // source/sink/sanitizer blocks.
             // The taint bridge supports `pattern` / `pattern-either` /
             // `patterns:` inside those blocks (see semgrep_taint.rs +
-            // COMPATIBILITY.md). `patterns:` blocks undergo graceful
+            // docs/compatibility.md). `patterns:` blocks undergo graceful
             // degradation: expressible `pattern:`/`pattern-either:` sub-items
             // are compiled; constraint-only sub-items (pattern-inside, etc.)
             // are dropped with a warning making the matcher broader. The real

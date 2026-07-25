@@ -2,12 +2,18 @@
 name = "foxguard"
 version = "0.12.0"
 edition = "2021"
+rust-version = "1.88"
 description = "A security scanner as fast as a linter, written in Rust. 200+ built-in rules across 12 source languages."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/0sec-labs/foxguard"
 homepage = "https://foxguard.dev"
 keywords = ["security", "linter", "static-analysis", "sast", "vulnerability"]
 categories = ["command-line-utilities", "development-tools"]
+
+[lints.clippy]
+# Declaring the MSRV enables this style-only lint across the existing codebase.
+# Keep the mechanical migration separate from production workflow hardening.
+uninlined_format_args = "allow"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

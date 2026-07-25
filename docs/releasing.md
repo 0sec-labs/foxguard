@@ -2,15 +2,17 @@
 
 ## Normal flow
 
-1. Start from a clean `main`
-2. Run:
+1. Write and review `docs/releases/vX.Y.Z.md` for the version to publish.
+2. Start from a clean `main`; the new release-note file is the only allowed uncommitted change.
+3. Run:
 
 ```sh
-./scripts/release.sh 0.3.4
+./scripts/release.sh X.Y.Z
 ```
 
 That script:
 
+- verifies that the versioned release note exists under `docs/releases/`
 - bumps Cargo, npm, and VS Code extension versions
 - refreshes `vscode-extension/package-lock.json`
 - runs the verification suite

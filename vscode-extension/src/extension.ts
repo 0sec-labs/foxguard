@@ -721,14 +721,14 @@ function scanDocument(document: vscode.TextDocument): void {
         .showInformationMessage(
           "foxguard not found. Install it to enable security scanning.",
           "Install with npm",
-          "Install with brew"
+          "Install prebuilt binary"
         )
         .then((choice) => {
           if (choice) {
             const terminal = vscode.window.createTerminal("foxguard");
             terminal.show();
-            if (choice === "Install with brew") {
-              terminal.sendText("brew install peaktwilight/tap/foxguard");
+            if (choice === "Install prebuilt binary") {
+              terminal.sendText("curl -fsSL https://foxguard.dev/install.sh | sh");
             } else {
               terminal.sendText("npm install -g foxguard");
             }

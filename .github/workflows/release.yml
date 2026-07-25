@@ -85,8 +85,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
         with:
+          toolchain: "1.88.0"
           targets: ${{ matrix.target }}
 
       - name: Install musl tools (x86_64)
@@ -171,7 +172,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          body_path: RELEASE_NOTES_${{ github.ref_name }}.md
+          body_path: docs/releases/${{ github.ref_name }}.md
           files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
