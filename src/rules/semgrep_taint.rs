@@ -20,7 +20,7 @@
 //!   extracts all `pattern:` and `pattern-either:` sub-items as expressible
 //!   matchers. Constraint-only sub-items (`pattern-inside:`, `pattern-not:`,
 //!   `focus-metavariable:`, `metavariable-*:`) are dropped with a per-key
-//!   warning (documented broadening — see COMPATIBILITY.md). If the block
+//!   warning (documented broadening — see `docs/compatibility.md`). If the block
 //!   produces at least one expressible matcher, the entry is loaded; otherwise
 //!   the entry is warn-skipped without aborting the whole rule.
 //! - Severity mapping via the same `map_severity` used by the pattern-rule
@@ -430,7 +430,7 @@ struct GenericSpec {
 /// source node. Source-side enforcement currently requires a source byte
 /// range the finding does not carry (see [`SemgrepTaintRule`]
 /// post-filter), so source negatives are collected but not yet applied —
-/// see COMPATIBILITY.md for the deferred items.
+/// see `docs/compatibility.md` for the deferred items.
 #[derive(Clone, Default)]
 struct TaintNegatives {
     /// `pattern-not` matchers compiled from `pattern-sinks` blocks.
@@ -3618,7 +3618,7 @@ impl Rule for SemgrepTaintRule {
         //
         // Source-side `pattern-not` is compiled but not enforced here:
         // findings carry no source byte range, so we cannot precisely test
-        // the source node (deferred — see COMPATIBILITY.md).
+        // the source node (deferred — see docs/compatibility.md).
         if !self.negatives.sink.is_empty() {
             let root = tree.root_node();
             raw.retain(|t| {
@@ -5099,7 +5099,7 @@ fn compile_entry(
             //   (`pattern-not-inside:`, `focus-metavariable:`,
             //   `metavariable-*:`) with a per-key warning. This makes the
             //   compiled matcher slightly BROADER than the original Semgrep
-            //   rule — documented in COMPATIBILITY.md — but only for those
+            //   rule — documented in docs/compatibility.md — but only for those
             //   deferred keys.
             // - If no expressible matcher results, warn-skip the whole entry.
             compile_patterns_block(
@@ -5194,7 +5194,9 @@ fn compile_patterns_block(
         if sub_map.len() != 1 {
             continue;
         }
-        let (sk, sv) = sub_map.iter().next().expect("len == 1");
+        let Some((sk, sv)) = sub_map.iter().next() else {
+            continue;
+        };
         match sk.as_str() {
             Some("pattern") | Some("pattern-either") => {
                 // Recursively compile via the normal entry path.
@@ -7170,7 +7172,9 @@ fn try_compile_ruby_metavar_pattern_enum_call_block(
         if map.len() != 1 {
             continue;
         }
-        let (k, val) = map.iter().next().expect("len == 1");
+        let Some((k, val)) = map.iter().next() else {
+            continue;
+        };
         match k.as_str() {
             Some("pattern") => {
                 if let Some(s) = val.as_str() {
@@ -8554,7 +8558,7 @@ fn compile_pattern(pattern: &str, role: MatcherRole, lang: Language) -> Option<G
     // has no expressible sink node shape and is skipped (deferred).
     //
     // Gated to Java and C#: this parenthesised-type syntax is shared by both
-    // (Go uses a different `($X : *pkg.Type)` colon form — see COMPATIBILITY.md).
+    // (Go uses a different `($X : *pkg.Type)` colon form — see docs/compatibility.md).
     // C# expresses `csharp-sqli`'s `pattern-sources` as `(string $X)` ("any
     // variable of declared type `string` is untrusted"), the exact same shape
     // as Java's `(HttpServletRequest $REQ)`. The C# engine seeds every
@@ -9144,7 +9148,8 @@ fn compile_pattern(pattern: &str, role: MatcherRole, lang: Language) -> Option<G
         // `root.field` or `root.intermediate.field`. The engine only
         // supports one-level roots, so we take the leftmost segment as
         // the root and the outermost (last) segment as the field.
-        let root = pat[..pat.find('.').expect("rfind guarantees at least one dot")].to_string();
+        let first_dot = pat.find('.')?;
+        let root = pat[..first_dot].to_string();
         let field = pat[dot + 1..].to_string();
         if root.is_empty() || field.is_empty() {
             return None;

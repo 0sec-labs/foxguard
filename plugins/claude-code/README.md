@@ -26,9 +26,6 @@ Pick whichever fits:
 # Prebuilt binary — fastest
 curl -fsSL https://foxguard.dev/install.sh | sh
 
-# Homebrew
-brew install 0sec-labs/foxguard/foxguard
-
 # npm (global or zero-install)
 npm i -g foxguard       # or just: npx foxguard
 

@@ -2,6 +2,7 @@ const RELEASE_WORKFLOW: &str = include_str!("../.github/workflows/release.yml");
 const README: &str = include_str!("../README.md");
 const NPM_README: &str = include_str!("../packages/npm/README.md");
 const PROVENANCE_DOCS: &str = include_str!("../docs/release-provenance.md");
+const RELEASE_SCRIPT: &str = include_str!("../scripts/release.sh");
 
 fn index_of(haystack: &str, needle: &str) -> usize {
     match haystack.find(needle) {
@@ -31,6 +32,16 @@ fn release_workflow_attests_binaries_before_publishing_release() {
 
     assert!(checksum_step < attest_step);
     assert!(attest_step < release_step);
+}
+
+#[test]
+fn release_notes_are_kept_under_docs_and_required_for_a_release() {
+    assert!(RELEASE_WORKFLOW.contains("body_path: docs/releases/${{ github.ref_name }}.md"));
+    assert!(RELEASE_SCRIPT.contains("RELEASE_NOTES=\"docs/releases/${TAG}.md\""));
+    assert!(RELEASE_SCRIPT.contains("if [ ! -f \"${RELEASE_NOTES}\" ]"));
+    assert!(RELEASE_SCRIPT.contains("git ls-files --others --exclude-standard"));
+    assert!(RELEASE_SCRIPT.contains("grep -Fvx \"${RELEASE_NOTES}\""));
+    assert!(RELEASE_SCRIPT.contains("\"${RELEASE_NOTES}\""));
 }
 
 #[test]

@@ -6,6 +6,7 @@ set -euo pipefail
 
 VERSION="${1:?Usage: ./scripts/release.sh <version>}"
 TAG="v${VERSION}"
+RELEASE_NOTES="docs/releases/${TAG}.md"
 BRANCH="$(git branch --show-current)"
 
 echo "=== Preparing foxguard ${TAG} ==="
@@ -15,8 +16,26 @@ if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "Working tree must be clean before preparing a release"
+if [ ! -f "${RELEASE_NOTES}" ]; then
+  echo "Write release notes at ${RELEASE_NOTES} before preparing ${TAG}"
+  exit 1
+fi
+
+# The versioned release note may be newly authored and untracked; the release
+# metadata commit below stages it. Every other local or staged change is a
+# release blocker so the tag always points at a deliberate, reviewable tree.
+DIRTY_PATHS="$(
+  {
+    git diff --name-only
+    git diff --cached --name-only
+    git ls-files --others --exclude-standard
+  } | sort -u
+)"
+UNEXPECTED_PATHS="$(printf '%s' "${DIRTY_PATHS}" | grep -Fvx "${RELEASE_NOTES}" || true)"
+if [ -n "${UNEXPECTED_PATHS}" ]; then
+  echo "Working tree may only contain ${RELEASE_NOTES} before preparing a release"
+  echo "Unexpected changes:"
+  printf '%s\n' "${UNEXPECTED_PATHS}"
   exit 1
 fi
 
@@ -60,8 +79,8 @@ perl -i -pe 's{(\s+rev:\s+)v[0-9]+\.[0-9]+\.[0-9]+}{${1}v'"${VERSION}"'}g' READM
 
 echo "Verifying release candidate..."
 cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
 (
   cd www
   npm ci
@@ -78,7 +97,7 @@ cargo test
 )
 
 echo "Committing release metadata..."
-git add Cargo.toml Cargo.lock packages/npm/package.json vscode-extension/package.json vscode-extension/package-lock.json README.md
+git add Cargo.toml Cargo.lock packages/npm/package.json vscode-extension/package.json vscode-extension/package-lock.json README.md "${RELEASE_NOTES}"
 git commit -m "Prepare ${TAG} release metadata" -m "Bump crate, npm, and VS Code extension versions to ${VERSION} so the
 tag-driven release workflow can publish a coherent release.
 
@@ -88,7 +107,7 @@ Confidence: high
 Scope-risk: narrow
 Reversibility: clean
 Directive: Use this script to prepare release metadata, then let the tag-triggered GitHub workflow publish artifacts
-Tested: cargo fmt --check; cargo clippy -- -D warnings; cargo test; npm ci && npm run build (www); npm ci && npm run compile (vscode-extension); npm pack --dry-run (packages/npm)
+Tested: cargo fmt --check; cargo clippy --locked --all-targets --all-features -- -D warnings; cargo test --locked --all-features; npm ci && npm run build (www); npm ci && npm run compile (vscode-extension); npm pack --dry-run (packages/npm)
 Not-tested: Live publish against GitHub Releases, npm, crates.io, and VS Code Marketplace"
 
 echo "Pushing branch and tag..."
