@@ -3,3 +3,6 @@ scan:
 
 secrets:
   baseline: .foxguard/secrets-baseline.json
+  exclude_paths:
+    - .git
+    - assets/demo.gif
