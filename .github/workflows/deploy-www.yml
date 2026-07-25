@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     name: Build and deploy foxguard.dev
     runs-on: ubuntu-latest
     steps:

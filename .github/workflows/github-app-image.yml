@@ -35,7 +35,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.ref == 'refs/heads/main'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -57,7 +57,7 @@ jobs:
         run: scripts/smoke-github-app-image.sh ghcr.io/0sec-labs/foxguard-github-app:${{ github.sha }}
 
       - name: Push verified GitHub App image
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: github.ref == 'refs/heads/main'
         run: |
-          docker push ghcr.io/0sec-labs/foxguard-github-app:${GITHUB_SHA}
-          docker push ghcr.io/0sec-labs/foxguard-github-app:latest
+          docker push "ghcr.io/0sec-labs/foxguard-github-app:${GITHUB_SHA}"
+          docker push "ghcr.io/0sec-labs/foxguard-github-app:latest"
