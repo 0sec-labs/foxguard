@@ -88,7 +88,7 @@ Metavariable filtering:
     metavar's bound text has Shannon entropy ≥ **3.5 bits/char**. This threshold
     is a documented approximation of Semgrep's internal Gaussian-mixture entropy
     model: it flags random secrets / tokens (e.g. an AWS-style key
-    `"AKIA1234567890ABCDEF"` scores ≈ 4.0 bits/char) while passing low-entropy
+    `"<AWS_ACCESS_KEY_ID>"`) while passing low-entropy
     words (e.g. `"password"` scores ≈ 2.75 bits/char). The threshold is defined
     as `ENTROPY_THRESHOLD` in `semgrep_compat.rs` and can be adjusted in one
     place if calibration is needed.
