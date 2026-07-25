@@ -1968,6 +1968,56 @@ mod bash_taint {
             n
         );
     }
+    /// The strict, negated release-version allowlist followed by a direct
+    /// rejection exit makes later GitHub release-download URLs safe.
+    #[test]
+    fn test_guarded_bash_release_version_url_has_no_ssrf_finding() {
+        let output = foxguard_cmd_isolated()
+            .args([
+                "tests/fixtures/safe_bash_release_version_ssrf.sh",
+                "-f",
+                "json",
+            ])
+            .output()
+            .expect("failed to execute foxguard");
+
+        let findings = scan_json_findings_from_slice(&output.stdout);
+        let ssrf = findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some("bash/taint-ssrf"))
+            .count();
+        assert_eq!(
+            ssrf, 0,
+            "strict fail-closed release guard must prevent bash/taint-ssrf, got {:?}",
+            findings
+        );
+    }
+
+    /// Removing only the release-version guard leaves the otherwise identical
+    /// dynamically interpolated release-download URL tainted.
+    #[test]
+    fn test_unguarded_bash_release_version_url_reports_ssrf() {
+        let output = foxguard_cmd_isolated()
+            .args([
+                "tests/fixtures/vulnerable_bash_release_version_ssrf.sh",
+                "-f",
+                "json",
+            ])
+            .output()
+            .expect("failed to execute foxguard");
+
+        assert!(!output.status.success());
+        let findings = scan_json_findings_from_slice(&output.stdout);
+        let ssrf = findings
+            .iter()
+            .filter(|f| f["rule_id"].as_str() == Some("bash/taint-ssrf"))
+            .count();
+        assert_eq!(
+            ssrf, 1,
+            "unguarded release URL must produce one bash/taint-ssrf finding, got {:?}",
+            findings
+        );
+    }
 }
 
 // ─── Apex taint ──────────────────────────────────────────────────────────────
