@@ -241,6 +241,111 @@ fn ssrf_spec() -> TaintSpec {
 
 // ─── Scope walking ─────────────────────────────────────────────────────────
 
+/// The exact release-version allowlist used before interpolating a version into
+/// a GitHub release URL. It excludes URL delimiters, so a value accepted by it
+/// cannot change the URL's scheme, host, path hierarchy, query, or fragment.
+const RELEASE_VERSION_ALLOWLIST: &str = r"^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$";
+
+/// Return the variable protected by the action's fail-closed release-version
+/// guard. This intentionally recognises one narrow shape rather than treating
+/// arbitrary Bash regex tests as sanitizers:
+///
+/// ```bash
+/// if [[ ! "${VERSION}" =~ ^v…$ ]]; then
+///     # direct diagnostic commands
+///     exit 1
+/// fi
+/// ```
+///
+/// The regex must be the exact restrictive release allowlist, the check must
+/// reject non-matches, and the rejection branch must end in a direct `exit`.
+/// Callers clear taint only after walking that branch so a sink in the rejected
+/// path remains visible.
+fn fail_closed_release_version_guard<'tree>(
+    node: Node<'tree>,
+    source: &str,
+) -> Option<Node<'tree>> {
+    if node.kind() != "if_statement" {
+        return None;
+    }
+
+    let condition = node.child_by_field_name("condition")?;
+    if condition.kind() != "test_command" {
+        return None;
+    }
+    let expression = only_named_child(condition)?;
+    if expression.kind() != "binary_expression"
+        || expression.named_child_count() != 2
+        || node_text(expression.child_by_field_name("operator")?, source) != "=~"
+    {
+        return None;
+    }
+
+    let negated = expression.child_by_field_name("left")?;
+    if negated.kind() != "unary_expression"
+        || negated.named_child_count() != 1
+        || node_text(negated.child_by_field_name("operator")?, source) != "!"
+    {
+        return None;
+    }
+    let variable = guarded_variable_name(only_named_child(negated)?)?;
+
+    let allowlist = expression.child_by_field_name("right")?;
+    if allowlist.kind() != "regex" || node_text(allowlist, source) != RELEASE_VERSION_ALLOWLIST {
+        return None;
+    }
+
+    direct_final_exit(node, source).then_some(variable)
+}
+
+/// Return the sole variable expanded by a guard operand such as `"${VERSION}"`.
+fn guarded_variable_name(node: Node<'_>) -> Option<Node<'_>> {
+    let expansion = match node.kind() {
+        "simple_expansion" | "expansion" => node,
+        "string" => only_named_child(node)?,
+        _ => return None,
+    };
+    if !matches!(expansion.kind(), "simple_expansion" | "expansion")
+        || expansion.named_child_count() != 1
+    {
+        return None;
+    }
+    find_variable_name(expansion)
+}
+
+/// Return `true` only when an `if` rejection branch consists of direct commands
+/// and its final command is `exit`. `elif`/`else` clauses and nested compound
+/// forms are deliberately not accepted as proof that invalid input cannot
+/// continue to a later sink.
+fn direct_final_exit(node: Node<'_>, source: &str) -> bool {
+    let mut saw_body_command = false;
+    let mut final_command_is_exit = false;
+    let mut cursor = node.walk();
+    for (index, child) in node.children(&mut cursor).enumerate() {
+        if node.field_name_for_child(index as u32) == Some("condition") {
+            continue;
+        }
+        if !child.is_named() || child.kind() != "command" {
+            if child.is_named() {
+                return false;
+            }
+            continue;
+        }
+        saw_body_command = true;
+        final_command_is_exit = command_name(child, source).as_deref() == Some("exit");
+    }
+    saw_body_command && final_command_is_exit
+}
+
+/// Return a node's only named child.
+fn only_named_child(node: Node<'_>) -> Option<Node<'_>> {
+    if node.named_child_count() == 1 {
+        node.named_child(0)
+    } else {
+        None
+    }
+}
+
 /// Walk a scope (program root or function body) in source order, propagating
 /// taint through assignments and reporting sink hits.
 ///
@@ -258,6 +363,15 @@ fn walk_scope(
         return;
     }
 
+    // A rejected value stays tainted while its rejection branch is walked.
+    // Only a strict, direct exit guard may clear it for statements after the
+    // complete `if` statement.
+    let release_version_guard = if node.kind() == "if_statement" {
+        fail_closed_release_version_guard(node, source)
+    } else {
+        None
+    };
+
     match node.kind() {
         "variable_assignment" => handle_assignment(node, source, spec, state),
         "command" => {
@@ -273,6 +387,10 @@ fn walk_scope(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         walk_scope(child, source, spec, state, findings, skip_functions);
+    }
+
+    if let Some(variable) = release_version_guard {
+        state.clear(node_text(variable, source));
     }
 }
 
@@ -698,5 +816,95 @@ eval "$safe"
         let src = "eval \"ls -la\"\n";
         let f = run(src, &command_injection_spec());
         assert_eq!(f.len(), 0, "literal eval must not fire, got {:?}", f);
+    }
+    #[test]
+    fn strict_fail_closed_release_version_guard_sanitizes_ssrf_taint() {
+        let src = r#"
+VERSION="$1"
+if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+    echo "invalid release version"
+    exit 1
+fi
+BASE_URL="https://github.com/example/releases/download/${VERSION}"
+curl --fail "$BASE_URL"
+"#;
+        let f = run(src, &ssrf_spec());
+        assert!(
+            f.is_empty(),
+            "strict fail-closed release guard must sanitize SSRF flow, got {:?}",
+            f
+        );
+    }
+
+    #[test]
+    fn unguarded_release_version_url_reaches_curl() {
+        let src = r#"
+VERSION="$1"
+BASE_URL="https://github.com/example/releases/download/${VERSION}"
+curl --fail "$BASE_URL"
+"#;
+        let f = run(src, &ssrf_spec());
+        assert_eq!(
+            f.len(),
+            1,
+            "unguarded release URL must reach curl, got {:?}",
+            f
+        );
+    }
+
+    #[test]
+    fn arbitrary_regex_guard_does_not_sanitize_ssrf_taint() {
+        let src = r#"
+VERSION="$1"
+if [[ ! "${VERSION}" =~ ^v.*$ ]]; then
+    exit 1
+fi
+BASE_URL="https://github.com/example/releases/download/${VERSION}"
+curl --fail "$BASE_URL"
+"#;
+        let f = run(src, &ssrf_spec());
+        assert_eq!(
+            f.len(),
+            1,
+            "an arbitrary regex guard must not sanitize SSRF taint, got {:?}",
+            f
+        );
+    }
+
+    #[test]
+    fn release_version_regex_requires_rejection_exit() {
+        let src = r#"
+VERSION="$1"
+if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+    echo "invalid release version"
+fi
+BASE_URL="https://github.com/example/releases/download/${VERSION}"
+curl --fail "$BASE_URL"
+"#;
+        let f = run(src, &ssrf_spec());
+        assert_eq!(
+            f.len(),
+            1,
+            "a release regex without a rejection exit must not sanitize taint, got {:?}",
+            f
+        );
+    }
+
+    #[test]
+    fn rejected_release_version_branch_remains_tainted() {
+        let src = r#"
+VERSION="$1"
+if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+    curl --fail "https://example.invalid/${VERSION}"
+    exit 1
+fi
+"#;
+        let f = run(src, &ssrf_spec());
+        assert_eq!(
+            f.len(),
+            1,
+            "a sink before the rejection exit must retain taint, got {:?}",
+            f
+        );
     }
 }

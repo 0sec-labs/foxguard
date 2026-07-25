@@ -8,9 +8,14 @@ REPO="0sec-labs/foxguard"
 
 if [ "$VERSION" = "latest" ]; then
     echo "::group::Fetching latest foxguard release"
-    VERSION=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+    VERSION=$(curl --fail --silent --show-error --location "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
     echo "Latest version: ${VERSION}"
     echo "::endgroup::"
+fi
+
+if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+    echo "::error::Invalid foxguard release version: ${VERSION}"
+    exit 1
 fi
 
 # ─── Detect platform ────────────────────────────────────────────────────────
