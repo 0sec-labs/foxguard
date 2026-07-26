@@ -13,7 +13,7 @@ jobs:
   mutation-test:
     name: Mutation testing (advisory)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 3
 
     steps:
       - name: Checkout
@@ -52,7 +52,7 @@ jobs:
             check
             --base "origin/${BASE_REF}"
             --test-cmd "cargo test --all-features"
-            --timeout 180
+            --timeout 60
             --format sarif
             --pr-comment togi-pr-comment.md
           )
