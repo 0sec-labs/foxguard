@@ -162,20 +162,179 @@ impl GitHubReviewClient {
         })
     }
 
-    pub async fn post_check_run(
+    /// Create a queued check run before the durable job is handed to a worker.
+    /// `external_id` lets restart reconciliation find a check whose POST
+    /// completed but whose response could not be persisted.
+    pub async fn create_queued_check_run(
         &self,
         repo_full_name: &str,
         head_sha: &str,
+        external_id: &str,
+        installation_token: &str,
+    ) -> Result<u64, ReviewError> {
+        let repo = RepositoryPath::parse(repo_full_name)?;
+        self.create_check_run(
+            &repo,
+            queued_check_run_payload(head_sha, external_id),
+            installation_token,
+        )
+        .await
+    }
+
+    /// Return the authoritative PR head immediately before scan/render work.
+    pub async fn pull_request_head_sha(
+        &self,
+        repo_full_name: &str,
+        pr_number: u64,
+        installation_token: &str,
+    ) -> Result<String, ReviewError> {
+        let repo = RepositoryPath::parse(repo_full_name)?;
+        let url = self.endpoint(&format!(
+            "repos/{}/{}/pulls/{pr_number}",
+            repo.owner, repo.name
+        ))?;
+        let request = self.http.get(url); // foxguard: ignore[rs/no-ssrf]
+        let response = request
+            .bearer_auth(installation_token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(response.json::<PullRequestHeadResponse>().await?.head.sha)
+    }
+
+    /// Find a check run created with a durable delivery id after a restart or
+    /// a lost create response. The exact external id avoids touching another
+    /// application's check run on the same commit.
+    pub async fn find_check_run_by_external_id(
+        &self,
+        repo_full_name: &str,
+        head_sha: &str,
+        external_id: &str,
+        installation_token: &str,
+    ) -> Result<Option<u64>, ReviewError> {
+        if !is_git_object_id(head_sha) {
+            return Err(ReviewError::InvalidEndpoint(
+                "head SHA must be an ASCII hexadecimal Git object id".to_string(),
+            ));
+        }
+        let repo = RepositoryPath::parse(repo_full_name)?;
+        let check_runs = self
+            .paginated_check_runs(
+                &format!(
+                    "repos/{}/{}/commits/{head_sha}/check-runs",
+                    repo.owner, repo.name
+                ),
+                installation_token,
+            )
+            .await?;
+        Ok(check_runs
+            .into_iter()
+            .find(|check_run| check_run.external_id.as_deref() == Some(external_id))
+            .map(|check_run| check_run.id))
+    }
+
+    pub async fn mark_check_run_running(
+        &self,
+        repo_full_name: &str,
+        check_run_id: u64,
+        installation_token: &str,
+    ) -> Result<(), ReviewError> {
+        let repo = RepositoryPath::parse(repo_full_name)?;
+        self.update_check_run(
+            &repo,
+            check_run_id,
+            running_check_run_payload(),
+            installation_token,
+        )
+        .await
+    }
+
+    pub async fn complete_check_run(
+        &self,
+        repo_full_name: &str,
+        check_run_id: u64,
         policy: CheckRunPolicy<'_>,
         installation_token: &str,
         changed_lines: Option<&HashMap<String, HashSet<usize>>>,
     ) -> Result<PostCheckRunOutcome, ReviewError> {
         let repo = RepositoryPath::parse(repo_full_name)?;
-        let (body, annotation_count) = check_run_payload(head_sha, policy, changed_lines);
+        let (body, posted_annotations) = check_run_payload(policy, changed_lines);
+        self.update_check_run(&repo, check_run_id, body, installation_token)
+            .await?;
+        Ok(PostCheckRunOutcome { posted_annotations })
+    }
+
+    pub async fn complete_failed_check_run(
+        &self,
+        repo_full_name: &str,
+        check_run_id: u64,
+        error: &str,
+        installation_token: &str,
+    ) -> Result<(), ReviewError> {
+        let repo = RepositoryPath::parse(repo_full_name)?;
+        self.update_check_run(
+            &repo,
+            check_run_id,
+            failed_check_run_payload(error),
+            installation_token,
+        )
+        .await
+    }
+
+    pub async fn complete_superseded_check_run(
+        &self,
+        repo_full_name: &str,
+        check_run_id: u64,
+        installation_token: &str,
+    ) -> Result<(), ReviewError> {
+        let repo = RepositoryPath::parse(repo_full_name)?;
+        self.update_check_run(
+            &repo,
+            check_run_id,
+            superseded_check_run_payload(),
+            installation_token,
+        )
+        .await
+    }
+
+
+
+    async fn create_check_run(
+        &self,
+        repo: &RepositoryPath,
+        body: Value,
+        installation_token: &str,
+    ) -> Result<u64, ReviewError> {
         let url = self.endpoint(&format!("repos/{}/{}/check-runs", repo.owner, repo.name))?;
         // URL construction is restricted to a validated GitHub API base URL plus
         // repository path segments parsed by `RepositoryPath::parse`.
         let request = self.http.post(url); // foxguard: ignore[rs/no-ssrf]
+        let response = request
+            .bearer_auth(installation_token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(response.json::<CreatedCheckRun>().await?.id)
+    }
+
+    async fn update_check_run(
+        &self,
+        repo: &RepositoryPath,
+        check_run_id: u64,
+        body: Value,
+        installation_token: &str,
+    ) -> Result<(), ReviewError> {
+        let url = self.endpoint(&format!(
+            "repos/{}/{}/check-runs/{check_run_id}",
+            repo.owner, repo.name
+        ))?;
+        // `check_run_id` is an API response id stored by this receiver.
+        let request = self.http.patch(url); // foxguard: ignore[rs/no-ssrf]
         request
             .bearer_auth(installation_token)
             .header("Accept", "application/vnd.github+json")
@@ -184,10 +343,7 @@ impl GitHubReviewClient {
             .send()
             .await?
             .error_for_status()?;
-
-        Ok(PostCheckRunOutcome {
-            posted_annotations: annotation_count,
-        })
+        Ok(())
     }
 
     async fn delete_foxguard_comment_ids(
@@ -439,6 +595,40 @@ impl GitHubReviewClient {
         }
     }
 
+    async fn paginated_check_runs(
+        &self,
+        endpoint: &str,
+        installation_token: &str,
+    ) -> Result<Vec<CheckRunSummary>, ReviewError> {
+        let mut page = 1;
+        let mut check_runs = Vec::new();
+        loop {
+            let mut url = self.endpoint(endpoint)?;
+            url.query_pairs_mut()
+                .append_pair("per_page", &PAGE_SIZE.to_string())
+                .append_pair("page", &page.to_string());
+            let request = self.http.get(url); // foxguard: ignore[rs/no-ssrf]
+            let response = request
+                .bearer_auth(installation_token)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+                .send()
+                .await?
+                .error_for_status()?;
+            let has_next_page = response
+                .headers()
+                .get(reqwest::header::LINK)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(link_header_has_next);
+            let mut page_check_runs = response.json::<CheckRunsResponse>().await?.check_runs;
+            check_runs.append(&mut page_check_runs);
+            if !has_next_page {
+                return Ok(check_runs);
+            }
+            page += 1;
+        }
+    }
+
     fn endpoint(&self, endpoint: &str) -> Result<Url, ReviewError> {
         self.api_base_url
             .join(&format!(
@@ -459,6 +649,32 @@ pub struct PostReviewOutcome {
 #[derive(Debug, PartialEq, Eq)]
 pub struct PostCheckRunOutcome {
     pub posted_annotations: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreatedCheckRun {
+    id: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestHeadResponse {
+    head: PullRequestHead,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestHead {
+    sha: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CheckRunsResponse {
+    check_runs: Vec<CheckRunSummary>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CheckRunSummary {
+    id: u64,
+    external_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -605,6 +821,10 @@ fn valid_repo_segment(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
+fn is_git_object_id(value: &str) -> bool {
+    (7..=64).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 #[derive(Debug, Deserialize)]
 struct PullRequestComment {
     id: u64,
@@ -741,7 +961,6 @@ fn filter_findings_to_changed_lines(
 }
 
 fn check_run_payload(
-    head_sha: &str,
     policy: CheckRunPolicy<'_>,
     changed_lines: Option<&HashMap<String, HashSet<usize>>>,
 ) -> (Value, usize) {
@@ -774,7 +993,6 @@ fn check_run_payload(
     (
         serde_json::json!({
             "name": "foxguard",
-            "head_sha": head_sha,
             "status": "completed",
             "conclusion": conclusion,
             "output": {
@@ -882,6 +1100,56 @@ fn check_run_summary(
     summary.push_str(&format!("\n\n{policy_summary}"));
     summary
 }
+
+fn queued_check_run_payload(head_sha: &str, external_id: &str) -> Value {
+    serde_json::json!({
+        "name": "foxguard",
+        "head_sha": head_sha,
+        "external_id": external_id,
+        "status": "queued",
+        "output": {
+            "title": "foxguard scan queued",
+            "summary": "foxguard accepted this pull-request scan and is waiting for a worker.",
+        },
+    })
+}
+
+fn running_check_run_payload() -> Value {
+    serde_json::json!({
+        "status": "in_progress",
+        "output": {
+            "title": "foxguard scan in progress",
+            "summary": "foxguard is scanning this pull request.",
+        },
+    })
+}
+
+fn failed_check_run_payload(error: &str) -> Value {
+    serde_json::json!({
+        "status": "completed",
+        "conclusion": "failure",
+        "output": {
+            "title": "foxguard scan could not complete",
+            "summary": format!(
+                "foxguard could not complete this pull-request scan: {}",
+                truncate(error, 4_000)
+            ),
+        },
+    })
+}
+
+fn superseded_check_run_payload() -> Value {
+    serde_json::json!({
+        "status": "completed",
+        "conclusion": "cancelled",
+        "output": {
+            "title": "foxguard scan superseded",
+            "summary": "foxguard received a newer pull-request head before this queued scan started.",
+        },
+    })
+}
+
+
 
 fn check_run_annotations(findings: &[Finding]) -> Vec<Value> {
     findings
@@ -1182,6 +1450,34 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_check_payloads_make_terminal_failures_visible() {
+        let queued = queued_check_run_payload("head-sha", "delivery-id");
+        assert_eq!(queued["status"], "queued");
+        assert_eq!(queued["head_sha"], "head-sha");
+        assert_eq!(queued["external_id"], "delivery-id");
+        assert_eq!(queued["output"]["title"], "foxguard scan queued");
+
+        let running = running_check_run_payload();
+        assert_eq!(running["status"], "in_progress");
+        assert_eq!(running["output"]["title"], "foxguard scan in progress");
+
+        let failed = failed_check_run_payload("clone timed out");
+        assert_eq!(failed["status"], "completed");
+        assert_eq!(failed["conclusion"], "failure");
+        assert_eq!(
+            failed["output"]["title"],
+            "foxguard scan could not complete"
+        );
+        assert!(failed["output"]["summary"]
+            .as_str()
+            .is_some_and(|summary| summary.contains("clone timed out")));
+
+        let superseded = superseded_check_run_payload();
+        assert_eq!(superseded["status"], "completed");
+        assert_eq!(superseded["conclusion"], "cancelled");
+    }
+
+    #[test]
     fn check_run_conclusion_comes_from_shared_policy() {
         let pass = evaluate(crate::pr_policy::PrSecurityPolicy::default(), vec![]);
         assert_eq!(
@@ -1214,7 +1510,7 @@ mod tests {
         let (policy, findings, expected) = crate::pr_policy::contract_fixture::mixed_v1();
         let evaluation = evaluate(policy, findings);
         let (payload, annotation_count) =
-            check_run_payload("head-sha", CheckRunPolicy::Evaluated(&evaluation), None);
+            check_run_payload(CheckRunPolicy::Evaluated(&evaluation), None);
 
         assert_eq!(evaluation.report(), &expected);
         assert_eq!(annotation_count, expected.included_findings);
@@ -1239,7 +1535,6 @@ mod tests {
             crate::pr_policy::PrPolicyNotEvaluatedReason::ChangedFilesFallback,
         );
         let (payload, _) = check_run_payload(
-            "head-sha",
             CheckRunPolicy::NotEvaluated {
                 findings: &findings,
                 policy: &partial,
@@ -1271,7 +1566,6 @@ mod tests {
         let changed_lines = HashMap::from([("src/app.js".to_string(), HashSet::from([3]))]);
 
         let (payload, annotation_count) = check_run_payload(
-            "head-sha",
             CheckRunPolicy::NotEvaluated {
                 findings: &findings,
                 policy: &partial,
@@ -2073,6 +2367,76 @@ mod tests {
         assert!(update_payload["body"]
             .as_str()
             .is_some_and(|body| body.contains("found no issues in this PR revision")));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fetches_authoritative_pull_request_head() {
+        let (url, handle) = spawn_mock_server(vec![(
+            reqwest::StatusCode::OK,
+            None,
+            r#"{"head":{"sha":"0123456789abcdef0123456789abcdef01234567"}}"#.to_string(),
+        )]);
+        let client = GitHubReviewClient::new(&url).expect("client should build");
+        let head = client
+            .pull_request_head_sha("octo-org/app", 7, "test-token")
+            .await
+            .expect("head request should succeed");
+        assert_eq!(head, "0123456789abcdef0123456789abcdef01234567");
+        assert_eq!(handle.join().expect("server thread should join"), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn finds_only_delivery_owned_check_run() {
+        let (url, handle) = spawn_mock_server(vec![(
+            reqwest::StatusCode::OK,
+            None,
+            r#"{"check_runs":[{"id":90,"external_id":"other"},{"id":91,"external_id":"foxguard-pr-scan:delivery-1"}]}"#.to_string(),
+        )]);
+        let client = GitHubReviewClient::new(&url).expect("client should build");
+        let check_run_id = client
+            .find_check_run_by_external_id(
+                "octo-org/app",
+                "0123456789abcdef0123456789abcdef01234567",
+                "foxguard-pr-scan:delivery-1",
+                "test-token",
+            )
+            .await
+            .expect("check lookup should succeed");
+        assert_eq!(check_run_id, Some(91));
+        assert_eq!(handle.join().expect("server thread should join"), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn finds_delivery_owned_check_run_on_a_later_page() {
+        let first_page: Vec<serde_json::Value> = (1_u64..=100)
+            .map(|id| serde_json::json!({"id": id, "external_id": format!("other-{id}")}))
+            .collect();
+        let responses = vec![
+            (
+                reqwest::StatusCode::OK,
+                Some("<http://example/check-runs?page=2>; rel=\"next\"".to_string()),
+                serde_json::json!({"check_runs": first_page}).to_string(),
+            ),
+            (
+                reqwest::StatusCode::OK,
+                None,
+                r#"{"check_runs":[{"id":101,"external_id":"foxguard-pr-scan:delivery-1"}]}"#
+                    .to_string(),
+            ),
+        ];
+        let (url, handle) = spawn_mock_server(responses);
+        let client = GitHubReviewClient::new(&url).expect("client should build");
+        let check_run_id = client
+            .find_check_run_by_external_id(
+                "octo-org/app",
+                "0123456789abcdef0123456789abcdef01234567",
+                "foxguard-pr-scan:delivery-1",
+                "test-token",
+            )
+            .await
+            .expect("paginated check lookup should succeed");
+        assert_eq!(check_run_id, Some(101));
+        assert_eq!(handle.join().expect("server thread should join"), 2);
     }
 
     #[tokio::test(flavor = "current_thread")]

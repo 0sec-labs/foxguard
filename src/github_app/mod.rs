@@ -19,5 +19,6 @@
 
 pub mod auth;
 pub mod installation_store;
+pub mod pull_request_job_store;
 pub mod review;
 pub mod webhook;

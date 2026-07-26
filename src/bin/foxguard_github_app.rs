@@ -12,13 +12,13 @@
 //! Run:      `FOXGUARD_WEBHOOK_SECRET=xxx FOXGUARD_BIND=0.0.0.0:8080 foxguard-github-app`
 //! Docker:   `docker build -f Dockerfile.github-app -t ghcr.io/0sec-labs/foxguard-github-app .`
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::State,
@@ -32,7 +32,13 @@ use foxguard::github_app::auth::{
     AppCredentials, AuthError, GitHubAppAuthClient, InstallationToken, InstallationTokenCache,
 };
 use foxguard::github_app::installation_store::{InstallationMetadataInput, InstallationStore};
-use foxguard::github_app::review::{CheckRunPolicy, GitHubReviewClient, SourceRevision};
+use foxguard::github_app::pull_request_job_store::{
+    CheckRunAttachment, CheckRunCreationState, PullRequestJobAdmission, PullRequestJobInput,
+    PullRequestJobStatus, PullRequestJobStore, StoredPullRequestJob,
+};
+use foxguard::github_app::review::{
+    CheckRunPolicy, GitHubReviewClient, ReviewError, SourceRevision,
+};
 use foxguard::github_app::webhook::{verify_signature, EventKind, SignatureError};
 use foxguard::pr_policy::{
     evaluate, resolve as resolve_pr_security_policy, PrPolicyEvaluation, PrPolicyNotEvaluated,
@@ -53,7 +59,7 @@ const MAX_BODY_BYTES: usize = 1 << 20; // 1 MiB
 const MAX_REPO_BYTES: u64 = 1_000_000_000; // 1 GB
 const DEFAULT_PR_QUEUE_CAPACITY: usize = 128;
 const DEFAULT_PR_WORKERS: usize = 4;
-const RECENT_DELIVERY_CAPACITY: usize = 4096;
+const LIFECYCLE_DRIVER_INTERVAL: Duration = Duration::from_secs(1);
 /// Wall-clock timeout applied to each `git` clone and each `foxguard` scan
 /// during a pull-request review, configurable via the
 /// `FOXGUARD_SCAN_TIMEOUT_SECS` environment variable (default `60`).
@@ -85,63 +91,321 @@ fn parse_positive_usize(value: Option<String>, default: usize) -> usize {
 }
 
 impl PullRequestDispatcher {
-    fn new(capacity: usize) -> (Self, tokio::sync::mpsc::Receiver<PullRequestJob>) {
+    fn new(
+        capacity: usize,
+        jobs: PullRequestJobStore,
+    ) -> (Self, tokio::sync::mpsc::Receiver<PullRequestJob>) {
         let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
         (
             Self {
                 sender,
                 admission: Arc::new(Mutex::new(PullRequestAdmission::default())),
+                jobs: Arc::new(Mutex::new(jobs)),
             },
             receiver,
         )
     }
 
-    fn try_dispatch(&self, job: PullRequestJob) -> DispatchOutcome {
-        let mut admission = self.admission.lock().unwrap_or_else(|e| e.into_inner());
-        if admission.recent_deliveries.contains(&job.delivery) {
-            return DispatchOutcome::DuplicateDelivery;
-        }
-        if admission.outstanding.contains(&job.key) {
-            admission.remember_delivery(job.delivery.clone());
-            admission.coalesced.insert(job.key.clone(), job);
-            return DispatchOutcome::Coalesced;
-        }
-
-        admission.outstanding.insert(job.key.clone());
-        let delivery = job.delivery.clone();
-        match self.sender.try_send(job) {
-            Ok(()) => {
-                admission.remember_delivery(delivery);
-                DispatchOutcome::Enqueued
-            }
-            Err(tokio::sync::mpsc::error::TrySendError::Full(job)) => {
-                admission.outstanding.remove(&job.key);
-                DispatchOutcome::QueueFull
-            }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(job)) => {
-                admission.outstanding.remove(&job.key);
-                DispatchOutcome::QueueClosed
-            }
+    /// Persist a delivery before acknowledging it. Scheduling happens only
+    /// after the caller has had a chance to create its queued check run.
+    fn admit(&self, job: PullRequestJob) -> Result<DispatchOutcome, String> {
+        let key = job.key.clone();
+        let admission = self.admission.lock().unwrap_or_else(|e| e.into_inner());
+        let was_outstanding = admission.outstanding.contains(&key);
+        let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        match jobs
+            .accept(job.into_store_input()?)
+            .map_err(|error| error.to_string())?
+        {
+            PullRequestJobAdmission::DuplicateDelivery => Ok(DispatchOutcome::DuplicateDelivery),
+            PullRequestJobAdmission::Accepted {
+                job,
+                cancellation_pending,
+            } => Ok(DispatchOutcome::Accepted {
+                job,
+                cancellation_pending,
+                coalesced: was_outstanding,
+            }),
         }
     }
 
-    fn complete(&self, key: &PullRequestKey) -> Option<PullRequestJob> {
+    fn recover(&self) -> Result<usize, String> {
+        let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        let recovered = jobs
+            .recover_non_terminal()
+            .map_err(|error| error.to_string())?;
+        Ok(recovered.queued.len())
+    }
+
+    fn schedule(&self) {
         let mut admission = self.admission.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(job) = admission.coalesced.remove(key) {
-            return Some(job);
+        let jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        self.schedule_locked(&mut admission, &jobs);
+    }
+
+    fn mark_running(&self, delivery: &str) -> Result<Option<StoredPullRequestJob>, String> {
+        let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        match jobs.mark_running(delivery) {
+            Ok(job) => Ok(job),
+            Err(error) if error.state_transition_applied() => {
+                let applied = jobs.job(delivery);
+                if matches!(
+                    applied.as_ref(),
+                    Some(job) if job.status == PullRequestJobStatus::Running
+                ) {
+                    warn!(
+                        delivery,
+                        %error,
+                        "pull_request job was durably marked running before directory sync failed; continuing it"
+                    );
+                    Ok(applied)
+                } else {
+                    Err(error.to_string())
+                }
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn mark_check_run_creation_started(
+        &self,
+        delivery: &str,
+    ) -> Result<Option<StoredPullRequestJob>, String> {
+        let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        match jobs.mark_check_run_creation_started(delivery) {
+            Ok(job) => Ok(job),
+            Err(error) if error.state_transition_applied() => {
+                let applied = jobs.job(delivery);
+                if matches!(
+                    applied.as_ref(),
+                    Some(job) if job.check_run_creation == CheckRunCreationState::Creating
+                ) {
+                    warn!(
+                        delivery,
+                        %error,
+                        "check-run creation intent was durably recorded before directory sync failed; continuing create"
+                    );
+                    Ok(applied)
+                } else {
+                    Err(error.to_string())
+                }
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn reset_check_run_creation(
+        &self,
+        delivery: &str,
+    ) -> Result<Option<StoredPullRequestJob>, String> {
+        let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        match jobs.reset_check_run_creation(delivery) {
+            Ok(job) => Ok(job),
+            Err(error) if error.state_transition_applied() => {
+                let applied = jobs.job(delivery);
+                if matches!(
+                    applied.as_ref(),
+                    Some(job) if job.check_run_creation == CheckRunCreationState::NotStarted
+                ) {
+                    warn!(
+                        delivery,
+                        %error,
+                        "check-run creation reset was durably applied before directory sync failed"
+                    );
+                    Ok(applied)
+                } else {
+                    Err(error.to_string())
+                }
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn attach_check_run_id(
+        &self,
+        delivery: &str,
+        check_run_id: u64,
+    ) -> Result<CheckRunAttachment, String> {
+        self.jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .attach_check_run_id(delivery, check_run_id)
+            .map_err(|error| error.to_string())
+    }
+
+    fn cancellation_pending_jobs(&self) -> Vec<StoredPullRequestJob> {
+        self.jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cancellation_pending_jobs()
+    }
+
+    fn is_cancellation_pending(&self, delivery: &str) -> bool {
+        self.cancellation_pending_jobs()
+            .iter()
+            .any(|job| job.delivery_id == delivery)
+    }
+
+    fn mark_cancellation_pending(
+        &self,
+        delivery: &str,
+        reason: String,
+    ) -> Result<Option<StoredPullRequestJob>, String> {
+        self.jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .mark_cancellation_pending(delivery, reason)
+            .map_err(|error| error.to_string())
+    }
+
+    fn mark_superseded(&self, delivery: &str) -> Result<Option<StoredPullRequestJob>, String> {
+        self.jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .mark_superseded(delivery)
+            .map_err(|error| error.to_string())
+    }
+
+    fn mark_completed(
+        &self,
+        delivery: &str,
+        finding_count: usize,
+    ) -> Result<Option<StoredPullRequestJob>, String> {
+        self.jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .mark_completed(delivery, finding_count)
+            .map_err(|error| error.to_string())
+    }
+
+    fn mark_failed(
+        &self,
+        delivery: &str,
+        error: String,
+    ) -> Result<Option<StoredPullRequestJob>, String> {
+        self.jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .mark_failed(delivery, error)
+            .map_err(|error| error.to_string())
+    }
+
+    fn mark_retry_pending(
+        &self,
+        delivery: &str,
+        error: String,
+    ) -> Result<Option<StoredPullRequestJob>, String> {
+        self.jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .mark_retry_pending(delivery, error)
+            .map_err(|error| error.to_string())
+    }
+
+    fn requeue_due_retry_pending(&self, now_unix_ms: u64) -> Result<usize, String> {
+        let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        match jobs.requeue_due_retry_pending(now_unix_ms) {
+            Ok(jobs) => Ok(jobs.len()),
+            Err(error) if error.state_transition_applied() => {
+                warn!(
+                    %error,
+                    "durable pull_request retry became queued before directory sync failed; scheduling it"
+                );
+                Ok(1)
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    /// Requeue only `Running` jobs whose worker finished without persisting a
+    /// successor state. The abandoned set is in-memory; restart recovery owns
+    /// all durable `Running` jobs.
+    fn requeue_abandoned_running(&self) -> Result<usize, String> {
+        let mut admission = self.admission.lock().unwrap_or_else(|e| e.into_inner());
+        let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        admission.abandoned_deliveries.retain(|delivery| {
+            matches!(
+                jobs.job(delivery),
+                Some(job) if job.status == PullRequestJobStatus::Running
+            )
+        });
+        let deliveries: Vec<_> = admission.abandoned_deliveries.iter().cloned().collect();
+        if deliveries.is_empty() {
+            return Ok(0);
+        }
+        match jobs.requeue_abandoned_running(&deliveries) {
+            Ok(requeued) => {
+                let requeued = requeued.len();
+                admission
+                    .abandoned_deliveries
+                    .retain(|delivery| matches!(jobs.job(delivery), Some(job) if job.status == PullRequestJobStatus::Running));
+                if requeued > 0 {
+                    self.schedule_locked(&mut admission, &jobs);
+                }
+                Ok(requeued)
+            }
+            Err(error) if error.state_transition_applied() => {
+                let before = admission.abandoned_deliveries.len();
+                admission
+                    .abandoned_deliveries
+                    .retain(|delivery| matches!(jobs.job(delivery), Some(job) if job.status == PullRequestJobStatus::Running));
+                let requeued = before.saturating_sub(admission.abandoned_deliveries.len());
+                if requeued > 0 {
+                    warn!(
+                        %error,
+                        requeued,
+                        "abandoned pull_request jobs requeued before directory sync failed; scheduling them"
+                    );
+                    self.schedule_locked(&mut admission, &jobs);
+                }
+                Ok(requeued)
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn defer_cancellation_retry(
+        &self,
+        delivery: &str,
+        error: String,
+    ) -> Result<Option<StoredPullRequestJob>, String> {
+        self.jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .defer_cancellation_retry(delivery, error)
+            .map_err(|error| error.to_string())
+    }
+
+    fn complete(&self, key: &PullRequestKey, delivery: &str) {
+        let mut admission = self.admission.lock().unwrap_or_else(|e| e.into_inner());
+        let jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(
+            jobs.job(delivery),
+            Some(job) if job.status == PullRequestJobStatus::Running
+        ) {
+            admission.abandoned_deliveries.insert(delivery.to_string());
+        } else {
+            admission.abandoned_deliveries.remove(delivery);
         }
         admission.outstanding.remove(key);
-        None
+        self.schedule_locked(&mut admission, &jobs);
     }
-}
 
-impl PullRequestAdmission {
-    fn remember_delivery(&mut self, delivery: String) {
-        self.recent_deliveries.insert(delivery.clone());
-        self.delivery_order.push_back(delivery);
-        while self.delivery_order.len() > RECENT_DELIVERY_CAPACITY {
-            if let Some(expired) = self.delivery_order.pop_front() {
-                self.recent_deliveries.remove(&expired);
+    fn schedule_locked(&self, admission: &mut PullRequestAdmission, jobs: &PullRequestJobStore) {
+        for stored in jobs.queued_jobs() {
+            let job = PullRequestJob::from_stored(&stored);
+            if admission.outstanding.contains(&job.key) {
+                continue;
+            }
+            match self.sender.try_send(job) {
+                Ok(()) => {
+                    admission.outstanding.insert(PullRequestKey {
+                        repository: stored.repository,
+                        number: stored.pull_request,
+                    });
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_))
+                | Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
             }
         }
     }
@@ -163,6 +427,14 @@ struct AppState {
     /// cache and both hit GitHub's `access_tokens` endpoint, wasting
     /// API quota.
     installation_token_locks: Arc<tokio::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
+    /// Serializes external transitions for one durable delivery so a late
+    /// `in_progress` PATCH cannot overwrite its cancellation.
+    check_lifecycle_locks: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    /// Serializes authoritative head lookup and durable admission for one PR,
+    /// closing the race where an older webhook finishes lookup after a newer
+    /// delivery has already superseded it.
+    pull_request_admission_locks:
+        Arc<tokio::sync::Mutex<HashMap<PullRequestKey, Arc<tokio::sync::Mutex<()>>>>>,
     installations: Arc<Mutex<InstallationStore>>,
     /// The on-disk path the install store persists to, captured at
     /// startup so a persistence failure can be logged with the exact
@@ -175,14 +447,17 @@ struct AppState {
 struct PullRequestDispatcher {
     sender: tokio::sync::mpsc::Sender<PullRequestJob>,
     admission: Arc<Mutex<PullRequestAdmission>>,
+    jobs: Arc<Mutex<PullRequestJobStore>>,
 }
 
 #[derive(Default)]
 struct PullRequestAdmission {
+    /// Keys currently in the mpsc queue or running on a worker. A newer
+    /// persisted delivery for one key waits until the current job finishes.
     outstanding: HashSet<PullRequestKey>,
-    coalesced: HashMap<PullRequestKey, PullRequestJob>,
-    recent_deliveries: HashSet<String>,
-    delivery_order: VecDeque<String>,
+    /// Deliveries whose worker ended while their durable job remained
+    /// `Running`; retried by the idle lifecycle driver after parent sync.
+    abandoned_deliveries: HashSet<String>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -191,7 +466,7 @@ struct PullRequestKey {
     number: u64,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct PullRequestJob {
     delivery: String,
     action: String,
@@ -201,13 +476,58 @@ struct PullRequestJob {
     key: PullRequestKey,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+impl PullRequestJob {
+    fn into_store_input(self) -> Result<PullRequestJobInput, String> {
+        let pull_request = self
+            .pull_request
+            .ok_or_else(|| "pull_request payload missing PR data".to_string())?;
+        let repository = self
+            .repository
+            .unwrap_or_else(|| pull_request.head.repo.clone());
+        Ok(PullRequestJobInput {
+            delivery_id: self.delivery,
+            action: self.action,
+            installation_id: self.installation_id,
+            repository: repository.full_name,
+            pull_request: pull_request.number,
+            head_sha: pull_request.head.sha,
+            clone_url: pull_request.head.repo.clone_url,
+        })
+    }
+
+    fn from_stored(job: &StoredPullRequestJob) -> Self {
+        let head_repo = GitHubRepository {
+            clone_url: job.clone_url.clone(),
+            full_name: job.repository.clone(),
+        };
+        Self {
+            delivery: job.delivery_id.clone(),
+            action: job.action.clone(),
+            installation_id: job.installation_id,
+            pull_request: Some(GitHubPullRequest {
+                number: job.pull_request,
+                head: GitHubPullRequestHead {
+                    sha: job.head_sha.clone(),
+                    repo: head_repo.clone(),
+                },
+            }),
+            repository: Some(head_repo),
+            key: PullRequestKey {
+                repository: job.repository.clone(),
+                number: job.pull_request,
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
 enum DispatchOutcome {
-    Enqueued,
+    Accepted {
+        job: Box<StoredPullRequestJob>,
+        cancellation_pending: Vec<StoredPullRequestJob>,
+        coalesced: bool,
+    },
     DuplicateDelivery,
-    Coalesced,
-    QueueFull,
-    QueueClosed,
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,19 +556,19 @@ struct GitHubAccount {
     kind: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct GitHubPullRequest {
     number: u64,
     head: GitHubPullRequestHead,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct GitHubPullRequestHead {
     sha: String,
     repo: GitHubRepository,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct GitHubRepository {
     clone_url: String,
     html_url: String,
@@ -286,6 +606,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let installations = InstallationStore::from_env_or_default()?;
     let installations_path: Arc<Path> = Arc::from(installations.path());
     info!(path = %installations_path.display(), "installation store ready");
+    let jobs = PullRequestJobStore::from_env_or_default()?;
+    info!(path = %jobs.path().display(), "pull-request job store ready");
     let queue_capacity = parse_positive_usize(
         std::env::var("FOXGUARD_PR_QUEUE_CAPACITY").ok(),
         DEFAULT_PR_QUEUE_CAPACITY,
@@ -295,19 +617,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         DEFAULT_PR_WORKERS,
     );
     let (pull_request_dispatcher, pull_request_receiver) =
-        PullRequestDispatcher::new(queue_capacity);
+        PullRequestDispatcher::new(queue_capacity, jobs);
     let state = AppState {
         webhook_secret: secret.into_bytes(),
         auth: GitHubAppAuthClient::new(credentials)?,
         review,
         installation_tokens: Arc::new(tokio::sync::Mutex::new(InstallationTokenCache::new())),
         installation_token_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        check_lifecycle_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        pull_request_admission_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         installations: Arc::new(Mutex::new(installations)),
         installations_path,
         pull_request_dispatcher,
     };
+    let recovered = state
+        .pull_request_dispatcher
+        .recover()
+        .map_err(std::io::Error::other)?;
+    reconcile_pending_job_checks(&state, unix_time_millis(), false).await;
+    state.pull_request_dispatcher.schedule();
     start_pull_request_workers(state.clone(), pull_request_receiver, worker_count);
-    info!(queue_capacity, worker_count, "pull_request workers ready");
+    start_pull_request_lifecycle_driver(state.clone());
+    info!(
+        queue_capacity,
+        worker_count, recovered, "pull_request workers ready"
+    );
 
     let app = Router::new()
         .route("/healthz", get(healthz))
@@ -356,51 +690,615 @@ fn start_pull_request_workers(
                     let mut receiver = receiver.lock().await;
                     receiver.recv().await
                 };
-                let Some(mut job) = job else {
+                let Some(job) = job else {
                     break;
                 };
 
-                loop {
-                    match process_pull_request_delivery(
-                        state.clone(),
-                        job.installation_id,
-                        job.pull_request,
-                        job.repository,
-                    )
-                    .await
-                    {
-                        Ok(result) => {
-                            info!(
+                let mut stored = match state.pull_request_dispatcher.mark_running(&job.delivery) {
+                    Ok(Some(job)) => job,
+                    Ok(None) => {
+                        // A newer delivery superseded this job while it was
+                        // waiting in the in-memory queue.
+                        state
+                            .pull_request_dispatcher
+                            .complete(&job.key, &job.delivery);
+                        continue;
+                    }
+                    Err(error) => {
+                        error!(
+                            delivery = job.delivery,
+                            worker_id,
+                            %error,
+                            "failed to persist pull_request job as running"
+                        );
+                        state
+                            .pull_request_dispatcher
+                            .complete(&job.key, &job.delivery);
+                        continue;
+                    }
+                };
+
+                match mark_job_check_running(&state, &mut stored).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        reconcile_pending_job_checks(&state, unix_time_millis(), true).await;
+                        state
+                            .pull_request_dispatcher
+                            .complete(&job.key, &job.delivery);
+                        continue;
+                    }
+                    Err(error) => {
+                        warn!(
+                            delivery = job.delivery,
+                            worker_id,
+                            %error,
+                            "failed to expose running pull_request scan status"
+                        );
+                        if let Err(store_error) = state
+                            .pull_request_dispatcher
+                            .mark_retry_pending(&job.delivery, error)
+                        {
+                            error!(
                                 delivery = job.delivery,
                                 worker_id,
-                                installation_id = job.installation_id,
-                                action = job.action,
-                                pr_number = result.pr_number,
-                                repo = result.repo,
-                                findings = result.findings_for_transport().len(),
-                                review_messages = result.review_messages,
-                                deleted_comments = result.deleted_comments,
-                                posted_check_annotations = result.posted_check_annotations,
-                                "pull_request scan complete and GitHub surfaces updated"
+                                %store_error,
+                                "failed to persist retryable pull_request check status"
                             );
                         }
-                        Err(error) => {
-                            warn!(
+                        state
+                            .pull_request_dispatcher
+                            .complete(&job.key, &job.delivery);
+                        continue;
+                    }
+                }
+
+                match process_pull_request_delivery(
+                    state.clone(),
+                    &job.delivery,
+                    job.installation_id,
+                    job.pull_request.clone(),
+                    job.repository.clone(),
+                    stored.check_run_id,
+                )
+                .await
+                {
+                    Ok(result) => {
+                        if let Err(error) = state
+                            .pull_request_dispatcher
+                            .mark_completed(&job.delivery, result.findings.len())
+                        {
+                            error!(
                                 delivery = job.delivery,
                                 worker_id,
-                                installation_id = job.installation_id,
                                 %error,
-                                "failed to process pull_request delivery"
+                                "failed to persist completed pull_request job"
+                            );
+                        }
+                        info!(
+                            delivery = job.delivery,
+                            worker_id,
+                            installation_id = job.installation_id,
+                            action = job.action,
+                            pr_number = result.pr_number,
+                            repo = result.repo,
+                            findings = result.findings.len(),
+                            posted_comments = result.posted_comments,
+                            deleted_comments = result.deleted_comments,
+                            posted_check_annotations = result.posted_check_annotations,
+                            "pull_request scan complete and GitHub surfaces updated"
+                        );
+                    }
+                    Err(PullRequestProcessError::CheckUpdateFailed(error)) => {
+                        if let Err(store_error) = state
+                            .pull_request_dispatcher
+                            .mark_retry_pending(&job.delivery, error.clone())
+                        {
+                            error!(
+                                delivery = job.delivery,
+                                worker_id,
+                                %store_error,
+                                "failed to persist retryable terminal check update"
+                            );
+                        }
+                        warn!(
+                            delivery = job.delivery,
+                            worker_id,
+                            %error,
+                            "retaining pull_request job until terminal check update can retry"
+                        );
+                    }
+                    Err(PullRequestProcessError::StaleHead { expected, actual }) => {
+                        let reason = format!(
+                            "authoritative pull_request head changed from {expected} to {actual}"
+                        );
+                        if let Err(error) = state
+                            .pull_request_dispatcher
+                            .mark_cancellation_pending(&job.delivery, reason)
+                        {
+                            error!(
+                                delivery = job.delivery,
+                                worker_id,
+                                %error,
+                                "failed to persist stale pull_request cancellation"
+                            );
+                        }
+                        reconcile_pending_job_checks(&state, unix_time_millis(), true).await;
+                        info!(
+                            delivery = job.delivery,
+                            worker_id,
+                            expected,
+                            actual,
+                            "skipped stale pull_request delivery before rendering"
+                        );
+                    }
+                    Err(PullRequestProcessError::Superseded) => {
+                        reconcile_pending_job_checks(&state, unix_time_millis(), true).await;
+                    }
+                    Err(PullRequestProcessError::Failed(error)) => {
+                        match complete_failed_job_check(&state, &stored, &error).await {
+                            Ok(()) => {
+                                if let Err(store_error) = state
+                                    .pull_request_dispatcher
+                                    .mark_failed(&job.delivery, error.clone())
+                                {
+                                    error!(
+                                        delivery = job.delivery,
+                                        worker_id,
+                                        %store_error,
+                                        "failed to persist pull_request job failure"
+                                    );
+                                }
+                            }
+                            Err(status_error) => {
+                                warn!(
+                                    delivery = job.delivery,
+                                    worker_id,
+                                    %status_error,
+                                    "failed to expose pull_request scan failure status"
+                                );
+                                if let Err(store_error) = state
+                                    .pull_request_dispatcher
+                                    .mark_retry_pending(&job.delivery, status_error)
+                                {
+                                    error!(
+                                        delivery = job.delivery,
+                                        worker_id,
+                                        %store_error,
+                                        "failed to persist retryable failure check update"
+                                    );
+                                }
+                            }
+                        }
+                        warn!(
+                            delivery = job.delivery,
+                            worker_id,
+                            installation_id = job.installation_id,
+                            %error,
+                            "failed to process pull_request delivery"
+                        );
+                    }
+                }
+                state
+                    .pull_request_dispatcher
+                    .complete(&job.key, &job.delivery);
+            }
+        }));
+    }
+}
+
+fn unix_time_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+/// Drive persisted lifecycle work even when no more webhooks arrive. Retry
+/// deadlines live in the store, so a restart cannot lose the outbox intent.
+async fn drive_pending_lifecycle(state: &AppState, now_unix_ms: u64) {
+    reconcile_pending_job_checks(state, now_unix_ms, false).await;
+    match state
+        .pull_request_dispatcher
+        .requeue_due_retry_pending(now_unix_ms)
+    {
+        Ok(requeued) if requeued > 0 => {
+            info!(requeued, "requeued durable pull_request lifecycle retries");
+            state.pull_request_dispatcher.schedule();
+        }
+        Ok(_) => {}
+        Err(error) => warn!(%error, "failed to requeue durable pull_request lifecycle retries"),
+    }
+    match state.pull_request_dispatcher.requeue_abandoned_running() {
+        Ok(requeued) if requeued > 0 => {
+            info!(requeued, "requeued abandoned durable pull_request workers");
+        }
+        Ok(_) => {}
+        Err(error) => warn!(%error, "failed to requeue abandoned pull_request workers"),
+    }
+}
+
+fn start_pull_request_lifecycle_driver(state: AppState) {
+    std::mem::drop(tokio::spawn(async move {
+        let mut interval = tokio::time::interval(LIFECYCLE_DRIVER_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            drive_pending_lifecycle(&state, unix_time_millis()).await;
+        }
+    }));
+}
+
+fn check_run_external_id(delivery_id: &str) -> String {
+    format!("foxguard-pr-scan:{delivery_id}")
+}
+
+async fn job_check_lifecycle_lock(
+    state: &AppState,
+    delivery_id: &str,
+) -> tokio::sync::OwnedMutexGuard<()> {
+    let lock = {
+        let mut locks = state.check_lifecycle_locks.lock().await;
+        locks
+            .entry(delivery_id.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
+    lock.lock_owned().await
+}
+
+async fn pull_request_admission_lock(
+    state: &AppState,
+    key: &PullRequestKey,
+) -> tokio::sync::OwnedMutexGuard<()> {
+    let lock = {
+        let mut locks = state.pull_request_admission_locks.lock().await;
+        locks
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
+    lock.lock_owned().await
+}
+
+fn check_create_definitely_did_not_happen(error: &ReviewError) -> bool {
+    match error {
+        ReviewError::Http(error) => {
+            error.is_connect()
+                || error
+                    .status()
+                    .is_some_and(|status| status.is_client_error())
+        }
+        ReviewError::InvalidApiBaseUrl(_)
+        | ReviewError::InvalidRepository(_)
+        | ReviewError::InvalidEndpoint(_) => true,
+    }
+}
+async fn ensure_queued_job_check_unlocked(
+    state: &AppState,
+    job: &StoredPullRequestJob,
+) -> Result<Option<CheckRunAttachment>, String> {
+    if state
+        .pull_request_dispatcher
+        .is_cancellation_pending(&job.delivery_id)
+    {
+        return Ok(None);
+    }
+    let token = installation_token_for(state, job.installation_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let external_id = check_run_external_id(&job.delivery_id);
+    let check_run_id = match state
+        .review
+        .find_check_run_by_external_id(&job.repository, &job.head_sha, &external_id, &token)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        Some(check_run_id) => check_run_id,
+        None if job.check_run_creation != CheckRunCreationState::NotStarted => {
+            return Err(
+                "queued check-run creation is not yet observable; retrying external-id lookup"
+                    .to_string(),
+            );
+        }
+        None => {
+            let Some(creation) = state
+                .pull_request_dispatcher
+                .mark_check_run_creation_started(&job.delivery_id)?
+            else {
+                return Ok(None);
+            };
+            debug_assert_eq!(creation.check_run_creation, CheckRunCreationState::Creating);
+            match state
+                .review
+                .create_queued_check_run(&job.repository, &job.head_sha, &external_id, &token)
+                .await
+            {
+                Ok(check_run_id) => check_run_id,
+                Err(error) => {
+                    if check_create_definitely_did_not_happen(&error) {
+                        if let Err(reset_error) = state
+                            .pull_request_dispatcher
+                            .reset_check_run_creation(&job.delivery_id)
+                        {
+                            warn!(
+                                delivery = job.delivery_id,
+                                %reset_error,
+                                "failed to clear definitely-unsubmitted check-run creation intent"
                             );
                         }
                     }
-                    match state.pull_request_dispatcher.complete(&job.key) {
-                        Some(coalesced) => job = coalesced,
-                        None => break,
+                    return Err(error.to_string());
+                }
+            }
+        }
+    };
+    state
+        .pull_request_dispatcher
+        .attach_check_run_id(&job.delivery_id, check_run_id)
+        .map(Some)
+}
+
+async fn create_queued_job_check(
+    state: &AppState,
+    job: &StoredPullRequestJob,
+) -> Result<Option<CheckRunAttachment>, String> {
+    let _guard = job_check_lifecycle_lock(state, &job.delivery_id).await;
+    ensure_queued_job_check_unlocked(state, job).await
+}
+
+/// Returns `false` if a newer delivery has already made this check-run's
+/// cancellation authoritative. The lifecycle lock ensures any cancellation
+/// PATCH that races this running PATCH is sent afterwards.
+async fn mark_job_check_running(
+    state: &AppState,
+    job: &mut StoredPullRequestJob,
+) -> Result<bool, String> {
+    let _guard = job_check_lifecycle_lock(state, &job.delivery_id).await;
+    if state
+        .pull_request_dispatcher
+        .is_cancellation_pending(&job.delivery_id)
+    {
+        return Ok(false);
+    }
+    if job.check_run_id.is_none() {
+        match ensure_queued_job_check_unlocked(state, job).await? {
+            Some(CheckRunAttachment::Attached(persisted)) => {
+                job.check_run_id = persisted.check_run_id
+            }
+            Some(CheckRunAttachment::CancellationPending(_))
+            | Some(CheckRunAttachment::IgnoredTerminal)
+            | Some(CheckRunAttachment::Missing)
+            | None => return Ok(false),
+        }
+    }
+    if state
+        .pull_request_dispatcher
+        .is_cancellation_pending(&job.delivery_id)
+    {
+        return Ok(false);
+    }
+    let token = installation_token_for(state, job.installation_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    state
+        .review
+        .mark_check_run_running(
+            &job.repository,
+            job.check_run_id.expect("check run id is set"),
+            &token,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+async fn complete_failed_job_check(
+    state: &AppState,
+    job: &StoredPullRequestJob,
+    error: &str,
+) -> Result<(), String> {
+    let _guard = job_check_lifecycle_lock(state, &job.delivery_id).await;
+    if state
+        .pull_request_dispatcher
+        .is_cancellation_pending(&job.delivery_id)
+    {
+        return Ok(());
+    }
+    let check_run_id = match job.check_run_id {
+        Some(check_run_id) => check_run_id,
+        None => match ensure_queued_job_check_unlocked(state, job).await? {
+            Some(CheckRunAttachment::Attached(persisted)) => persisted
+                .check_run_id
+                .expect("persisted check attachment has an id"),
+            Some(CheckRunAttachment::CancellationPending(_))
+            | Some(CheckRunAttachment::IgnoredTerminal)
+            | Some(CheckRunAttachment::Missing)
+            | None => return Ok(()),
+        },
+    };
+    let token = installation_token_for(state, job.installation_id)
+        .await
+        .map_err(|token_error| token_error.to_string())?;
+    state
+        .review
+        .complete_failed_check_run(&job.repository, check_run_id, error, &token)
+        .await
+        .map_err(|status_error| status_error.to_string())
+}
+
+/// Record a retryable cancellation failure without allowing an idle process
+/// to strand the persisted job forever.
+fn defer_cancellation_retry(state: &AppState, job: &StoredPullRequestJob, error: String) {
+    if let Err(store_error) = state
+        .pull_request_dispatcher
+        .defer_cancellation_retry(&job.delivery_id, error)
+    {
+        warn!(
+            delivery = job.delivery_id,
+            %store_error,
+            "failed to persist cancellation lifecycle retry"
+        );
+    }
+}
+
+/// Reconcile persisted cancellation requests. Calls made from an event may
+/// force the first attempt; the idle lifecycle driver honors each durable
+/// backoff deadline.
+async fn reconcile_pending_job_checks(state: &AppState, now_unix_ms: u64, force: bool) {
+    for job in state.pull_request_dispatcher.cancellation_pending_jobs() {
+        if !force && !job.retry_is_due(now_unix_ms) {
+            continue;
+        }
+        let _guard = job_check_lifecycle_lock(state, &job.delivery_id).await;
+        if !state
+            .pull_request_dispatcher
+            .is_cancellation_pending(&job.delivery_id)
+        {
+            continue;
+        }
+        let token = match installation_token_for(state, job.installation_id).await {
+            Ok(token) => token,
+            Err(error) => {
+                warn!(
+                    delivery = job.delivery_id,
+                    %error,
+                    "failed to obtain token for cancellation-pending pull_request scan"
+                );
+                defer_cancellation_retry(
+                    state,
+                    &job,
+                    format!("failed to obtain cancellation token: {error}"),
+                );
+                continue;
+            }
+        };
+        let check_run_id = match job.check_run_id {
+            Some(check_run_id) => Some(check_run_id),
+            None => {
+                let external_id = check_run_external_id(&job.delivery_id);
+                match state
+                    .review
+                    .find_check_run_by_external_id(
+                        &job.repository,
+                        &job.head_sha,
+                        &external_id,
+                        &token,
+                    )
+                    .await
+                {
+                    Ok(Some(check_run_id)) => {
+                        match state
+                            .pull_request_dispatcher
+                            .attach_check_run_id(&job.delivery_id, check_run_id)
+                        {
+                            Ok(_) => Some(check_run_id),
+                            Err(error) => {
+                                warn!(
+                                    delivery = job.delivery_id,
+                                    %error,
+                                    "failed to persist recovered pull_request check-run id"
+                                );
+                                defer_cancellation_retry(
+                                    state,
+                                    &job,
+                                    format!("failed to persist recovered check-run id: {error}"),
+                                );
+                                None
+                            }
+                        }
+                    }
+                    Ok(None) if job.check_run_creation == CheckRunCreationState::NotStarted => {
+                        // No create request was ever started, so there is no
+                        // external check that needs a cancellation PATCH.
+                        if let Err(error) = state
+                            .pull_request_dispatcher
+                            .mark_superseded(&job.delivery_id)
+                        {
+                            warn!(
+                                delivery = job.delivery_id,
+                                %error,
+                                "failed to persist no-check supersession"
+                            );
+                            defer_cancellation_retry(
+                                state,
+                                &job,
+                                format!("failed to persist no-check supersession: {error}"),
+                            );
+                        } else {
+                            tracing::debug!(
+                                delivery = job.delivery_id,
+                                "terminalized superseded delivery whose check creation never began"
+                            );
+                        }
+                        None
+                    }
+                    Ok(None) => {
+                        // `Creating` is durable evidence that a POST may have
+                        // reached GitHub even if its response was lost. A
+                        // single list miss is not proof that no check exists.
+                        defer_cancellation_retry(
+                            state,
+                            &job,
+                            "created check is not yet observable".to_string(),
+                        );
+                        None
+                    }
+                    Err(error) => {
+                        warn!(
+                            delivery = job.delivery_id,
+                            %error,
+                            "failed to look up cancellation-pending pull_request check"
+                        );
+                        defer_cancellation_retry(
+                            state,
+                            &job,
+                            format!("failed to look up cancellation-pending check: {error}"),
+                        );
+                        None
                     }
                 }
             }
-        }));
+        };
+        let Some(check_run_id) = check_run_id else {
+            continue;
+        };
+        match state
+            .review
+            .complete_superseded_check_run(&job.repository, check_run_id, &token)
+            .await
+        {
+            Ok(()) => {
+                if let Err(error) = state
+                    .pull_request_dispatcher
+                    .mark_superseded(&job.delivery_id)
+                {
+                    warn!(
+                        delivery = job.delivery_id,
+                        %error,
+                        "failed to persist terminalized superseded pull_request job"
+                    );
+                    defer_cancellation_retry(
+                        state,
+                        &job,
+                        format!("failed to persist terminalized cancellation: {error}"),
+                    );
+                }
+            }
+            Err(error) => {
+                warn!(
+                    delivery = job.delivery_id,
+                    %error,
+                    "failed to cancel superseded pull_request check; retaining retryable state"
+                );
+                defer_cancellation_retry(
+                    state,
+                    &job,
+                    format!("failed to cancel superseded check: {error}"),
+                );
+            }
+        }
     }
 }
 
@@ -418,9 +1316,10 @@ fn pull_request_key(payload: &GitHubWebhookPayload) -> Option<PullRequestKey> {
 
 /// Webhook handler. Verifies the GitHub HMAC, parses the event type
 /// from the `X-GitHub-Event` header, and dispatches to a per-kind
-/// stub. All paths return 202 except for verification failures
-/// (401) and oversized / unparseable inputs (400) — keeping retry
-/// semantics correct on GitHub's end.
+/// stub. Accepted deliveries return 202; a valid pull-request delivery whose
+/// authoritative head cannot be checked or whose durable write fails returns
+/// 503 so GitHub retries it. Verification failures return 401 and oversized or
+/// unparseable inputs return 400.
 async fn webhook(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -514,46 +1413,103 @@ async fn webhook(
                     if let Some(key) = pull_request_key(&payload) {
                         let repo = key.repository.clone();
                         let pr_number = key.number;
-                        let outcome = state.pull_request_dispatcher.try_dispatch(PullRequestJob {
-                            delivery: delivery.to_string(),
-                            action,
-                            installation_id,
-                            pull_request: payload.pull_request,
-                            repository: payload.repository,
-                            key,
-                        });
-                        match outcome {
-                            DispatchOutcome::Enqueued => info!(
-                                delivery,
+                        let expected_head = payload
+                            .pull_request
+                            .as_ref()
+                            .expect("pull_request_key requires pull_request data")
+                            .head
+                            .sha
+                            .clone();
+                        let outcome = match admit_authoritative_pull_request(
+                            &state,
+                            PullRequestJob {
+                                delivery: delivery.to_string(),
+                                action,
                                 installation_id,
-                                repo,
-                                pr_number,
-                                "pull_request delivery queued"
-                            ),
-                            DispatchOutcome::DuplicateDelivery => tracing::debug!(
-                                delivery,
-                                repo,
-                                pr_number,
-                                "duplicate pull_request delivery acknowledged"
-                            ),
-                            DispatchOutcome::Coalesced => info!(
-                                delivery,
-                                repo,
-                                pr_number,
-                                "pull_request delivery coalesced behind active scan"
-                            ),
-                            DispatchOutcome::QueueFull => warn!(
-                                delivery,
-                                repo,
-                                pr_number,
-                                "pull_request queue full; delivery acknowledged without enqueue"
-                            ),
-                            DispatchOutcome::QueueClosed => error!(
-                                delivery,
-                                repo,
-                                pr_number,
-                                "pull_request queue unavailable; delivery acknowledged without enqueue"
-                            ),
+                                pull_request: payload.pull_request,
+                                repository: payload.repository,
+                                key,
+                            },
+                        )
+                        .await
+                        {
+                            Ok(outcome) => outcome,
+                            Err(PullRequestProcessError::StaleHead { actual, .. }) => {
+                                info!(
+                                    delivery,
+                                    installation_id,
+                                    repo,
+                                    pr_number,
+                                    expected_head,
+                                    actual,
+                                    "ignored delayed pull_request delivery before it could supersede current work"
+                                );
+                                return StatusCode::ACCEPTED;
+                            }
+                            Err(error) => {
+                                error!(
+                                    delivery,
+                                    installation_id,
+                                    repo,
+                                    pr_number,
+                                    %error,
+                                    "failed to validate authoritative pull_request head before admission"
+                                );
+                                return StatusCode::SERVICE_UNAVAILABLE;
+                            }
+                        };
+                        match outcome {
+                            DispatchOutcome::DuplicateDelivery => {
+                                // A prior atomic rename can be visible even
+                                // when its directory sync reported an error.
+                                // GitHub's retry then sees a duplicate, but it
+                                // must still wake that durable queued job.
+                                state.pull_request_dispatcher.schedule();
+                                tracing::debug!(
+                                    delivery,
+                                    repo,
+                                    pr_number,
+                                    "duplicate pull_request delivery acknowledged"
+                                );
+                            }
+                            DispatchOutcome::Accepted {
+                                job,
+                                cancellation_pending,
+                                coalesced,
+                            } => {
+                                if let Err(error) = create_queued_job_check(&state, &job).await {
+                                    warn!(
+                                        delivery,
+                                        installation_id,
+                                        repo,
+                                        pr_number,
+                                        %error,
+                                        "pull_request job is durable but queued status was not posted"
+                                    );
+                                }
+                                reconcile_pending_job_checks(&state, unix_time_millis(), true)
+                                    .await;
+                                state.pull_request_dispatcher.schedule();
+                                if coalesced {
+                                    info!(
+                                        delivery,
+                                        installation_id,
+                                        repo,
+                                        pr_number,
+                                        cancellation_pending = cancellation_pending.len(),
+                                        "pull_request delivery coalesced behind active scan"
+                                    );
+                                } else {
+                                    info!(
+                                        delivery,
+                                        installation_id,
+                                        repo,
+                                        pr_number,
+                                        cancellation_pending = cancellation_pending.len(),
+                                        "pull_request delivery persisted and queued"
+                                    );
+                                }
+                            }
                         }
                     } else {
                         warn!(delivery, "pull_request event missing PR or repository data");
@@ -688,17 +1644,163 @@ impl PullRequestScanResult {
 }
 
 #[derive(Debug)]
+enum PullRequestProcessError {
+    Failed(String),
+    /// Review/scan work completed, but GitHub has not accepted its terminal
+    /// check-run update. The durable job must remain retryable.
+    CheckUpdateFailed(String),
+    StaleHead {
+        expected: String,
+        actual: String,
+    },
+    Superseded,
+}
+
+impl std::fmt::Display for PullRequestProcessError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Failed(error) => f.write_str(error),
+            Self::CheckUpdateFailed(error) => {
+                write!(f, "terminal pull_request check update failed: {error}")
+            }
+            Self::StaleHead { expected, actual } => write!(
+                f,
+                "pull_request head changed from queued {expected} to authoritative {actual}"
+            ),
+            Self::Superseded => f.write_str("pull_request delivery was superseded"),
+        }
+    }
+}
+
+impl From<String> for PullRequestProcessError {
+    fn from(error: String) -> Self {
+        Self::Failed(error)
+    }
+}
+
+fn validate_authoritative_pull_request_head(
+    expected: &str,
+    actual: String,
+) -> Result<(), PullRequestProcessError> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(PullRequestProcessError::StaleHead {
+            expected: expected.to_string(),
+            actual,
+        })
+    }
+}
+
+async fn ensure_authoritative_pull_request_head(
+    state: &AppState,
+    repository: &str,
+    pull_request: u64,
+    expected_head: &str,
+    installation_token: &str,
+) -> Result<(), PullRequestProcessError> {
+    let actual = state
+        .review
+        .pull_request_head_sha(repository, pull_request, installation_token)
+        .await
+        .map_err(|error| PullRequestProcessError::Failed(error.to_string()))?;
+    validate_authoritative_pull_request_head(expected_head, actual)
+}
+
+/// Atomically order a webhook's authoritative-head observation and its
+/// durable admission relative to other deliveries for the same pull request.
+async fn admit_authoritative_pull_request(
+    state: &AppState,
+    job: PullRequestJob,
+) -> Result<DispatchOutcome, PullRequestProcessError> {
+    let expected_head = job
+        .pull_request
+        .as_ref()
+        .ok_or_else(|| {
+            PullRequestProcessError::Failed("pull_request payload missing PR data".to_string())
+        })?
+        .head
+        .sha
+        .clone();
+    let _guard = pull_request_admission_lock(state, &job.key).await;
+    let token = installation_token_for(state, job.installation_id)
+        .await
+        .map_err(|error| PullRequestProcessError::Failed(error.to_string()))?;
+    ensure_authoritative_pull_request_head(
+        state,
+        &job.key.repository,
+        job.key.number,
+        &expected_head,
+        &token,
+    )
+    .await?;
+    state
+        .pull_request_dispatcher
+        .admit(job)
+        .map_err(PullRequestProcessError::Failed)
+}
+
+#[derive(Debug)]
 struct CloneTarget {
     url: String,
     auth_header_key: String,
 }
 
+/// Prevent a newer delivery from superseding a validated head while this
+/// delivery renders or removes its review comments.
+async fn validate_and_render_pull_request_review(
+    state: &AppState,
+    delivery_id: &str,
+    result: &mut PullRequestScanResult,
+    installation_token: &str,
+    changed_lines: Option<&HashMap<String, HashSet<usize>>>,
+) -> Result<(), PullRequestProcessError> {
+    let key = PullRequestKey {
+        repository: result.repo.clone(),
+        number: result.pr_number,
+    };
+    let _gate = pull_request_admission_lock(state, &key).await;
+    ensure_authoritative_pull_request_head(
+        state,
+        &result.repo,
+        result.pr_number,
+        &result.head_sha,
+        installation_token,
+    )
+    .await?;
+    if state
+        .pull_request_dispatcher
+        .is_cancellation_pending(delivery_id)
+    {
+        return Err(PullRequestProcessError::Superseded);
+    }
+    let source_revision = SourceRevision::new(&result.head_repo_web_url, &result.head_sha)
+        .map_err(|error| error.to_string())?;
+    let review = state
+        .review
+        .post_pull_request_review(
+            &result.repo,
+            result.pr_number,
+            result.findings_for_transport(),
+            &source_revision,
+            installation_token,
+            changed_lines,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    result.review_messages = review.review_messages;
+    result.deleted_comments = review.deleted_comments;
+    Ok(())
+}
+
 async fn process_pull_request_delivery(
     state: AppState,
+    delivery_id: &str,
     installation_id: u64,
     pull_request: Option<GitHubPullRequest>,
     repository: Option<GitHubRepository>,
-) -> Result<PullRequestScanResult, String> {
+    check_run_id: Option<u64>,
+) -> Result<PullRequestScanResult, PullRequestProcessError> {
     let pull_request =
         pull_request.ok_or_else(|| "pull_request payload missing PR data".to_string())?;
     let repository =
@@ -709,6 +1811,14 @@ async fn process_pull_request_delivery(
 
     let pr_number = pull_request.number;
     let repo_full_name = repository.full_name.clone();
+    ensure_authoritative_pull_request_head(
+        &state,
+        &repo_full_name,
+        pr_number,
+        &pull_request.head.sha,
+        &token,
+    )
+    .await?;
 
     // Fetch the PR's changed lines BEFORE scanning so the scan can be
     // diff-scoped to just the changed files — while still cloning the full
@@ -745,46 +1855,38 @@ async fn process_pull_request_delivery(
     })
     .await
     .map_err(|error| format!("pull_request scan task failed: {error}"))??;
-    let source_revision = SourceRevision::new(&result.head_repo_web_url, &result.head_sha)
-        .map_err(|error| error.to_string())?;
-
-    let review = state
-        .review
-        .post_pull_request_review(
-            &result.repo,
-            result.pr_number,
-            result.findings_for_transport(),
-            &source_revision,
-            &token,
-            changed_lines.as_ref(),
+    validate_and_render_pull_request_review(
+        &state,
+        delivery_id,
+        &mut result,
+        &token,
+        changed_lines.as_ref(),
+    )
+    .await?;
+    let _check_lifecycle_guard = job_check_lifecycle_lock(&state, delivery_id).await;
+    if state
+        .pull_request_dispatcher
+        .is_cancellation_pending(delivery_id)
+    {
+        return Err(PullRequestProcessError::Superseded);
+    }
+    let check_run_id = check_run_id.ok_or_else(|| {
+        PullRequestProcessError::CheckUpdateFailed(
+            "queued check-run id was not persisted before terminal update".to_string(),
         )
-        .await
-        .map_err(|error| error.to_string())?;
-    result.review_messages = review.review_messages;
-    result.deleted_comments = review.deleted_comments;
-    match state
+    })?;
+    let check_run = state
         .review
-        .post_check_run(
+        .complete_check_run(
             &result.repo,
-            &result.head_sha,
+            check_run_id,
             result.check_run_policy(),
             &token,
             changed_lines.as_ref(),
         )
         .await
-    {
-        Ok(check_run) => {
-            result.posted_check_annotations = check_run.posted_annotations;
-        }
-        Err(error) => {
-            warn!(
-                repo = result.repo,
-                pr_number = result.pr_number,
-                %error,
-                "failed to post foxguard check run"
-            );
-        }
-    }
+        .map_err(|error| PullRequestProcessError::CheckUpdateFailed(error.to_string()))?;
+    result.posted_check_annotations = check_run.posted_annotations;
     Ok(result)
 }
 
@@ -1253,14 +2355,30 @@ async fn remove_cached_installation_token(state: &AppState, installation_id: u64
 #[cfg(test)]
 mod tests {
     use super::*;
+    use foxguard::github_app::pull_request_job_store::PullRequestJobStatus;
 
-    fn pull_request_job(delivery: &str, repository: &str, number: u64) -> PullRequestJob {
+    fn pull_request_job(
+        delivery: &str,
+        repository: &str,
+        number: u64,
+        head_sha: &str,
+    ) -> PullRequestJob {
+        let head_repo = GitHubRepository {
+            clone_url: format!("https://github.com/{repository}.git"),
+            full_name: repository.to_string(),
+        };
         PullRequestJob {
             delivery: delivery.to_string(),
             action: "synchronize".to_string(),
             installation_id: 1,
-            pull_request: None,
-            repository: None,
+            pull_request: Some(GitHubPullRequest {
+                number,
+                head: GitHubPullRequestHead {
+                    sha: head_sha.to_string(),
+                    repo: head_repo.clone(),
+                },
+            }),
+            repository: Some(head_repo),
             key: PullRequestKey {
                 repository: repository.to_string(),
                 number,
@@ -1268,83 +2386,1339 @@ mod tests {
         }
     }
 
-    #[test]
-    fn pull_request_dispatcher_applies_backpressure_without_leaking_admission() {
-        let (dispatcher, mut receiver) = PullRequestDispatcher::new(1);
-        assert_eq!(
-            dispatcher.try_dispatch(pull_request_job("delivery-1", "owner/repo", 1)),
-            DispatchOutcome::Enqueued
-        );
-        assert_eq!(
-            dispatcher.try_dispatch(pull_request_job("delivery-2", "owner/repo", 2)),
-            DispatchOutcome::QueueFull
-        );
+    fn dispatcher() -> (
+        tempfile::TempDir,
+        PullRequestDispatcher,
+        tokio::sync::mpsc::Receiver<PullRequestJob>,
+    ) {
+        let dir = tempfile::tempdir().expect("tempdir should be created");
+        let store = PullRequestJobStore::open(dir.path().join("pull-request-jobs.json"))
+            .expect("job store should open");
+        let (dispatcher, receiver) = PullRequestDispatcher::new(1, store);
+        (dir, dispatcher, receiver)
+    }
 
-        let first = receiver.try_recv().expect("first job should be queued");
-        assert!(dispatcher.complete(&first.key).is_none());
-        assert_eq!(
-            dispatcher.try_dispatch(pull_request_job("delivery-2", "owner/repo", 2)),
-            DispatchOutcome::Enqueued,
-            "a queue-full rejection must release its admission key"
+    fn test_state_with_review(
+        jobs: PullRequestJobStore,
+        review_url: &str,
+    ) -> (tempfile::TempDir, AppState) {
+        let dir = tempfile::tempdir().expect("tempdir should be created");
+        let installations = InstallationStore::open(dir.path().join("installations.json"))
+            .expect("installation store should open");
+        let installations_path: Arc<Path> = Arc::from(installations.path());
+        let (pull_request_dispatcher, _receiver) = PullRequestDispatcher::new(1, jobs);
+        let credentials = AppCredentials::new(1, b"not-a-real-private-key".to_vec());
+        (
+            dir,
+            AppState {
+                webhook_secret: b"test-webhook-secret".to_vec(),
+                auth: GitHubAppAuthClient::new(credentials).expect("auth client should build"),
+                review: GitHubReviewClient::new(review_url).expect("review client should build"),
+                installation_tokens: Arc::new(tokio::sync::Mutex::new(
+                    InstallationTokenCache::new(),
+                )),
+                installation_token_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                check_lifecycle_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                pull_request_admission_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                installations: Arc::new(Mutex::new(installations)),
+                installations_path,
+                pull_request_dispatcher,
+            },
+        )
+    }
+
+    fn signed_pull_request_headers(body: &[u8]) -> HeaderMap {
+        use hmac::Mac;
+
+        let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(b"test-webhook-secret")
+            .expect("HMAC key should be accepted");
+        mac.update(body);
+        let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "X-Hub-Signature-256",
+            signature.parse().expect("signature header should parse"),
+        );
+        headers.insert(
+            "X-GitHub-Event",
+            "pull_request".parse().expect("event header should parse"),
+        );
+        headers.insert(
+            "X-GitHub-Delivery",
+            "delivery-1".parse().expect("delivery header should parse"),
+        );
+        headers
+    }
+
+    fn spawn_check_update_server(status: u16) -> (String, std::thread::JoinHandle<()>) {
+        spawn_json_response_server(status, "{}")
+    }
+
+    fn spawn_json_response_server(
+        status: u16,
+        body: &'static str,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("mock server should bind");
+        let port = listener
+            .local_addr()
+            .expect("mock server should report its address")
+            .port();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("mock server should accept");
+            let mut request = [0_u8; 8192];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("mock server should respond");
+            stream.flush().expect("mock server should flush");
+        });
+        (format!("http://127.0.0.1:{port}/"), handle)
+    }
+
+    fn spawn_json_response_then_refuse(
+        status: u16,
+        body: &'static str,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("mock server should bind");
+        let port = listener
+            .local_addr()
+            .expect("mock server should report its address")
+            .port();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("mock server should accept");
+            drop(listener);
+            let mut request = [0_u8; 8192];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("mock server should respond");
+            stream.flush().expect("mock server should flush");
+        });
+        (format!("http://127.0.0.1:{port}/"), handle)
+    }
+
+    fn spawn_json_response_sequence(
+        responses: Vec<(u16, String)>,
+    ) -> (String, std::thread::JoinHandle<usize>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("mock server should bind");
+        let port = listener
+            .local_addr()
+            .expect("mock server should report its address")
+            .port();
+        let handle = std::thread::spawn(move || {
+            let mut served = 0;
+            for (status, body) in responses {
+                let (mut stream, _) = listener.accept().expect("mock server should accept");
+                let mut request = [0_u8; 8192];
+                let _ = stream.read(&mut request);
+                let response = format!(
+                    "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("mock server should respond");
+                stream.flush().expect("mock server should flush");
+                served += 1;
+            }
+            served
+        });
+        (format!("http://127.0.0.1:{port}/"), handle)
+    }
+
+    fn spawn_json_or_disconnect_sequence(
+        responses: Vec<Option<(u16, String)>>,
+    ) -> (String, std::thread::JoinHandle<usize>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("mock server should bind");
+        let port = listener
+            .local_addr()
+            .expect("mock server should report its address")
+            .port();
+        let handle = std::thread::spawn(move || {
+            let mut served = 0;
+            for response in responses {
+                let (mut stream, _) = listener.accept().expect("mock server should accept");
+                let mut request = [0_u8; 8192];
+                let _ = stream.read(&mut request);
+                if let Some((status, body)) = response {
+                    let response = format!(
+                        "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    stream
+                        .write_all(response.as_bytes())
+                        .expect("mock server should respond");
+                    stream.flush().expect("mock server should flush");
+                }
+                served += 1;
+            }
+            served
+        });
+        (format!("http://127.0.0.1:{port}/"), handle)
+    }
+
+    fn spawn_interleaved_head_server(
+        first_body: &'static str,
+        second_body: &'static str,
+    ) -> (
+        String,
+        tokio::sync::oneshot::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+        tokio::sync::mpsc::UnboundedReceiver<()>,
+        std::thread::JoinHandle<()>,
+    ) {
+        use std::io::{ErrorKind, Read, Write};
+        use std::net::{TcpListener, TcpStream};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("mock server should bind");
+        listener
+            .set_nonblocking(true)
+            .expect("mock server should become nonblocking");
+        let port = listener
+            .local_addr()
+            .expect("mock server should report its address")
+            .port();
+        let (first_started_tx, first_started_rx) = tokio::sync::oneshot::channel();
+        let (release_first_tx, release_first_rx) = std::sync::mpsc::channel();
+        let (second_request_tx, second_request_rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = std::thread::spawn(move || {
+            let read_request = |stream: &mut TcpStream| {
+                let mut request = [0_u8; 8192];
+                let _ = stream.read(&mut request);
+            };
+            let write_response = |stream: &mut TcpStream, body: &str| {
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("mock server should respond");
+                stream.flush().expect("mock server should flush");
+            };
+            let mut first = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("mock server should accept first request: {error}"),
+                }
+            };
+            read_request(&mut first);
+            let _ = first_started_tx.send(());
+            let mut second = None;
+            let mut second_was_read = false;
+            loop {
+                if release_first_rx.try_recv().is_ok() {
+                    break;
+                }
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        read_request(&mut stream);
+                        let _ = second_request_tx.send(());
+                        second_was_read = true;
+                        second = Some(stream);
+                    }
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("mock server should accept second request: {error}"),
+                }
+            }
+            write_response(&mut first, first_body);
+            let (mut second, second_was_read) = match second {
+                Some(stream) => (stream, second_was_read),
+                None => (
+                    loop {
+                        match listener.accept() {
+                            Ok((stream, _)) => break stream,
+                            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                                std::thread::sleep(Duration::from_millis(1));
+                            }
+                            Err(error) => {
+                                panic!("mock server should accept second request: {error}")
+                            }
+                        }
+                    },
+                    false,
+                ),
+            };
+            if !second_was_read {
+                read_request(&mut second);
+                let _ = second_request_tx.send(());
+            }
+            write_response(&mut second, second_body);
+        });
+        (
+            format!("http://127.0.0.1:{port}/"),
+            first_started_rx,
+            release_first_tx,
+            second_request_rx,
+            handle,
+        )
+    }
+
+    fn spawn_interleaved_render_server(
+        older_head: &'static str,
+        newer_head: &'static str,
+    ) -> (
+        String,
+        tokio::sync::oneshot::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+        tokio::sync::mpsc::UnboundedReceiver<()>,
+        std::thread::JoinHandle<()>,
+    ) {
+        use std::io::{ErrorKind, Read, Write};
+        use std::net::{TcpListener, TcpStream};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("mock server should bind");
+        listener
+            .set_nonblocking(true)
+            .expect("mock server should become nonblocking");
+        let port = listener
+            .local_addr()
+            .expect("mock server should report its address")
+            .port();
+        let (render_started_tx, render_started_rx) = tokio::sync::oneshot::channel();
+        let (release_render_tx, release_render_rx) = std::sync::mpsc::channel();
+        let (newer_request_tx, newer_request_rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = std::thread::spawn(move || {
+            let read_request = |stream: &mut TcpStream| {
+                let mut request = [0_u8; 8192];
+                let _ = stream.read(&mut request);
+            };
+            let write_response = |stream: &mut TcpStream, body: &str| {
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("mock server should respond");
+                stream.flush().expect("mock server should flush");
+            };
+            let accept_stream = || loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("mock server should accept request: {error}"),
+                }
+            };
+
+            let mut head_lookup = accept_stream();
+            read_request(&mut head_lookup);
+            write_response(&mut head_lookup, older_head);
+
+            let mut render_request = accept_stream();
+            read_request(&mut render_request);
+            let _ = render_started_tx.send(());
+            let mut newer_request = None;
+            loop {
+                if release_render_rx.try_recv().is_ok() {
+                    break;
+                }
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        read_request(&mut stream);
+                        let _ = newer_request_tx.send(());
+                        newer_request = Some(stream);
+                    }
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("mock server should accept newer request: {error}"),
+                }
+            }
+            write_response(&mut render_request, "[]");
+
+            let (mut newer_request, was_read) = match newer_request {
+                Some(stream) => (stream, true),
+                None => (accept_stream(), false),
+            };
+            if !was_read {
+                read_request(&mut newer_request);
+                let _ = newer_request_tx.send(());
+            }
+            write_response(&mut newer_request, newer_head);
+        });
+        (
+            format!("http://127.0.0.1:{port}/"),
+            render_started_rx,
+            release_render_tx,
+            newer_request_rx,
+            handle,
+        )
+    }
+
+    async fn remember_test_token(state: &AppState) {
+        state.installation_tokens.lock().await.remember(
+            1,
+            InstallationToken {
+                token: "test-installation-token".to_string(),
+                expires_at: "2099-01-01T00:00:00Z".to_string(),
+            },
+            std::time::SystemTime::now(),
         );
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn pull_request_dispatcher_dedupes_concurrent_repository_pr_jobs() {
-        let (dispatcher, mut receiver) = PullRequestDispatcher::new(32);
-        let barrier = Arc::new(tokio::sync::Barrier::new(17));
-        let mut handles = Vec::new();
-        for index in 0..16 {
-            let dispatcher = dispatcher.clone();
-            let barrier = Arc::clone(&barrier);
-            handles.push(tokio::spawn(async move {
-                barrier.wait().await;
-                dispatcher.try_dispatch(pull_request_job(
-                    &format!("delivery-{index}"),
-                    "owner/repo",
-                    7,
-                ))
-            }));
+    #[tokio::test(flavor = "current_thread")]
+    async fn persistence_failure_returns_503_and_retry_is_admitted_durably() {
+        let body = br#"{
+            "action":"synchronize",
+            "installation":{"id":1},
+            "pull_request":{
+                "number":7,
+                "head":{
+                    "sha":"0123456789abcdef0123456789abcdef01234567",
+                    "repo":{
+                        "clone_url":"https://github.com/owner/repo.git",
+                        "full_name":"owner/repo"
+                    }
+                }
+            },
+            "repository":{
+                "clone_url":"https://github.com/owner/repo.git",
+                "full_name":"owner/repo"
+            }
+        }"#;
+        let failed_dir = tempfile::tempdir().expect("failure tempdir should be created");
+        let failed_path = failed_dir.path().join("pull-request-jobs.json");
+        let failing_store =
+            PullRequestJobStore::open(failed_path.clone()).expect("store should open");
+        std::fs::create_dir(&failed_path).expect("target directory injects rename failure");
+        let (failed_url, failed_server) = spawn_json_response_server(
+            200,
+            r#"{"head":{"sha":"0123456789abcdef0123456789abcdef01234567"}}"#,
+        );
+        let (_state_dir, failed_state) = test_state_with_review(failing_store, &failed_url);
+        remember_test_token(&failed_state).await;
+        assert_eq!(
+            webhook(
+                State(failed_state),
+                signed_pull_request_headers(body),
+                axum::body::Bytes::from_static(body),
+            )
+            .await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        failed_server
+            .join()
+            .expect("authoritative head mock server should join");
+
+        let retry_dir = tempfile::tempdir().expect("retry tempdir should be created");
+        let retry_path = retry_dir.path().join("pull-request-jobs.json");
+        let retry_store =
+            PullRequestJobStore::open(retry_path.clone()).expect("retry store should open");
+        let (retry_url, retry_server) = spawn_json_response_server(
+            200,
+            r#"{"head":{"sha":"0123456789abcdef0123456789abcdef01234567"}}"#,
+        );
+        let (_state_dir, retry_state) = test_state_with_review(retry_store, &retry_url);
+        remember_test_token(&retry_state).await;
+        assert_eq!(
+            webhook(
+                State(retry_state),
+                signed_pull_request_headers(body),
+                axum::body::Bytes::from_static(body),
+            )
+            .await,
+            StatusCode::ACCEPTED
+        );
+        retry_server
+            .join()
+            .expect("authoritative head mock server should join");
+        let durable = PullRequestJobStore::open(retry_path).expect("retry delivery should persist");
+        assert_eq!(durable.queued_jobs().len(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn delayed_webhook_head_does_not_supersede_authoritative_queued_head() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let job_path = job_dir.path().join("pull-request-jobs.json");
+        let mut store = PullRequestJobStore::open(job_path.clone()).expect("store should open");
+        assert!(matches!(
+            store.accept(PullRequestJobInput {
+                delivery_id: "current-delivery".to_string(),
+                action: "synchronize".to_string(),
+                installation_id: 1,
+                repository: "owner/repo".to_string(),
+                pull_request: 7,
+                head_sha: "89abcdef0123456789abcdef0123456789abcdef".to_string(),
+                clone_url: "https://github.com/owner/repo.git".to_string(),
+            }),
+            Ok(PullRequestJobAdmission::Accepted { .. })
+        ));
+        let (review_url, server) = spawn_json_response_server(
+            200,
+            r#"{"head":{"sha":"89abcdef0123456789abcdef0123456789abcdef"}}"#,
+        );
+        let (_state_dir, state) = test_state_with_review(store, &review_url);
+        remember_test_token(&state).await;
+        let delayed_body = br#"{
+            "action":"synchronize",
+            "installation":{"id":1},
+            "pull_request":{
+                "number":7,
+                "head":{
+                    "sha":"0123456789abcdef0123456789abcdef01234567",
+                    "repo":{
+                        "clone_url":"https://github.com/owner/repo.git",
+                        "full_name":"owner/repo"
+                    }
+                }
+            },
+            "repository":{
+                "clone_url":"https://github.com/owner/repo.git",
+                "full_name":"owner/repo"
+            }
+        }"#;
+        assert_eq!(
+            webhook(
+                State(state.clone()),
+                signed_pull_request_headers(delayed_body),
+                axum::body::Bytes::from_static(delayed_body),
+            )
+            .await,
+            StatusCode::ACCEPTED
+        );
+        server
+            .join()
+            .expect("authoritative head mock server should join");
+        assert!(
+            state
+                .pull_request_dispatcher
+                .cancellation_pending_jobs()
+                .is_empty(),
+            "a delayed webhook must not cancel the current head"
+        );
+        drop(state);
+        let durable = PullRequestJobStore::open(job_path).expect("current job should persist");
+        let queued = durable.queued_jobs();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].delivery_id, "current-delivery");
+        assert_eq!(
+            queued[0].head_sha,
+            "89abcdef0123456789abcdef0123456789abcdef"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn authoritative_lookup_and_admission_are_serialized_per_pull_request() {
+        const H1: &str = "0123456789abcdef0123456789abcdef01234567";
+        const H2: &str = "89abcdef0123456789abcdef0123456789abcdef";
+
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let job_path = job_dir.path().join("pull-request-jobs.json");
+        let store = PullRequestJobStore::open(job_path.clone()).expect("store should open");
+        let (review_url, first_started, release_first, mut second_request, server) =
+            spawn_interleaved_head_server(
+                r#"{"head":{"sha":"0123456789abcdef0123456789abcdef01234567"}}"#,
+                r#"{"head":{"sha":"89abcdef0123456789abcdef0123456789abcdef"}}"#,
+            );
+        let (_state_dir, state) = test_state_with_review(store, &review_url);
+        remember_test_token(&state).await;
+
+        let first_state = state.clone();
+        let first = tokio::spawn(async move {
+            admit_authoritative_pull_request(
+                &first_state,
+                pull_request_job("delivery-h1", "owner/repo", 7, H1),
+            )
+            .await
+        });
+        first_started
+            .await
+            .expect("first authoritative lookup should reach the server");
+
+        let second_state = state.clone();
+        let second = tokio::spawn(async move {
+            admit_authoritative_pull_request(
+                &second_state,
+                pull_request_job("delivery-h2", "owner/repo", 7, H2),
+            )
+            .await
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), second_request.recv())
+                .await
+                .is_err(),
+            "the later delivery must wait for the first lookup and admission gate"
+        );
+        release_first
+            .send(())
+            .expect("mock server should still await the first response release");
+
+        assert!(matches!(
+            first.await.expect("first admission task should join"),
+            Ok(DispatchOutcome::Accepted { .. })
+        ));
+        assert!(matches!(
+            second.await.expect("second admission task should join"),
+            Ok(DispatchOutcome::Accepted { .. })
+        ));
+        server.join().expect("interleaving mock server should join");
+
+        drop(state);
+        let durable =
+            PullRequestJobStore::open(job_path).expect("admitted deliveries should persist");
+        let queued = durable.queued_jobs();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].delivery_id, "delivery-h2");
+        let pending = durable.cancellation_pending_jobs();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].delivery_id, "delivery-h1");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn final_review_rendering_and_newer_admission_share_the_pull_request_gate() {
+        const H1: &str = "0123456789abcdef0123456789abcdef01234567";
+        const H2: &str = "89abcdef0123456789abcdef0123456789abcdef";
+
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let job_path = job_dir.path().join("pull-request-jobs.json");
+        let mut store = PullRequestJobStore::open(job_path).expect("store should open");
+        assert!(matches!(
+            store.accept(PullRequestJobInput {
+                delivery_id: "delivery-h1".to_string(),
+                action: "synchronize".to_string(),
+                installation_id: 1,
+                repository: "owner/repo".to_string(),
+                pull_request: 7,
+                head_sha: H1.to_string(),
+                clone_url: "https://github.com/owner/repo.git".to_string(),
+            }),
+            Ok(PullRequestJobAdmission::Accepted { .. })
+        ));
+        let (review_url, render_started, release_render, mut newer_request, server) =
+            spawn_interleaved_render_server(
+                r#"{"head":{"sha":"0123456789abcdef0123456789abcdef01234567"}}"#,
+                r#"{"head":{"sha":"89abcdef0123456789abcdef0123456789abcdef"}}"#,
+            );
+        let (_state_dir, state) = test_state_with_review(store, &review_url);
+        remember_test_token(&state).await;
+
+        let rendering_state = state.clone();
+        let rendering = tokio::spawn(async move {
+            let mut result = PullRequestScanResult {
+                pr_number: 7,
+                repo: "owner/repo".to_string(),
+                head_sha: H1.to_string(),
+                findings: Vec::new(),
+                posted_comments: 0,
+                deleted_comments: 0,
+                posted_check_annotations: 0,
+            };
+            validate_and_render_pull_request_review(
+                &rendering_state,
+                "delivery-h1",
+                &mut result,
+                "test-installation-token",
+                None,
+            )
+            .await
+            .map(|()| result)
+        });
+        render_started
+            .await
+            .expect("old-head render should reach the held review request");
+
+        let newer_state = state.clone();
+        let newer = tokio::spawn(async move {
+            admit_authoritative_pull_request(
+                &newer_state,
+                pull_request_job("delivery-h2", "owner/repo", 7, H2),
+            )
+            .await
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), newer_request.recv())
+                .await
+                .is_err(),
+            "newer admission must not cancel the old delivery while its review renders"
+        );
+        release_render
+            .send(())
+            .expect("mock server should still await render release");
+
+        let rendered = rendering
+            .await
+            .expect("render task should join")
+            .expect("old review should render before newer admission");
+        assert_eq!(rendered.posted_comments, 0);
+        assert_eq!(rendered.deleted_comments, 0);
+        assert!(matches!(
+            newer.await.expect("newer admission task should join"),
+            Ok(DispatchOutcome::Accepted { .. })
+        ));
+        server.join().expect("interleaving mock server should join");
+        let pending = state.pull_request_dispatcher.cancellation_pending_jobs();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].delivery_id, "delivery-h1");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_check_cancellation_is_reconciled_after_restart() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let job_path = job_dir.path().join("pull-request-jobs.json");
+        let mut store = PullRequestJobStore::open(job_path.clone()).expect("store should open");
+        let input = |delivery_id: &str, head_sha: &str| PullRequestJobInput {
+            delivery_id: delivery_id.to_string(),
+            action: "synchronize".to_string(),
+            installation_id: 1,
+            repository: "owner/repo".to_string(),
+            pull_request: 7,
+            head_sha: head_sha.to_string(),
+            clone_url: "https://github.com/owner/repo.git".to_string(),
+        };
+        let first = match store
+            .accept(input(
+                "delivery-1",
+                "0123456789abcdef0123456789abcdef01234567",
+            ))
+            .expect("first delivery should persist")
+        {
+            PullRequestJobAdmission::Accepted { job, .. } => *job,
+            PullRequestJobAdmission::DuplicateDelivery => panic!("first delivery must be accepted"),
+        };
+        store
+            .attach_check_run_id(&first.delivery_id, 91)
+            .expect("check attachment should persist");
+        assert!(matches!(
+            store.accept(input(
+                "delivery-2",
+                "89abcdef0123456789abcdef0123456789abcdef",
+            )),
+            Ok(PullRequestJobAdmission::Accepted { .. })
+        ));
+        drop(store);
+
+        let (failure_url, failure_server) = spawn_check_update_server(503);
+        let (failure_state_dir, failure_state) = test_state_with_review(
+            PullRequestJobStore::open(job_path.clone()).expect("store should reopen"),
+            &failure_url,
+        );
+        remember_test_token(&failure_state).await;
+        reconcile_pending_job_checks(&failure_state, unix_time_millis(), true).await;
+        failure_server
+            .join()
+            .expect("failure mock server should join");
+        assert_eq!(
+            failure_state
+                .pull_request_dispatcher
+                .cancellation_pending_jobs()
+                .len(),
+            1,
+            "a failed external cancellation must remain retryable"
+        );
+        drop(failure_state);
+        drop(failure_state_dir);
+
+        let (success_url, success_server) = spawn_check_update_server(200);
+        let (restart_state_dir, restart_state) = test_state_with_review(
+            PullRequestJobStore::open(job_path).expect("store should reopen after failure"),
+            &success_url,
+        );
+        restart_state
+            .pull_request_dispatcher
+            .recover()
+            .expect("restart recovery should persist");
+        remember_test_token(&restart_state).await;
+        reconcile_pending_job_checks(&restart_state, unix_time_millis(), true).await;
+        success_server
+            .join()
+            .expect("success mock server should join");
+        assert!(
+            restart_state
+                .pull_request_dispatcher
+                .cancellation_pending_jobs()
+                .is_empty(),
+            "a successful retry must terminalize the superseded job"
+        );
+        drop(restart_state_dir);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_terminal_check_patch_persists_a_retryable_job() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let job_path = job_dir.path().join("pull-request-jobs.json");
+        let mut store = PullRequestJobStore::open(job_path.clone()).expect("store should open");
+        let delivery_id = "delivery-1";
+        let input = PullRequestJobInput {
+            delivery_id: delivery_id.to_string(),
+            action: "synchronize".to_string(),
+            installation_id: 1,
+            repository: "owner/repo".to_string(),
+            pull_request: 7,
+            head_sha: "0123456789abcdef0123456789abcdef01234567".to_string(),
+            clone_url: "https://github.com/owner/repo.git".to_string(),
+        };
+        assert!(matches!(
+            store.accept(input),
+            Ok(PullRequestJobAdmission::Accepted { .. })
+        ));
+        let mut running = store
+            .mark_running(delivery_id)
+            .expect("running transition should persist")
+            .expect("queued job should become running");
+        store
+            .attach_check_run_id(delivery_id, 91)
+            .expect("check attachment should persist");
+        running.check_run_id = Some(91);
+
+        let (failure_url, failure_server) = spawn_check_update_server(503);
+        let (state_dir, state) = test_state_with_review(store, &failure_url);
+        remember_test_token(&state).await;
+        let terminal_update_error = complete_failed_job_check(&state, &running, "scan failed")
+            .await
+            .expect_err(
+                "a rejected terminal check PATCH must be surfaced to the durable job lifecycle",
+            );
+        failure_server
+            .join()
+            .expect("failure mock server should join");
+        let retry = state
+            .pull_request_dispatcher
+            .mark_retry_pending(delivery_id, terminal_update_error)
+            .expect("retry transition should persist")
+            .expect("running job should remain retryable");
+        assert_eq!(retry.status, PullRequestJobStatus::RetryPending);
+        drop(state);
+        drop(state_dir);
+
+        let mut restarted =
+            PullRequestJobStore::open(job_path).expect("retryable job should survive restart");
+        let recovered = restarted
+            .recover_non_terminal()
+            .expect("retryable job should requeue during restart recovery");
+        assert_eq!(recovered.queued.len(), 1);
+        assert_eq!(recovered.queued[0].delivery_id, delivery_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn lifecycle_driver_requeues_terminal_update_failures_without_restart() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let job_path = job_dir.path().join("pull-request-jobs.json");
+        let mut store = PullRequestJobStore::open(job_path).expect("store should open");
+        let delivery_id = "delivery-1";
+        assert!(matches!(
+            store.accept(PullRequestJobInput {
+                delivery_id: delivery_id.to_string(),
+                action: "synchronize".to_string(),
+                installation_id: 1,
+                repository: "owner/repo".to_string(),
+                pull_request: 7,
+                head_sha: "0123456789abcdef0123456789abcdef01234567".to_string(),
+                clone_url: "https://github.com/owner/repo.git".to_string(),
+            }),
+            Ok(PullRequestJobAdmission::Accepted { .. })
+        ));
+        store
+            .mark_running(delivery_id)
+            .expect("running transition should persist");
+        let retry = store
+            .mark_retry_pending(delivery_id, "terminal PATCH failed".to_string())
+            .expect("retry transition should persist")
+            .expect("running job should become retryable");
+        let retry_deadline = retry
+            .retry_not_before_unix_ms
+            .expect("retryable job should persist a deadline");
+        let (_state_dir, state) = test_state_with_review(store, "http://127.0.0.1:1/");
+
+        drive_pending_lifecycle(&state, retry_deadline).await;
+        let retried = state
+            .pull_request_dispatcher
+            .mark_running(delivery_id)
+            .expect("lifecycle driver should make the job runnable")
+            .expect("retryable job should requeue without restart");
+        assert_eq!(retried.attempts, 2);
+        let terminal = state
+            .pull_request_dispatcher
+            .mark_completed(delivery_id, 0)
+            .expect("successful retry should persist terminal state")
+            .expect("retried job should terminalize");
+        assert_eq!(terminal.status, PullRequestJobStatus::Succeeded);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn lifecycle_driver_retries_cancel_after_a_transient_failure_without_restart() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let job_path = job_dir.path().join("pull-request-jobs.json");
+        let mut store = PullRequestJobStore::open(job_path).expect("store should open");
+        let input = |delivery_id: &str, head_sha: &str| PullRequestJobInput {
+            delivery_id: delivery_id.to_string(),
+            action: "synchronize".to_string(),
+            installation_id: 1,
+            repository: "owner/repo".to_string(),
+            pull_request: 7,
+            head_sha: head_sha.to_string(),
+            clone_url: "https://github.com/owner/repo.git".to_string(),
+        };
+        let first = match store
+            .accept(input(
+                "delivery-1",
+                "0123456789abcdef0123456789abcdef01234567",
+            ))
+            .expect("first delivery should persist")
+        {
+            PullRequestJobAdmission::Accepted { job, .. } => *job,
+            PullRequestJobAdmission::DuplicateDelivery => panic!("first delivery must be accepted"),
+        };
+        store
+            .attach_check_run_id(&first.delivery_id, 91)
+            .expect("check attachment should persist");
+        assert!(matches!(
+            store.accept(input(
+                "delivery-2",
+                "89abcdef0123456789abcdef0123456789abcdef",
+            )),
+            Ok(PullRequestJobAdmission::Accepted { .. })
+        ));
+        let (review_url, server) =
+            spawn_json_response_sequence(vec![(503, "{}".to_string()), (200, "{}".to_string())]);
+        let (_state_dir, state) = test_state_with_review(store, &review_url);
+        remember_test_token(&state).await;
+
+        reconcile_pending_job_checks(&state, unix_time_millis(), true).await;
+        let retry = state.pull_request_dispatcher.cancellation_pending_jobs();
+        assert_eq!(retry.len(), 1);
+        let retry_deadline = retry[0]
+            .retry_not_before_unix_ms
+            .expect("failed cancellation should persist a backoff deadline");
+        drive_pending_lifecycle(&state, retry_deadline).await;
+        assert!(
+            state
+                .pull_request_dispatcher
+                .cancellation_pending_jobs()
+                .is_empty(),
+            "the idle lifecycle driver should terminalize after the retry succeeds"
+        );
+        assert_eq!(server.join().expect("mock server should join"), 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn persisted_creating_check_survives_a_lookup_miss_until_it_can_be_cancelled() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let job_path = job_dir.path().join("pull-request-jobs.json");
+        let mut store = PullRequestJobStore::open(job_path).expect("store should open");
+        let input = |delivery_id: &str, head_sha: &str| PullRequestJobInput {
+            delivery_id: delivery_id.to_string(),
+            action: "synchronize".to_string(),
+            installation_id: 1,
+            repository: "owner/repo".to_string(),
+            pull_request: 7,
+            head_sha: head_sha.to_string(),
+            clone_url: "https://github.com/owner/repo.git".to_string(),
+        };
+        let first = match store
+            .accept(input(
+                "delivery-1",
+                "0123456789abcdef0123456789abcdef01234567",
+            ))
+            .expect("first delivery should persist")
+        {
+            PullRequestJobAdmission::Accepted { job, .. } => *job,
+            PullRequestJobAdmission::DuplicateDelivery => panic!("first delivery must be accepted"),
+        };
+        store
+            .mark_check_run_creation_started(&first.delivery_id)
+            .expect("creation intent should persist");
+        assert!(matches!(
+            store.accept(input(
+                "delivery-2",
+                "89abcdef0123456789abcdef0123456789abcdef",
+            )),
+            Ok(PullRequestJobAdmission::Accepted { .. })
+        ));
+        let (review_url, server) = spawn_json_response_sequence(vec![
+            (200, r#"{"check_runs":[]}"#.to_string()),
+            (
+                200,
+                r#"{"check_runs":[{"id":91,"external_id":"foxguard-pr-scan:delivery-1"}]}"#
+                    .to_string(),
+            ),
+            (200, "{}".to_string()),
+        ]);
+        let (_state_dir, state) = test_state_with_review(store, &review_url);
+        remember_test_token(&state).await;
+
+        reconcile_pending_job_checks(&state, unix_time_millis(), true).await;
+        let pending = state.pull_request_dispatcher.cancellation_pending_jobs();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            pending[0].check_run_creation,
+            CheckRunCreationState::Creating
+        );
+        let retry_deadline = pending[0]
+            .retry_not_before_unix_ms
+            .expect("a lookup miss after creation intent must persist a retry");
+
+        drive_pending_lifecycle(&state, retry_deadline).await;
+        assert!(
+            state
+                .pull_request_dispatcher
+                .cancellation_pending_jobs()
+                .is_empty(),
+            "the later lookup must cancel the discovered check rather than leak it"
+        );
+        assert_eq!(server.join().expect("mock server should join"), 3);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn lost_queued_check_create_response_retries_lookup_without_a_second_post() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let job_path = job_dir.path().join("pull-request-jobs.json");
+        let mut store = PullRequestJobStore::open(job_path).expect("store should open");
+        let stored = match store
+            .accept(PullRequestJobInput {
+                delivery_id: "delivery-1".to_string(),
+                action: "synchronize".to_string(),
+                installation_id: 1,
+                repository: "owner/repo".to_string(),
+                pull_request: 7,
+                head_sha: "0123456789abcdef0123456789abcdef01234567".to_string(),
+                clone_url: "https://github.com/owner/repo.git".to_string(),
+            })
+            .expect("delivery should persist")
+        {
+            PullRequestJobAdmission::Accepted { job, .. } => *job,
+            PullRequestJobAdmission::DuplicateDelivery => panic!("delivery must be accepted"),
+        };
+        let (review_url, server) = spawn_json_or_disconnect_sequence(vec![
+            Some((200, r#"{"check_runs":[]}"#.to_string())),
+            None,
+            Some((200, r#"{"check_runs":[]}"#.to_string())),
+            Some((200, r#"{"check_runs":[]}"#.to_string())),
+        ]);
+        let (_state_dir, state) = test_state_with_review(store, &review_url);
+        remember_test_token(&state).await;
+
+        create_queued_job_check(&state, &stored)
+            .await
+            .expect_err("a dropped create response must leave the intent unresolved");
+        let mut running = state
+            .pull_request_dispatcher
+            .mark_running(&stored.delivery_id)
+            .expect("running transition should persist")
+            .expect("queued job should become running");
+        let lookup_error = mark_job_check_running(&state, &mut running)
+            .await
+            .expect_err("a creating check that is still absent must retry lookup");
+        assert!(lookup_error.contains("not yet observable"));
+        let retry = state
+            .pull_request_dispatcher
+            .mark_retry_pending(&stored.delivery_id, lookup_error)
+            .expect("retry transition should persist")
+            .expect("running job should become retryable");
+        assert_eq!(retry.status, PullRequestJobStatus::RetryPending);
+        assert_eq!(retry.check_run_creation, CheckRunCreationState::Creating);
+        let retry_deadline = retry
+            .retry_not_before_unix_ms
+            .expect("unresolved creation must persist a retry deadline");
+
+        drive_pending_lifecycle(&state, retry_deadline).await;
+        let mut retried = state
+            .pull_request_dispatcher
+            .mark_running(&stored.delivery_id)
+            .expect("lifecycle retry should persist")
+            .expect("retryable job should requeue without restart");
+        let lookup_error = mark_job_check_running(&state, &mut retried)
+            .await
+            .expect_err("the retried job must perform another lookup, not another create");
+        assert!(lookup_error.contains("not yet observable"));
+        assert_eq!(
+            server.join().expect("mock server should join"),
+            4,
+            "only the initial create POST may be sent"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn unsubmitted_queued_check_create_resets_intent_before_a_later_successful_post() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let job_path = job_dir.path().join("pull-request-jobs.json");
+        let mut store = PullRequestJobStore::open(job_path.clone()).expect("store should open");
+        let stored = match store
+            .accept(PullRequestJobInput {
+                delivery_id: "delivery-1".to_string(),
+                action: "synchronize".to_string(),
+                installation_id: 1,
+                repository: "owner/repo".to_string(),
+                pull_request: 7,
+                head_sha: "0123456789abcdef0123456789abcdef01234567".to_string(),
+                clone_url: "https://github.com/owner/repo.git".to_string(),
+            })
+            .expect("delivery should persist")
+        {
+            PullRequestJobAdmission::Accepted { job, .. } => *job,
+            PullRequestJobAdmission::DuplicateDelivery => panic!("delivery must be accepted"),
+        };
+        let (failed_url, failed_server) =
+            spawn_json_response_then_refuse(200, r#"{"check_runs":[]}"#);
+        let (failed_state_dir, failed_state) = test_state_with_review(store, &failed_url);
+        remember_test_token(&failed_state).await;
+        create_queued_job_check(&failed_state, &stored)
+            .await
+            .expect_err("a refused create connection must be reported");
+        failed_server
+            .join()
+            .expect("initial lookup mock server should join");
+        assert_eq!(
+            failed_state
+                .pull_request_dispatcher
+                .jobs
+                .lock()
+                .expect("job store lock should not poison")
+                .job(&stored.delivery_id)
+                .expect("durable job should remain visible")
+                .check_run_creation,
+            CheckRunCreationState::NotStarted,
+            "a definitely unsubmitted create must clear its durable intent"
+        );
+        drop(failed_state);
+        drop(failed_state_dir);
+
+        let retried_store = PullRequestJobStore::open(job_path).expect("store should reopen");
+        let retried = retried_store
+            .queued_jobs()
+            .into_iter()
+            .next()
+            .expect("job should remain queued for a later create");
+        let (success_url, success_server) = spawn_json_response_sequence(vec![
+            (200, r#"{"check_runs":[]}"#.to_string()),
+            (201, r#"{"id":91}"#.to_string()),
+        ]);
+        let (_success_state_dir, success_state) =
+            test_state_with_review(retried_store, &success_url);
+        remember_test_token(&success_state).await;
+        assert!(matches!(
+            create_queued_job_check(&success_state, &retried)
+                .await
+                .expect("a later lookup may safely create the check"),
+            Some(CheckRunAttachment::Attached(job)) if job.check_run_id == Some(91)
+        ));
+        assert_eq!(
+            success_server
+                .join()
+                .expect("successful create mock should join"),
+            2
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn superseded_delivery_without_an_observable_check_terminalizes_safely() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let job_path = job_dir.path().join("pull-request-jobs.json");
+        let mut store = PullRequestJobStore::open(job_path).expect("store should open");
+        let input = |delivery_id: &str, head_sha: &str| PullRequestJobInput {
+            delivery_id: delivery_id.to_string(),
+            action: "synchronize".to_string(),
+            installation_id: 1,
+            repository: "owner/repo".to_string(),
+            pull_request: 7,
+            head_sha: head_sha.to_string(),
+            clone_url: "https://github.com/owner/repo.git".to_string(),
+        };
+        assert!(matches!(
+            store.accept(input(
+                "delivery-1",
+                "0123456789abcdef0123456789abcdef01234567",
+            )),
+            Ok(PullRequestJobAdmission::Accepted { .. })
+        ));
+        assert!(matches!(
+            store.accept(input(
+                "delivery-2",
+                "89abcdef0123456789abcdef0123456789abcdef",
+            )),
+            Ok(PullRequestJobAdmission::Accepted { .. })
+        ));
+
+        let (review_url, server) = spawn_json_response_server(200, r#"{"check_runs":[]}"#);
+        let (_state_dir, state) = test_state_with_review(store, &review_url);
+        remember_test_token(&state).await;
+        reconcile_pending_job_checks(&state, unix_time_millis(), true).await;
+        server.join().expect("check lookup mock server should join");
+        assert!(
+            state
+                .pull_request_dispatcher
+                .cancellation_pending_jobs()
+                .is_empty(),
+            "a superseded delivery with no external check must not remain pending forever"
+        );
+    }
+
+    #[test]
+    fn dispatcher_keeps_newer_head_durable_until_active_scan_completes() {
+        let (_dir, dispatcher, mut receiver) = dispatcher();
+        let first = pull_request_job("delivery-1", "owner/repo", 7, "head-1");
+        match dispatcher.admit(first) {
+            Ok(DispatchOutcome::Accepted {
+                coalesced: false, ..
+            }) => {}
+            outcome => panic!("first delivery should persist: {outcome:?}"),
         }
+        dispatcher.schedule();
+        let active = receiver.try_recv().expect("first job should be queued");
+        dispatcher
+            .mark_running(&active.delivery)
+            .expect("running transition should persist");
+
+        let second = pull_request_job("delivery-2", "owner/repo", 7, "head-2");
+        match dispatcher.admit(second) {
+            Ok(DispatchOutcome::Accepted {
+                coalesced: true, ..
+            }) => {}
+            outcome => panic!("newer head should coalesce: {outcome:?}"),
+        }
+        dispatcher.schedule();
+        assert!(
+            receiver.try_recv().is_err(),
+            "active key blocks a second scan"
+        );
+
+        dispatcher.complete(&active.key, &active.delivery);
+        let follow_up = receiver.try_recv().expect("newer head should be scheduled");
+        let head = follow_up
+            .pull_request
+            .as_ref()
+            .map(|pull_request| pull_request.head.sha.as_str());
+        assert_eq!(head, Some("head-2"));
+    }
+
+    #[test]
+    fn dispatcher_requeues_abandoned_running_work_only_after_worker_completion() {
+        let (_dir, dispatcher, mut receiver) = dispatcher();
+        let job = pull_request_job("delivery-1", "owner/repo", 7, "head-1");
+        assert!(matches!(
+            dispatcher.admit(job),
+            Ok(DispatchOutcome::Accepted { .. })
+        ));
+        dispatcher.schedule();
+        let active = receiver.try_recv().expect("first job should be queued");
+        assert!(dispatcher
+            .mark_running(&active.delivery)
+            .expect("running transition should persist")
+            .is_some());
+        assert_eq!(
+            dispatcher
+                .requeue_abandoned_running()
+                .expect("active worker must not be requeued"),
+            0
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "an active worker must not be duplicated"
+        );
+
+        // Simulate the worker finishing after a later durable transition
+        // failed, leaving its already-persisted `Running` state behind.
+        dispatcher.complete(&active.key, &active.delivery);
+        assert_eq!(
+            dispatcher
+                .requeue_abandoned_running()
+                .expect("finished running work should be recovered"),
+            1
+        );
+        assert_eq!(
+            receiver
+                .try_recv()
+                .expect("recovered job should be scheduled")
+                .delivery,
+            "delivery-1"
+        );
+    }
+
+    #[test]
+    fn dispatcher_dedupes_persisted_delivery_ids() {
+        let (_dir, dispatcher, _receiver) = dispatcher();
+        let first = pull_request_job("same-delivery", "owner/repo", 7, "head-1");
+        assert!(matches!(
+            dispatcher.admit(first),
+            Ok(DispatchOutcome::Accepted { .. })
+        ));
+        let duplicate = pull_request_job("same-delivery", "owner/repo", 7, "head-1");
+        assert!(matches!(
+            dispatcher.admit(duplicate),
+            Ok(DispatchOutcome::DuplicateDelivery)
+        ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_newer_delivery_and_late_check_attachment_retain_cancellation() {
+        let (_dir, dispatcher, _receiver) = dispatcher();
+        let first = match dispatcher
+            .admit(pull_request_job("delivery-1", "owner/repo", 7, "head-1"))
+            .expect("first delivery should persist")
+        {
+            DispatchOutcome::Accepted { job, .. } => job,
+            DispatchOutcome::DuplicateDelivery => panic!("first delivery must be accepted"),
+        };
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let attach_dispatcher = dispatcher.clone();
+        let attach_delivery = first.delivery_id.clone();
+        let attach_barrier = Arc::clone(&barrier);
+        let attachment = tokio::spawn(async move {
+            attach_barrier.wait().await;
+            attach_dispatcher.attach_check_run_id(&attach_delivery, 91)
+        });
+        let admit_dispatcher = dispatcher.clone();
+        let admit_barrier = Arc::clone(&barrier);
+        let newer_delivery = tokio::spawn(async move {
+            admit_barrier.wait().await;
+            admit_dispatcher.admit(pull_request_job("delivery-2", "owner/repo", 7, "head-2"))
+        });
         barrier.wait().await;
 
-        let mut enqueued = 0;
-        let mut coalesced = 0;
-        for handle in handles {
-            match handle.await.expect("dispatch task should not panic") {
-                DispatchOutcome::Enqueued => enqueued += 1,
-                DispatchOutcome::Coalesced => coalesced += 1,
-                outcome => panic!("unexpected dispatch outcome: {outcome:?}"),
-            }
-        }
-        assert_eq!(enqueued, 1);
-        assert_eq!(coalesced, 15);
-        let first = receiver.try_recv().expect("one job should enter the queue");
-        assert!(receiver.try_recv().is_err());
-        let latest = dispatcher
-            .complete(&first.key)
-            .expect("concurrent updates should coalesce into one follow-up");
-        assert_eq!(latest.key, first.key);
-        assert!(dispatcher.complete(&latest.key).is_none());
+        assert!(matches!(
+            attachment.await.expect("attachment task should join"),
+            Ok(CheckRunAttachment::Attached(_)) | Ok(CheckRunAttachment::CancellationPending(_))
+        ));
+        assert!(matches!(
+            newer_delivery.await.expect("admission task should join"),
+            Ok(DispatchOutcome::Accepted { .. })
+        ));
+        let pending = dispatcher.cancellation_pending_jobs();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].delivery_id, "delivery-1");
+        assert_eq!(pending[0].check_run_id, Some(91));
     }
 
     #[test]
-    fn pull_request_dispatcher_remembers_completed_delivery_ids() {
-        let (dispatcher, mut receiver) = PullRequestDispatcher::new(2);
-        let original = pull_request_job("same-delivery", "owner/repo", 7);
-        assert_eq!(dispatcher.try_dispatch(original), DispatchOutcome::Enqueued);
-        let completed = receiver.try_recv().expect("job should be queued");
-        assert!(dispatcher.complete(&completed.key).is_none());
-
-        assert_eq!(
-            dispatcher.try_dispatch(pull_request_job("same-delivery", "owner/repo", 7)),
-            DispatchOutcome::DuplicateDelivery
-        );
-        assert_eq!(
-            dispatcher.try_dispatch(pull_request_job("new-delivery", "owner/repo", 7)),
-            DispatchOutcome::Enqueued,
-            "a newer delivery may rescan a completed PR"
-        );
+    fn authoritative_newer_head_marks_delayed_delivery_stale_before_rendering() {
+        let error = validate_authoritative_pull_request_head(
+            "0123456789abcdef0123456789abcdef01234567",
+            "89abcdef0123456789abcdef0123456789abcdef".to_string(),
+        )
+        .expect_err("a delayed delivery must not render against a newer head");
+        assert!(matches!(
+            error,
+            PullRequestProcessError::StaleHead { expected, actual }
+                if expected == "0123456789abcdef0123456789abcdef01234567"
+                    && actual == "89abcdef0123456789abcdef0123456789abcdef"
+        ));
     }
 
     #[test]
