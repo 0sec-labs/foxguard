@@ -38,6 +38,37 @@ foxguard baseline --output .foxguard/baseline.json
 foxguard --baseline .foxguard/baseline.json .
 ```
 
+## Semgrep migration readiness
+
+Assess an imported YAML file or directory with the same production importer used
+by `--rules`; FoxGuard never invokes Semgrep for this report:
+
+```sh
+foxguard semgrep-readiness ./semgrep-pack
+foxguard semgrep-readiness ./semgrep-pack --format json
+```
+
+The versioned JSON contract (`schema_version: "1.0.0"`) is defined by
+[`schemas/semgrep-migration-readiness-v1.schema.json`](../schemas/semgrep-migration-readiness-v1.schema.json).
+It contains one deterministically ordered record per source rule: `source_id`,
+normalized source `language`, `disposition`, and stable `reason_code`. The
+terminal form totals records by language and reason before listing them.
+
+- `exact` / `exact`: the production importer emitted a live rule and recorded
+  no reduction. This is **not** an empirical Semgrep-finding-parity claim.
+- `degraded`: the importer emitted a live rule after recording a reduction,
+  such as ignored `fix-regex` (`unsupported-fix-regex`), a skipped unsupported
+  `pattern-not-regex`, or a partially unsupported language declaration.
+- `skipped`: the importer emitted no live rule, for example because it routed
+  the rule to an engine bridge, could not map its language, or dropped the
+  original file transaction (`file-import-failed`).
+
+Readiness imports each original file as one transaction. A strict error in one
+source rule marks every source rule in that file as skipped, matching
+`--rules`. A malformed YAML document cannot expose individual source rules, so
+it appears once as `<invalid-document>` rather than disappearing from the
+inventory.
+
 ## Supported today
 
 Top-level structure:

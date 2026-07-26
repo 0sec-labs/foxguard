@@ -1,0 +1,24 @@
+rules:
+  - id: ""
+    message: Empty ID emitted
+    severity: WARNING
+    languages: [python]
+    pattern: eval(...)
+
+  - id: ""
+    message: Empty ID skipped
+    severity: WARNING
+    languages: [lua]
+    pattern: eval(...)
+
+  - id: duplicate/source
+    message: Duplicate ID emitted
+    severity: WARNING
+    languages: [python]
+    pattern: exec(...)
+
+  - id: duplicate/source
+    message: Duplicate ID skipped
+    severity: WARNING
+    languages: [lua]
+    pattern: exec(...)

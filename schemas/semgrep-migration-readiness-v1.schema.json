@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://foxguard.dev/schemas/semgrep-migration-readiness-v1.schema.json",
+  "title": "Foxguard Semgrep Migration Readiness v1",
+  "type": "object",
+  "required": ["schema_version", "records"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_id", "language", "disposition", "reason_code"],
+        "properties": {
+          "source_id": { "type": "string" },
+          "language": { "type": "string" },
+          "disposition": { "enum": ["exact", "degraded", "skipped"] },
+          "reason_code": {
+            "enum": [
+              "exact",
+              "unsupported-fix-regex",
+              "unsupported-language",
+              "unsupported-mode",
+              "unsupported-construct",
+              "unsupported-taint-shape",
+              "unsupported-pattern-either-regex",
+              "unsupported-pattern-not-regex",
+              "unsupported-pattern-regex",
+              "engine-codeql",
+              "engine-coccinelle",
+              "invalid-rule",
+              "invalid-document",
+              "file-import-failed",
+              "loader-rejected"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

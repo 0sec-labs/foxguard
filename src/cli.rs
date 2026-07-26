@@ -595,6 +595,26 @@ pub struct ScaArgs {
     pub sca_cache: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum SemgrepReadinessFormat {
+    Terminal,
+    Json,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct SemgrepReadinessArgs {
+    /// Semgrep YAML rule file or directory to assess with FoxGuard's importer
+    pub rules: String,
+
+    /// Report format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: SemgrepReadinessFormat,
+
+    /// Write JSON output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
+}
+
 #[derive(Args, Debug, Clone)]
 pub struct InternalAddScanIgnoreRuleArgs {
     /// Scan root used to resolve relative finding paths.
@@ -746,6 +766,9 @@ pub enum Command {
     Pqc(PqcArgs),
     /// Dependency vulnerability audit using OSV
     Sca(ScaArgs),
+    /// Report migration readiness for an imported Semgrep rule pack
+    #[command(name = "semgrep-readiness")]
+    SemgrepReadiness(SemgrepReadinessArgs),
     /// Internal machine-facing helpers used by editor integrations.
     #[command(hide = true, name = "internal")]
     Internal(InternalArgs),

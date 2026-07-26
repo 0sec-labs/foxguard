@@ -5,7 +5,9 @@ use crate::{Finding, Language, Severity};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use regex::Regex;
 use serde::Deserialize;
-use std::collections::HashMap;
+use serde_yaml_ng::Value as YamlValue;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -127,20 +129,36 @@ impl PatternOrBlock {
         match self {
             PatternOrBlock::Literal(s) => Some(s),
             PatternOrBlock::Block(v) => {
-                // Try to extract the first `pattern:` string from a
-                // `patterns: [{ pattern: "..." }, ...]` block.
-                if let Some(clauses) = v
-                    .get("patterns")
-                    .and_then(serde_yaml_ng::Value::as_sequence)
-                {
+                // Extract the first usable pattern, but record when the block
+                // contains anything this narrow bridge drops.
+                let mut dropped_content = v.as_mapping().is_none_or(|mapping| {
+                    mapping.len() != 1
+                        || !mapping.contains_key(YamlValue::String("patterns".to_string()))
+                });
+                if let Some(clauses) = v.get("patterns").and_then(YamlValue::as_sequence) {
+                    let mut first_pattern = None;
                     for clause in clauses {
-                        if let Some(pat) =
-                            clause.get("pattern").and_then(serde_yaml_ng::Value::as_str)
-                        {
-                            return Some(pat.to_string());
+                        if let Some(pattern) = clause.get("pattern").and_then(YamlValue::as_str) {
+                            if first_pattern.is_some()
+                                || !is_plain_pattern_not_inside_clause(clause)
+                            {
+                                dropped_content = true;
+                            }
+                            first_pattern.get_or_insert_with(|| pattern.to_string());
+                        } else {
+                            dropped_content = true;
                         }
                     }
+                    if let Some(pattern) = first_pattern {
+                        if dropped_content {
+                            record_current_import_diagnostic(
+                                SemgrepImportDiagnostic::UnsupportedConstruct,
+                            );
+                        }
+                        return Some(pattern);
+                    }
                 }
+                record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
                 eprintln!(
                     "Warning: pattern-not-inside block has no extractable `pattern:` string; \
                      skipping constraint"
@@ -149,6 +167,16 @@ impl PatternOrBlock {
             }
         }
     }
+}
+
+fn is_plain_pattern_not_inside_clause(clause: &YamlValue) -> bool {
+    clause.as_mapping().is_some_and(|mapping| {
+        mapping.len() == 1
+            && mapping
+                .get(YamlValue::String("pattern".to_string()))
+                .and_then(YamlValue::as_str)
+                .is_some()
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -605,6 +633,7 @@ impl MetavariableAnalysisConstraint {
                 metavariable: clause.metavariable.clone(),
             }),
             "redos" => {
+                record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
                 eprintln!(
                     "Warning: metavariable-analysis analyzer 'redos' for {} is not \
                     implemented (no sound cheap heuristic); skipping constraint",
@@ -613,6 +642,7 @@ impl MetavariableAnalysisConstraint {
                 None
             }
             other => {
+                record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
                 eprintln!(
                     "Warning: metavariable-analysis analyzer '{}' for {} is unknown; \
                     skipping constraint",
@@ -965,6 +995,7 @@ impl MetavariableRegexConstraint {
                 regex,
             }),
             Err(e) => {
+                record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
                 eprintln!(
                     "Warning: metavariable-regex for {} uses an unsupported regex ({}); \
                      skipping constraint",
@@ -996,6 +1027,9 @@ impl MetavariableComparisonConstraint {
                     "metavariable-comparison: base:{base} is not supported (only base:10); skipping constraint"
                 ));
             }
+        }
+        if clause.strip.unwrap_or(false) {
+            record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
         }
 
         // Some advanced Semgrep rules use `comparison:` without an explicit
@@ -1073,6 +1107,7 @@ impl MetavariablePatternConstraint {
             match compile_regex(regex) {
                 Ok(r) => PatternMatcher::Regex(r),
                 Err(e) => {
+                    record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
                     eprintln!(
                         "Warning: metavariable-pattern for {} has invalid pattern-regex: {}; skipping constraint",
                         clause.metavariable, e
@@ -1084,6 +1119,7 @@ impl MetavariablePatternConstraint {
             match build_either_matchers(entries, lang) {
                 Ok(matchers) => PatternMatcher::Either(matchers),
                 Err(e) => {
+                    record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
                     eprintln!(
                         "Warning: metavariable-pattern for {} has invalid pattern-either: {}; skipping constraint",
                         clause.metavariable, e
@@ -1092,6 +1128,7 @@ impl MetavariablePatternConstraint {
                 }
             }
         } else {
+            record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
             eprintln!(
                 "Warning: metavariable-pattern for {} has no supported nested pattern form \
                 (pattern, pattern-regex, or pattern-either); skipping constraint",
@@ -2191,7 +2228,7 @@ fn map_severity(s: &SemgrepSeverity) -> Severity {
     }
 }
 
-fn map_language(lang_str: &str) -> Option<Language> {
+pub(crate) fn map_language(lang_str: &str) -> Option<Language> {
     match lang_str.to_lowercase().as_str() {
         "javascript" | "js" | "typescript" | "ts" | "jsx" | "tsx" => Some(Language::JavaScript),
         "python" | "py" => Some(Language::Python),
@@ -2426,11 +2463,14 @@ fn build_regex_mode_rules(
         ($dest:expr, $re:expr, $label:expr) => {
             match compile_regex($re) {
                 Ok(r) => $dest.push(r),
-                Err(e) => eprintln!(
-                    "Warning: regex-mode rule '{}' {} has unsupported regex ({}); \
-                     skipping clause",
-                    yaml.id, $label, e
-                ),
+                Err(e) => {
+                    record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
+                    eprintln!(
+                        "Warning: regex-mode rule '{}' {} has unsupported regex ({}); \
+                         skipping clause",
+                        yaml.id, $label, e
+                    );
+                }
             }
         };
     }
@@ -2475,6 +2515,7 @@ fn build_regex_mode_rules(
     if positives.is_empty() {
         // Rule has no regex patterns at all (only AST patterns that regex mode
         // cannot execute). Warn-skip rather than build a no-op matcher.
+        record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
         eprintln!(
             "Warning: languages: [regex] rule '{}' has no pattern-regex; \
              regex mode cannot run AST patterns — skipping",
@@ -2546,6 +2587,7 @@ fn build_generic_mode_rules(
         strict: bool,
     ) -> Option<GenericPatternsClause> {
         if clause.pattern_inside.is_some() {
+            record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
             eprintln!(
                 "Warning: generic mode does not support pattern-inside in rule '{rule_id}'; \
                  skipping clause"
@@ -2553,6 +2595,7 @@ fn build_generic_mode_rules(
             return None;
         }
         if clause.pattern_not_inside.is_some() {
+            record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
             eprintln!(
                 "Warning: generic mode does not support pattern-not-inside in rule '{rule_id}'; \
                  skipping clause"
@@ -2584,8 +2627,12 @@ fn build_generic_mode_rules(
         // so its `patterns:` block refuses to load — dropping the constraint
         // would broaden the rule into false positives. In lenient mode
         // (top-level `patterns:`), keep the legacy load-broadened behaviour.
-        let unsupported_constraint = strict
-            && (clause.metavariable_pattern.is_some() || clause.metavariable_analysis.is_some());
+        let has_unenforceable_constraint =
+            clause.metavariable_pattern.is_some() || clause.metavariable_analysis.is_some();
+        if has_unenforceable_constraint {
+            record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
+        }
+        let unsupported_constraint = strict && has_unenforceable_constraint;
 
         let has_positive = clause.pattern.is_some()
             || clause.pattern_regex.is_some()
@@ -2618,16 +2665,20 @@ fn build_generic_mode_rules(
     fn map_either_arm(entry: &PatternEntry) -> GenericEitherEntry {
         // Decode the raw `patterns:` value into typed clauses leniently. If it
         // does not fit our `PatternClause` shape (e.g. an AST-only nested form),
-        // we simply skip it — the arm degrades to its `pattern`/`pattern-regex`
-        // (usually empty), which the generic builder warn-skips.
-        let patterns = entry
-            .patterns
-            .as_ref()
-            .and_then(|v| serde_yaml_ng::from_value::<Vec<PatternClause>>(v.clone()).ok())
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|c| map_clause(c, "<pattern-either arm>", true))
-            .collect();
+        // the arm is reduced to its `pattern`/`pattern-regex` portion.
+        let patterns = match entry.patterns.as_ref() {
+            Some(value) => match serde_yaml_ng::from_value::<Vec<PatternClause>>(value.clone()) {
+                Ok(clauses) => clauses
+                    .iter()
+                    .filter_map(|clause| map_clause(clause, "<pattern-either arm>", true))
+                    .collect(),
+                Err(_) => {
+                    record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
+                    Vec::new()
+                }
+            },
+            None => Vec::new(),
+        };
         GenericEitherEntry {
             pattern: entry.pattern.clone(),
             pattern_regex: entry.pattern_regex.clone(),
@@ -2696,11 +2747,16 @@ fn build_matcher(yaml: &SemgrepRuleYaml, lang: Language) -> Result<PatternMatche
                 // broader but functional matcher.
                 match compile_regex(regex) {
                     Ok(r) => positives.push(PatternMatcher::Regex(r)),
-                    Err(e) => eprintln!(
-                        "Warning: patterns: clause has unsupported pattern-regex ({}); \
-                         skipping clause",
-                        e
-                    ),
+                    Err(e) => {
+                        record_current_import_diagnostic(
+                            SemgrepImportDiagnostic::UnsupportedPatternRegex,
+                        );
+                        eprintln!(
+                            "Warning: patterns: clause has unsupported pattern-regex ({}); \
+                             skipping clause",
+                            e
+                        );
+                    }
                 }
             }
             if let Some(ref pn) = clause.pattern_not {
@@ -2713,11 +2769,16 @@ fn build_matcher(yaml: &SemgrepRuleYaml, lang: Language) -> Result<PatternMatche
                 // Gracefully skip unsupported negative-regex clauses too.
                 match compile_regex(regex) {
                     Ok(r) => negatives.push(NegativeMatcher::Regex(r)),
-                    Err(e) => eprintln!(
-                        "Warning: patterns: clause has unsupported pattern-not-regex ({}); \
-                         skipping clause",
-                        e
-                    ),
+                    Err(e) => {
+                        record_current_import_diagnostic(
+                            SemgrepImportDiagnostic::UnsupportedPatternNotRegex,
+                        );
+                        eprintln!(
+                            "Warning: patterns: clause has unsupported pattern-not-regex ({}); \
+                             skipping clause",
+                            e
+                        );
+                    }
                 }
             }
             if let Some(ref pi) = clause.pattern_inside {
@@ -2744,7 +2805,12 @@ fn build_matcher(yaml: &SemgrepRuleYaml, lang: Language) -> Result<PatternMatche
             if let Some(ref mc) = clause.metavariable_comparison {
                 match MetavariableComparisonConstraint::from_yaml(mc) {
                     Ok(constraint) => metavariable_comparisons.push(constraint),
-                    Err(e) => eprintln!("Warning: {e}"),
+                    Err(e) => {
+                        record_current_import_diagnostic(
+                            SemgrepImportDiagnostic::UnsupportedConstruct,
+                        );
+                        eprintln!("Warning: {e}");
+                    }
                 }
             }
             if let Some(ref mp) = clause.metavariable_pattern {
@@ -2807,11 +2873,14 @@ fn build_matcher(yaml: &SemgrepRuleYaml, lang: Language) -> Result<PatternMatche
         // Gracefully skip unsupported top-level pattern-regex.
         match compile_regex(regex) {
             Ok(r) => positives.push(PatternMatcher::Regex(r)),
-            Err(e) => eprintln!(
-                "Warning: top-level pattern-regex uses unsupported features ({}); \
-                 skipping pattern",
-                e
-            ),
+            Err(e) => {
+                record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedPatternRegex);
+                eprintln!(
+                    "Warning: top-level pattern-regex uses unsupported features ({}); \
+                     skipping pattern",
+                    e
+                );
+            }
         }
     }
     if let Some(ref either) = yaml.pattern_either {
@@ -2827,11 +2896,16 @@ fn build_matcher(yaml: &SemgrepRuleYaml, lang: Language) -> Result<PatternMatche
         // Gracefully skip unsupported top-level pattern-not-regex.
         match compile_regex(regex) {
             Ok(r) => negatives.push(NegativeMatcher::Regex(r)),
-            Err(e) => eprintln!(
-                "Warning: top-level pattern-not-regex uses unsupported features ({}); \
-                 skipping pattern",
-                e
-            ),
+            Err(e) => {
+                record_current_import_diagnostic(
+                    SemgrepImportDiagnostic::UnsupportedPatternNotRegex,
+                );
+                eprintln!(
+                    "Warning: top-level pattern-not-regex uses unsupported features ({}); \
+                     skipping pattern",
+                    e
+                );
+            }
         }
     }
 
@@ -2895,11 +2969,16 @@ fn build_either_matchers(
             // the rule loads with a broader but functional matcher.
             match compile_regex(regex) {
                 Ok(r) => matchers.push(PatternMatcher::Regex(r)),
-                Err(e) => eprintln!(
-                    "Warning: pattern-either entry has unsupported pattern-regex ({}); \
-                     skipping entry",
-                    e
-                ),
+                Err(e) => {
+                    record_current_import_diagnostic(
+                        SemgrepImportDiagnostic::UnsupportedPatternEitherRegex,
+                    );
+                    eprintln!(
+                        "Warning: pattern-either entry has unsupported pattern-regex ({}); \
+                         skipping entry",
+                        e
+                    );
+                }
             }
         }
     }
@@ -3118,11 +3197,318 @@ fn validate_semgrep_rule_id(rule_id: &str, source_label: &str) -> Result<(), Str
     ))
 }
 
+/// A structured diagnostic emitted while importing one source Semgrep rule.
+///
+/// These codes describe behavior of this importer, rather than an attempted
+/// classification of Semgrep syntax outside the import transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SemgrepImportDiagnostic {
+    EngineCodeql,
+    EngineCoccinelle,
+    FileImportFailed,
+    InvalidDocument,
+    UnsupportedFixRegex,
+    UnsupportedLanguage,
+    UnsupportedPatternEitherRegex,
+    UnsupportedPatternNotRegex,
+    UnsupportedPatternRegex,
+    UnsupportedTaintShape,
+    UnsupportedConstruct,
+}
+
+impl std::fmt::Display for SemgrepImportDiagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::EngineCodeql => "engine-codeql",
+            Self::EngineCoccinelle => "engine-coccinelle",
+            Self::FileImportFailed => "file-import-failed",
+            Self::InvalidDocument => "invalid-document",
+            Self::UnsupportedFixRegex => "unsupported-fix-regex",
+            Self::UnsupportedLanguage => "unsupported-language",
+            Self::UnsupportedPatternEitherRegex => "unsupported-pattern-either-regex",
+            Self::UnsupportedPatternNotRegex => "unsupported-pattern-not-regex",
+            Self::UnsupportedPatternRegex => "unsupported-pattern-regex",
+            Self::UnsupportedTaintShape => "unsupported-taint-shape",
+            Self::UnsupportedConstruct => "unsupported-construct",
+        })
+    }
+}
+
+/// Import outcome for one original Semgrep YAML document.
+///
+/// `source_rules` retains one entry for each source node even when a strict
+/// parse failure drops the document's emitted rules.
+pub struct SemgrepImportOutcome {
+    pub rules: Vec<Box<dyn Rule>>,
+    pub source_rules: Vec<SemgrepImportSourceOutcome>,
+    pub error: Option<String>,
+}
+
+/// Outcome for one source rule node within a Semgrep import transaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemgrepImportSourceOutcome {
+    pub source_id: String,
+    pub language: String,
+    pub emitted: bool,
+    pub diagnostics: Vec<SemgrepImportDiagnostic>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct SemgrepSourceKey(usize);
+
+#[derive(Debug, Clone)]
+struct SemgrepSourceRuleMetadata {
+    key: SemgrepSourceKey,
+    source_id: String,
+    language: String,
+}
+
+#[derive(Default)]
+struct SemgrepImportDiagnosticCapture {
+    current_source: Option<SemgrepSourceKey>,
+    by_source: BTreeMap<SemgrepSourceKey, BTreeSet<SemgrepImportDiagnostic>>,
+    emitted_sources: BTreeSet<SemgrepSourceKey>,
+}
+
+thread_local! {
+    static SEMGREP_IMPORT_DIAGNOSTICS: RefCell<Option<SemgrepImportDiagnosticCapture>> =
+        const { RefCell::new(None) };
+}
+
+pub(crate) fn record_current_import_diagnostic(diagnostic: SemgrepImportDiagnostic) {
+    SEMGREP_IMPORT_DIAGNOSTICS.with(|capture| {
+        let mut capture = capture.borrow_mut();
+        let Some(capture) = capture.as_mut() else {
+            return;
+        };
+        let Some(source_key) = capture.current_source else {
+            return;
+        };
+        capture
+            .by_source
+            .entry(source_key)
+            .or_default()
+            .insert(diagnostic);
+    });
+}
+
+fn record_import_emission() {
+    SEMGREP_IMPORT_DIAGNOSTICS.with(|capture| {
+        let mut capture = capture.borrow_mut();
+        let Some(capture) = capture.as_mut() else {
+            return;
+        };
+        let Some(source_key) = capture.current_source else {
+            return;
+        };
+        capture.emitted_sources.insert(source_key);
+    });
+}
+
+fn with_import_source<T>(source_key: SemgrepSourceKey, import: impl FnOnce() -> T) -> T {
+    let previous = SEMGREP_IMPORT_DIAGNOSTICS.with(|capture| {
+        capture
+            .borrow_mut()
+            .as_mut()
+            .map(|capture| capture.current_source.replace(source_key))
+    });
+    let result = import();
+    if let Some(previous) = previous {
+        SEMGREP_IMPORT_DIAGNOSTICS.with(|capture| {
+            capture
+                .borrow_mut()
+                .as_mut()
+                .expect("import diagnostic capture must remain installed")
+                .current_source = previous;
+        });
+    }
+    result
+}
+
+fn capture_import_diagnostics<T>(
+    import: impl FnOnce() -> T,
+) -> (T, SemgrepImportDiagnosticCapture) {
+    SEMGREP_IMPORT_DIAGNOSTICS.with(|capture| {
+        debug_assert!(capture.borrow().is_none());
+        *capture.borrow_mut() = Some(SemgrepImportDiagnosticCapture::default());
+    });
+    let result = import();
+    let diagnostics = SEMGREP_IMPORT_DIAGNOSTICS.with(|capture| {
+        capture
+            .borrow_mut()
+            .take()
+            .expect("import diagnostic capture must be installed")
+    });
+    (result, diagnostics)
+}
+
+fn semgrep_source_rule_metadata(
+    document: &YamlValue,
+) -> Result<Vec<SemgrepSourceRuleMetadata>, SemgrepImportDiagnostic> {
+    let rules = document
+        .get("rules")
+        .and_then(YamlValue::as_sequence)
+        .ok_or(SemgrepImportDiagnostic::InvalidDocument)?;
+
+    Ok(rules
+        .iter()
+        .enumerate()
+        .map(|(index, rule)| {
+            let source_id = rule
+                .get("id")
+                .and_then(YamlValue::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("<invalid-rule-{}>", index + 1));
+            let language = rule
+                .get("languages")
+                .and_then(YamlValue::as_sequence)
+                .and_then(|languages| languages.first())
+                .and_then(YamlValue::as_str)
+                .or_else(|| rule.get("languages").and_then(YamlValue::as_str))
+                .or_else(|| rule.get("language").and_then(YamlValue::as_str))
+                .map(semgrep_source_language_bucket)
+                .unwrap_or_else(|| "<none>".to_string());
+            SemgrepSourceRuleMetadata {
+                key: SemgrepSourceKey(index),
+                source_id,
+                language,
+            }
+        })
+        .collect())
+}
+
+fn semgrep_source_language_bucket(language: &str) -> String {
+    if language.eq_ignore_ascii_case("generic") || language.eq_ignore_ascii_case("regex") {
+        return language.to_ascii_lowercase();
+    }
+    map_language(language)
+        .map(|language| language.to_string())
+        .unwrap_or_else(|| language.to_ascii_lowercase())
+}
+
+/// Import one original YAML document and retain its per-source outcomes.
+///
+/// This is the transaction boundary used by both [`load_semgrep_rules`] and
+/// migration readiness: a strict failure leaves every source node un-emitted.
+pub fn import_semgrep_str(content: &str, source_label: &str) -> SemgrepImportOutcome {
+    let raw_doc: YamlValue = match serde_yaml_ng::from_str(content) {
+        Ok(document) => document,
+        Err(error) => {
+            return SemgrepImportOutcome {
+                rules: Vec::new(),
+                source_rules: vec![SemgrepImportSourceOutcome {
+                    source_id: "<invalid-document>".to_string(),
+                    language: "<none>".to_string(),
+                    emitted: false,
+                    diagnostics: vec![SemgrepImportDiagnostic::InvalidDocument],
+                }],
+                error: Some(format!("Failed to parse YAML {}: {}", source_label, error)),
+            };
+        }
+    };
+
+    let source_metadata = match semgrep_source_rule_metadata(&raw_doc) {
+        Ok(metadata) => metadata,
+        Err(diagnostic) => {
+            let (result, _) =
+                capture_import_diagnostics(|| parse_semgrep_document(raw_doc, source_label));
+            return match result {
+                Ok(rules) => SemgrepImportOutcome {
+                    rules,
+                    source_rules: vec![SemgrepImportSourceOutcome {
+                        source_id: "<invalid-document>".to_string(),
+                        language: "<none>".to_string(),
+                        emitted: false,
+                        diagnostics: vec![diagnostic],
+                    }],
+                    error: None,
+                },
+                Err(error) => SemgrepImportOutcome {
+                    rules: Vec::new(),
+                    source_rules: vec![SemgrepImportSourceOutcome {
+                        source_id: "<invalid-document>".to_string(),
+                        language: "<none>".to_string(),
+                        emitted: false,
+                        diagnostics: vec![diagnostic],
+                    }],
+                    error: Some(error),
+                },
+            };
+        }
+    };
+
+    let (result, mut diagnostics) =
+        capture_import_diagnostics(|| parse_semgrep_document(raw_doc, source_label));
+    match result {
+        Ok(rules) => {
+            let source_rules = source_metadata
+                .into_iter()
+                .map(|metadata| {
+                    let emitted = diagnostics.emitted_sources.contains(&metadata.key);
+                    let diagnostics = diagnostics
+                        .by_source
+                        .remove(&metadata.key)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect();
+                    SemgrepImportSourceOutcome {
+                        source_id: metadata.source_id,
+                        language: metadata.language,
+                        emitted,
+                        diagnostics,
+                    }
+                })
+                .collect();
+            SemgrepImportOutcome {
+                rules,
+                source_rules,
+                error: None,
+            }
+        }
+        Err(error) => SemgrepImportOutcome {
+            rules: Vec::new(),
+            source_rules: source_metadata
+                .into_iter()
+                .map(|metadata| {
+                    let mut source_diagnostics = diagnostics
+                        .by_source
+                        .remove(&metadata.key)
+                        .unwrap_or_default();
+                    source_diagnostics.insert(SemgrepImportDiagnostic::FileImportFailed);
+                    SemgrepImportSourceOutcome {
+                        source_id: metadata.source_id,
+                        language: metadata.language,
+                        emitted: false,
+                        diagnostics: source_diagnostics.into_iter().collect(),
+                    }
+                })
+                .collect(),
+            error: Some(error),
+        },
+    }
+}
+
+/// Import one explicitly supplied file regardless of its filename extension.
+pub fn import_semgrep_file(path: &Path) -> SemgrepImportOutcome {
+    match std::fs::read_to_string(path) {
+        Ok(content) => import_semgrep_str(&content, &path.display().to_string()),
+        Err(error) => SemgrepImportOutcome {
+            rules: Vec::new(),
+            source_rules: vec![SemgrepImportSourceOutcome {
+                source_id: "<invalid-document>".to_string(),
+                language: "<none>".to_string(),
+                emitted: false,
+                diagnostics: vec![SemgrepImportDiagnostic::FileImportFailed],
+            }],
+            error: Some(format!("Failed to read {}: {}", path.display(), error)),
+        },
+    }
+}
+
 /// Parse a single Semgrep YAML file into foxguard rules.
 pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-    parse_semgrep_str(&content, &path.display().to_string())
+    let outcome = import_semgrep_file(path);
+    outcome.error.map_or(Ok(outcome.rules), Err)
 }
 
 /// Parse a Semgrep YAML document (passed as an in-memory string) into
@@ -3134,112 +3520,128 @@ pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
 /// purely for error messages — pass the embedded path or any human-readable
 /// identifier.
 pub fn parse_semgrep_str(content: &str, source_label: &str) -> Result<Vec<Box<dyn Rule>>, String> {
-    use crate::rules::semgrep_taint::{self, TaintRuleParse};
-    use serde_yaml_ng::Value as YamlValue;
-
-    // First pass: parse as an untyped Value so we can detect `mode: taint`
-    // rules and route them to the taint bridge without breaking the strict
-    // `SemgrepRuleYaml` schema used for pattern rules.
     let raw_doc: YamlValue = serde_yaml_ng::from_str(content)
-        .map_err(|e| format!("Failed to parse YAML {}: {}", source_label, e))?;
+        .map_err(|error| format!("Failed to parse YAML {}: {}", source_label, error))?;
+    parse_semgrep_document(raw_doc, source_label)
+}
 
+fn parse_semgrep_document(
+    raw_doc: YamlValue,
+    source_label: &str,
+) -> Result<Vec<Box<dyn Rule>>, String> {
     let mut rules: Vec<Box<dyn Rule>> = Vec::new();
-    let mut pattern_rule_nodes: Vec<YamlValue> = Vec::new();
-
     if let Some(raw_rules) = raw_doc.get("rules").and_then(YamlValue::as_sequence) {
-        for raw_rule in raw_rules {
-            if let Some(rule_id) = raw_rule.get("id").and_then(YamlValue::as_str) {
-                validate_semgrep_rule_id(rule_id, source_label)?;
-            }
-
-            if raw_rule
-                .get("engine")
-                .and_then(YamlValue::as_str)
-                .is_some_and(|engine| {
-                    engine.eq_ignore_ascii_case("coccinelle")
-                        || engine.eq_ignore_ascii_case("codeql")
-                })
-            {
-                continue;
-            }
-
-            match semgrep_taint::parse_taint_rule(raw_rule) {
-                TaintRuleParse::Compiled(r) => rules.push(Box::new(r)),
-                TaintRuleParse::Skip(msg) => eprintln!("Warning: {}", msg),
-                TaintRuleParse::NotTaint => pattern_rule_nodes.push(raw_rule.clone()),
-            }
-        }
-    }
-
-    // Second pass: the non-taint rules go through the existing strict
-    // deserialization path. Re-serialize them into a minimal `SemgrepFile`
-    // so we reuse `build_matcher`, path filters, language mapping, etc.
-    let pattern_file = YamlValue::Mapping({
-        let mut m = serde_yaml_ng::Mapping::new();
-        m.insert(
-            YamlValue::String("rules".into()),
-            YamlValue::Sequence(pattern_rule_nodes),
-        );
-        m
-    });
-    let semgrep_file: SemgrepFile = serde_yaml_ng::from_value(pattern_file)
-        .map_err(|e| format!("Failed to parse YAML {}: {}", source_label, e))?;
-
-    for yaml_rule in semgrep_file.rules {
-        let cwe = extract_cwe(&yaml_rule);
-        let severity = map_severity(&yaml_rule.severity);
-        let path_filter = PathFilter::from_yaml(yaml_rule.paths.as_ref())?;
-
-        // `languages: [generic]` — AST-less spacegrep rules routed to the
-        // generic-mode (tokenized) matcher.  See `generic_mode.rs`.
-        if is_generic_language_rule(&yaml_rule.languages) {
-            rules.extend(build_generic_mode_rules(
-                &yaml_rule,
-                severity,
-                &cwe,
-                &path_filter,
-            )?);
-            continue;
-        }
-
-        // `languages: [regex]` — pure regex rules that run `pattern-regex` /
-        // `pattern-not-regex` against raw file text, with no tree-sitter parse.
-        // They are language-agnostic and fan out across all detectable languages.
-        if is_regex_language_rule(&yaml_rule.languages) {
-            rules.extend(build_regex_mode_rules(
-                &yaml_rule,
-                severity,
-                &cwe,
-                &path_filter,
-            )?);
-            continue;
-        }
-
-        let mut mapped_languages = Vec::new();
-        for lang_str in &yaml_rule.languages {
-            if let Some(lang) = map_language(lang_str) {
-                if !mapped_languages.contains(&lang) {
-                    mapped_languages.push(lang);
-                }
-            }
-        }
-
-        for lang in mapped_languages {
-            let matcher = build_matcher(&yaml_rule, lang)?;
-            rules.push(Box::new(SemgrepRule {
-                id: format!("semgrep/{}", yaml_rule.id),
-                message: yaml_rule.message.clone(),
-                severity,
-                lang,
-                cwe: cwe.clone(),
-                matcher,
-                path_filter: path_filter.clone(),
-                fix_template: yaml_rule.fix.clone(),
-            }));
+        for (index, raw_rule) in raw_rules.iter().enumerate() {
+            with_import_source(SemgrepSourceKey(index), || {
+                parse_semgrep_rule_node(raw_rule, source_label, &mut rules)
+            })?;
         }
     }
 
     Ok(rules)
+}
+
+fn parse_semgrep_rule_node(
+    raw_rule: &YamlValue,
+    source_label: &str,
+    rules: &mut Vec<Box<dyn Rule>>,
+) -> Result<(), String> {
+    use crate::rules::semgrep_taint::{self, TaintRuleParse};
+
+    let rule_id = raw_rule.get("id").and_then(YamlValue::as_str);
+    if let Some(rule_id) = rule_id {
+        validate_semgrep_rule_id(rule_id, source_label)?;
+        if raw_rule.get("fix-regex").is_some() {
+            record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedFixRegex);
+        }
+    }
+
+    if let Some(engine) = raw_rule.get("engine").and_then(YamlValue::as_str) {
+        let diagnostic = if engine.eq_ignore_ascii_case("coccinelle") {
+            Some(SemgrepImportDiagnostic::EngineCoccinelle)
+        } else if engine.eq_ignore_ascii_case("codeql") {
+            Some(SemgrepImportDiagnostic::EngineCodeql)
+        } else {
+            None
+        };
+        if let Some(diagnostic) = diagnostic {
+            record_current_import_diagnostic(diagnostic);
+            return Ok(());
+        }
+    }
+
+    match semgrep_taint::parse_taint_rule(raw_rule) {
+        TaintRuleParse::Compiled(rule) => {
+            record_import_emission();
+            rules.push(Box::new(rule));
+            return Ok(());
+        }
+        TaintRuleParse::Skip(message) => {
+            record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedTaintShape);
+            eprintln!("Warning: {}", message);
+            return Ok(());
+        }
+        TaintRuleParse::NotTaint => {}
+    }
+
+    let yaml_rule: SemgrepRuleYaml = serde_yaml_ng::from_value(raw_rule.clone())
+        .map_err(|error| format!("Failed to parse YAML {}: {}", source_label, error))?;
+    let cwe = extract_cwe(&yaml_rule);
+    let severity = map_severity(&yaml_rule.severity);
+    let path_filter = PathFilter::from_yaml(yaml_rule.paths.as_ref())?;
+
+    // `languages: [generic]` — AST-less spacegrep rules routed to the
+    // generic-mode (tokenized) matcher. See `generic_mode.rs`.
+    if is_generic_language_rule(&yaml_rule.languages) {
+        let imported_rules = build_generic_mode_rules(&yaml_rule, severity, &cwe, &path_filter)?;
+        if !imported_rules.is_empty() {
+            record_import_emission();
+        }
+        rules.extend(imported_rules);
+        return Ok(());
+    }
+
+    // `languages: [regex]` — pure regex rules that run `pattern-regex` /
+    // `pattern-not-regex` against raw file text, with no tree-sitter parse.
+    if is_regex_language_rule(&yaml_rule.languages) {
+        let imported_rules = build_regex_mode_rules(&yaml_rule, severity, &cwe, &path_filter)?;
+        if !imported_rules.is_empty() {
+            record_import_emission();
+        }
+        rules.extend(imported_rules);
+        return Ok(());
+    }
+
+    let mut mapped_languages = Vec::new();
+    let mut has_unmapped_language = false;
+    for lang_str in &yaml_rule.languages {
+        if let Some(lang) = map_language(lang_str) {
+            if !mapped_languages.contains(&lang) {
+                mapped_languages.push(lang);
+            }
+        } else {
+            has_unmapped_language = true;
+        }
+    }
+    if has_unmapped_language {
+        record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedLanguage);
+    }
+    for lang in mapped_languages {
+        let matcher = build_matcher(&yaml_rule, lang)?;
+        rules.push(Box::new(SemgrepRule {
+            id: format!("semgrep/{}", yaml_rule.id),
+            message: yaml_rule.message.clone(),
+            severity,
+            lang,
+            cwe: cwe.clone(),
+            matcher,
+            path_filter: path_filter.clone(),
+            fix_template: yaml_rule.fix.clone(),
+        }));
+        record_import_emission();
+    }
+
+    Ok(())
 }
 
 /// Load all Semgrep YAML rules from a file or directory (recursive).
@@ -3247,10 +3649,11 @@ pub fn load_semgrep_rules(path: &Path) -> Vec<Box<dyn Rule>> {
     let mut rules = Vec::new();
 
     if path.is_file() {
-        match parse_semgrep_file(path) {
-            Ok(r) => rules.extend(r),
-            Err(e) => eprintln!("Warning: {}", e),
+        let outcome = import_semgrep_file(path);
+        if let Some(error) = outcome.error {
+            eprintln!("Warning: {}", error);
         }
+        rules.extend(outcome.rules);
     } else if path.is_dir() {
         let walker = walkdir::WalkDir::new(path)
             .into_iter()
@@ -3264,10 +3667,11 @@ pub fn load_semgrep_rules(path: &Path) -> Vec<Box<dyn Rule>> {
             });
 
         for entry in walker {
-            match parse_semgrep_file(entry.path()) {
-                Ok(r) => rules.extend(r),
-                Err(e) => eprintln!("Warning: {}", e),
+            let outcome = import_semgrep_file(entry.path());
+            if let Some(error) = outcome.error {
+                eprintln!("Warning: {}", error);
             }
+            rules.extend(outcome.rules);
         }
     }
 
