@@ -1,13 +1,12 @@
 //! Pull request review posting for the GitHub App receiver.
 
-use crate::report::github_pr::{format_comment_body, COMMENT_MARKER};
+use crate::report::github_pr::COMMENT_MARKER;
 use crate::{Finding, Severity};
 use reqwest::Url;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::path::Path;
 use std::time::Duration;
 
 const GITHUB_API_VERSION: &str = "2026-03-10";
@@ -17,6 +16,7 @@ const PAGE_SIZE: usize = 100;
 pub enum ReviewError {
     InvalidApiBaseUrl(String),
     InvalidRepository(String),
+    InvalidRepositoryWebUrl(String),
     InvalidEndpoint(String),
     Http(reqwest::Error),
 }
@@ -26,6 +26,9 @@ impl fmt::Display for ReviewError {
         match self {
             Self::InvalidApiBaseUrl(error) => write!(f, "invalid GitHub API base URL: {error}"),
             Self::InvalidRepository(error) => write!(f, "invalid GitHub repository: {error}"),
+            Self::InvalidRepositoryWebUrl(error) => {
+                write!(f, "invalid GitHub repository web URL: {error}")
+            }
             Self::InvalidEndpoint(error) => write!(f, "invalid GitHub API endpoint: {error}"),
             Self::Http(error) => write!(f, "GitHub review request failed: {error}"),
         }
@@ -44,22 +47,27 @@ impl From<reqwest::Error> for ReviewError {
 pub struct GitHubReviewClient {
     http: reqwest::Client,
     api_base_url: Url,
+    app_id: u64,
 }
 
 impl GitHubReviewClient {
-    pub fn new(api_base_url: &str) -> Result<Self, ReviewError> {
+    pub fn new(api_base_url: &str, app_id: u64) -> Result<Self, ReviewError> {
         let api_base_url = Url::parse(api_base_url)
             .map_err(|error| ReviewError::InvalidApiBaseUrl(error.to_string()))?;
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
             .user_agent("foxguard-github-app")
             .build()?;
-        Ok(Self { http, api_base_url })
+        Ok(Self {
+            http,
+            api_base_url,
+            app_id,
+        })
     }
 
-    /// Fetch the set of added lines for each file in a pull request.
-    /// Callers use this to scope review comments and check-run output
-    /// to findings the PR actually introduced.
+    /// Fetch added lines for each changed file in a pull request. Files without
+    /// a patch remain in the map with an empty line set so file-only findings
+    /// can still be scoped to changed files.
     pub async fn pull_request_changed_lines(
         &self,
         repo_full_name: &str,
@@ -71,14 +79,12 @@ impl GitHubReviewClient {
             .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn post_pull_request_review(
         &self,
         repo_full_name: &str,
         pr_number: u64,
-        head_sha: &str,
         findings: &[Finding],
-        scan_root: Option<&Path>,
+        source_revision: &SourceRevision,
         installation_token: &str,
         changed_lines: Option<&HashMap<String, HashSet<usize>>>,
     ) -> Result<PostReviewOutcome, ReviewError> {
@@ -86,49 +92,63 @@ impl GitHubReviewClient {
         let existing_comment_ids = self
             .existing_foxguard_comment_ids(&repo, pr_number, installation_token)
             .await?;
-        if findings.is_empty() {
-            let deleted_comments = self
-                .delete_foxguard_comment_ids(&repo, &existing_comment_ids, installation_token)
-                .await?;
-            return Ok(PostReviewOutcome {
-                deleted_comments,
-                posted_comments: 0,
-            });
-        }
-
-        let owned_lines;
-        let commentable_lines = match changed_lines {
-            Some(lines) => lines,
-            None => {
-                owned_lines = self
-                    .pull_request_commentable_lines(&repo, pr_number, installation_token)
-                    .await?;
-                &owned_lines
-            }
-        };
-        let review_findings = filter_findings_to_changed_lines(findings, commentable_lines);
-        let comments = review_comment_payloads(&review_findings, commentable_lines, scan_root);
-        if comments.is_empty() {
-            let deleted_comments = self
-                .delete_foxguard_comment_ids(&repo, &existing_comment_ids, installation_token)
-                .await?;
-            return Ok(PostReviewOutcome {
-                deleted_comments,
-                posted_comments: 0,
-            });
-        }
-
-        let posted_comments = comments.len();
-        self.post_review_comments(&repo, pr_number, head_sha, comments, installation_token)
+        let mut owned_summary_comment_ids = self
+            .existing_foxguard_summary_comment_ids(&repo, pr_number, installation_token)
             .await?;
+        let canonical_summary_comment_id = owned_summary_comment_ids.pop();
 
+        let review_findings = if findings.is_empty() {
+            Vec::new()
+        } else {
+            let owned_lines;
+            let changed_lines = match changed_lines {
+                Some(lines) => lines,
+                None => {
+                    owned_lines = self
+                        .pull_request_commentable_lines(&repo, pr_number, installation_token)
+                        .await?;
+                    &owned_lines
+                }
+            };
+            filter_findings_to_changed_lines(findings, changed_lines)
+        };
+
+        let review_messages = if review_findings.is_empty() {
+            if let Some(comment_id) = canonical_summary_comment_id {
+                self.update_summary_comment(
+                    &repo,
+                    comment_id,
+                    &review_findings,
+                    source_revision,
+                    installation_token,
+                )
+                .await?;
+                1
+            } else {
+                0
+            }
+        } else {
+            self.create_or_update_summary_comment(
+                &repo,
+                pr_number,
+                &review_findings,
+                source_revision,
+                canonical_summary_comment_id,
+                installation_token,
+            )
+            .await?;
+            1
+        };
+
+        self.delete_summary_comment_ids(&repo, &owned_summary_comment_ids, installation_token)
+            .await?;
         let deleted_comments = self
             .delete_foxguard_comment_ids(&repo, &existing_comment_ids, installation_token)
             .await?;
 
         Ok(PostReviewOutcome {
             deleted_comments,
-            posted_comments,
+            review_messages,
         })
     }
 
@@ -206,6 +226,30 @@ impl GitHubReviewClient {
         }
         Ok(ids.len())
     }
+    async fn delete_summary_comment_ids(
+        &self,
+        repo: &RepositoryPath,
+        ids: &[u64],
+        installation_token: &str,
+    ) -> Result<(), ReviewError> {
+        for id in ids {
+            let url = self.endpoint(&format!(
+                "repos/{}/{}/issues/comments/{id}",
+                repo.owner, repo.name
+            ))?;
+            // URL construction is restricted to validated path segments and ids
+            // returned by GitHub's issue-comments API.
+            let request = self.http.delete(url); // foxguard: ignore[rs/no-ssrf]
+            request
+                .bearer_auth(installation_token)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+                .send()
+                .await?
+                .error_for_status()?;
+        }
+        Ok(())
+    }
 
     async fn existing_foxguard_comment_ids(
         &self,
@@ -226,13 +270,33 @@ impl GitHubReviewClient {
         Ok(comments
             .into_iter()
             .filter(|comment| {
-                comment
-                    .body
-                    .as_deref()
-                    .is_some_and(|body| body.contains(COMMENT_MARKER))
+                is_owned_marker_comment(
+                    comment.body.as_deref(),
+                    comment.performed_via_github_app.as_ref(),
+                    self.app_id,
+                )
             })
             .map(|comment| comment.id)
             .collect())
+    }
+
+    async fn existing_foxguard_summary_comment_ids(
+        &self,
+        repo: &RepositoryPath,
+        pr_number: u64,
+        installation_token: &str,
+    ) -> Result<Vec<u64>, ReviewError> {
+        let comments = self
+            .paginated_get::<IssueComment>(
+                &format!(
+                    "repos/{}/{}/issues/{pr_number}/comments",
+                    repo.owner, repo.name
+                ),
+                installation_token,
+            )
+            .await?;
+
+        Ok(owned_foxguard_summary_comment_ids(comments, self.app_id))
     }
 
     async fn pull_request_commentable_lines(
@@ -249,41 +313,93 @@ impl GitHubReviewClient {
             .await?;
         Ok(files
             .into_iter()
-            .filter_map(|file| {
-                let lines = added_lines_from_patch(file.patch.as_deref())?;
-                Some((file.filename, lines))
+            .map(|file| {
+                let lines = added_lines_from_patch(file.patch.as_deref()).unwrap_or_default();
+                (file.filename, lines)
             })
             .collect())
     }
 
-    async fn post_review_comments(
+    async fn create_or_update_summary_comment(
         &self,
         repo: &RepositoryPath,
         pr_number: u64,
-        head_sha: &str,
-        comments: Vec<Value>,
+        findings: &[Finding],
+        source_revision: &SourceRevision,
+        existing_comment_id: Option<u64>,
+        installation_token: &str,
+    ) -> Result<(), ReviewError> {
+        if let Some(comment_id) = existing_comment_id {
+            self.update_summary_comment(
+                repo,
+                comment_id,
+                findings,
+                source_revision,
+                installation_token,
+            )
+            .await
+        } else {
+            self.create_summary_comment(
+                repo,
+                pr_number,
+                findings,
+                source_revision,
+                installation_token,
+            )
+            .await
+        }
+    }
+
+    async fn create_summary_comment(
+        &self,
+        repo: &RepositoryPath,
+        pr_number: u64,
+        findings: &[Finding],
+        source_revision: &SourceRevision,
         installation_token: &str,
     ) -> Result<(), ReviewError> {
         let url = self.endpoint(&format!(
-            "repos/{}/{}/pulls/{pr_number}/comments",
+            "repos/{}/{}/issues/{pr_number}/comments",
             repo.owner, repo.name
         ))?;
-        for mut comment in comments {
-            if let Some(object) = comment.as_object_mut() {
-                object.insert("commit_id".to_string(), Value::String(head_sha.to_string()));
-            }
-            // URL construction is restricted to a validated GitHub API base URL plus
-            // repository path segments parsed by `RepositoryPath::parse`.
-            let request = self.http.post(url.clone()); // foxguard: ignore[rs/no-ssrf]
-            request
-                .bearer_auth(installation_token)
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-                .json(&comment)
-                .send()
-                .await?
-                .error_for_status()?;
-        }
+        // URL construction is restricted to a validated GitHub API base URL plus
+        // repository path segments parsed by `RepositoryPath::parse`.
+        let request = self.http.post(url); // foxguard: ignore[rs/no-ssrf]
+        request
+            .bearer_auth(installation_token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            .json(&summary_comment_request_body(findings, source_revision))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    async fn update_summary_comment(
+        &self,
+        repo: &RepositoryPath,
+        comment_id: u64,
+        findings: &[Finding],
+        source_revision: &SourceRevision,
+        installation_token: &str,
+    ) -> Result<(), ReviewError> {
+        let url = self.endpoint(&format!(
+            "repos/{}/{}/issues/comments/{comment_id}",
+            repo.owner, repo.name
+        ))?;
+        let body = summary_comment_request_body(findings, source_revision);
+        // URL construction is restricted to validated path segments and a
+        // comment id returned by GitHub's issue-comments API.
+        let request = self.http.patch(url); // foxguard: ignore[rs/no-ssrf]
+        request
+            .bearer_auth(installation_token)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
         Ok(())
     }
 
@@ -349,7 +465,7 @@ impl GitHubReviewClient {
 #[derive(Debug, PartialEq, Eq)]
 pub struct PostReviewOutcome {
     pub deleted_comments: usize,
-    pub posted_comments: usize,
+    pub review_messages: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -390,6 +506,108 @@ impl RepositoryPath {
     }
 }
 
+#[derive(Debug)]
+pub struct SourceRevision {
+    repo_web_url: Url,
+    head_sha: String,
+}
+
+impl SourceRevision {
+    pub fn new(repo_web_url: &str, head_sha: &str) -> Result<Self, ReviewError> {
+        let repo_web_url = Url::parse(repo_web_url)
+            .map_err(|error| ReviewError::InvalidRepositoryWebUrl(error.to_string()))?;
+        if repo_web_url.scheme() != "https" {
+            return Err(ReviewError::InvalidRepositoryWebUrl(
+                "scheme must be https".to_string(),
+            ));
+        }
+        if repo_web_url.username() != "" || repo_web_url.password().is_some() {
+            return Err(ReviewError::InvalidRepositoryWebUrl(
+                "credentials are not allowed".to_string(),
+            ));
+        }
+        if repo_web_url.query().is_some() || repo_web_url.fragment().is_some() {
+            return Err(ReviewError::InvalidRepositoryWebUrl(
+                "query and fragment are not allowed".to_string(),
+            ));
+        }
+        if repo_web_url.host_str().is_none() {
+            return Err(ReviewError::InvalidRepositoryWebUrl(
+                "host is required".to_string(),
+            ));
+        }
+        let path_segments = repo_web_url.path_segments().ok_or_else(|| {
+            ReviewError::InvalidRepositoryWebUrl("repository path is required".to_string())
+        })?;
+        let mut path_segment_count = 0;
+        for segment in path_segments {
+            if segment.is_empty() {
+                continue;
+            }
+            if matches!(segment, "." | "..") {
+                return Err(ReviewError::InvalidRepositoryWebUrl(
+                    "path traversal segments are not allowed".to_string(),
+                ));
+            }
+            path_segment_count += 1;
+        }
+        if path_segment_count < 2 {
+            return Err(ReviewError::InvalidRepositoryWebUrl(
+                "repository owner/name path is required".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            repo_web_url,
+            head_sha: head_sha.to_string(),
+        })
+    }
+
+    fn permalink(&self, file: &str, line: usize, end_line: usize) -> Option<String> {
+        if !valid_repo_relative_path(file) {
+            return None;
+        }
+
+        let mut permalink = self.repo_web_url.as_str().trim_end_matches('/').to_string();
+        permalink.push_str("/blob/");
+        push_percent_encoded_path_segment(&mut permalink, &self.head_sha);
+        for segment in file.split('/') {
+            permalink.push('/');
+            push_percent_encoded_path_segment(&mut permalink, segment);
+        }
+        if line > 0 {
+            if end_line > line {
+                permalink.push_str(&format!("#L{line}-L{end_line}"));
+            } else {
+                permalink.push_str(&format!("#L{line}"));
+            }
+        }
+        Some(permalink)
+    }
+}
+
+fn valid_repo_relative_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && path
+            .split('/')
+            .all(|segment| !segment.is_empty() && !matches!(segment, "." | ".."))
+}
+
+fn push_percent_encoded_path_segment(url: &mut String, segment: &str) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
+    for byte in segment.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            url.push(char::from(byte));
+        } else {
+            url.push('%');
+            url.push(char::from(HEX[usize::from(byte >> 4)]));
+            url.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+    }
+}
+
 fn valid_repo_segment(value: &str) -> bool {
     !value.is_empty()
         && value != "."
@@ -403,6 +621,42 @@ fn valid_repo_segment(value: &str) -> bool {
 struct PullRequestComment {
     id: u64,
     body: Option<String>,
+    performed_via_github_app: Option<PerformedViaGitHubApp>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueComment {
+    id: u64,
+    body: Option<String>,
+    performed_via_github_app: Option<PerformedViaGitHubApp>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PerformedViaGitHubApp {
+    id: u64,
+}
+
+fn is_owned_marker_comment(
+    body: Option<&str>,
+    performed_via_github_app: Option<&PerformedViaGitHubApp>,
+    app_id: u64,
+) -> bool {
+    body.is_some_and(|body| body.contains(COMMENT_MARKER))
+        && performed_via_github_app.is_some_and(|app| app.id == app_id)
+}
+
+fn owned_foxguard_summary_comment_ids(comments: Vec<IssueComment>, app_id: u64) -> Vec<u64> {
+    comments
+        .into_iter()
+        .filter(|comment| {
+            is_owned_marker_comment(
+                comment.body.as_deref(),
+                comment.performed_via_github_app.as_ref(),
+                app_id,
+            )
+        })
+        .map(|comment| comment.id)
+        .collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -478,9 +732,9 @@ fn hunk_new_start(line: &str) -> Option<usize> {
     start.parse().ok()
 }
 
-/// Filter findings to only those whose file AND line fall within the
-/// PR's changed lines. This ensures check-run annotations and the
-/// conclusion reflect only PR-introduced issues, not pre-existing ones.
+/// Filter line-bearing findings to changed lines and file-only findings to
+/// changed files. This ensures review summaries and check-run conclusions
+/// reflect only PR-introduced issues, not pre-existing ones.
 fn filter_findings_to_changed_lines(
     findings: &[Finding],
     changed_lines: &HashMap<String, HashSet<usize>>,
@@ -492,7 +746,7 @@ fn filter_findings_to_changed_lines(
             // foxguard: ignore[rs/no-ssrf]
             changed_lines
                 .get(&finding.file)
-                .is_some_and(|lines| lines.contains(&finding.line))
+                .is_some_and(|lines| finding.line == 0 || lines.contains(&finding.line))
         })
         .cloned()
         .collect()
@@ -556,7 +810,7 @@ fn check_run_summary(findings: &[Finding], annotation_count: usize) -> String {
         .collect();
     if !summary_only_findings.is_empty() {
         summary.push_str(&format!(
-            " {} dependency finding(s) are summarized below without inline PR comments or check annotations.",
+            " {} dependency finding(s) are summarized below without check annotations.",
             summary_only_findings.len()
         ));
         summary.push_str("\n\nDependency findings (summary only):");
@@ -613,32 +867,110 @@ fn truncate(value: &str, max_chars: usize) -> String {
     truncated
 }
 
-fn review_comment_payloads(
-    findings: &[Finding],
-    changed_lines: &HashMap<String, HashSet<usize>>,
-    scan_root: Option<&Path>,
-) -> Vec<Value> {
-    findings
-        .iter()
-        .filter(|finding| !is_summary_only_finding(finding))
-        .filter_map(|finding| {
-            let path = crate::report::github_pr::relative_path(&finding.file, scan_root);
-            // HashMap::get on the local changed-lines map; not a network call.
-            // foxguard: ignore[rs/no-ssrf]
-            if !changed_lines
-                .get(&path)
-                .is_some_and(|lines| lines.contains(&finding.line))
-            {
-                return None;
-            }
-            Some(serde_json::json!({
-                "path": path,
-                "line": finding.line,
-                "side": "RIGHT",
-                "body": format_comment_body(finding),
-            }))
-        })
-        .collect()
+fn summary_comment_request_body(findings: &[Finding], source_revision: &SourceRevision) -> Value {
+    serde_json::json!({
+        "body": review_summary_body(findings, source_revision),
+    })
+}
+
+fn review_summary_body(findings: &[Finding], source_revision: &SourceRevision) -> String {
+    if findings.is_empty() {
+        return format!("{COMMENT_MARKER}\n\n**foxguard** found no issues in this PR revision.");
+    }
+
+    let mut low = 0;
+    let mut medium = 0;
+    let mut high = 0;
+    let mut critical = 0;
+    for finding in findings {
+        match finding.severity {
+            Severity::Low => low += 1,
+            Severity::Medium => medium += 1,
+            Severity::High => high += 1,
+            Severity::Critical => critical += 1,
+        }
+    }
+
+    let mut body = format!(
+        "{COMMENT_MARKER}\n\n**foxguard** found {} issue(s) in this PR",
+        findings.len()
+    );
+    body.push_str(&format!(
+        "\n\n**By severity**\n- `CRITICAL`: {critical}\n- `HIGH`: {high}\n- `MEDIUM`: {medium}\n- `LOW`: {low}"
+    ));
+    body.push_str("\n\n**Findings**");
+    for finding in findings {
+        body.push_str(&format_review_finding(finding, source_revision));
+    }
+    body
+}
+
+fn format_review_finding(finding: &Finding, source_revision: &SourceRevision) -> String {
+    let cwe_suffix = finding
+        .cwe
+        .as_deref()
+        .map(|cwe| format!(" ({cwe})"))
+        .unwrap_or_default();
+    let advisory_suffix = finding
+        .dep_vulnerability_id
+        .as_deref()
+        .map(|advisory| format!(" ({advisory})"))
+        .unwrap_or_default();
+    let location = format_review_location(finding, source_revision);
+    let mut entry = format!(
+        "\n- **{}** `{}`{}{} at {} — {}",
+        severity_label(finding.severity),
+        finding.rule_id,
+        cwe_suffix,
+        advisory_suffix,
+        location,
+        finding.description,
+    );
+    if let Some(fix) = &finding.fix_suggestion {
+        entry.push_str(&format!("\n  - **Fix:** {fix}"));
+    }
+    entry
+}
+
+fn format_review_location(finding: &Finding, source_revision: &SourceRevision) -> String {
+    let line_range = if finding.line > 0 {
+        if finding.end_line > finding.line {
+            format!(":{}-{}", finding.line, finding.end_line)
+        } else {
+            format!(":{}", finding.line)
+        }
+    } else {
+        String::new()
+    };
+    let label = format!(
+        "{}{}",
+        percent_encoded_display_path(&finding.file),
+        line_range
+    );
+    source_revision
+        .permalink(&finding.file, finding.line, finding.end_line)
+        .map(|url| format!("[`{label}`](<{url}>)"))
+        .unwrap_or_else(|| format!("`{label}`"))
+}
+
+fn percent_encoded_display_path(path: &str) -> String {
+    let mut encoded = String::with_capacity(path.len());
+    for (index, segment) in path.split('/').enumerate() {
+        if index > 0 {
+            encoded.push('/');
+        }
+        push_percent_encoded_path_segment(&mut encoded, segment);
+    }
+    encoded
+}
+
+fn severity_label(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Low => "LOW",
+        Severity::Medium => "MEDIUM",
+        Severity::High => "HIGH",
+        Severity::Critical => "CRITICAL",
+    }
 }
 
 fn is_summary_only_finding(finding: &Finding) -> bool {
@@ -651,7 +983,7 @@ fn dependency_summary_line(finding: &Finding) -> String {
         (Some(name), None) => format!("`{name}`"),
         _ => format!("`{}`", finding.rule_id),
     };
-    let location = format!("in `{}`", finding.file);
+    let location = format!("in `{}`", percent_encoded_display_path(&finding.file));
     let advisory = finding
         .dep_vulnerability_id
         .as_deref()
@@ -688,7 +1020,7 @@ mod tests {
 
     #[test]
     fn endpoint_preserves_enterprise_api_path() {
-        let client = match GitHubReviewClient::new("https://github.example.com/api/v3") {
+        let client = match GitHubReviewClient::new("https://github.example.com/api/v3", 42) {
             Ok(client) => client,
             Err(error) => panic!("client should build: {error}"),
         };
@@ -787,6 +1119,11 @@ mod tests {
         finding
     }
 
+    fn scanned_revision(repo_web_url: &str, head_sha: &str) -> SourceRevision {
+        SourceRevision::new(repo_web_url, head_sha)
+            .unwrap_or_else(|error| panic!("source revision should parse: {error}"))
+    }
+
     #[test]
     fn check_run_conclusion_matches_severity() {
         assert_eq!(check_run_conclusion(&[]), "success");
@@ -814,20 +1151,145 @@ mod tests {
     }
 
     #[test]
-    fn review_comment_payloads_skip_dependency_findings() {
+    fn summary_comment_request_body_puts_all_findings_in_one_message() {
         let findings = vec![finding(Severity::High, 10), dependency_finding(11)];
-        let changed_lines = HashMap::from([(String::from("src/app.js"), HashSet::from([10usize]))]);
+        let source = scanned_revision(
+            "https://github.com/fork-owner/fork-repo",
+            "0123456789abcdef",
+        );
 
-        let comments = review_comment_payloads(&findings, &changed_lines, None);
+        let body = summary_comment_request_body(&findings, &source);
+        assert!(body.get("event").is_none());
+        assert!(body.get("commit_id").is_none());
+        assert!(body.get("comments").is_none());
+        let summary = body["body"]
+            .as_str()
+            .unwrap_or_else(|| panic!("summary body should be a string"));
+        assert!(summary.contains("**Findings**"));
+        assert!(summary.contains(
+            "[`src/app.js:10`](<https://github.com/fork-owner/fork-repo/blob/0123456789abcdef/src/app.js#L10>)"
+        ));
+        assert!(summary.contains(
+            "[`package-lock.json:11`](<https://github.com/fork-owner/fork-repo/blob/0123456789abcdef/package-lock.json#L11>)"
+        ));
+        assert!(summary.contains("`manifest/osv-vulnerable-dep`"));
+        assert!(summary.contains("GHSA-r9p9-mrjm-926w"));
+    }
 
-        assert_eq!(comments.len(), 1);
-        assert_eq!(comments[0]["path"], "src/app.js");
-        assert_eq!(comments[0]["line"], 10);
+    #[test]
+    fn summary_links_single_lines_and_ranges_to_scanned_ghe_fork_revision() {
+        let mut range = finding(Severity::High, 20);
+        range.end_line = 24;
+        let source = scanned_revision(
+            "https://github.example.com/fork-owner/fork-repo",
+            "feedface0123456789abcdef",
+        );
+
+        let summary = review_summary_body(&[finding(Severity::Medium, 10), range], &source);
+
+        assert!(summary.contains(
+            "[`src/app.js:10`](<https://github.example.com/fork-owner/fork-repo/blob/feedface0123456789abcdef/src/app.js#L10>)"
+        ));
+        assert!(summary.contains(
+            "[`src/app.js:20-24`](<https://github.example.com/fork-owner/fork-repo/blob/feedface0123456789abcdef/src/app.js#L20-L24>)"
+        ));
+    }
+
+    #[test]
+    fn summary_encodes_special_path_segments_in_permalinks() {
+        let source = scanned_revision(
+            "https://github.com/fork-owner/fork-repo",
+            "0123456789abcdef",
+        );
+        let finding = finding_in_file(Severity::High, "src/space #?/[brackets].rs", 7);
+
+        let summary = review_summary_body(&[finding], &source);
+
+        assert!(summary.contains(
+            "https://github.com/fork-owner/fork-repo/blob/0123456789abcdef/src/space%20%23%3F/%5Bbrackets%5D.rs#L7"
+        ));
+    }
+
+    #[test]
+    fn summary_encodes_untrusted_and_malformed_paths_before_markdown_rendering() {
+        let source = scanned_revision(
+            "https://github.com/fork-owner/fork-repo",
+            "0123456789abcdef",
+        );
+        let unsafe_path = "src/unsafe`](<https:attacker.invalid>)\n[trick].rs";
+        let malformed_path = "/../unsafe`](<https://attacker.invalid>)\n[trick].rs";
+        let safe_finding = finding_in_file(Severity::High, unsafe_path, 9);
+        let malformed_finding = finding_in_file(Severity::High, malformed_path, 10);
+
+        let summary = review_summary_body(&[safe_finding, malformed_finding], &source);
+
+        assert!(summary.contains(
+            "[`src/unsafe%60%5D%28%3Chttps%3Aattacker.invalid%3E%29%0A%5Btrick%5D.rs:9`](<https://github.com/fork-owner/fork-repo/blob/0123456789abcdef/src/unsafe%60%5D%28%3Chttps%3Aattacker.invalid%3E%29%0A%5Btrick%5D.rs#L9>)"
+        ));
+        assert!(summary.contains(
+            "`/../unsafe%60%5D%28%3Chttps%3A//attacker.invalid%3E%29%0A%5Btrick%5D.rs:10`"
+        ));
+        assert_eq!(summary.matches("](<https://").count(), 1);
+        assert!(!summary.contains("https://attacker.invalid"));
+        assert!(!summary.contains("`](<https:attacker.invalid>)"));
+        assert!(!summary.contains("\n[trick]"));
+    }
+
+    #[test]
+    fn summary_links_file_only_dependency_findings_without_line_zero_anchor() {
+        let source = scanned_revision(
+            "https://github.com/fork-owner/fork-repo",
+            "0123456789abcdef",
+        );
+
+        let summary = review_summary_body(&[dependency_finding(0)], &source);
+
+        assert!(summary.contains(
+            "[`package-lock.json`](<https://github.com/fork-owner/fork-repo/blob/0123456789abcdef/package-lock.json>)"
+        ));
+        assert!(summary.contains("GHSA-r9p9-mrjm-926w"));
+        assert!(!summary.contains("#L0"));
+    }
+
+    #[test]
+    fn source_revision_rejects_invalid_web_urls() {
+        assert!(SourceRevision::new("http://github.com/fork-owner/fork-repo", "deadbeef").is_err());
+        assert!(SourceRevision::new(
+            "https://github.com/fork-owner/fork-repo?ref=main",
+            "deadbeef"
+        )
+        .is_err());
+        assert!(SourceRevision::new("https://github.com/fork-owner", "deadbeef").is_err());
+    }
+
+    #[test]
+    fn owned_foxguard_summary_comment_ids_retain_all_owned_markers() {
+        let comments = vec![
+            IssueComment {
+                id: 3,
+                body: Some("human comment".to_string()),
+                performed_via_github_app: None,
+            },
+            IssueComment {
+                id: 7,
+                body: Some(format!("{COMMENT_MARKER}\nold foxguard summary")),
+                performed_via_github_app: Some(PerformedViaGitHubApp { id: 42 }),
+            },
+            IssueComment {
+                id: 11,
+                body: Some(format!("{COMMENT_MARKER}\nother app summary")),
+                performed_via_github_app: Some(PerformedViaGitHubApp { id: 99 }),
+            },
+            IssueComment {
+                id: 13,
+                body: Some(format!("{COMMENT_MARKER}\nnew foxguard summary")),
+                performed_via_github_app: Some(PerformedViaGitHubApp { id: 42 }),
+            },
+        ];
+
         assert_eq!(
-            comments[0]["body"]
-                .as_str()
-                .map(|body| body.contains(COMMENT_MARKER)),
-            Some(true)
+            owned_foxguard_summary_comment_ids(comments, 42),
+            vec![7, 13]
         );
     }
 
@@ -850,6 +1312,21 @@ mod tests {
         assert!(summary.contains("1 dependency finding(s)"));
         assert!(summary.contains("GHSA-r9p9-mrjm-926w"));
         assert!(summary.contains("`elliptic@6.5.4`"));
+    }
+
+    #[test]
+    fn check_run_dependency_summary_encodes_untrusted_file_path() {
+        let mut finding = dependency_finding(0);
+        finding.file = "package`](<https://attacker.invalid>)\n[trick].json".to_string();
+
+        let summary = check_run_summary(&[finding], 0);
+
+        assert!(summary.contains(
+            "in `package%60%5D%28%3Chttps%3A//attacker.invalid%3E%29%0A%5Btrick%5D.json`"
+        ));
+        assert!(!summary.contains("https://attacker.invalid"));
+        assert!(!summary.contains("`](<https://attacker.invalid>)"));
+        assert!(!summary.contains("\n[trick]"));
     }
 
     #[test]
@@ -1048,6 +1525,418 @@ mod tests {
         (url, handle)
     }
 
+    fn read_http_request(stream: &mut std::net::TcpStream) -> String {
+        use std::io::Read;
+
+        let mut request = Vec::new();
+        let mut buffer = [0u8; 4096];
+        loop {
+            let read = stream
+                .read(&mut buffer)
+                .unwrap_or_else(|error| panic!("mock server should read request: {error}"));
+            assert!(read > 0, "client closed the request before sending a body");
+            request.extend_from_slice(&buffer[..read]);
+
+            let Some(header_end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") else {
+                continue;
+            };
+            let headers = std::str::from_utf8(&request[..header_end])
+                .unwrap_or_else(|error| panic!("request headers should be UTF-8: {error}"));
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    if name.eq_ignore_ascii_case("content-length") {
+                        value.trim().parse::<usize>().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+            if request.len() >= header_end + 4 + content_length {
+                return String::from_utf8(request)
+                    .unwrap_or_else(|error| panic!("request should be UTF-8: {error}"));
+            }
+        }
+    }
+    fn spawn_recording_mock_server(
+        responses: Vec<(u16, String)>,
+    ) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::time::{Duration, Instant};
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .unwrap_or_else(|error| panic!("mock server should bind: {error}"));
+        listener
+            .set_nonblocking(true)
+            .unwrap_or_else(|error| panic!("mock server should become non-blocking: {error}"));
+        let port = listener
+            .local_addr()
+            .unwrap_or_else(|error| panic!("mock server should report port: {error}"))
+            .port();
+        let url = format!("http://127.0.0.1:{port}/");
+
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut requests = Vec::new();
+            while requests.len() < responses.len() && Instant::now() < deadline {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(pair) => pair,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("mock server should accept: {error}"),
+                };
+                stream.set_nonblocking(false).unwrap_or_else(|error| {
+                    panic!("accepted mock connection should block: {error}")
+                });
+                let (status, body) = &responses[requests.len()];
+                requests.push(read_http_request(&mut stream));
+                let response = format!(
+                    "HTTP/1.1 {status} OK\r\n\
+                     Content-Type: application/json\r\n\
+                     Content-Length: {}\r\n\
+                     Connection: close\r\n\
+                     \r\n\
+                     {body}",
+                    body.len(),
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .unwrap_or_else(|error| panic!("mock server should respond: {error}"));
+            }
+            requests
+        });
+
+        (url, handle)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn summary_comment_create_then_update_uses_new_head_sha_and_preserves_human_markers() {
+        let (url, handle) = spawn_recording_mock_server(vec![
+            (
+                200,
+                serde_json::json!([
+                    {
+                        "id": 76,
+                        "body": format!("{COMMENT_MARKER}\nhuman marker"),
+                        "performed_via_github_app": null,
+                    },
+                    {
+                        "id": 77,
+                        "body": format!("{COMMENT_MARKER}\nlegacy app marker"),
+                        "performed_via_github_app": { "id": 42 },
+                    },
+                    {
+                        "id": 78,
+                        "body": format!("{COMMENT_MARKER}\nother app marker"),
+                        "performed_via_github_app": { "id": 99 },
+                    },
+                ])
+                .to_string(),
+            ),
+            (200, "[]".to_string()),
+            (201, "{}".to_string()),
+            (204, String::new()),
+            (200, "[]".to_string()),
+            (
+                200,
+                serde_json::json!([{
+                    "id": 99,
+                    "body": format!("{COMMENT_MARKER}\nold summary"),
+                    "performed_via_github_app": { "id": 42 },
+                }])
+                .to_string(),
+            ),
+            (200, "{}".to_string()),
+        ]);
+        let client = GitHubReviewClient::new(&url, 42)
+            .unwrap_or_else(|error| panic!("client should build: {error}"));
+        let findings = vec![finding(Severity::High, 10), dependency_finding(11)];
+        let changed_lines = HashMap::from([
+            ("src/app.js".to_string(), HashSet::from([10usize])),
+            ("package-lock.json".to_string(), HashSet::from([11usize])),
+        ]);
+        let first_source = scanned_revision(
+            "https://github.example.com/fork-owner/fork-repo",
+            "0123456789abcdef",
+        );
+        let second_source = scanned_revision(
+            "https://github.example.com/fork-owner/fork-repo",
+            "fedcba9876543210",
+        );
+
+        let first = client
+            .post_pull_request_review(
+                "owner/repo",
+                42,
+                &findings,
+                &first_source,
+                "test-token",
+                Some(&changed_lines),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("summary should post: {error}"));
+        let second = client
+            .post_pull_request_review(
+                "owner/repo",
+                42,
+                &findings,
+                &second_source,
+                "test-token",
+                Some(&changed_lines),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("summary should update: {error}"));
+
+        assert_eq!(
+            first,
+            PostReviewOutcome {
+                deleted_comments: 1,
+                review_messages: 1,
+            }
+        );
+        assert_eq!(
+            second,
+            PostReviewOutcome {
+                deleted_comments: 0,
+                review_messages: 1,
+            }
+        );
+
+        let requests = handle
+            .join()
+            .unwrap_or_else(|_| panic!("mock server thread should join"));
+        assert_eq!(requests.len(), 7);
+        assert!(requests[0].starts_with(
+            "GET /repos/owner/repo/pulls/42/comments?per_page=100&page=1 HTTP/1.1\r\n"
+        ));
+        assert!(requests[1].starts_with(
+            "GET /repos/owner/repo/issues/42/comments?per_page=100&page=1 HTTP/1.1\r\n"
+        ));
+        assert!(requests[2].starts_with("POST /repos/owner/repo/issues/42/comments HTTP/1.1\r\n"));
+        assert!(requests[3].starts_with("DELETE /repos/owner/repo/pulls/comments/77 HTTP/1.1\r\n"));
+        assert!(requests[4].starts_with(
+            "GET /repos/owner/repo/pulls/42/comments?per_page=100&page=1 HTTP/1.1\r\n"
+        ));
+        assert!(requests[5].starts_with(
+            "GET /repos/owner/repo/issues/42/comments?per_page=100&page=1 HTTP/1.1\r\n"
+        ));
+        assert!(requests[6].starts_with("PATCH /repos/owner/repo/issues/comments/99 HTTP/1.1\r\n"));
+        assert!(requests.iter().all(|request| {
+            !request.contains("/reviews")
+                && !request.starts_with("PUT ")
+                && !request.starts_with("POST /repos/owner/repo/pulls/comments ")
+        }));
+        assert!(requests
+            .iter()
+            .all(|request| !request.contains("/pulls/comments/76")));
+        assert!(requests
+            .iter()
+            .all(|request| !request.contains("/pulls/comments/78")));
+
+        let (_, create_payload) = requests[2]
+            .split_once("\r\n\r\n")
+            .unwrap_or_else(|| panic!("create request should contain JSON payload"));
+        let create_payload: Value = serde_json::from_str(create_payload)
+            .unwrap_or_else(|error| panic!("create payload should be JSON: {error}"));
+        assert!(create_payload.get("event").is_none());
+        assert!(create_payload.get("commit_id").is_none());
+        let create_body = create_payload["body"]
+            .as_str()
+            .unwrap_or_else(|| panic!("create payload body should be a string"));
+        assert!(create_body.contains(
+            "https://github.example.com/fork-owner/fork-repo/blob/0123456789abcdef/package-lock.json#L11"
+        ));
+        assert!(create_body.contains("GHSA-r9p9-mrjm-926w"));
+
+        let (_, update_payload) = requests[6]
+            .split_once("\r\n\r\n")
+            .unwrap_or_else(|| panic!("update request should contain JSON payload"));
+        let update_payload: Value = serde_json::from_str(update_payload)
+            .unwrap_or_else(|error| panic!("update payload should be JSON: {error}"));
+        let update_body = update_payload["body"]
+            .as_str()
+            .unwrap_or_else(|| panic!("update payload body should be a string"));
+        assert!(update_body.contains(
+            "https://github.example.com/fork-owner/fork-repo/blob/fedcba9876543210/package-lock.json#L11"
+        ));
+        assert!(!update_body.contains("0123456789abcdef"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn patchless_changed_manifest_line_zero_dependencies_are_file_linked_through_updates() {
+        let (url, handle) = spawn_recording_mock_server(vec![
+            (200, "[]".to_string()),
+            (200, "[]".to_string()),
+            (
+                200,
+                serde_json::json!([{
+                    "filename": "package-lock.json",
+                    "patch": null,
+                }])
+                .to_string(),
+            ),
+            (201, "{}".to_string()),
+            (200, "[]".to_string()),
+            (
+                200,
+                serde_json::json!([{
+                    "id": 99,
+                    "body": format!("{COMMENT_MARKER}\nold summary"),
+                    "performed_via_github_app": { "id": 42 },
+                }])
+                .to_string(),
+            ),
+            (
+                200,
+                serde_json::json!([{
+                    "filename": "package-lock.json",
+                    "patch": null,
+                }])
+                .to_string(),
+            ),
+            (200, "{}".to_string()),
+        ]);
+        let client = GitHubReviewClient::new(&url, 42)
+            .unwrap_or_else(|error| panic!("client should build: {error}"));
+        let mut line_bearing_finding = dependency_finding(9);
+        line_bearing_finding.file = "package-lock.json".to_string();
+        let mut unchanged_finding = dependency_finding(0);
+        unchanged_finding.file = "yarn.lock".to_string();
+        let findings = vec![
+            dependency_finding(0),
+            line_bearing_finding,
+            unchanged_finding,
+        ];
+        let source = scanned_revision(
+            "https://github.com/fork-owner/fork-repo",
+            "0123456789abcdef",
+        );
+
+        let first = client
+            .post_pull_request_review("owner/repo", 42, &findings, &source, "test-token", None)
+            .await
+            .unwrap_or_else(|error| panic!("summary should post: {error}"));
+        let second = client
+            .post_pull_request_review("owner/repo", 42, &findings, &source, "test-token", None)
+            .await
+            .unwrap_or_else(|error| panic!("summary should update: {error}"));
+
+        assert_eq!(first.review_messages, 1);
+        assert_eq!(second.review_messages, 1);
+
+        let requests = handle
+            .join()
+            .unwrap_or_else(|_| panic!("mock server thread should join"));
+        assert_eq!(requests.len(), 8);
+        assert!(requests[2]
+            .starts_with("GET /repos/owner/repo/pulls/42/files?per_page=100&page=1 HTTP/1.1\r\n"));
+        assert!(requests[3].starts_with("POST /repos/owner/repo/issues/42/comments HTTP/1.1\r\n"));
+        assert!(requests[6]
+            .starts_with("GET /repos/owner/repo/pulls/42/files?per_page=100&page=1 HTTP/1.1\r\n"));
+        assert!(requests[7].starts_with("PATCH /repos/owner/repo/issues/comments/99 HTTP/1.1\r\n"));
+
+        let expected_link = "[`package-lock.json`](<https://github.com/fork-owner/fork-repo/blob/0123456789abcdef/package-lock.json>)";
+        for request in [&requests[3], &requests[7]] {
+            let (_, payload) = request
+                .split_once("\r\n\r\n")
+                .unwrap_or_else(|| panic!("summary request should contain JSON payload"));
+            let payload: Value = serde_json::from_str(payload)
+                .unwrap_or_else(|error| panic!("summary payload should be JSON: {error}"));
+            let body = payload["body"]
+                .as_str()
+                .unwrap_or_else(|| panic!("summary payload body should be a string"));
+            assert!(body.contains(expected_link));
+            assert!(!body.contains("yarn.lock"));
+            assert!(!body.contains("package-lock.json:9"));
+            assert!(!body.contains("#L0"));
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn duplicate_owned_summary_comments_converge_after_canonical_update() {
+        let (url, handle) = spawn_recording_mock_server(vec![
+            (200, "[]".to_string()),
+            (
+                200,
+                serde_json::json!([
+                    {
+                        "id": 80,
+                        "body": format!("{COMMENT_MARKER}\nhuman marker"),
+                        "performed_via_github_app": null,
+                    },
+                    {
+                        "id": 88,
+                        "body": format!("{COMMENT_MARKER}\nold owned summary"),
+                        "performed_via_github_app": { "id": 42 },
+                    },
+                    {
+                        "id": 93,
+                        "body": format!("{COMMENT_MARKER}\nother app summary"),
+                        "performed_via_github_app": { "id": 99 },
+                    },
+                    {
+                        "id": 99,
+                        "body": format!("{COMMENT_MARKER}\ncanonical owned summary"),
+                        "performed_via_github_app": { "id": 42 },
+                    },
+                ])
+                .to_string(),
+            ),
+            (200, "{}".to_string()),
+            (204, String::new()),
+        ]);
+        let client = GitHubReviewClient::new(&url, 42)
+            .unwrap_or_else(|error| panic!("client should build: {error}"));
+        let source = scanned_revision("https://github.com/owner/repo", "0123456789abcdef");
+
+        let outcome = client
+            .post_pull_request_review("owner/repo", 42, &[], &source, "test-token", None)
+            .await
+            .unwrap_or_else(|error| panic!("summary should converge: {error}"));
+        assert_eq!(
+            outcome,
+            PostReviewOutcome {
+                deleted_comments: 0,
+                review_messages: 1,
+            }
+        );
+
+        let requests = handle
+            .join()
+            .unwrap_or_else(|_| panic!("mock server thread should join"));
+        assert_eq!(requests.len(), 4);
+        assert!(requests[0].starts_with(
+            "GET /repos/owner/repo/pulls/42/comments?per_page=100&page=1 HTTP/1.1\r\n"
+        ));
+        assert!(requests[1].starts_with(
+            "GET /repos/owner/repo/issues/42/comments?per_page=100&page=1 HTTP/1.1\r\n"
+        ));
+        assert!(requests[2].starts_with("PATCH /repos/owner/repo/issues/comments/99 HTTP/1.1\r\n"));
+        assert!(requests[3].starts_with("DELETE /repos/owner/repo/issues/comments/88 HTTP/1.1\r\n"));
+        assert!(requests
+            .iter()
+            .all(|request| !request.contains("/issues/comments/80")));
+        assert!(requests
+            .iter()
+            .all(|request| !request.contains("/issues/comments/93")));
+        assert!(requests
+            .iter()
+            .all(|request| !request.starts_with("POST /repos/owner/repo/issues/42/comments ")));
+
+        let (_, update_payload) = requests[2]
+            .split_once("\r\n\r\n")
+            .unwrap_or_else(|| panic!("update request should contain JSON payload"));
+        let update_payload: Value = serde_json::from_str(update_payload)
+            .unwrap_or_else(|error| panic!("update payload should be JSON: {error}"));
+        assert!(update_payload["body"]
+            .as_str()
+            .is_some_and(|body| body.contains("found no issues in this PR revision")));
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn paginated_get_follows_link_header_through_short_page() {
         // Three pages: a full 100-item first page, a *short* 30-item
@@ -1087,7 +1976,7 @@ mod tests {
         ];
 
         let (url, handle) = spawn_mock_server(responses);
-        let client = match GitHubReviewClient::new(&url) {
+        let client = match GitHubReviewClient::new(&url, 42) {
             Ok(client) => client,
             Err(error) => panic!("client should build: {error}"),
         };
@@ -1117,7 +2006,7 @@ mod tests {
         )];
 
         let (url, handle) = spawn_mock_server(responses);
-        let client = match GitHubReviewClient::new(&url) {
+        let client = match GitHubReviewClient::new(&url, 42) {
             Ok(client) => client,
             Err(error) => panic!("client should build: {error}"),
         };
@@ -1146,7 +2035,7 @@ mod tests {
         )];
 
         let (url, handle) = spawn_mock_server(responses);
-        let client = match GitHubReviewClient::new(&url) {
+        let client = match GitHubReviewClient::new(&url, 42) {
             Ok(client) => client,
             Err(error) => panic!("client should build: {error}"),
         };
