@@ -48,6 +48,12 @@ fn foxguard_cmd_isolated() -> Command {
     cmd
 }
 
+fn pqc_cmd_isolated() -> Command {
+    let mut cmd = foxguard_cmd();
+    cmd.args(["pqc", "--config", "/dev/null"]);
+    cmd
+}
+
 fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -6032,10 +6038,9 @@ mod config_files {
     }
 
     #[test]
-    #[ignore = "PQC dep scanning differs on CI — investigate separately"]
     fn poetry_lock_pq_finds_crypto_deps() {
-        let output = foxguard_cmd_isolated()
-            .args(["pqc", "tests/fixtures/deps/poetry.lock", "-f", "json"])
+        let output = pqc_cmd_isolated()
+            .args(["tests/fixtures/deps/poetry.lock", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
 
@@ -6062,10 +6067,9 @@ mod config_files {
     }
 
     #[test]
-    #[ignore = "PQC dep scanning differs on CI — investigate separately"]
     fn pipfile_lock_pq_finds_crypto_deps() {
-        let output = foxguard_cmd_isolated()
-            .args(["pqc", "tests/fixtures/deps/Pipfile.lock", "-f", "json"])
+        let output = pqc_cmd_isolated()
+            .args(["tests/fixtures/deps/Pipfile.lock", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
 
@@ -6090,10 +6094,9 @@ mod config_files {
     }
 
     #[test]
-    #[ignore = "PQC dep scanning differs on CI — investigate separately"]
     fn pnpm_lock_pq_finds_crypto_deps() {
-        let output = foxguard_cmd_isolated()
-            .args(["pqc", "tests/fixtures/deps/pnpm-lock.yaml", "-f", "json"])
+        let output = pqc_cmd_isolated()
+            .args(["tests/fixtures/deps/pnpm-lock.yaml", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
 
@@ -6115,10 +6118,9 @@ mod config_files {
     }
 
     #[test]
-    #[ignore = "PQC dep scanning differs on CI — investigate separately"]
     fn package_lock_pq_finds_crypto_deps() {
-        let output = foxguard_cmd_isolated()
-            .args(["pqc", "tests/fixtures/deps/package-lock.json", "-f", "json"])
+        let output = pqc_cmd_isolated()
+            .args(["tests/fixtures/deps/package-lock.json", "-f", "json"])
             .output()
             .expect("failed to execute foxguard");
 
