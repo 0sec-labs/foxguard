@@ -273,7 +273,8 @@ Execution model:
 - SARIF results are normalized into the same `Finding` shape used by built-in, Semgrep-compatible, and Coccinelle rules.
 - If `codeql` is missing from PATH, foxguard emits a single warning and skips CodeQL rules while continuing the rest of the scan.
 - If `codeql database create` fails (e.g. no compilable source under the scan target, or the qlpack language family isn't installed), foxguard emits a per-rule warning and continues. Set `FOXGUARD_CODEQL_CREATE_TIMEOUT_SECS` to override the default 15-minute build timeout.
-- `foxguard diff` does not run the CodeQL bridge yet. Accurate diffing needs a base/current database strategy rather than a single current database.
+- `foxguard diff` compares CodeQL only when both pre-built databases are supplied. Use `--codeql-base-db /path/to/base-db --codeql-head-db /path/to/head-db` (or `diff.codeql_base_db` and `diff.codeql_head_db` in config) with `--rules`; an incomplete pair is an error. It never builds databases in diff mode. Each configured rule runs against both databases, normalized equivalent findings are suppressed, and head-only findings flow through normal diff output once. If CodeQL is unavailable or either analysis fails, the diff exits with an explicit error rather than emitting a clean CodeQL delta.
+- In paired diff mode, unloadable CodeQL rules and malformed SARIF are errors; foxguard never treats them as an empty result set. Paired SARIF must be version 2.1.0 with a run/tool/driver/results structure. Singleton artifact roots share one comparison identity across `uriBaseId` and source-root encodings; multiple independent `uriBaseId` roots are namespaced and must map identically between base and head. Anonymous or incompatible multi-root inputs fail explicitly rather than collapsing same-tail paths.
 
 ## Important limitations
 

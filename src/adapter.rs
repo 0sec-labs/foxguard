@@ -67,6 +67,10 @@ pub struct AdapterRequest {
     pub config: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codeql_base_db: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codeql_head_db: Option<String>,
     #[serde(default)]
     pub no_builtins: bool,
     #[serde(default)]
@@ -99,6 +103,8 @@ impl AdapterRequest {
             severity: None,
             config: None,
             rules: None,
+            codeql_base_db: None,
+            codeql_head_db: None,
             no_builtins: false,
             change_mode: AdapterChangeMode::None,
             exclude: Vec::new(),
@@ -343,24 +349,7 @@ fn diff_response(request: &AdapterRequest) -> AdapterResponse {
         .or(request.workspace_root.as_deref())
         .unwrap_or(".");
     let base = request.base.clone().unwrap_or_else(|| "main".to_string());
-    let args = DiffArgs {
-        target: base.clone(),
-        path: resolve_workspace_path(path, request.workspace_root.as_deref()),
-        config: resolve_optional_workspace_path(
-            request.config.as_deref(),
-            request.workspace_root.as_deref(),
-        ),
-        format: OutputFormat::Json,
-        severity: request.severity.map(severity_filter),
-        rules: resolve_optional_workspace_path(
-            request.rules.as_deref(),
-            request.workspace_root.as_deref(),
-        ),
-        no_builtins: request.no_builtins,
-        output: None,
-        github_pr: None,
-        max_file_size: max_file_size(request),
-    };
+    let args = adapter_diff_args(request, path, &base);
     match execute_diff(&args) {
         Ok(result) => {
             let summary = summarize(&result.findings, result.files_scanned, result.duration);
@@ -381,6 +370,35 @@ fn diff_response(request: &AdapterRequest) -> AdapterResponse {
             )
         }
         Err(error) => request_error(request, error),
+    }
+}
+
+fn adapter_diff_args(request: &AdapterRequest, path: &str, base: &str) -> DiffArgs {
+    DiffArgs {
+        target: base.to_string(),
+        path: resolve_workspace_path(path, request.workspace_root.as_deref()),
+        config: resolve_optional_workspace_path(
+            request.config.as_deref(),
+            request.workspace_root.as_deref(),
+        ),
+        format: OutputFormat::Json,
+        severity: request.severity.map(severity_filter),
+        rules: resolve_optional_workspace_path(
+            request.rules.as_deref(),
+            request.workspace_root.as_deref(),
+        ),
+        codeql_base_db: resolve_optional_workspace_path(
+            request.codeql_base_db.as_deref(),
+            request.workspace_root.as_deref(),
+        ),
+        codeql_head_db: resolve_optional_workspace_path(
+            request.codeql_head_db.as_deref(),
+            request.workspace_root.as_deref(),
+        ),
+        no_builtins: request.no_builtins,
+        output: None,
+        github_pr: None,
+        max_file_size: max_file_size(request),
     }
 }
 
@@ -681,6 +699,33 @@ mod tests {
         assert_eq!(
             encoded["schema_version"].as_str(),
             Some(ADAPTER_SCHEMA_VERSION)
+        );
+    }
+
+    #[test]
+    fn adapter_diff_maps_paired_codeql_databases() {
+        let workspace = tempfile::tempdir().expect("failed to create workspace");
+        let workspace_root = workspace.path().to_string_lossy().into_owned();
+        let request: AdapterRequest = must(serde_json::from_value(json!({
+            "command": "diff",
+            "workspace_root": workspace_root,
+            "codeql_base_db": "codeql/base",
+            "codeql_head_db": "codeql/head"
+        })));
+
+        let args = adapter_diff_args(
+            &request,
+            request.workspace_root.as_deref().expect("workspace root"),
+            "main",
+        );
+
+        assert_eq!(
+            args.codeql_base_db.as_deref(),
+            Some(format!("{}/codeql/base", workspace.path().display()).as_str())
+        );
+        assert_eq!(
+            args.codeql_head_db.as_deref(),
+            Some(format!("{}/codeql/head", workspace.path().display()).as_str())
         );
     }
 

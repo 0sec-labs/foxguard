@@ -47,6 +47,11 @@ pub struct DiffExecution {
     pub notices: Vec<String>,
 }
 
+struct CodeQlDiffDatabases {
+    base: PathBuf,
+    head: PathBuf,
+}
+
 pub struct DiffSummary {
     pub target: String,
     pub total_current: usize,
@@ -468,6 +473,7 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
 pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     validate_root_path(&args.path)?;
     let config = load_for_scan(Path::new(&args.path), args.config.as_deref())?;
+    let codeql_databases = resolve_codeql_diff_databases(args, config.as_ref())?;
     let identity_root = finding_identity_root(Path::new(&args.path), config.as_ref());
     let config_scan = config.as_ref().map(|config| &config.scan);
     let rules_path = args
@@ -488,22 +494,37 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
         Some(rules_path) => coccinelle::load_coccinelle_rules(Path::new(rules_path)),
         None => (Vec::new(), Vec::new()),
     };
+    let mut codeql_rules = if codeql_databases.is_some() {
+        let rules_path = rules_path.ok_or_else(|| {
+            "CodeQL diff requires --rules or scan.rules with engine: codeql rules".to_string()
+        })?;
+        codeql::load_codeql_rules_for_diff(Path::new(rules_path))?
+    } else {
+        Vec::new()
+    };
     let coccinelle_rule_ids = coccinelle::rule_ids(&coccinelle_rules);
+    let codeql_rule_ids = codeql::rule_ids(&codeql_rules);
+    let external_rule_ids = external_rule_ids(&coccinelle_rule_ids, &codeql_rule_ids);
     let rule_filter_unknown = if let Some(config) = config.as_ref() {
         coccinelle::apply_rule_filter(
             &mut coccinelle_rules,
             &config.scan.enable_rules,
             &config.scan.disable_rules,
         );
+        codeql::apply_rule_filter(
+            &mut codeql_rules,
+            &config.scan.enable_rules,
+            &config.scan.disable_rules,
+        );
         registry.apply_rule_filter_with_known(
             &config.scan.enable_rules,
             &config.scan.disable_rules,
-            &coccinelle_rule_ids,
+            &external_rule_ids,
         )
     } else {
-        registry.apply_rule_filter_with_known(&[], &[], &coccinelle_rule_ids)
+        registry.apply_rule_filter_with_known(&[], &[], &external_rule_ids)
     };
-    let ((scan_result, mut diff_result), mut notices) = run_diff_with_coccinelle_warnings(
+    let ((mut scan_result, mut diff_result), mut notices) = run_diff_with_coccinelle_warnings(
         &args.path,
         &args.target,
         &registry,
@@ -512,6 +533,28 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     )?;
     notices.append(&mut coccinelle_notices);
     append_scan_stats_notice(&mut notices, &scan_result.stats);
+
+    if let Some(databases) = codeql_databases {
+        let base_result = codeql::scan_prebuilt_database(&codeql_rules, &databases.base)
+            .map_err(|error| format!("CodeQL base database comparison could not run: {error}"))?;
+        let head_result = codeql::scan_prebuilt_database(&codeql_rules, &databases.head)
+            .map_err(|error| format!("CodeQL head database comparison could not run: {error}"))?;
+        let head_files_scanned = head_result.files_scanned;
+        let codeql_diff = codeql::diff_prebuilt_database_findings(head_result, base_result)
+            .map_err(|error| format!("CodeQL database comparison could not run: {error}"))?;
+
+        scan_result.files_scanned += head_files_scanned;
+        diff_result.total_current += codeql_diff.total_current;
+        diff_result.existing_count += codeql_diff.existing_count;
+        diff_result.new_findings.extend(codeql_diff.new_findings);
+        diff_result.new_findings.sort_by(|a, b| {
+            a.file
+                .cmp(&b.file)
+                .then(a.line.cmp(&b.line))
+                .then(a.column.cmp(&b.column))
+                .then(a.rule_id.cmp(&b.rule_id))
+        });
+    }
 
     if !rule_filter_unknown.is_empty() {
         notices.insert(
@@ -531,7 +574,7 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     // Annotate CNSA 2.0 deadlines on the new findings surfaced by this diff.
     crate::compliance::annotate_cnsa2_deadlines(&mut diff_result.new_findings, &registry);
 
-    let known_rule_ids = collect_rule_ids(&registry, &coccinelle_rules, &[]);
+    let known_rule_ids = collect_rule_ids(&registry, &coccinelle_rules, &codeql_rules);
     let override_warnings = apply_severity_overrides(
         &mut diff_result.new_findings,
         config.as_ref(),
@@ -576,6 +619,41 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
         existing_count: diff_result.existing_count,
         notices,
     })
+}
+
+fn resolve_codeql_diff_databases(
+    args: &DiffArgs,
+    config: Option<&FoxguardConfig>,
+) -> Result<Option<CodeQlDiffDatabases>, String> {
+    if args.codeql_base_db.is_some() || args.codeql_head_db.is_some() {
+        return codeql_diff_database_pair(
+            args.codeql_base_db.as_deref(),
+            args.codeql_head_db.as_deref(),
+            "--codeql-base-db and --codeql-head-db",
+        );
+    }
+
+    let config = config.map(|config| &config.diff);
+    codeql_diff_database_pair(
+        config.and_then(|config| config.codeql_base_db.as_deref()),
+        config.and_then(|config| config.codeql_head_db.as_deref()),
+        "diff.codeql_base_db and diff.codeql_head_db",
+    )
+}
+
+fn codeql_diff_database_pair(
+    base: Option<&str>,
+    head: Option<&str>,
+    source: &str,
+) -> Result<Option<CodeQlDiffDatabases>, String> {
+    match (base, head) {
+        (Some(base), Some(head)) => Ok(Some(CodeQlDiffDatabases {
+            base: PathBuf::from(base),
+            head: PathBuf::from(head),
+        })),
+        (None, None) => Ok(None),
+        _ => Err(format!("CodeQL diff requires both {source}")),
+    }
 }
 
 fn append_scan_stats_notice(notices: &mut Vec<String>, stats: &ScanStats) {
@@ -676,6 +754,8 @@ fn tui_diff_args(args: &TuiArgs, target: &str) -> DiffArgs {
         severity: args.severity,
         config: args.config.clone(),
         rules: args.rules.clone(),
+        codeql_base_db: None,
+        codeql_head_db: None,
         no_builtins: args.no_builtins,
         output: None,
         github_pr: None,

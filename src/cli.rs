@@ -393,6 +393,13 @@ pub struct DiffArgs {
     /// Path to external YAML rule file or directory
     #[arg(short, long)]
     pub rules: Option<String>,
+    /// Pre-built CodeQL database for the base side of this diff. Must be paired with --codeql-head-db.
+    #[arg(long = "codeql-base-db", requires = "codeql_head_db")]
+    pub codeql_base_db: Option<String>,
+
+    /// Pre-built CodeQL database for the head side of this diff. Must be paired with --codeql-base-db.
+    #[arg(long = "codeql-head-db", requires = "codeql_base_db")]
+    pub codeql_head_db: Option<String>,
 
     /// Disable built-in rules and run only external rules loaded via --rules
     #[arg(long, default_value_t = false)]
