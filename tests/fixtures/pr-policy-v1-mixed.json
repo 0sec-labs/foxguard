@@ -1,0 +1,15 @@
+{
+  "policy": {
+    "version": "v1",
+    "scope": "repository",
+    "reporting_threshold": "medium",
+    "blocking_threshold": "high"
+  },
+  "findings": ["low", "medium", "high", "critical"],
+  "expected": {
+    "scoped_findings": 4,
+    "included_findings": 3,
+    "blocking_findings": 2,
+    "decision": "fail"
+  }
+}

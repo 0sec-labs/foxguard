@@ -27,12 +27,17 @@ use axum::{
     Router,
 };
 use base64::Engine;
+use foxguard::config::load_for_scan;
 use foxguard::github_app::auth::{
     AppCredentials, AuthError, GitHubAppAuthClient, InstallationToken, InstallationTokenCache,
 };
 use foxguard::github_app::installation_store::{InstallationMetadataInput, InstallationStore};
-use foxguard::github_app::review::{GitHubReviewClient, SourceRevision};
+use foxguard::github_app::review::{CheckRunPolicy, GitHubReviewClient, SourceRevision};
 use foxguard::github_app::webhook::{verify_signature, EventKind, SignatureError};
+use foxguard::pr_policy::{
+    evaluate, resolve as resolve_pr_security_policy, PrPolicyEvaluation, PrPolicyNotEvaluated,
+    PrPolicyNotEvaluatedReason, PrSecurityPolicyInput,
+};
 use foxguard::report::github_pr::relative_path;
 use foxguard::Finding;
 use serde::Deserialize;
@@ -372,7 +377,7 @@ fn start_pull_request_workers(
                                 action = job.action,
                                 pr_number = result.pr_number,
                                 repo = result.repo,
-                                findings = result.findings.len(),
+                                findings = result.findings_for_transport().len(),
                                 review_messages = result.review_messages,
                                 deleted_comments = result.deleted_comments,
                                 posted_check_annotations = result.posted_check_annotations,
@@ -643,15 +648,43 @@ fn repository_names(repositories: Option<&[GitHubRepositorySummary]>) -> Vec<Str
 }
 
 #[derive(Debug)]
+enum PullRequestPolicyOutcome {
+    Evaluated(PrPolicyEvaluation),
+    NotEvaluated(PrPolicyNotEvaluated),
+}
+
+#[derive(Debug)]
 struct PullRequestScanResult {
     pr_number: u64,
     repo: String,
     head_sha: String,
     head_repo_web_url: String,
     findings: Vec<Finding>,
+    policy_outcome: PullRequestPolicyOutcome,
     review_messages: usize,
     deleted_comments: usize,
     posted_check_annotations: usize,
+}
+
+impl PullRequestScanResult {
+    fn findings_for_transport(&self) -> &[Finding] {
+        match &self.policy_outcome {
+            PullRequestPolicyOutcome::Evaluated(evaluation) => &evaluation.findings,
+            PullRequestPolicyOutcome::NotEvaluated(_) => &self.findings,
+        }
+    }
+
+    fn check_run_policy(&self) -> CheckRunPolicy<'_> {
+        match &self.policy_outcome {
+            PullRequestPolicyOutcome::Evaluated(evaluation) => {
+                CheckRunPolicy::Evaluated(evaluation)
+            }
+            PullRequestPolicyOutcome::NotEvaluated(policy) => CheckRunPolicy::NotEvaluated {
+                findings: &self.findings,
+                policy,
+            },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -720,7 +753,7 @@ async fn process_pull_request_delivery(
         .post_pull_request_review(
             &result.repo,
             result.pr_number,
-            &result.findings,
+            result.findings_for_transport(),
             &source_revision,
             &token,
             changed_lines.as_ref(),
@@ -734,7 +767,7 @@ async fn process_pull_request_delivery(
         .post_check_run(
             &result.repo,
             &result.head_sha,
-            &result.findings,
+            result.check_run_policy(),
             &token,
             changed_lines.as_ref(),
         )
@@ -780,6 +813,17 @@ fn run_pull_request_scan(
         ));
     }
 
+    let config = load_for_scan(&checkout, None)
+        .map_err(|error| format!("failed to load PR security policy config: {error}"))?;
+    let policy_overrides = PrSecurityPolicyInput::default();
+    let policy = resolve_pr_security_policy(
+        config
+            .as_ref()
+            .and_then(|config| config.pr_security_policy.as_ref()),
+        &policy_overrides,
+    )
+    .map_err(|error| format!("invalid PR security policy: {error}"))?;
+
     // Full-tree scan FIRST — this preserves whole-repo cross-file taint context
     // (a source in an unchanged file reaching a sink in a changed file is still
     // caught), which is foxguard's headline capability. The ~80% of PRs whose
@@ -805,17 +849,20 @@ fn run_pull_request_scan(
         _ => None,
     };
 
-    let output = match run_scanner(&checkout, None) {
-        Ok(output) => output,
+    let (output, full_repository_scan) = match run_scanner(&checkout, None) {
+        Ok(output) => (output, true),
         Err(error) if is_scan_timeout(&error) && changed_files_list.is_some() => {
             warn!(
                 repo = target_repo,
                 pr_number = pull_request.number,
                 "full-tree scan timed out; falling back to a diff-scoped scan of \
                  the PR's changed files (cross-file taint from unchanged files not \
-                 analysed on this path)"
+                 analysed on this path); v1 repository policy will not be evaluated"
             );
-            run_scanner(&checkout, changed_files_list.as_deref())?
+            (
+                run_scanner(&checkout, changed_files_list.as_deref())?,
+                false,
+            )
         }
         Err(error) => return Err(error),
     };
@@ -823,12 +870,27 @@ fn run_pull_request_scan(
     for finding in &mut findings {
         finding.file = relative_path(&finding.file, Some(&checkout));
     }
+    let (findings, policy_outcome) = if full_repository_scan {
+        (
+            Vec::new(),
+            PullRequestPolicyOutcome::Evaluated(evaluate(policy, findings)),
+        )
+    } else {
+        (
+            findings,
+            PullRequestPolicyOutcome::NotEvaluated(PrPolicyNotEvaluated::new(
+                policy,
+                PrPolicyNotEvaluatedReason::ChangedFilesFallback,
+            )),
+        )
+    };
     Ok(PullRequestScanResult {
         pr_number: pull_request.number,
         repo: target_repo.to_string(),
         head_sha: pull_request.head.sha,
         head_repo_web_url: pull_request.head.repo.html_url,
         findings,
+        policy_outcome,
         review_messages: 0,
         deleted_comments: 0,
         posted_check_annotations: 0,

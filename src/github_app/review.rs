@@ -1,6 +1,7 @@
 //! Pull request review posting for the GitHub App receiver.
 
-use crate::report::github_pr::COMMENT_MARKER;
+use crate::pr_policy::{PrPolicyEvaluation, PrPolicyNotEvaluated, PrPolicyReport};
+use crate::report::github_pr::{format_comment_body, COMMENT_MARKER};
 use crate::{Finding, Severity};
 use reqwest::Url;
 use serde::Deserialize;
@@ -41,6 +42,15 @@ impl From<reqwest::Error> for ReviewError {
     fn from(error: reqwest::Error) -> Self {
         Self::Http(error)
     }
+}
+
+/// The policy result represented by a GitHub check run.
+pub enum CheckRunPolicy<'a> {
+    Evaluated(&'a PrPolicyEvaluation),
+    NotEvaluated {
+        findings: &'a [Finding],
+        policy: &'a PrPolicyNotEvaluated,
+    },
 }
 
 #[derive(Clone)]
@@ -156,35 +166,13 @@ impl GitHubReviewClient {
         &self,
         repo_full_name: &str,
         head_sha: &str,
-        findings: &[Finding],
+        policy: CheckRunPolicy<'_>,
         installation_token: &str,
         changed_lines: Option<&HashMap<String, HashSet<usize>>>,
     ) -> Result<PostCheckRunOutcome, ReviewError> {
         let repo = RepositoryPath::parse(repo_full_name)?;
-        let effective_findings = if let Some(lines) = changed_lines {
-            filter_findings_to_changed_lines(findings, lines)
-        } else {
-            findings.to_vec()
-        };
-        let annotation_findings: Vec<Finding> = effective_findings
-            .iter()
-            .filter(|finding| !is_summary_only_finding(finding))
-            .cloned()
-            .collect();
-        let annotations = check_run_annotations(&annotation_findings);
-        let annotation_count = annotations.len();
+        let (body, annotation_count) = check_run_payload(head_sha, policy, changed_lines);
         let url = self.endpoint(&format!("repos/{}/{}/check-runs", repo.owner, repo.name))?;
-        let body = serde_json::json!({
-            "name": "foxguard",
-            "head_sha": head_sha,
-            "status": "completed",
-            "conclusion": check_run_conclusion(&effective_findings),
-            "output": {
-                "title": check_run_title(&effective_findings),
-                "summary": check_run_summary(&effective_findings, annotation_count),
-                "annotations": annotations,
-            },
-        });
         // URL construction is restricted to a validated GitHub API base URL plus
         // repository path segments parsed by `RepositoryPath::parse`.
         let request = self.http.post(url); // foxguard: ignore[rs/no-ssrf]
@@ -733,8 +721,8 @@ fn hunk_new_start(line: &str) -> Option<usize> {
 }
 
 /// Filter line-bearing findings to changed lines and file-only findings to
-/// changed files. This ensures review summaries and check-run conclusions
-/// reflect only PR-introduced issues, not pre-existing ones.
+/// changed files. This GitHub review transport constraint is separate from a
+/// repository policy decision.
 fn filter_findings_to_changed_lines(
     findings: &[Finding],
     changed_lines: &HashMap<String, HashSet<usize>>,
@@ -752,30 +740,97 @@ fn filter_findings_to_changed_lines(
         .collect()
 }
 
-fn check_run_conclusion(findings: &[Finding]) -> &'static str {
-    if findings.is_empty() {
-        return "success";
-    }
-    if findings
-        .iter()
-        .any(|finding| matches!(finding.severity, Severity::High | Severity::Critical))
-    {
-        return "failure";
-    }
-    "neutral"
+fn check_run_payload(
+    head_sha: &str,
+    policy: CheckRunPolicy<'_>,
+    changed_lines: Option<&HashMap<String, HashSet<usize>>>,
+) -> (Value, usize) {
+    let findings = match &policy {
+        CheckRunPolicy::Evaluated(evaluation) => evaluation.findings.as_slice(),
+        CheckRunPolicy::NotEvaluated { findings, .. } => *findings,
+    };
+    let annotation_findings = match changed_lines {
+        Some(lines) => filter_findings_to_changed_lines(findings, lines),
+        None => findings.to_vec(),
+    };
+    let annotation_findings: Vec<Finding> = annotation_findings
+        .into_iter()
+        .filter(|finding| !is_summary_only_finding(finding))
+        .collect();
+    let annotations = check_run_annotations(&annotation_findings);
+    let annotation_count = annotations.len();
+    let (conclusion, title, summary) = match policy {
+        CheckRunPolicy::Evaluated(evaluation) => (
+            evaluation.report().decision.github_check_conclusion(),
+            check_run_title(evaluation),
+            check_run_summary(findings, annotation_count, evaluation.report()),
+        ),
+        CheckRunPolicy::NotEvaluated { policy, .. } => (
+            "neutral",
+            "foxguard policy not evaluated",
+            check_run_not_evaluated_summary(findings, annotation_count, policy),
+        ),
+    };
+    (
+        serde_json::json!({
+            "name": "foxguard",
+            "head_sha": head_sha,
+            "status": "completed",
+            "conclusion": conclusion,
+            "output": {
+                "title": title,
+                "summary": summary,
+                "annotations": annotations,
+            },
+        }),
+        annotation_count,
+    )
 }
 
-fn check_run_title(findings: &[Finding]) -> &'static str {
-    if findings.is_empty() {
-        "foxguard found no issues"
-    } else {
-        "foxguard found issues"
+fn check_run_not_evaluated_summary(
+    findings: &[Finding],
+    annotation_count: usize,
+    policy: &PrPolicyNotEvaluated,
+) -> String {
+    let mut summary = format!(
+        "foxguard found {} issue(s) in a partial scan. {policy}",
+        findings.len()
+    );
+    if annotation_count > 0 {
+        summary.push_str(&format!(
+            " Showing {annotation_count} partial-scan finding(s) as check annotations."
+        ));
+    }
+    summary.push_str("\n\nThis neutral check is not a v1 repository-scope policy decision.");
+    summary
+}
+
+fn check_run_title(evaluation: &PrPolicyEvaluation) -> &'static str {
+    match evaluation.report().decision {
+        crate::pr_policy::PrPolicyDecision::Pass => "foxguard policy passed",
+        crate::pr_policy::PrPolicyDecision::Neutral => "foxguard policy reported issues",
+        crate::pr_policy::PrPolicyDecision::Fail => "foxguard policy failed",
     }
 }
 
-fn check_run_summary(findings: &[Finding], annotation_count: usize) -> String {
+fn check_run_summary(
+    findings: &[Finding],
+    annotation_count: usize,
+    policy: &PrPolicyReport,
+) -> String {
+    let policy_summary = format!(
+        "PR security policy {} (scope {}, report >= {}, block >= {}): {} \
+         ({} included, {} blocking).",
+        policy.version,
+        policy.scope,
+        policy.reporting_threshold,
+        policy.blocking_threshold,
+        policy.decision,
+        policy.included_findings,
+        policy.blocking_findings
+    );
     if findings.is_empty() {
-        return "foxguard scan completed with no findings.".to_string();
+        return format!("foxguard scan completed with no reportable findings.\n\n{policy_summary}");
     }
 
     let mut low = 0;
@@ -792,7 +847,7 @@ fn check_run_summary(findings: &[Finding], annotation_count: usize) -> String {
     }
 
     let mut summary = format!(
-        "foxguard found {} issue(s): {critical} critical, {high} high, {medium} medium, {low} low.",
+        "foxguard found {} reportable issue(s): {critical} critical, {high} high, {medium} medium, {low} low.",
         findings.len()
     );
     let annotation_eligible_count = findings
@@ -824,6 +879,7 @@ fn check_run_summary(findings: &[Finding], annotation_count: usize) -> String {
             ));
         }
     }
+    summary.push_str(&format!("\n\n{policy_summary}"));
     summary
 }
 
@@ -1000,6 +1056,7 @@ fn dependency_summary_line(finding: &Finding) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pr_policy::evaluate;
 
     #[test]
     fn repository_path_accepts_owner_repo() {
@@ -1125,16 +1182,105 @@ mod tests {
     }
 
     #[test]
-    fn check_run_conclusion_matches_severity() {
-        assert_eq!(check_run_conclusion(&[]), "success");
+    fn check_run_conclusion_comes_from_shared_policy() {
+        let pass = evaluate(crate::pr_policy::PrSecurityPolicy::default(), vec![]);
         assert_eq!(
-            check_run_conclusion(&[finding(Severity::Low, 1)]),
-            "neutral"
+            pass.report().decision,
+            crate::pr_policy::PrPolicyDecision::Pass
+        );
+
+        let neutral = evaluate(
+            crate::pr_policy::PrSecurityPolicy::default(),
+            vec![finding(Severity::Medium, 1)],
         );
         assert_eq!(
-            check_run_conclusion(&[finding(Severity::High, 1)]),
-            "failure"
+            neutral.report().decision,
+            crate::pr_policy::PrPolicyDecision::Neutral
         );
+
+        let fail = evaluate(
+            crate::pr_policy::PrSecurityPolicy::default(),
+            vec![finding(Severity::High, 1)],
+        );
+        assert_eq!(
+            fail.report().decision,
+            crate::pr_policy::PrPolicyDecision::Fail
+        );
+        assert_eq!(check_run_title(&fail), "foxguard policy failed");
+    }
+
+    #[test]
+    fn check_run_payload_matches_shared_mixed_policy_contract() {
+        let (policy, findings, expected) = crate::pr_policy::contract_fixture::mixed_v1();
+        let evaluation = evaluate(policy, findings);
+        let (payload, annotation_count) =
+            check_run_payload("head-sha", CheckRunPolicy::Evaluated(&evaluation), None);
+
+        assert_eq!(evaluation.report(), &expected);
+        assert_eq!(annotation_count, expected.included_findings);
+        assert_eq!(payload["conclusion"].as_str(), Some("failure"));
+        assert_eq!(
+            payload["output"]["title"].as_str(),
+            Some("foxguard policy failed")
+        );
+        let summary = payload["output"]["summary"]
+            .as_str()
+            .expect("check-run summary");
+        assert!(summary.contains("scope repository"));
+        assert!(summary.contains("report >= medium, block >= high"));
+        assert!(summary.contains("fail (3 included, 2 blocking)"));
+    }
+
+    #[test]
+    fn partial_check_run_is_not_labeled_as_repository_policy() {
+        let (policy, findings, _) = crate::pr_policy::contract_fixture::mixed_v1();
+        let partial = PrPolicyNotEvaluated::new(
+            policy,
+            crate::pr_policy::PrPolicyNotEvaluatedReason::ChangedFilesFallback,
+        );
+        let (payload, _) = check_run_payload(
+            "head-sha",
+            CheckRunPolicy::NotEvaluated {
+                findings: &findings,
+                policy: &partial,
+            },
+            None,
+        );
+
+        assert_eq!(payload["conclusion"].as_str(), Some("neutral"));
+        assert_eq!(
+            payload["output"]["title"].as_str(),
+            Some("foxguard policy not evaluated")
+        );
+        let summary = payload["output"]["summary"]
+            .as_str()
+            .expect("check-run summary");
+        assert!(summary.contains("was not evaluated"));
+        assert!(summary.contains("not a v1 repository-scope policy decision"));
+        assert!(!summary.contains("scope repository"));
+    }
+
+    #[test]
+    fn partial_check_annotations_stay_within_changed_lines() {
+        let policy = crate::pr_policy::PrSecurityPolicy::default();
+        let partial = PrPolicyNotEvaluated::new(
+            policy,
+            crate::pr_policy::PrPolicyNotEvaluatedReason::ChangedFilesFallback,
+        );
+        let findings = vec![finding(Severity::High, 3), finding(Severity::High, 9)];
+        let changed_lines = HashMap::from([("src/app.js".to_string(), HashSet::from([3]))]);
+
+        let (payload, annotation_count) = check_run_payload(
+            "head-sha",
+            CheckRunPolicy::NotEvaluated {
+                findings: &findings,
+                policy: &partial,
+            },
+            Some(&changed_lines),
+        );
+
+        assert_eq!(annotation_count, 1);
+        assert_eq!(payload["output"]["annotations"][0]["start_line"], 3);
     }
 
     #[test]
@@ -1298,16 +1444,24 @@ mod tests {
         let findings: Vec<_> = (1..=60)
             .map(|line| finding(Severity::Medium, line))
             .collect();
-        let summary = check_run_summary(&findings, 50);
+        let policy = evaluate(
+            crate::pr_policy::PrSecurityPolicy::default(),
+            findings.clone(),
+        );
+        let summary = check_run_summary(&findings, 50, policy.report());
 
-        assert!(summary.contains("60 issue(s)"));
+        assert!(summary.contains("60 reportable issue(s)"));
         assert!(summary.contains("Showing the first 50"));
     }
 
     #[test]
     fn check_run_summary_mentions_dependency_findings_without_annotations() {
         let findings = vec![dependency_finding(12)];
-        let summary = check_run_summary(&findings, 0);
+        let policy = evaluate(
+            crate::pr_policy::PrSecurityPolicy::default(),
+            findings.clone(),
+        );
+        let summary = check_run_summary(&findings, 0, policy.report());
 
         assert!(summary.contains("1 dependency finding(s)"));
         assert!(summary.contains("GHSA-r9p9-mrjm-926w"));
@@ -1355,76 +1509,56 @@ mod tests {
     }
 
     #[test]
-    fn check_run_only_fails_for_pr_introduced_high_severity() {
-        // Simulate a repo scan that found both pre-existing and
-        // PR-introduced findings. The check-run conclusion must only
-        // consider findings on lines that the PR actually changed.
+    fn check_run_policy_is_not_limited_to_changed_lines() {
         let mut changed_lines: HashMap<String, HashSet<usize>> = HashMap::new();
         changed_lines.insert("src/app.js".to_string(), HashSet::from([10, 11, 12]));
 
-        // Pre-existing high-severity finding on an unchanged line.
-        let pre_existing_high = finding_in_file(Severity::High, "src/app.js", 50);
-        // Pre-existing critical finding in an entirely different file.
-        let pre_existing_critical = finding_in_file(Severity::Critical, "src/legacy.js", 1);
-        // PR-introduced low-severity finding.
-        let pr_low = finding_in_file(Severity::Low, "src/app.js", 10);
+        let all_findings = vec![
+            finding_in_file(Severity::High, "src/app.js", 50),
+            finding_in_file(Severity::Critical, "src/legacy.js", 1),
+            finding_in_file(Severity::Low, "src/app.js", 10),
+        ];
+        let policy = evaluate(
+            crate::pr_policy::PrSecurityPolicy::default(),
+            all_findings.clone(),
+        );
+        assert_eq!(
+            policy.report().decision,
+            crate::pr_policy::PrPolicyDecision::Fail
+        );
 
-        let all_findings = vec![pre_existing_high, pre_existing_critical, pr_low];
-
-        // Without filtering (the old behavior), the conclusion would be
-        // "failure" because of the pre-existing high/critical findings.
-        assert_eq!(check_run_conclusion(&all_findings), "failure");
-
-        // With filtering to changed lines, only the low-severity finding
-        // remains, so the conclusion should be "neutral" (not failure).
-        let pr_findings = filter_findings_to_changed_lines(&all_findings, &changed_lines);
-        assert_eq!(pr_findings.len(), 1);
-        assert_eq!(pr_findings[0].severity, Severity::Low);
-        assert_eq!(check_run_conclusion(&pr_findings), "neutral");
-
-        // Annotations should also only include the PR-introduced finding.
-        let annotations = check_run_annotations(&pr_findings);
+        let comment_findings = filter_findings_to_changed_lines(&all_findings, &changed_lines);
+        assert_eq!(comment_findings.len(), 1);
+        let annotations = check_run_annotations(&comment_findings);
         assert_eq!(annotations.len(), 1);
-        assert_eq!(annotations[0]["path"], "src/app.js");
-        assert_eq!(annotations[0]["start_line"], 10);
         assert_eq!(annotations[0]["annotation_level"], "notice");
     }
 
     #[test]
-    fn check_run_fails_only_when_pr_introduces_high_severity() {
-        // When the PR itself introduces a high-severity finding, the
-        // check run should correctly fail.
-        let mut changed_lines: HashMap<String, HashSet<usize>> = HashMap::new();
-        changed_lines.insert("src/app.js".to_string(), HashSet::from([10, 11]));
+    fn check_run_policy_fails_on_reported_high_severity() {
+        let policy = evaluate(
+            crate::pr_policy::PrSecurityPolicy::default(),
+            vec![
+                finding_in_file(Severity::Critical, "src/legacy.js", 1),
+                finding_in_file(Severity::High, "src/app.js", 10),
+                finding_in_file(Severity::Low, "src/app.js", 11),
+            ],
+        );
 
-        let findings = vec![
-            // Pre-existing critical (should be filtered out)
-            finding_in_file(Severity::Critical, "src/legacy.js", 1),
-            // PR-introduced high (should cause failure)
-            finding_in_file(Severity::High, "src/app.js", 10),
-            // PR-introduced low
-            finding_in_file(Severity::Low, "src/app.js", 11),
-        ];
-
-        let pr_findings = filter_findings_to_changed_lines(&findings, &changed_lines);
-        assert_eq!(pr_findings.len(), 2);
-        assert_eq!(check_run_conclusion(&pr_findings), "failure");
+        assert_eq!(
+            policy.report().decision,
+            crate::pr_policy::PrPolicyDecision::Fail
+        );
     }
 
     #[test]
-    fn check_run_succeeds_when_no_pr_findings() {
-        // All findings are pre-existing; the PR changed lines have none.
-        let mut changed_lines: HashMap<String, HashSet<usize>> = HashMap::new();
-        changed_lines.insert("src/app.js".to_string(), HashSet::from([10]));
+    fn check_run_policy_passes_without_reportable_findings() {
+        let policy = evaluate(crate::pr_policy::PrSecurityPolicy::default(), vec![]);
 
-        let findings = vec![
-            finding_in_file(Severity::Critical, "src/app.js", 50),
-            finding_in_file(Severity::High, "src/other.js", 1),
-        ];
-
-        let pr_findings = filter_findings_to_changed_lines(&findings, &changed_lines);
-        assert!(pr_findings.is_empty());
-        assert_eq!(check_run_conclusion(&pr_findings), "success");
+        assert_eq!(
+            policy.report().decision,
+            crate::pr_policy::PrPolicyDecision::Pass
+        );
     }
 
     #[test]

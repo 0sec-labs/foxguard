@@ -1,4 +1,5 @@
 use crate::cli::{ScanArgs, SecretsArgs, SeverityFilter};
+use crate::pr_policy::PrSecurityPolicyInput;
 use crate::rules::common::SecretScanThresholds;
 use crate::{Finding, Severity};
 use regex::Regex;
@@ -21,6 +22,7 @@ pub struct FoxguardConfig {
     pub scan: ScanConfig,
     pub secrets: SecretsConfig,
     pub diff: DiffConfig,
+    pub pr_security_policy: Option<PrSecurityPolicyInput>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -145,6 +147,7 @@ struct RawFoxguardConfig {
     secrets: RawSecretsConfig,
     #[serde(default)]
     diff: RawDiffConfig,
+    pr_security_policy: Option<PrSecurityPolicyInput>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -256,6 +259,22 @@ pub fn load_for_scan(
         config_dir,
         &allowed_root,
     )?))
+}
+
+/// Resolve the directory containing the configuration discovered for a scan.
+///
+/// This is distinct from `FoxguardConfig::project_root`, which is the
+/// scan-specific trust boundary for config paths.
+pub(crate) fn config_root_for_scan(
+    scan_path: &Path,
+    explicit_path: Option<&str>,
+) -> Option<PathBuf> {
+    let path = resolve_config_path(scan_path, explicit_path)
+        .ok()
+        .flatten()?;
+    let path = path.canonicalize().unwrap_or(path);
+    path.parent()
+        .map(crate::path_identity::resolve_path_for_boundary)
 }
 
 pub fn apply_scan_defaults(scan: &mut ScanArgs, config: Option<&FoxguardConfig>) {
@@ -474,6 +493,7 @@ impl FoxguardConfig {
                 codeql_base_db: diff_codeql_base_db,
                 codeql_head_db: diff_codeql_head_db,
             },
+            pr_security_policy: raw.pr_security_policy,
         })
     }
 }

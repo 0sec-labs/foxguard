@@ -7,11 +7,20 @@ use std::process::Command;
 /// then the scan root. Callers use this as the base for stable baseline and
 /// suppression keys while leaving reported finding paths unchanged.
 pub fn project_root(scan_path: &Path, configured_root: Option<&Path>) -> PathBuf {
-    if let Some(root) = configured_root {
-        return resolve_path_for_boundary(root);
-    }
+    configured_root
+        .map(resolve_path_for_boundary)
+        .or_else(|| git_repo_root(scan_path))
+        .unwrap_or_else(|| resolve_scan_root(scan_path))
+}
 
-    git_repo_root(scan_path).unwrap_or_else(|| resolve_scan_root(scan_path))
+/// Resolve the canonical root for repository-scoped policy evaluation.
+///
+/// A Git checkout is the authoritative repository boundary even when a config
+/// was supplied from an ancestor or nested directory. Without Git metadata, a
+/// discovered config directory establishes the project boundary. Unlike
+/// [`project_root`], this intentionally does not fall back to the scan target.
+pub fn pr_policy_root(scan_path: &Path, configured_root: Option<&Path>) -> Option<PathBuf> {
+    git_repo_root(scan_path).or_else(|| configured_root.map(resolve_path_for_boundary))
 }
 
 pub fn resolve_scan_root(scan_path: &Path) -> PathBuf {

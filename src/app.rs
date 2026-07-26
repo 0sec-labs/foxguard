@@ -1,14 +1,19 @@
 use crate::baseline::{load_baseline, suppress_with_baseline_at_root, write_baseline_at_root};
-use crate::cli::{DiffArgs, OutputFormat, ScanArgs, SecretsArgs, TuiArgs};
+use crate::cli::{DiffArgs, OutputFormat, PrSecurityPolicyArgs, ScanArgs, SecretsArgs, TuiArgs};
 use crate::config::{
-    apply_scan_defaults, apply_secrets_defaults, apply_severity_overrides, load_for_scan,
-    secret_scan_thresholds, suppress_with_patterns, suppress_with_scan_ignores, FoxguardConfig,
+    apply_scan_defaults, apply_secrets_defaults, apply_severity_overrides, config_root_for_scan,
+    load_for_scan, secret_scan_thresholds, suppress_with_patterns, suppress_with_scan_ignores,
+    FoxguardConfig,
 };
 use crate::deps::{scan_dependency_vulnerabilities, DependencyScanOptions};
 use crate::diff::run_diff_with_coccinelle_warnings;
 use crate::engine::{
     coccinelle, codeql, scan_directory_with_notices, scan_paths_with_root_with_notices, ScanResult,
     ScanStats,
+};
+use crate::pr_policy::{
+    resolve as resolve_pr_security_policy, PrPolicyNotEvaluated, PrPolicyNotEvaluatedReason,
+    PrSecurityPolicy,
 };
 use crate::rules::semgrep_compat::load_semgrep_rules;
 use crate::rules::RuleRegistry;
@@ -27,6 +32,8 @@ pub struct ScanExecution {
     pub stats: ScanStats,
     pub duration: std::time::Duration,
     pub notices: Vec<String>,
+    pub pr_security_policy: Option<PrSecurityPolicy>,
+    pub pr_security_policy_not_evaluated: Option<PrPolicyNotEvaluated>,
 }
 
 pub struct SecretsExecution {
@@ -45,6 +52,8 @@ pub struct DiffExecution {
     pub total_current: usize,
     pub existing_count: usize,
     pub notices: Vec<String>,
+    pub pr_security_policy: Option<PrSecurityPolicy>,
+    pub pr_security_policy_not_evaluated: Option<PrPolicyNotEvaluated>,
 }
 
 struct CodeQlDiffDatabases {
@@ -89,6 +98,37 @@ pub fn resolve_secrets_args(args: &SecretsArgs) -> Result<SecretsArgs, String> {
     Ok(args)
 }
 
+fn resolve_pr_security_policy_for_surface(
+    config: Option<&FoxguardConfig>,
+    args: &PrSecurityPolicyArgs,
+    github_pr: bool,
+) -> Result<Option<PrSecurityPolicy>, String> {
+    if !github_pr && !args.is_enabled() {
+        return Ok(None);
+    }
+
+    resolve_pr_security_policy(
+        config.and_then(|config| config.pr_security_policy.as_ref()),
+        &args.input(),
+    )
+    .map(Some)
+}
+
+fn scan_targets_pr_policy_root(scan_path: &Path, config_path: Option<&str>) -> bool {
+    if !scan_path.is_dir() {
+        return false;
+    }
+
+    let configured_root = config_root_for_scan(scan_path, config_path);
+    let Some(project_root) =
+        crate::path_identity::pr_policy_root(scan_path, configured_root.as_deref())
+    else {
+        return false;
+    };
+
+    crate::path_identity::resolve_path_for_boundary(scan_path) == project_root
+}
+
 pub fn scan_findings(scan: &ScanArgs) -> Result<ScanResult, String> {
     let execution = execute_scan(scan)?;
     Ok(ScanResult {
@@ -117,6 +157,28 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
     let config = load_for_scan(Path::new(&scan.path), scan.config.as_deref())?;
     validate_root_path(&scan.path)?;
     validate_rules_path(scan.rules.as_deref())?;
+    let change_limited = scan.changed_files_from.is_some() || scan.changes.selection().is_some();
+    let requested_pr_security_policy = resolve_pr_security_policy_for_surface(
+        config.as_ref(),
+        &scan.pr_security_policy,
+        scan.github_pr.is_some(),
+    )?;
+    let full_repository_scan = requested_pr_security_policy.is_some()
+        && !change_limited
+        && scan_targets_pr_policy_root(Path::new(&scan.path), scan.config.as_deref());
+    let (pr_security_policy, pr_security_policy_not_evaluated) = match requested_pr_security_policy
+    {
+        Some(policy) if full_repository_scan => (Some(policy), None),
+        Some(policy) => {
+            let reason = if change_limited {
+                PrPolicyNotEvaluatedReason::ChangedOnlyScan
+            } else {
+                PrPolicyNotEvaluatedReason::PartialScan
+            };
+            (None, Some(PrPolicyNotEvaluated::new(policy, reason)))
+        }
+        None => (None, None),
+    };
     let identity_root = finding_identity_root(Path::new(&scan.path), config.as_ref());
 
     let mut registry = build_registry(scan.no_builtins, scan.rules.as_deref())?;
@@ -403,12 +465,18 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
         }
     }
 
+    if let Some(policy) = &pr_security_policy_not_evaluated {
+        notices.push(policy.to_string());
+    }
+
     Ok(ScanExecution {
         args: scan,
         findings,
         files_scanned,
         stats,
         duration,
+        pr_security_policy,
+        pr_security_policy_not_evaluated,
         notices,
     })
 }
@@ -474,6 +542,13 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
     validate_root_path(&args.path)?;
     let config = load_for_scan(Path::new(&args.path), args.config.as_deref())?;
     let codeql_databases = resolve_codeql_diff_databases(args, config.as_ref())?;
+    let pr_security_policy_not_evaluated = resolve_pr_security_policy_for_surface(
+        config.as_ref(),
+        &args.pr_security_policy,
+        args.github_pr.is_some(),
+    )?
+    .map(|policy| PrPolicyNotEvaluated::new(policy, PrPolicyNotEvaluatedReason::DiffScan));
+    let pr_security_policy = None;
     let identity_root = finding_identity_root(Path::new(&args.path), config.as_ref());
     let config_scan = config.as_ref().map(|config| &config.scan);
     let rules_path = args
@@ -610,6 +685,10 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
         diff_result.existing_count
     ));
 
+    if let Some(policy) = &pr_security_policy_not_evaluated {
+        notices.push(policy.to_string());
+    }
+
     Ok(DiffExecution {
         args: args.clone(),
         findings: diff_result.new_findings,
@@ -617,6 +696,8 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
         duration: scan_result.duration,
         total_current: diff_result.total_current,
         existing_count: diff_result.existing_count,
+        pr_security_policy,
+        pr_security_policy_not_evaluated,
         notices,
     })
 }
@@ -731,6 +812,7 @@ fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
         write_baseline: None,
         explain: args.explain,
         github_pr: None,
+        pr_security_policy: PrSecurityPolicyArgs::default(),
         quiet: false,
         output: None,
         max_file_size: args.max_file_size,
@@ -759,6 +841,7 @@ fn tui_diff_args(args: &TuiArgs, target: &str) -> DiffArgs {
         no_builtins: args.no_builtins,
         output: None,
         github_pr: None,
+        pr_security_policy: PrSecurityPolicyArgs::default(),
         max_file_size: args.max_file_size,
     }
 }
@@ -910,6 +993,8 @@ fn count_secret_files(scan_path: &Path) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::Cli;
+    use clap::Parser;
 
     #[test]
     fn pq_rule_ids_include_coccinelle_rules() {
@@ -923,5 +1008,167 @@ mod tests {
 
         assert!(ids.contains(&"kernel/pq-vulnerable-cocci".to_string()));
         assert!(!ids.contains(&"kernel/non-pq-cocci".to_string()));
+    }
+
+    #[test]
+    fn changed_file_scan_is_not_labeled_as_a_repository_policy_decision() {
+        let temp = tempfile::tempdir().expect("temporary repository");
+        std::fs::write(temp.path().join("app.py"), "print('safe')\n").expect("write source file");
+        let changed_files = temp.path().join("changed-files.txt");
+        std::fs::write(&changed_files, "app.py\n").expect("write changed-files list");
+        let path = temp.path().to_string_lossy().into_owned();
+        let changed_files = changed_files.to_string_lossy().into_owned();
+        let cli = Cli::try_parse_from([
+            "foxguard",
+            "--pr-policy",
+            "--changed-files-from",
+            &changed_files,
+            &path,
+        ])
+        .expect("parse CLI scan");
+
+        let result = execute_scan(&cli.scan).expect("scan changed file");
+
+        assert!(result.pr_security_policy.is_none());
+        assert_eq!(
+            result
+                .pr_security_policy_not_evaluated
+                .as_ref()
+                .map(|policy| policy.reason),
+            Some(PrPolicyNotEvaluatedReason::ChangedOnlyScan)
+        );
+    }
+
+    #[test]
+    fn cli_scan_without_a_project_root_is_not_a_repository_policy_scan() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        std::fs::write(temp.path().join("app.py"), "print('safe')\n").expect("write source file");
+        let path = temp.path().to_string_lossy().into_owned();
+        let cli = Cli::try_parse_from(["foxguard", "--pr-policy", &path]).expect("parse CLI scan");
+
+        let result = execute_scan(&cli.scan).expect("scan directory");
+
+        assert!(result.pr_security_policy.is_none());
+        assert_eq!(
+            result
+                .pr_security_policy_not_evaluated
+                .as_ref()
+                .map(|policy| policy.reason),
+            Some(PrPolicyNotEvaluatedReason::PartialScan)
+        );
+    }
+
+    #[test]
+    fn cli_nested_repository_directory_is_not_a_repository_policy_scan() {
+        let temp = tempfile::tempdir().expect("temporary repository");
+        let repo = temp.path();
+        git(repo, &["init", "-q"]);
+        let source = repo.join("src").join("app.py");
+        std::fs::create_dir_all(source.parent().expect("source parent"))
+            .expect("create source directory");
+        std::fs::write(
+            source
+                .parent()
+                .expect("source parent")
+                .join(".foxguard.yml"),
+            "scan: {}\n",
+        )
+        .expect("write nested config");
+        std::fs::write(&source, "print('safe')\n").expect("write source file");
+        let path = source
+            .parent()
+            .expect("source parent")
+            .to_string_lossy()
+            .into_owned();
+        let cli = Cli::try_parse_from(["foxguard", "--pr-policy", &path]).expect("parse CLI scan");
+
+        let result = execute_scan(&cli.scan).expect("scan nested directory");
+
+        assert!(result.pr_security_policy.is_none());
+        assert_eq!(
+            result
+                .pr_security_policy_not_evaluated
+                .as_ref()
+                .map(|policy| policy.reason),
+            Some(PrPolicyNotEvaluatedReason::PartialScan)
+        );
+    }
+
+    #[test]
+    fn cli_git_root_beats_ancestor_explicit_config_for_policy_scope() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("create repository");
+        git(&repo, &["init", "-q"]);
+        std::fs::write(repo.join("app.py"), "print('safe')\n").expect("write source file");
+        let config = temp.path().join("foxguard.yml");
+        std::fs::write(&config, "scan: {}\n").expect("write ancestor config");
+        let path = repo.to_string_lossy().into_owned();
+        let config = config.to_string_lossy().into_owned();
+        let cli = Cli::try_parse_from(["foxguard", "--pr-policy", "--config", &config, &path])
+            .expect("parse CLI scan");
+
+        let result = execute_scan(&cli.scan).expect("scan Git root");
+
+        assert!(result.pr_security_policy.is_some());
+        assert!(result.pr_security_policy_not_evaluated.is_none());
+    }
+
+    fn git(repo: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {:?} failed", args);
+    }
+
+    #[test]
+    fn diff_policy_is_explicitly_not_evaluated() {
+        let temp = tempfile::tempdir().expect("temporary repository");
+        let repo = temp.path();
+        git(repo, &["init", "-q"]);
+        std::fs::write(repo.join("app.py"), "print('before')\n").expect("write source file");
+        git(repo, &["add", "app.py"]);
+        git(
+            repo,
+            &[
+                "-c",
+                "user.name=Foxguard Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-qm",
+                "initial",
+            ],
+        );
+        std::fs::write(repo.join("app.py"), "print('after')\n").expect("modify source file");
+
+        let result = execute_diff(&DiffArgs {
+            target: "HEAD".to_string(),
+            path: repo.to_string_lossy().into_owned(),
+            config: None,
+            format: OutputFormat::Json,
+            severity: None,
+            rules: None,
+            no_builtins: false,
+            output: None,
+            github_pr: None,
+            pr_security_policy: PrSecurityPolicyArgs {
+                pr_policy: true,
+                ..PrSecurityPolicyArgs::default()
+            },
+            max_file_size: 1_048_576,
+        })
+        .expect("run diff");
+
+        assert!(result.pr_security_policy.is_none());
+        assert_eq!(
+            result
+                .pr_security_policy_not_evaluated
+                .as_ref()
+                .map(|policy| policy.reason),
+            Some(PrPolicyNotEvaluatedReason::DiffScan)
+        );
     }
 }
