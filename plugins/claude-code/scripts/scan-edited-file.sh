@@ -10,6 +10,20 @@
 
 set -uo pipefail
 
+script_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)
+state_enabled=0
+if [ -n "$script_dir" ] && [ -r "$script_dir/finding-state.sh" ] \
+  && . "$script_dir/finding-state.sh" 2>/dev/null; then
+  state_enabled=1
+fi
+
+scan_status=0
+session_id=
+cwd=
+repo_root=
+normalized_file_path=
+state_active=0
+
 input=$(cat)
 
 file_path=$(printf '%s' "$input" | jq -r '
@@ -21,8 +35,18 @@ file_path=$(printf '%s' "$input" | jq -r '
   // empty
 ' 2>/dev/null)
 
+session_id=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)
+cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
+
 [ -z "$file_path" ] && exit 0
+if [ "$state_enabled" = "1" ] \
+  && repo_root=$(fg_state_repository_root "$cwd") \
+  && normalized_file_path=$(fg_state_normalize_file_path "$cwd" "$file_path" "$repo_root"); then
+  file_path=$normalized_file_path
+  state_active=1
+fi
 [ ! -f "$file_path" ] && exit 0
+[ ! -r "$file_path" ] && exit 0
 
 # Resolve foxguard binary: prefer PATH, fall back to npx.
 if command -v foxguard >/dev/null 2>&1; then
@@ -35,26 +59,40 @@ fi
 
 min_severity="${FOXGUARD_HOOK_SEVERITY:-medium}"
 
-scan_output=$("${fg[@]}" --format json --severity "$min_severity" -- "$file_path" 2>/dev/null) || true
+if scan_output=$("${fg[@]}" --format json --severity "$min_severity" -- "$file_path" 2>/dev/null); then
+  scan_status=0
+else
+  scan_status=$?
+fi
 
 [ -z "$scan_output" ] && exit 0
 
-findings=$(printf '%s' "$scan_output" | jq -c '
+findings=$(printf '%s' "$scan_output" | jq -ce '
   if type == "array" then
     .
   elif type == "object" and (.findings | type == "array") then
     .findings
   else
-    []
+    error("invalid foxguard JSON")
   end
-' 2>/dev/null)
+' 2>/dev/null) || exit 0
 
-[ -z "$findings" ] && exit 0
-[ "$findings" = "[]" ] && exit 0
+if [ "$findings" = "[]" ]; then
+  if [ "$state_active" = "1" ] && [ "$scan_status" = "0" ]; then
+    fg_state_clear_findings "$session_id" "$cwd" "$file_path" || :
+  fi
+  exit 0
+fi
 
 count=$(printf '%s' "$findings" | jq 'length' 2>/dev/null)
 if [ -z "$count" ] || [ "$count" = "0" ]; then
   exit 0
+fi
+
+if [ "$state_active" = "1" ]; then
+  case "$scan_status" in
+    0|1) fg_state_record_findings "$session_id" "$cwd" "$file_path" "$min_severity" "$findings" || : ;;
+  esac
 fi
 
 {

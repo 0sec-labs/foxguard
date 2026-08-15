@@ -7,6 +7,7 @@ foxguard ships a Claude Code plugin in [`plugins/claude-code`](../plugins/claude
 - Runs a `PostToolUse` hook after `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` so files Claude changes are scanned immediately.
 - Emits medium-and-above findings back to Claude so the agent can fix them before the issue lands in the repo.
 - Adds a `SessionStart` secure-coding preamble covering command execution, SQL, SSRF, path traversal, secrets, randomness, crypto, and deserialization.
+- Restores a bounded, metadata-only reminder of unresolved findings after Claude Code compaction.
 - Provides namespaced `/foxguard:*` skills for setup, full scans, diff scans, PQ audits, secrets scans, and TUI triage.
 
 ## Local Install
@@ -46,8 +47,29 @@ foxguard --format json --severity medium <edited-file>
 
 If findings are present, the hook exits `2` and prints a compact finding summary to stderr. Missing binaries, unreadable files, invalid hook input, and clean scans exit `0` so plugin machinery does not block Claude by itself.
 
-The hook uses `jq` to parse Claude Code's hook JSON. Run `/foxguard:setup` after
-loading the plugin to verify both `jq` and the active `foxguard` binary.
+When capacity allows, successful single-file scans keep only relative paths,
+thresholds, rule IDs, severities, locations, and stable fingerprints derived
+from that metadata in a private user cache outside the repository. Records are
+namespaced by a one-way repository-root identifier and session ID; raw roots
+are not stored. If the bounded cache reaches capacity, it retains bounded
+opaque omitted-path identifiers, or a conservative overflow flag if even those
+cannot fit, and compaction reports that some successful scans were omitted.
+A hook keeps every workspace record for its session and refreshes its own
+repository/session record; only sessions inactive for one day are pruned when a
+later hook runs. On `SessionStart` after compaction, foxguard returns a concise
+advisory reminder with only opaque fingerprint IDs, severities, and locations,
+not stored paths or rule IDs. This keeps untrusted filenames and rule text out
+of model context; run `/foxguard:scan` to review current findings. It
+never replays snippets, descriptions, secrets, scanner JSON, transcripts, or
+credentials. The cache does not affect foxguard baselines.
+
+This is live feedback, not a final enforcement gate. Use full or diff scans plus
+pre-commit or CI for final coverage.
+
+The hook uses `jq` to parse Claude Code's hook JSON. Perl with `Fcntl`
+no-follow locking is required only for continuity state; if it is unavailable,
+scanning still works and continuity fails open. Run `/foxguard:setup` after
+loading the plugin to verify `jq`, Perl, and the active `foxguard` binary.
 
 Tune the threshold with:
 

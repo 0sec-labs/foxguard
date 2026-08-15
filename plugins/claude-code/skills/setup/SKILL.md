@@ -11,25 +11,29 @@ Walk the user through getting foxguard installed and the plugin working:
    user's package manager (`brew install jq`, `sudo apt-get install jq`,
    `sudo dnf install jq`, or `sudo apk add jq`) before calling the auto-scan
    ready. Do not install without confirmation.
-2. Run `foxguard --version` via the Bash tool. If it succeeds, also run
+2. Run `command -v perl` and `perl -MFcntl=:flock -e 'exit !eval { defined(Fcntl::O_NOFOLLOW()) && LOCK_EX }'`. If either
+   fails, explain that file scanning still works but compaction continuity is
+   unavailable and fails open. Recommend the system Perl package; do not
+   install without confirmation.
+3. Run `foxguard --version` via the Bash tool. If it succeeds, also run
    `foxguard --help` and verify the active binary exposes these subcommands:
    `secrets`, `diff`, `tui`, and `pqc`.
-3. If `foxguard` is installed but any required subcommand is missing, report
+4. If `foxguard` is installed but any required subcommand is missing, report
    that the binary is too old for the full Claude Code plugin. Recommend
    upgrading with the install options below before calling the plugin ready.
-4. If `foxguard` is not on PATH, offer the install options in this order:
+5. If `foxguard` is not on PATH, offer the install options in this order:
    - **Prebuilt binary (fastest)**: `curl -fsSL https://foxguard.dev/install.sh | sh`
    - **npm**: `npm i -g foxguard` or zero-install via `npx foxguard`
    - **cargo**: `cargo install foxguard`
    Ask which the user prefers; do NOT install without confirmation.
-5. If `jq` and all required foxguard subcommands are present, report the
-   version and tell the user the plugin is ready — every Write/Edit will now be
-   auto-scanned.
-6. Recommend the user run `foxguard init` inside their repo to add a pre-commit
+6. If `jq`, Perl locking support, and all required foxguard subcommands are
+   present, report the version and tell the user the plugin is ready — every
+   Write/Edit will now be auto-scanned with compaction continuity.
+7. Recommend the user run `foxguard init` inside their repo to add a pre-commit
    hook so foxguard also catches issues outside Claude Code sessions.
-7. Mention the env vars they can tune:
+8. Mention the env vars they can tune:
    - `FOXGUARD_HOOK_SEVERITY` — minimum severity for auto-scan (default `medium`; values: `low|medium|high|critical`)
 
-Finish with a one-line confirmation of which `jq` version is active, which
-foxguard version is active, whether the full command surface is available, and
-which severity threshold the auto-scan is using.
+Finish with a one-line confirmation of which `jq` and Perl locking support are
+active, which foxguard version is active, whether the full command surface is
+available, and which severity threshold the auto-scan is using.

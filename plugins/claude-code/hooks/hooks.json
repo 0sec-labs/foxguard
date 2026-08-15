@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/scan-edited-file.sh"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/scan-edited-file.sh\""
           }
         ]
       }
@@ -17,6 +17,15 @@
           {
             "type": "command",
             "command": "cat \"${CLAUDE_PLUGIN_ROOT}/scripts/secure-defaults.txt\""
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/restore-unresolved-findings.sh\""
           }
         ]
       }
