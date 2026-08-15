@@ -5,6 +5,7 @@ root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd -P)
 scan_hook="$root/plugins/claude-code/scripts/scan-edited-file.sh"
 restore_hook="$root/plugins/claude-code/scripts/restore-unresolved-findings.sh"
 state_helper="$root/plugins/claude-code/scripts/finding-state.sh"
+state_file_helper="$root/plugins/claude-code/scripts/state-file-operation.pl"
 lock_wrapper="$root/plugins/claude-code/scripts/with-state-lock.pl"
 hooks_json="$root/plugins/claude-code/hooks/hooks.json"
 fixture="$root/tests/fixtures/safe.py"
@@ -12,7 +13,6 @@ session_id="compaction-test-588"
 tmp_dir=$(mktemp -d)
 cache_dir="$tmp_dir/cache"
 fake_bin="$tmp_dir/bin"
-pause_bin="$tmp_dir/pause-bin"
 no_perl_bin="$tmp_dir/no-perl-bin"
 no_scanner_bin="$tmp_dir/no-scanner-bin"
 state_root="$cache_dir/foxguard/claude-code"
@@ -125,7 +125,7 @@ record_for_rule() {
   '
 }
 
-mkdir -p "$fake_bin" "$pause_bin" "$no_perl_bin" "$no_scanner_bin"
+mkdir -p "$fake_bin" "$no_perl_bin" "$no_scanner_bin"
 cat > "$fake_bin/foxguard" <<'EOF'
 #!/usr/bin/env bash
 case "${FOXGUARD_TEST_MODE:-finding}" in
@@ -182,15 +182,6 @@ cat > "$no_perl_bin/perl" <<'EOF'
 exit 99
 EOF
 chmod +x "$no_perl_bin/perl"
-cat > "$pause_bin/mv" <<'EOF'
-#!/usr/bin/env bash
-if [ "${FG_STATE_TEST_PAUSE_MV:-}" = "1" ]; then
-  : > "$FG_STATE_TEST_MV_READY"
-  while [ ! -f "$FG_STATE_TEST_MV_RELEASE" ]; do sleep 0.05; done
-fi
-exec /bin/mv "$@"
-EOF
-chmod +x "$pause_bin/mv"
 jq_path=$(command -v jq)
 case "$jq_path" in
   /*) ;;
@@ -424,10 +415,9 @@ run_paused_state_update() {
 
   (
     export XDG_CACHE_HOME="$cache_dir"
-    export PATH="$pause_bin:$fake_bin:$PATH"
-    export FG_STATE_TEST_PAUSE_MV=1
-    export FG_STATE_TEST_MV_READY="$ready_file"
-    export FG_STATE_TEST_MV_RELEASE="$release_file"
+    export PATH="$fake_bin:$PATH"
+    export FG_STATE_TEST_TEMP_READY="$ready_file"
+    export FG_STATE_TEST_TEMP_RELEASE="$release_file"
     . "$state_helper"
     fg_state_update_file "$session_id" "$repo_root" "$relative_path" medium "$record"
   )
@@ -495,6 +485,7 @@ restore_hook_command=$(jq -r '.hooks.SessionStart[] | select(.matcher == "compac
 bash -n "$scan_hook"
 bash -n "$state_helper"
 bash -n "$restore_hook"
+perl -c "$state_file_helper" >/dev/null
 perl -c "$lock_wrapper" >/dev/null
 jq empty "$hooks_json"
 for unsafe_path in '/absolute.py' 'C:/absolute.py' 'dir//empty.py' './dot.py' 'dir/../up.py' \
@@ -678,6 +669,140 @@ run_locked_action --locked-summary 131072 64 "$forged_locked_root" "$forged_lock
   || fail "direct locked summary pruned a forged-root JSON sentinel"
 [ "$(cat "$forged_temp_sentinel")" = "sentinel" ] \
   || fail "direct locked summary pruned a forged-root temporary sentinel"
+rendezvous_outside_ready="$tmp_dir/rendezvous-outside-ready"
+rendezvous_outside_release="$tmp_dir/rendezvous-outside-release"
+rendezvous_target="$state_root/rendezvous-inert.json"
+printf 'sentinel\n' > "$rendezvous_outside_ready"
+printf 'sentinel\n' > "$rendezvous_outside_release"
+printf '{}\n' | FG_STATE_TEST_TEMP_READY="$rendezvous_outside_ready" \
+  FG_STATE_TEST_TEMP_RELEASE="$rendezvous_outside_release" \
+  "$state_file_helper" --root "$state_root" write "${rendezvous_target##*/}" 128 \
+  || fail "invalid test rendezvous blocked an anchored write"
+[ "$(cat "$rendezvous_outside_ready")" = "sentinel" ] \
+  || fail "invalid test rendezvous wrote outside the state root"
+[ "$(cat "$rendezvous_outside_release")" = "sentinel" ] \
+  || fail "invalid test rendezvous read or wrote outside the state root"
+rm -f "$rendezvous_target"
+
+direct_race_root="$tmp_dir/direct-race-workspace"
+mkdir -p "$direct_race_root"
+git init -q "$direct_race_root"
+direct_race_root=$(CDPATH= cd -- "$direct_race_root" && pwd -P)
+direct_race_session_id='direct-final-symlink-race'
+direct_race_workspace_key=$(workspace_key_for_test "$direct_race_root")
+direct_race_session_key=$(session_key_for_test "$direct_race_session_id")
+direct_race_state_file="$state_root/$direct_race_workspace_key-$direct_race_session_key.json"
+direct_race_outside="$tmp_dir/direct-race-outside"
+direct_race_ready='test-direct-race-ready'
+direct_race_release='test-direct-race-release'
+mkdir -p "$direct_race_outside"
+: > "$state_root/$direct_race_ready"
+: > "$state_root/$direct_race_release"
+(
+  XDG_CACHE_HOME="$cache_dir" PATH="$fake_bin:$PATH" \
+    FG_STATE_TEST_TEMP_READY="$direct_race_ready" FG_STATE_TEST_TEMP_RELEASE="$direct_race_release" \
+    "$state_helper" --locked-update 131072 64 "$direct_race_root" "$direct_race_session_id" \
+      'direct-race.py' medium "$direct_locked_record"
+) > "$tmp_dir/direct-race-output" 2>&1 &
+direct_race_pid=$!
+for _ in $(seq 1 80); do
+  [ -s "$state_root/$direct_race_ready" ] && break
+  sleep 0.05
+done
+[ -s "$state_root/$direct_race_ready" ] || fail "direct symlink race did not reach state temp"
+ln -s "$direct_race_outside" "$direct_race_state_file"
+printf 'release\n' > "$state_root/$direct_race_release"
+set +e
+wait "$direct_race_pid"
+direct_race_status=$?
+set -e
+[ "$direct_race_status" -ne 0 ] || fail "direct symlink race did not fail closed"
+[ -L "$direct_race_state_file" ] || fail "direct symlink race replaced its final symlink"
+[ -z "$(find "$direct_race_outside" -type f -print)" ] \
+  || fail "direct symlink race wrote outside the cache"
+rm -f "$direct_race_state_file"
+
+normal_race_root="$tmp_dir/normal-race-workspace"
+mkdir -p "$normal_race_root"
+git init -q "$normal_race_root"
+normal_race_root=$(CDPATH= cd -- "$normal_race_root" && pwd -P)
+normal_race_session_id='normal-final-symlink-race'
+normal_race_workspace_key=$(workspace_key_for_test "$normal_race_root")
+normal_race_session_key=$(session_key_for_test "$normal_race_session_id")
+normal_race_state_file="$state_root/$normal_race_workspace_key-$normal_race_session_key.json"
+normal_race_outside="$tmp_dir/normal-race-outside"
+normal_race_ready='test-normal-race-ready'
+normal_race_release='test-normal-race-release'
+mkdir -p "$normal_race_outside"
+: > "$state_root/$normal_race_ready"
+: > "$state_root/$normal_race_release"
+(
+  export XDG_CACHE_HOME="$cache_dir"
+  export PATH="$fake_bin:$PATH"
+  export FG_STATE_TEST_TEMP_READY="$normal_race_ready"
+  export FG_STATE_TEST_TEMP_RELEASE="$normal_race_release"
+  . "$state_helper"
+  fg_state_update_file "$normal_race_session_id" "$normal_race_root" 'normal-race.py' medium "$direct_locked_record"
+) > "$tmp_dir/normal-race-output" 2>&1 &
+normal_race_pid=$!
+for _ in $(seq 1 80); do
+  [ -s "$state_root/$normal_race_ready" ] && break
+  sleep 0.05
+done
+[ -s "$state_root/$normal_race_ready" ] || fail "normal symlink race did not reach state temp"
+ln -s "$normal_race_outside" "$normal_race_state_file"
+printf 'release\n' > "$state_root/$normal_race_release"
+set +e
+wait "$normal_race_pid"
+normal_race_status=$?
+set -e
+[ "$normal_race_status" -ne 0 ] || fail "normal symlink race did not fail closed"
+[ -L "$normal_race_state_file" ] || fail "normal symlink race replaced its final symlink"
+[ -z "$(find "$normal_race_outside" -type f -print)" ] \
+  || fail "normal symlink race wrote outside the cache"
+rm -f "$normal_race_state_file"
+
+root_rename_cache="$tmp_dir/root-rename-cache"
+root_rename_root="$tmp_dir/root-rename-workspace"
+mkdir -p "$root_rename_root"
+git init -q "$root_rename_root"
+root_rename_root=$(CDPATH= cd -- "$root_rename_root" && pwd -P)
+root_rename_session_id='root-rename-race'
+root_rename_workspace_key=$(workspace_key_for_test "$root_rename_root")
+root_rename_session_key=$(session_key_for_test "$root_rename_session_id")
+root_rename_state_root="$root_rename_cache/foxguard/claude-code"
+root_rename_state_file="$root_rename_state_root/$root_rename_workspace_key-$root_rename_session_key.json"
+root_rename_moved_root="$tmp_dir/root-rename-moved"
+root_rename_outside="$tmp_dir/root-rename-outside"
+root_rename_ready='test-root-rename-ready'
+root_rename_release='test-root-rename-release'
+mkdir -p "$root_rename_state_root" "$root_rename_outside"
+: > "$root_rename_state_root/$root_rename_ready"
+: > "$root_rename_state_root/$root_rename_release"
+(
+  export XDG_CACHE_HOME="$root_rename_cache"
+  export PATH="$fake_bin:$PATH"
+  export FG_STATE_TEST_TEMP_READY="$root_rename_ready"
+  export FG_STATE_TEST_TEMP_RELEASE="$root_rename_release"
+  . "$state_helper"
+  fg_state_update_file "$root_rename_session_id" "$root_rename_root" 'root-rename.py' medium "$direct_locked_record"
+) > "$tmp_dir/root-rename-output" 2>&1 &
+root_rename_pid=$!
+for _ in $(seq 1 80); do
+  [ -s "$root_rename_state_root/$root_rename_ready" ] && break
+  sleep 0.05
+done
+[ -s "$root_rename_state_root/$root_rename_ready" ] || fail "root replacement test did not reach state temp"
+mv "$root_rename_state_root" "$root_rename_moved_root"
+ln -s "$root_rename_outside" "$root_rename_state_root"
+printf 'release\n' > "$root_rename_moved_root/$root_rename_release"
+wait "$root_rename_pid"
+[ -f "$root_rename_moved_root/${root_rename_state_file##*/}" ] \
+  || fail "root replacement lost its anchored state write"
+[ ! -e "$root_rename_outside/${root_rename_state_file##*/}" ] \
+  || fail "root replacement wrote through its replacement"
+[ -z "$(find "$root_rename_outside" -type f -print)" ] \
+  || fail "root replacement created a file outside the anchored root"
 
 
 run_scan_without_perl finding "$no_perl_payload"
@@ -812,7 +937,7 @@ lock_hardlink_mode=$(file_mode "$lock_hardlink_sentinel")
 rm -f "$state_root/.lock"
 ln "$lock_hardlink_sentinel" "$state_root/.lock"
 lock_hardlink_links=$(file_links "$lock_hardlink_sentinel")
-if perl "$lock_wrapper" "$state_root/.lock" /usr/bin/true; then
+if perl "$lock_wrapper" "$state_root" .lock /usr/bin/true; then
   fail "hard-linked lock was accepted"
 fi
 [ "$(cat "$lock_hardlink_sentinel")" = "$lock_hardlink_content" ] \
@@ -822,7 +947,7 @@ fi
 [ "$(file_links "$lock_hardlink_sentinel")" = "$lock_hardlink_links" ] \
   || fail "lock wrapper changed an outside hard-linked lock link count"
 rm -f "$state_root/.lock"
-perl "$lock_wrapper" "$state_root/.lock" /usr/bin/true \
+perl "$lock_wrapper" "$state_root" .lock /usr/bin/true \
   || fail "lock wrapper did not create a normal lock"
 [ "$(file_mode "$state_root/.lock")" = "0600" ] || fail "normal lock mode is not 0600"
 
@@ -857,28 +982,30 @@ jq -e '.files | has("kernel-lock.py")' "$concurrent_state_file" >/dev/null \
   || fail "state update did not recover after a crashed lock holder"
 [ -f "$state_root/.lock" ] && [ ! -L "$state_root/.lock" ] \
   || fail "state lock is not a regular persistent file"
-atomic_ready="$tmp_dir/atomic-write-ready"
+atomic_ready='test-atomic-ready'
+atomic_release='test-atomic-release'
 atomic_session_id='atomic-write-interrupt'
 atomic_session_key=$(session_key_for_test "$atomic_session_id")
 atomic_target="$state_root/$workspace_key-$atomic_session_key.json"
+: > "$state_root/$atomic_ready"
+: > "$state_root/$atomic_release"
 
 (
-  XDG_CACHE_HOME="$cache_dir"
-  PATH="$fake_bin:$PATH"
+  export XDG_CACHE_HOME="$cache_dir"
+  export PATH="$fake_bin:$PATH"
+  export FG_STATE_TEST_TEMP_READY="$atomic_ready"
+  export FG_STATE_TEST_TEMP_RELEASE="$atomic_release"
   . "$state_helper"
-  mv() {
-    bash -c 'printf "%s\n" "$PPID"' > "$atomic_ready"
-    while :; do sleep 1; done
-  }
+  fg_state_prepare_locked_state "$root" "$atomic_session_id"
   fg_state_atomic_write "$root" "$atomic_session_id" '{"metadata":"only"}'
 ) &
 atomic_holder_pid=$!
 for _ in $(seq 1 80); do
-  [ -f "$atomic_ready" ] && break
+  [ -s "$state_root/$atomic_ready" ] && break
   sleep 0.05
 done
-[ -f "$atomic_ready" ] || fail "atomic write did not reach move"
-atomic_owner_pid=$(cat "$atomic_ready")
+[ -s "$state_root/$atomic_ready" ] || fail "atomic write did not reach move"
+atomic_owner_pid=$(cat "$state_root/$atomic_ready")
 kill -0 "$atomic_owner_pid" 2>/dev/null || fail "atomic write owner was not live"
 kill -TERM "$atomic_owner_pid"
 set +e
@@ -908,20 +1035,22 @@ jq -e '(.files | keys | sort) == ["kernel-lock.py", "one.py", "two.py"]' "$concu
   || fail "concurrent updates did not retain a regular lock file"
 
 paused_record=$(record_for_rule test/paused)
-paused_ready="$tmp_dir/paused-mv-ready"
-paused_release="$tmp_dir/paused-mv-release"
+paused_ready='test-paused-ready'
+paused_release='test-paused-release'
+: > "$state_root/$paused_ready"
+: > "$state_root/$paused_release"
 run_paused_state_update "$paused_root" 'one.py' "$paused_record" "$paused_ready" "$paused_release" &
 paused_one_pid=$!
 for _ in $(seq 1 80); do
-  [ -f "$paused_ready" ] && break
+  [ -s "$state_root/$paused_ready" ] && break
   sleep 0.05
 done
-[ -f "$paused_ready" ] || fail "paused update did not reach rename"
+[ -s "$state_root/$paused_ready" ] || fail "paused update did not reach rename"
 run_state_update "$paused_root" 'two.py' "$paused_record" &
 paused_two_pid=$!
 sleep 0.1
 kill -0 "$paused_two_pid" 2>/dev/null || fail "second update bypassed the paused writer"
-touch "$paused_release"
+printf 'release\n' > "$state_root/$paused_release"
 wait "$paused_one_pid"
 wait "$paused_two_pid"
 jq -e '(.files | keys | sort) == ["one.py", "two.py"]' "$paused_state_file" >/dev/null \
