@@ -272,6 +272,15 @@ untracked_root=$(CDPATH= cd -- "$untracked_root" && pwd -P)
 untracked_workspace_key=$(workspace_key_for_test "$untracked_root")
 untracked_state_file="$state_root/$untracked_workspace_key-$session_key.json"
 
+forged_locked_root="$tmp_dir/forged-locked-workspace"
+mkdir -p "$forged_locked_root"
+git init -q "$forged_locked_root"
+forged_locked_root=$(CDPATH= cd -- "$forged_locked_root" && pwd -P)
+forged_locked_session_id='forged-locked-session'
+forged_locked_workspace_key=$(workspace_key_for_test "$forged_locked_root")
+forged_locked_session_key=$(session_key_for_test "$forged_locked_session_id")
+forged_locked_state_file="$state_root/$forged_locked_workspace_key-$forged_locked_session_key.json"
+
 plugin_root_with_spaces="$tmp_dir/plugin root"
 mkdir -p "$plugin_root_with_spaces"
 ln -s "$root/plugins/claude-code/scripts" "$plugin_root_with_spaces/scripts"
@@ -389,6 +398,14 @@ run_state_update() {
     fg_state_update_file "$state_session" "$repo_root" "$relative_path" medium "$record"
   )
 }
+
+run_locked_action() {
+  set +e
+  locked_action_output=$(XDG_CACHE_HOME="$cache_dir" PATH="$fake_bin:$PATH" "$state_helper" "$@" 2>&1)
+  locked_action_status=$?
+  set -e
+}
+
 
 run_paused_state_update() {
   local repo_root=$1 relative_path=$2 record=$3 ready_file=$4 release_file=$5
@@ -512,6 +529,64 @@ assert_not_contains "$state_content" FINDING_SECRET
 assert_not_contains "$state_content" SOURCE_SNIPPET_SECRET
 assert_not_contains "$state_content" "$root"
 assert_not_contains "$(basename "$state_file")" "$session_id"
+direct_locked_record=$(record_for_rule test/direct-locked)
+locked_update_sentinel="$forged_locked_root/update-sentinel"
+printf 'sentinel\n' > "$locked_update_sentinel"
+run_locked_action --locked-update 131072 64 "$forged_locked_root" "$forged_locked_session_id" \
+  'direct.py' medium "$direct_locked_record"
+assert_status "$locked_action_status" 0
+[ "$(cat "$locked_update_sentinel")" = "sentinel" ] \
+  || fail "direct locked update modified an out-of-cache sentinel"
+[ -f "$forged_locked_state_file" ] || fail "direct locked update did not write its derived state file"
+forged_locked_state_content=$(cat "$forged_locked_state_file")
+run_locked_action --locked-update 131072 64 "$forged_locked_root" "$forged_locked_session_id" \
+  "$locked_update_sentinel" medium "$direct_locked_record"
+[ "$locked_action_status" -ne 0 ] || fail "hostile direct locked update was accepted"
+[ "$(cat "$locked_update_sentinel")" = "sentinel" ] \
+  || fail "hostile direct locked update modified an out-of-cache sentinel"
+[ "$(cat "$forged_locked_state_file")" = "$forged_locked_state_content" ] \
+  || fail "hostile direct locked update changed derived state"
+
+locked_remove_sentinel="$forged_locked_root/remove-sentinel"
+printf 'sentinel\n' > "$locked_remove_sentinel"
+run_locked_action --locked-remove 131072 64 "$forged_locked_root" "$forged_locked_session_id" \
+  "$locked_remove_sentinel"
+assert_status "$locked_action_status" 0
+[ "$(cat "$locked_remove_sentinel")" = "sentinel" ] \
+  || fail "hostile direct locked remove modified an out-of-cache sentinel"
+[ "$(cat "$forged_locked_state_file")" = "$forged_locked_state_content" ] \
+  || fail "hostile direct locked remove changed derived state"
+run_locked_action --locked-remove 131072 64 "$forged_locked_root" "$forged_locked_session_id" 'direct.py'
+assert_status "$locked_action_status" 0
+[ ! -e "$forged_locked_state_file" ] || fail "direct locked remove did not remove its derived state file"
+[ "$(cat "$locked_remove_sentinel")" = "sentinel" ] \
+  || fail "direct locked remove modified an out-of-cache sentinel"
+
+locked_state_symlink_sentinel="$forged_locked_root/state-symlink-sentinel"
+printf 'sentinel\n' > "$locked_state_symlink_sentinel"
+ln -s "$locked_state_symlink_sentinel" "$forged_locked_state_file"
+run_locked_action --locked-update 131072 64 "$forged_locked_root" "$forged_locked_session_id" \
+  'direct.py' medium "$direct_locked_record"
+[ "$locked_action_status" -ne 0 ] || fail "symlinked derived state file was accepted"
+[ "$(cat "$locked_state_symlink_sentinel")" = "sentinel" ] \
+  || fail "direct locked update followed a state-file symlink"
+[ -L "$forged_locked_state_file" ] || fail "state-file symlink was replaced"
+rm -f "$forged_locked_state_file"
+
+forged_prune_root="$forged_locked_root/forged-prune-root"
+mkdir -p "$forged_prune_root"
+forged_json_sentinel="$forged_prune_root/stale.json"
+forged_temp_sentinel="$forged_prune_root/.state.stale"
+printf 'sentinel\n' > "$forged_json_sentinel"
+printf 'sentinel\n' > "$forged_temp_sentinel"
+touch -t 200001010000 "$forged_json_sentinel" "$forged_temp_sentinel"
+run_locked_action --locked-summary 131072 64 "$forged_locked_root" "$forged_locked_session_id"
+[ "$locked_action_status" -ne 0 ] || fail "missing direct locked summary state was accepted"
+[ "$(cat "$forged_json_sentinel")" = "sentinel" ] \
+  || fail "direct locked summary pruned a forged-root JSON sentinel"
+[ "$(cat "$forged_temp_sentinel")" = "sentinel" ] \
+  || fail "direct locked summary pruned a forged-root temporary sentinel"
+
 
 run_scan_without_perl finding "$no_perl_payload"
 assert_status "$scan_status" 2
@@ -669,7 +744,10 @@ jq -e '.files | has("kernel-lock.py")' "$concurrent_state_file" >/dev/null \
 [ -f "$state_root/.lock" ] && [ ! -L "$state_root/.lock" ] \
   || fail "state lock is not a regular persistent file"
 atomic_ready="$tmp_dir/atomic-write-ready"
-atomic_target="$tmp_dir/atomic-write-target.json"
+atomic_session_id='atomic-write-interrupt'
+atomic_session_key=$(session_key_for_test "$atomic_session_id")
+atomic_target="$state_root/$workspace_key-$atomic_session_key.json"
+
 (
   XDG_CACHE_HOME="$cache_dir"
   PATH="$fake_bin:$PATH"
@@ -678,7 +756,7 @@ atomic_target="$tmp_dir/atomic-write-target.json"
     bash -c 'printf "%s\n" "$PPID"' > "$atomic_ready"
     while :; do sleep 1; done
   }
-  fg_state_atomic_write "$state_root" "$atomic_target" '{"metadata":"only"}'
+  fg_state_atomic_write "$root" "$atomic_session_id" '{"metadata":"only"}'
 ) &
 atomic_holder_pid=$!
 for _ in $(seq 1 80); do
