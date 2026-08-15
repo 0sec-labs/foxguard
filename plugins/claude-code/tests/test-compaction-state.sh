@@ -51,6 +51,18 @@ assert_line() {
     *) fail "expected exact line $2" ;;
   esac
 }
+file_mtime() {
+  perl -e 'print((stat $ARGV[0])[9])' "$1"
+}
+
+file_links() {
+  perl -e 'print((stat $ARGV[0])[3])' "$1"
+}
+
+file_mode() {
+  perl -e 'printf "%04o", (stat $ARGV[0])[2] & 0777' "$1"
+}
+
 
 hash_for_test() {
   if command -v shasum >/dev/null 2>&1; then
@@ -572,6 +584,86 @@ run_locked_action --locked-update 131072 64 "$forged_locked_root" "$forged_locke
   || fail "direct locked update followed a state-file symlink"
 [ -L "$forged_locked_state_file" ] || fail "state-file symlink was replaced"
 rm -f "$forged_locked_state_file"
+nested_locked_root="$state_root/nested-locked-workspace"
+mkdir -p "$nested_locked_root"
+git init -q "$nested_locked_root"
+nested_locked_root=$(CDPATH= cd -- "$nested_locked_root" && pwd -P)
+nested_locked_session_id='nested-locked-session'
+nested_locked_session_key=$(session_key_for_test "$nested_locked_session_id")
+nested_locked_workspace_key=$(workspace_key_for_test "$nested_locked_root")
+nested_locked_state_file="$state_root/$nested_locked_workspace_key-$nested_locked_session_key.json"
+nested_locked_active_sentinel="$nested_locked_root/active-${nested_locked_session_key}.json"
+nested_locked_stale_sentinel="$nested_locked_root/stale.json"
+nested_locked_temp_sentinel="$nested_locked_root/.state.stale"
+printf 'sentinel\n' > "$nested_locked_active_sentinel"
+printf 'sentinel\n' > "$nested_locked_stale_sentinel"
+printf 'sentinel\n' > "$nested_locked_temp_sentinel"
+touch -t 200001010000 "$nested_locked_active_sentinel" "$nested_locked_stale_sentinel" "$nested_locked_temp_sentinel"
+nested_locked_active_mtime=$(file_mtime "$nested_locked_active_sentinel")
+run_locked_action --locked-update 131072 64 "$nested_locked_root" "$nested_locked_session_id" \
+  'direct.py' medium "$direct_locked_record"
+[ "$locked_action_status" -ne 0 ] || fail "nested cache repository direct locked update was accepted"
+run_locked_action --locked-remove 131072 64 "$nested_locked_root" "$nested_locked_session_id" 'direct.py'
+[ "$locked_action_status" -ne 0 ] || fail "nested cache repository direct locked remove was accepted"
+run_locked_action --locked-summary 131072 64 "$nested_locked_root" "$nested_locked_session_id"
+[ "$locked_action_status" -ne 0 ] || fail "nested cache repository direct locked summary was accepted"
+[ "$(cat "$nested_locked_active_sentinel")" = "sentinel" ] \
+  || fail "nested cache repository active JSON sentinel changed"
+[ "$(file_mtime "$nested_locked_active_sentinel")" = "$nested_locked_active_mtime" ] \
+  || fail "nested cache repository active JSON sentinel was touched"
+[ "$(cat "$nested_locked_stale_sentinel")" = "sentinel" ] \
+  || fail "nested cache repository stale JSON sentinel changed"
+[ "$(cat "$nested_locked_temp_sentinel")" = "sentinel" ] \
+  || fail "nested cache repository temporary sentinel changed"
+[ ! -e "$nested_locked_state_file" ] || fail "nested cache repository derived state was written"
+rm -rf "$nested_locked_root"
+
+locked_state_hardlink_sentinel="$tmp_dir/locked-state-hardlink-sentinel"
+state_for_path 'hard-link.py' > "$locked_state_hardlink_sentinel"
+chmod 600 "$locked_state_hardlink_sentinel"
+touch -t 200001010000 "$locked_state_hardlink_sentinel"
+locked_state_hardlink_content=$(cat "$locked_state_hardlink_sentinel")
+locked_state_hardlink_mtime=$(file_mtime "$locked_state_hardlink_sentinel")
+ln "$locked_state_hardlink_sentinel" "$forged_locked_state_file"
+locked_state_hardlink_links=$(file_links "$locked_state_hardlink_sentinel")
+run_locked_action --locked-summary 131072 64 "$forged_locked_root" "$forged_locked_session_id"
+[ "$locked_action_status" -ne 0 ] || fail "hard-linked direct summary state was accepted"
+[ "$(cat "$locked_state_hardlink_sentinel")" = "$locked_state_hardlink_content" ] \
+  || fail "direct locked summary changed an outside hard-linked state"
+[ "$(file_mtime "$locked_state_hardlink_sentinel")" = "$locked_state_hardlink_mtime" ] \
+  || fail "direct locked summary touched an outside hard-linked state"
+[ "$(file_links "$locked_state_hardlink_sentinel")" = "$locked_state_hardlink_links" ] \
+  || fail "direct locked summary changed an outside hard-linked state link count"
+rm -f "$forged_locked_state_file"
+
+hardlink_prune_root="$tmp_dir/hardlink-prune-workspace"
+mkdir -p "$hardlink_prune_root"
+git init -q "$hardlink_prune_root"
+hardlink_prune_root=$(CDPATH= cd -- "$hardlink_prune_root" && pwd -P)
+hardlink_prune_session_id='hardlink-prune-session'
+hardlink_prune_workspace_key=$(workspace_key_for_test "$hardlink_prune_root")
+hardlink_prune_session_key=$(session_key_for_test "$hardlink_prune_session_id")
+hardlink_prune_state_file="$state_root/$hardlink_prune_workspace_key-$hardlink_prune_session_key.json"
+state_for_path 'summary.py' > "$hardlink_prune_state_file"
+chmod 600 "$hardlink_prune_state_file"
+hardlink_prune_sentinel="$tmp_dir/hardlink-prune-sentinel"
+state_for_path 'stale.py' > "$hardlink_prune_sentinel"
+chmod 600 "$hardlink_prune_sentinel"
+touch -t 200001010000 "$hardlink_prune_sentinel"
+hardlink_prune_content=$(cat "$hardlink_prune_sentinel")
+hardlink_prune_mtime=$(file_mtime "$hardlink_prune_sentinel")
+ln "$hardlink_prune_sentinel" "$state_root/hardlink-prune.json"
+hardlink_prune_links=$(file_links "$hardlink_prune_sentinel")
+run_locked_action --locked-summary 131072 64 "$hardlink_prune_root" "$hardlink_prune_session_id"
+[ "$locked_action_status" -ne 0 ] || fail "hard-linked stale prune candidate was accepted"
+[ "$(cat "$hardlink_prune_sentinel")" = "$hardlink_prune_content" ] \
+  || fail "state prune changed an outside hard-linked candidate"
+[ "$(file_mtime "$hardlink_prune_sentinel")" = "$hardlink_prune_mtime" ] \
+  || fail "state prune touched an outside hard-linked candidate"
+[ "$(file_links "$hardlink_prune_sentinel")" = "$hardlink_prune_links" ] \
+  || fail "state prune changed an outside hard-linked candidate link count"
+rm -f "$state_root/hardlink-prune.json" "$hardlink_prune_state_file"
+
 
 forged_prune_root="$forged_locked_root/forged-prune-root"
 mkdir -p "$forged_prune_root"
@@ -712,6 +804,28 @@ if run_state_update "$concurrent_root" 'symlink.py' "$(record_for_rule test/syml
 fi
 [ "$(cat "$lock_sentinel")" = "sentinel" ] || fail "lock wrapper followed a symlink"
 rm -f "$state_root/.lock"
+lock_hardlink_sentinel="$tmp_dir/lock-hardlink-sentinel"
+printf 'sentinel\n' > "$lock_hardlink_sentinel"
+chmod 0644 "$lock_hardlink_sentinel"
+lock_hardlink_content=$(cat "$lock_hardlink_sentinel")
+lock_hardlink_mode=$(file_mode "$lock_hardlink_sentinel")
+rm -f "$state_root/.lock"
+ln "$lock_hardlink_sentinel" "$state_root/.lock"
+lock_hardlink_links=$(file_links "$lock_hardlink_sentinel")
+if perl "$lock_wrapper" "$state_root/.lock" /usr/bin/true; then
+  fail "hard-linked lock was accepted"
+fi
+[ "$(cat "$lock_hardlink_sentinel")" = "$lock_hardlink_content" ] \
+  || fail "lock wrapper changed an outside hard-linked lock"
+[ "$(file_mode "$lock_hardlink_sentinel")" = "$lock_hardlink_mode" ] \
+  || fail "lock wrapper changed an outside hard-linked lock mode"
+[ "$(file_links "$lock_hardlink_sentinel")" = "$lock_hardlink_links" ] \
+  || fail "lock wrapper changed an outside hard-linked lock link count"
+rm -f "$state_root/.lock"
+perl "$lock_wrapper" "$state_root/.lock" /usr/bin/true \
+  || fail "lock wrapper did not create a normal lock"
+[ "$(file_mode "$state_root/.lock")" = "0600" ] || fail "normal lock mode is not 0600"
+
 
 kernel_lock_ready="$tmp_dir/kernel-lock-ready"
 perl -MFcntl=:flock -e '

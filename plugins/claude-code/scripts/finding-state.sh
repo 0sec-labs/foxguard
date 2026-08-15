@@ -72,7 +72,7 @@ fg_state_relative_path() {
 }
 
 fg_state_cache_path_outside_repository() {
-  local candidate=$1 repo_root=$2 probe=$1 parent physical
+  local candidate=$1 repo_root=$2 probe=$1 parent physical candidate_physical
 
   # Start at the nearest existing ancestor, then compare physical filesystem
   # identities while walking upward so case-folding aliases cannot bypass this.
@@ -87,11 +87,23 @@ fg_state_cache_path_outside_repository() {
 
   while :; do
     [[ "$physical" -ef "$repo_root" ]] && return 1
-    [ "$physical" = / ] && return 0
+    [ "$physical" = / ] && break
     parent=$(cd -P "$physical/.." 2>/dev/null && pwd -P) || return 1
     [ "$parent" != "$physical" ] || return 1
     physical=$parent
   done
+
+  if [ -d "$candidate" ] && [ ! -L "$candidate" ]; then
+    candidate_physical=$(cd -P "$candidate" 2>/dev/null && pwd -P) || return 1
+    physical=$(cd -P "$repo_root" 2>/dev/null && pwd -P) || return 1
+    while :; do
+      [[ "$physical" -ef "$candidate_physical" ]] && return 1
+      [ "$physical" = / ] && break
+      parent=$(cd -P "$physical/.." 2>/dev/null && pwd -P) || return 1
+      [ "$parent" != "$physical" ] || return 1
+      physical=$parent
+    done
+  fi
 }
 
 
@@ -166,9 +178,81 @@ fg_state_workspace_key() {
   fg_state_sha256 "foxguard-claude-code-workspace-v1" "$1"
 }
 
-fg_state_prepare_locked_state() {
-  local repo_identity=$1 session_id=$2 repo_root state_root workspace_key session_key state_file
+fg_state_file_operation() {
+  local action=$1
+  shift
 
+  command -v perl >/dev/null 2>&1 || return 1
+  perl -MFcntl=:DEFAULT,S_IFMT,S_IFREG -e '
+    sub is_regular_unlinked {
+      my ($file) = @_;
+      my @stat = stat($file);
+
+      return @stat
+        && (($stat[2] & S_IFMT) == S_IFREG)
+        && $stat[3] == 1;
+    }
+
+    my $action = shift @ARGV;
+    exit 1 unless defined($action) && @ARGV;
+    exit 1 if ($action eq q(read) || $action eq q(touch-read)) && @ARGV != 1;
+
+    my $no_follow = eval { Fcntl::O_NOFOLLOW() };
+    exit 1 if $@ || !defined($no_follow);
+    my @files;
+    for my $path (@ARGV) {
+      sysopen(my $file, $path, O_RDONLY | O_NONBLOCK | $no_follow) or exit 1;
+      exit 1 unless is_regular_unlinked($file);
+      my @stat = stat($file);
+      push @files, [$path, $file, $stat[0], $stat[1]];
+    }
+
+    if ($action eq q(check)) {
+      exit 0;
+    }
+    if ($action eq q(touch) || $action eq q(touch-read)) {
+      for my $entry (@files) {
+        exit 1 unless is_regular_unlinked($entry->[1]);
+        utime undef, undef, $entry->[1] or exit 1;
+      }
+      exit 0 if $action eq q(touch);
+    }
+    if ($action eq q(read) || $action eq q(touch-read)) {
+      my $buffer;
+      while (1) {
+        my $count = sysread($files[0][1], $buffer, 8192);
+        exit 1 unless defined($count);
+        last if $count == 0;
+        print $buffer or exit 1;
+      }
+      exit 0;
+    }
+    if ($action eq q(remove)) {
+      for my $entry (@files) {
+        my @path_stat = lstat($entry->[0]);
+        exit 1 unless @path_stat
+          && $path_stat[0] == $entry->[2]
+          && $path_stat[1] == $entry->[3]
+          && (($path_stat[2] & S_IFMT) == S_IFREG)
+          && $path_stat[3] == 1;
+      }
+      for my $entry (@files) {
+        unlink $entry->[0] or exit 1;
+      }
+      exit 0;
+    }
+    exit 1;
+  ' "$action" "$@"
+}
+
+
+fg_state_prepare_locked_state() {
+  local repo_identity=$1 session_id=$2 check_file=${3:-1} repo_root state_root workspace_key session_key state_file
+
+  case "$check_file" in
+    0|1) ;;
+    *) return 1 ;;
+  esac
   # Locked actions are executable; re-derive every filesystem path from identity.
   unset FG_STATE_LOCKED_REPOSITORY FG_STATE_LOCKED_SESSION_ID \
     FG_STATE_LOCKED_SESSION_KEY FG_STATE_LOCKED_ROOT FG_STATE_LOCKED_FILE
@@ -179,6 +263,9 @@ fg_state_prepare_locked_state() {
   state_file="$state_root/$workspace_key-$session_key.json"
   [ ! -L "$state_file" ] || return 1
   [ ! -e "$state_file" ] || [ -f "$state_file" ] || return 1
+  if [ "$check_file" = "1" ] && [ -e "$state_file" ]; then
+    fg_state_file_operation check "$state_file" || return 1
+  fi
 
   FG_STATE_LOCKED_REPOSITORY=$repo_root
   FG_STATE_LOCKED_SESSION_ID=$session_id
@@ -379,13 +466,37 @@ fg_state_add_fingerprints() {
 }
 
 fg_state_prune_locked() {
-  local repo_identity=$1 session_id=$2
+  local repo_identity=$1 session_id=$2 candidate
+  local -a candidates
 
-  fg_state_prepare_locked_state "$repo_identity" "$session_id" || return 1
-  find "$FG_STATE_LOCKED_ROOT" -type f -name "*-${FG_STATE_LOCKED_SESSION_KEY}.json" -exec touch {} \; 2>/dev/null || :
-  find "$FG_STATE_LOCKED_ROOT" -type f -name '*.json' ! -name "*-${FG_STATE_LOCKED_SESSION_KEY}.json" -mtime +0 -exec rm -f {} \; 2>/dev/null || :
+  fg_state_prepare_locked_state "$repo_identity" "$session_id" 0 || return 1
+  candidates=()
+  while IFS= read -r -d '' candidate; do
+    candidates[${#candidates[@]}]=$candidate
+  done < <(
+    find "$FG_STATE_LOCKED_ROOT" -type d ! -path "$FG_STATE_LOCKED_ROOT" -prune -o \
+      -type f ! -path "$FG_STATE_LOCKED_FILE" -name "*-${FG_STATE_LOCKED_SESSION_KEY}.json" -print0 2>/dev/null
+  )
+  [ "${#candidates[@]}" -eq 0 ] || fg_state_file_operation touch "${candidates[@]}" || return 1
+
+  candidates=()
+  while IFS= read -r -d '' candidate; do
+    candidates[${#candidates[@]}]=$candidate
+  done < <(
+    find "$FG_STATE_LOCKED_ROOT" -type d ! -path "$FG_STATE_LOCKED_ROOT" -prune -o \
+      -type f -name '*.json' ! -name "*-${FG_STATE_LOCKED_SESSION_KEY}.json" -mtime +0 -print0 2>/dev/null
+  )
+  [ "${#candidates[@]}" -eq 0 ] || fg_state_file_operation remove "${candidates[@]}" || return 1
+
   # The kernel lock serializes state writes, so no live writer owns one of these.
-  find "$FG_STATE_LOCKED_ROOT" -type f -name '.state.*' -exec rm -f {} \; 2>/dev/null || :
+  candidates=()
+  while IFS= read -r -d '' candidate; do
+    candidates[${#candidates[@]}]=$candidate
+  done < <(
+    find "$FG_STATE_LOCKED_ROOT" -type d ! -path "$FG_STATE_LOCKED_ROOT" -prune -o \
+      -type f -name '.state.*' -print0 2>/dev/null
+  )
+  [ "${#candidates[@]}" -eq 0 ] || fg_state_file_operation remove "${candidates[@]}" || return 1
 }
 
 
@@ -426,7 +537,7 @@ fg_state_with_root_lock() {
     fg_state_emit_compact_summary_locked) action=--locked-summary ;;
     *) return 1 ;;
   esac
-  fg_state_prepare_locked_state "$repo_identity" "$session_id" || return 1
+  fg_state_prepare_locked_state "$repo_identity" "$session_id" 0 || return 1
   command -v perl >/dev/null 2>&1 || return 1
   state_script=$(fg_state_script_path) || return 1
   lock_wrapper=$(fg_state_lock_wrapper_path) || return 1
@@ -457,9 +568,9 @@ fg_state_atomic_write() (
     *) return 1 ;;
   esac
 
+  umask 077
   temp_file=$(mktemp "$FG_STATE_LOCKED_ROOT/.state.XXXXXX" 2>/dev/null) || return 1
   printf '%s\n' "$content" > "$temp_file" || return 1
-  chmod 600 "$temp_file" || return 1
 
   size=$(wc -c < "$temp_file") || return 1
   size=${size//[[:space:]]/}
@@ -497,11 +608,9 @@ fg_state_update_file_locked() {
 
   fg_state_prune_locked "$repo_identity" "$session_id" || return 1
   if [ -e "$FG_STATE_LOCKED_FILE" ]; then
-    if [ -f "$FG_STATE_LOCKED_FILE" ] && [ ! -L "$FG_STATE_LOCKED_FILE" ]; then
-      current=$(fg_state_validate < "$FG_STATE_LOCKED_FILE" 2>/dev/null) || current='{"version":3,"overflow":0,"omitted":[],"files":{}}'
-    else
-      return 1
-    fi
+    [ -f "$FG_STATE_LOCKED_FILE" ] && [ ! -L "$FG_STATE_LOCKED_FILE" ] || return 1
+    current=$(fg_state_file_operation touch-read "$FG_STATE_LOCKED_FILE") || return 1
+    current=$(printf '%s' "$current" | fg_state_validate 2>/dev/null) || current='{"version":3,"overflow":0,"omitted":[],"files":{}}'
   else
     current='{"version":3,"overflow":0,"omitted":[],"files":{}}'
   fi
@@ -558,7 +667,8 @@ fg_state_remove_file_locked() {
   fg_state_prune_locked "$repo_identity" "$session_id" || return 1
   [ -e "$FG_STATE_LOCKED_FILE" ] || return 0
   [ -f "$FG_STATE_LOCKED_FILE" ] && [ ! -L "$FG_STATE_LOCKED_FILE" ] || return 1
-  current=$(fg_state_validate < "$FG_STATE_LOCKED_FILE" 2>/dev/null) || return 1
+  current=$(fg_state_file_operation touch-read "$FG_STATE_LOCKED_FILE") || return 1
+  current=$(printf '%s' "$current" | fg_state_validate 2>/dev/null) || return 1
 
   next=$(printf '%s' "$current" | jq -ce --arg path "$relative_path" 'del(.files[$path])' 2>/dev/null) || return 1
   next=$(fg_state_remove_omitted_path "$next" "$relative_path") || return 1
@@ -607,7 +717,8 @@ fg_state_emit_compact_summary_locked() {
 
   fg_state_prune_locked "$repo_identity" "$session_id" || return 1
   [ -f "$FG_STATE_LOCKED_FILE" ] && [ ! -L "$FG_STATE_LOCKED_FILE" ] || return 1
-  state=$(fg_state_validate < "$FG_STATE_LOCKED_FILE" 2>/dev/null) || return 1
+  state=$(fg_state_file_operation touch-read "$FG_STATE_LOCKED_FILE") || return 1
+  state=$(printf '%s' "$state" | fg_state_validate 2>/dev/null) || return 1
 
   details=$(printf '%s' "$state" | jq -r \
     --argjson max_files "$FG_STATE_MAX_SUMMARY_FILES" \
