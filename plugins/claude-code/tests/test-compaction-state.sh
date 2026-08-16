@@ -11,6 +11,7 @@ hooks_json="$root/plugins/claude-code/hooks/hooks.json"
 fixture="$root/tests/fixtures/safe.py"
 session_id="compaction-test-588"
 tmp_dir=$(mktemp -d)
+tmp_dir=$(CDPATH= cd -- "$tmp_dir" && pwd -P)
 cache_dir="$tmp_dir/cache"
 fake_bin="$tmp_dir/bin"
 no_perl_bin="$tmp_dir/no-perl-bin"
@@ -409,19 +410,48 @@ run_locked_action() {
   set -e
 }
 
+run_locked_action_with_forged_fd() {
+  local outside_root=$1
+  shift
 
-run_paused_state_update() {
-  local repo_root=$1 relative_path=$2 record=$3 ready_file=$4 release_file=$5
-
-  (
-    export XDG_CACHE_HOME="$cache_dir"
-    export PATH="$fake_bin:$PATH"
-    export FG_STATE_TEST_TEMP_READY="$ready_file"
-    export FG_STATE_TEST_TEMP_RELEASE="$release_file"
-    . "$state_helper"
-    fg_state_update_file "$session_id" "$repo_root" "$relative_path" medium "$record"
-  )
+  set +e
+  locked_action_output=$(XDG_CACHE_HOME="$cache_dir" PATH="$fake_bin:$PATH" \
+    perl -MFcntl=F_SETFD -e '
+      my $outside_root = shift @ARGV;
+      open my $directory, q(<), $outside_root or exit 1;
+      fcntl($directory, F_SETFD, 0) or exit 1;
+      $ENV{FG_STATE_LOCK_DIR_FD} = fileno($directory);
+      exec @ARGV;
+    ' "$outside_root" "$state_helper" "$@" 2>&1)
+  locked_action_status=$?
+  set -e
 }
+
+start_fifo_state_write() {
+  local directory=$1 target=$2 fifo=$3 output=$4
+
+  mkfifo "$fifo"
+  "$state_file_helper" --root "$directory" write "$target" 128 < "$fifo" > "$output" 2>&1 &
+  fifo_write_pid=$!
+  exec 9> "$fifo"
+}
+
+wait_for_state_temp() {
+  local directory=$1 description=$2 state_temp
+
+  for _ in $(seq 1 80); do
+    state_temp=$(find "$directory" -maxdepth 1 -type f -name '.state.*' -print)
+    [ -n "$state_temp" ] && return 0
+    sleep 0.05
+  done
+  fail "$description"
+}
+
+close_fifo_state_write() {
+  exec 9>&-
+}
+
+
 
 run_state_update_with_limit() {
   local limit=$1 repo_root=$2 relative_path=$3 record=$4 state_session=${5:-$session_id}
@@ -533,6 +563,65 @@ assert_not_contains "$state_content" SOURCE_SNIPPET_SECRET
 assert_not_contains "$state_content" "$root"
 assert_not_contains "$(basename "$state_file")" "$session_id"
 direct_locked_record=$(record_for_rule test/direct-locked)
+forged_fd_root="$tmp_dir/forged-fd-workspace"
+mkdir -p "$forged_fd_root"
+git init -q "$forged_fd_root"
+forged_fd_root=$(CDPATH= cd -- "$forged_fd_root" && pwd -P)
+forged_fd_session_id='forged-fd-session'
+forged_fd_workspace_key=$(workspace_key_for_test "$forged_fd_root")
+forged_fd_session_key=$(session_key_for_test "$forged_fd_session_id")
+forged_fd_state_file="$state_root/$forged_fd_workspace_key-$forged_fd_session_key.json"
+state_for_path 'cache-sentinel.py' > "$forged_fd_state_file"
+chmod 600 "$forged_fd_state_file"
+forged_fd_cache_content=$(cat "$forged_fd_state_file")
+forged_fd_outside="$tmp_dir/forged-fd-outside"
+mkdir -p "$forged_fd_outside"
+forged_fd_json_sentinel="$forged_fd_outside/stale.json"
+forged_fd_temp_sentinel="$forged_fd_outside/.state.stale"
+printf 'sentinel\n' > "$forged_fd_json_sentinel"
+printf 'sentinel\n' > "$forged_fd_temp_sentinel"
+touch -t 200001010000 "$forged_fd_json_sentinel" "$forged_fd_temp_sentinel"
+run_locked_action_with_forged_fd "$forged_fd_outside" --locked-update 131072 64 \
+  "$forged_fd_root" "$forged_fd_session_id" 'forged-fd.py' medium "$direct_locked_record"
+[ "$locked_action_status" -ne 0 ] || fail "forged inherited state directory fd was accepted"
+[ "$(cat "$forged_fd_state_file")" = "$forged_fd_cache_content" ] \
+  || fail "forged inherited state directory fd changed cache state"
+[ "$(cat "$forged_fd_json_sentinel")" = "sentinel" ] \
+  || fail "forged inherited state directory fd pruned outside JSON"
+[ "$(cat "$forged_fd_temp_sentinel")" = "sentinel" ] \
+  || fail "forged inherited state directory fd pruned outside temporary state"
+[ ! -e "$forged_fd_outside/${forged_fd_state_file##*/}" ] \
+  || fail "forged inherited state directory fd wrote outside state"
+
+intermediate_cache="$tmp_dir/intermediate-cache"
+intermediate_outside="$tmp_dir/intermediate-outside"
+mkdir -p "$intermediate_cache" "$intermediate_outside"
+printf 'sentinel\n' > "$intermediate_outside/sentinel"
+ln -s "$intermediate_outside" "$intermediate_cache/foxguard"
+intermediate_session_id='intermediate-symlink-session'
+if XDG_CACHE_HOME="$intermediate_cache" PATH="$fake_bin:$PATH" "$state_helper" \
+  --locked-update 131072 64 "$forged_locked_root" "$intermediate_session_id" \
+  'intermediate-direct.py' medium "$direct_locked_record"; then
+  fail "direct locked action accepted an intermediate cache symlink"
+fi
+if perl "$lock_wrapper" "$intermediate_cache/foxguard/claude-code" .lock /usr/bin/true; then
+  fail "lock wrapper accepted an intermediate cache symlink"
+fi
+if (
+  XDG_CACHE_HOME="$intermediate_cache"
+  PATH="$fake_bin:$PATH"
+  . "$state_helper"
+  fg_state_update_file "$intermediate_session_id" "$forged_locked_root" \
+    'intermediate-normal.py' medium "$direct_locked_record"
+); then
+  fail "normal state update accepted an intermediate cache symlink"
+fi
+[ "$(cat "$intermediate_outside/sentinel")" = "sentinel" ] \
+  || fail "intermediate cache symlink changed an outside sentinel"
+[ ! -e "$intermediate_outside/.lock" ] \
+  || fail "intermediate cache symlink created an outside lock"
+[ -z "$(find "$intermediate_outside" -type f -name '*.json' -print)" ] \
+  || fail "intermediate cache symlink wrote state outside the cache"
 locked_update_sentinel="$forged_locked_root/update-sentinel"
 printf 'sentinel\n' > "$locked_update_sentinel"
 run_locked_action --locked-update 131072 64 "$forged_locked_root" "$forged_locked_session_id" \
@@ -669,137 +758,42 @@ run_locked_action --locked-summary 131072 64 "$forged_locked_root" "$forged_lock
   || fail "direct locked summary pruned a forged-root JSON sentinel"
 [ "$(cat "$forged_temp_sentinel")" = "sentinel" ] \
   || fail "direct locked summary pruned a forged-root temporary sentinel"
-rendezvous_outside_ready="$tmp_dir/rendezvous-outside-ready"
-rendezvous_outside_release="$tmp_dir/rendezvous-outside-release"
-rendezvous_target="$state_root/rendezvous-inert.json"
-printf 'sentinel\n' > "$rendezvous_outside_ready"
-printf 'sentinel\n' > "$rendezvous_outside_release"
-printf '{}\n' | FG_STATE_TEST_TEMP_READY="$rendezvous_outside_ready" \
-  FG_STATE_TEST_TEMP_RELEASE="$rendezvous_outside_release" \
-  "$state_file_helper" --root "$state_root" write "${rendezvous_target##*/}" 128 \
-  || fail "invalid test rendezvous blocked an anchored write"
-[ "$(cat "$rendezvous_outside_ready")" = "sentinel" ] \
-  || fail "invalid test rendezvous wrote outside the state root"
-[ "$(cat "$rendezvous_outside_release")" = "sentinel" ] \
-  || fail "invalid test rendezvous read or wrote outside the state root"
-rm -f "$rendezvous_target"
-
-direct_race_root="$tmp_dir/direct-race-workspace"
-mkdir -p "$direct_race_root"
-git init -q "$direct_race_root"
-direct_race_root=$(CDPATH= cd -- "$direct_race_root" && pwd -P)
-direct_race_session_id='direct-final-symlink-race'
-direct_race_workspace_key=$(workspace_key_for_test "$direct_race_root")
-direct_race_session_key=$(session_key_for_test "$direct_race_session_id")
-direct_race_state_file="$state_root/$direct_race_workspace_key-$direct_race_session_key.json"
+direct_race_state_root="$tmp_dir/direct-race-cache/foxguard/claude-code"
+direct_race_target='direct-final-symlink-race.json'
 direct_race_outside="$tmp_dir/direct-race-outside"
-direct_race_ready='test-direct-race-ready'
-direct_race_release='test-direct-race-release'
-mkdir -p "$direct_race_outside"
-: > "$state_root/$direct_race_ready"
-: > "$state_root/$direct_race_release"
-(
-  XDG_CACHE_HOME="$cache_dir" PATH="$fake_bin:$PATH" \
-    FG_STATE_TEST_TEMP_READY="$direct_race_ready" FG_STATE_TEST_TEMP_RELEASE="$direct_race_release" \
-    "$state_helper" --locked-update 131072 64 "$direct_race_root" "$direct_race_session_id" \
-      'direct-race.py' medium "$direct_locked_record"
-) > "$tmp_dir/direct-race-output" 2>&1 &
-direct_race_pid=$!
-for _ in $(seq 1 80); do
-  [ -s "$state_root/$direct_race_ready" ] && break
-  sleep 0.05
-done
-[ -s "$state_root/$direct_race_ready" ] || fail "direct symlink race did not reach state temp"
-ln -s "$direct_race_outside" "$direct_race_state_file"
-printf 'release\n' > "$state_root/$direct_race_release"
+direct_race_fifo="$tmp_dir/direct-race.fifo"
+mkdir -p "$direct_race_state_root" "$direct_race_outside"
+start_fifo_state_write "$direct_race_state_root" "$direct_race_target" "$direct_race_fifo" \
+  "$tmp_dir/direct-race-output"
+wait_for_state_temp "$direct_race_state_root" "direct symlink race did not reach state temp"
+ln -s "$direct_race_outside" "$direct_race_state_root/$direct_race_target"
+close_fifo_state_write
 set +e
-wait "$direct_race_pid"
+wait "$fifo_write_pid"
 direct_race_status=$?
 set -e
 [ "$direct_race_status" -ne 0 ] || fail "direct symlink race did not fail closed"
-[ -L "$direct_race_state_file" ] || fail "direct symlink race replaced its final symlink"
+[ -L "$direct_race_state_root/$direct_race_target" ] \
+  || fail "direct symlink race replaced its final symlink"
 [ -z "$(find "$direct_race_outside" -type f -print)" ] \
   || fail "direct symlink race wrote outside the cache"
-rm -f "$direct_race_state_file"
 
-normal_race_root="$tmp_dir/normal-race-workspace"
-mkdir -p "$normal_race_root"
-git init -q "$normal_race_root"
-normal_race_root=$(CDPATH= cd -- "$normal_race_root" && pwd -P)
-normal_race_session_id='normal-final-symlink-race'
-normal_race_workspace_key=$(workspace_key_for_test "$normal_race_root")
-normal_race_session_key=$(session_key_for_test "$normal_race_session_id")
-normal_race_state_file="$state_root/$normal_race_workspace_key-$normal_race_session_key.json"
-normal_race_outside="$tmp_dir/normal-race-outside"
-normal_race_ready='test-normal-race-ready'
-normal_race_release='test-normal-race-release'
-mkdir -p "$normal_race_outside"
-: > "$state_root/$normal_race_ready"
-: > "$state_root/$normal_race_release"
-(
-  export XDG_CACHE_HOME="$cache_dir"
-  export PATH="$fake_bin:$PATH"
-  export FG_STATE_TEST_TEMP_READY="$normal_race_ready"
-  export FG_STATE_TEST_TEMP_RELEASE="$normal_race_release"
-  . "$state_helper"
-  fg_state_update_file "$normal_race_session_id" "$normal_race_root" 'normal-race.py' medium "$direct_locked_record"
-) > "$tmp_dir/normal-race-output" 2>&1 &
-normal_race_pid=$!
-for _ in $(seq 1 80); do
-  [ -s "$state_root/$normal_race_ready" ] && break
-  sleep 0.05
-done
-[ -s "$state_root/$normal_race_ready" ] || fail "normal symlink race did not reach state temp"
-ln -s "$normal_race_outside" "$normal_race_state_file"
-printf 'release\n' > "$state_root/$normal_race_release"
-set +e
-wait "$normal_race_pid"
-normal_race_status=$?
-set -e
-[ "$normal_race_status" -ne 0 ] || fail "normal symlink race did not fail closed"
-[ -L "$normal_race_state_file" ] || fail "normal symlink race replaced its final symlink"
-[ -z "$(find "$normal_race_outside" -type f -print)" ] \
-  || fail "normal symlink race wrote outside the cache"
-rm -f "$normal_race_state_file"
-
-root_rename_cache="$tmp_dir/root-rename-cache"
-root_rename_root="$tmp_dir/root-rename-workspace"
-mkdir -p "$root_rename_root"
-git init -q "$root_rename_root"
-root_rename_root=$(CDPATH= cd -- "$root_rename_root" && pwd -P)
-root_rename_session_id='root-rename-race'
-root_rename_workspace_key=$(workspace_key_for_test "$root_rename_root")
-root_rename_session_key=$(session_key_for_test "$root_rename_session_id")
-root_rename_state_root="$root_rename_cache/foxguard/claude-code"
-root_rename_state_file="$root_rename_state_root/$root_rename_workspace_key-$root_rename_session_key.json"
+root_rename_state_root="$tmp_dir/root-rename-cache/foxguard/claude-code"
+root_rename_target='root-rename-race.json'
 root_rename_moved_root="$tmp_dir/root-rename-moved"
 root_rename_outside="$tmp_dir/root-rename-outside"
-root_rename_ready='test-root-rename-ready'
-root_rename_release='test-root-rename-release'
+root_rename_fifo="$tmp_dir/root-rename.fifo"
 mkdir -p "$root_rename_state_root" "$root_rename_outside"
-: > "$root_rename_state_root/$root_rename_ready"
-: > "$root_rename_state_root/$root_rename_release"
-(
-  export XDG_CACHE_HOME="$root_rename_cache"
-  export PATH="$fake_bin:$PATH"
-  export FG_STATE_TEST_TEMP_READY="$root_rename_ready"
-  export FG_STATE_TEST_TEMP_RELEASE="$root_rename_release"
-  . "$state_helper"
-  fg_state_update_file "$root_rename_session_id" "$root_rename_root" 'root-rename.py' medium "$direct_locked_record"
-) > "$tmp_dir/root-rename-output" 2>&1 &
-root_rename_pid=$!
-for _ in $(seq 1 80); do
-  [ -s "$root_rename_state_root/$root_rename_ready" ] && break
-  sleep 0.05
-done
-[ -s "$root_rename_state_root/$root_rename_ready" ] || fail "root replacement test did not reach state temp"
+start_fifo_state_write "$root_rename_state_root" "$root_rename_target" "$root_rename_fifo" \
+  "$tmp_dir/root-rename-output"
+wait_for_state_temp "$root_rename_state_root" "root replacement test did not reach state temp"
 mv "$root_rename_state_root" "$root_rename_moved_root"
 ln -s "$root_rename_outside" "$root_rename_state_root"
-printf 'release\n' > "$root_rename_moved_root/$root_rename_release"
-wait "$root_rename_pid"
-[ -f "$root_rename_moved_root/${root_rename_state_file##*/}" ] \
+close_fifo_state_write
+wait "$fifo_write_pid"
+[ -f "$root_rename_moved_root/$root_rename_target" ] \
   || fail "root replacement lost its anchored state write"
-[ ! -e "$root_rename_outside/${root_rename_state_file##*/}" ] \
+[ ! -e "$root_rename_outside/$root_rename_target" ] \
   || fail "root replacement wrote through its replacement"
 [ -z "$(find "$root_rename_outside" -type f -print)" ] \
   || fail "root replacement created a file outside the anchored root"
@@ -967,49 +961,29 @@ for _ in $(seq 1 80); do
   sleep 0.05
 done
 [ -f "$kernel_lock_ready" ] || fail "kernel lock holder did not start"
-run_state_update "$concurrent_root" 'kernel-lock.py' "$(record_for_rule test/kernel-lock)" &
-kernel_lock_update_pid=$!
-sleep 0.1
-kill -0 "$kernel_lock_update_pid" 2>/dev/null || fail "kernel lock did not exclude an update"
 kill -KILL "$kernel_lock_holder_pid"
 set +e
 wait "$kernel_lock_holder_pid"
 kernel_lock_holder_status=$?
 set -e
 [ "$kernel_lock_holder_status" -ne 0 ] || fail "crashed kernel lock holder exited cleanly"
-wait "$kernel_lock_update_pid"
+run_state_update "$concurrent_root" 'kernel-lock.py' "$(record_for_rule test/kernel-lock)"
 jq -e '.files | has("kernel-lock.py")' "$concurrent_state_file" >/dev/null \
   || fail "state update did not recover after a crashed lock holder"
 [ -f "$state_root/.lock" ] && [ ! -L "$state_root/.lock" ] \
   || fail "state lock is not a regular persistent file"
-atomic_ready='test-atomic-ready'
-atomic_release='test-atomic-release'
 atomic_session_id='atomic-write-interrupt'
 atomic_session_key=$(session_key_for_test "$atomic_session_id")
 atomic_target="$state_root/$workspace_key-$atomic_session_key.json"
-: > "$state_root/$atomic_ready"
-: > "$state_root/$atomic_release"
-
-(
-  export XDG_CACHE_HOME="$cache_dir"
-  export PATH="$fake_bin:$PATH"
-  export FG_STATE_TEST_TEMP_READY="$atomic_ready"
-  export FG_STATE_TEST_TEMP_RELEASE="$atomic_release"
-  . "$state_helper"
-  fg_state_prepare_locked_state "$root" "$atomic_session_id"
-  fg_state_atomic_write "$root" "$atomic_session_id" '{"metadata":"only"}'
-) &
-atomic_holder_pid=$!
-for _ in $(seq 1 80); do
-  [ -s "$state_root/$atomic_ready" ] && break
-  sleep 0.05
-done
-[ -s "$state_root/$atomic_ready" ] || fail "atomic write did not reach move"
-atomic_owner_pid=$(cat "$state_root/$atomic_ready")
+atomic_fifo="$tmp_dir/atomic-write.fifo"
+start_fifo_state_write "$state_root" "${atomic_target##*/}" "$atomic_fifo" "$tmp_dir/atomic-write-output"
+wait_for_state_temp "$state_root" "atomic write did not reach its temporary file"
+atomic_owner_pid=$fifo_write_pid
 kill -0 "$atomic_owner_pid" 2>/dev/null || fail "atomic write owner was not live"
 kill -TERM "$atomic_owner_pid"
+close_fifo_state_write
 set +e
-wait "$atomic_holder_pid"
+wait "$atomic_owner_pid"
 atomic_holder_status=$?
 set -e
 [ "$atomic_holder_status" -ne 0 ] || fail "interrupted atomic write exited cleanly"
@@ -1035,22 +1009,31 @@ jq -e '(.files | keys | sort) == ["kernel-lock.py", "one.py", "two.py"]' "$concu
   || fail "concurrent updates did not retain a regular lock file"
 
 paused_record=$(record_for_rule test/paused)
-paused_ready='test-paused-ready'
-paused_release='test-paused-release'
-: > "$state_root/$paused_ready"
-: > "$state_root/$paused_release"
-run_paused_state_update "$paused_root" 'one.py' "$paused_record" "$paused_ready" "$paused_release" &
-paused_one_pid=$!
+paused_ready="$tmp_dir/paused-lock-ready"
+paused_fifo="$tmp_dir/paused-lock.fifo"
+mkfifo "$paused_fifo"
+perl "$lock_wrapper" "$state_root" .lock perl -e '
+  open my $ready, q(>), $ARGV[0] or exit 1;
+  print {$ready} "ready\n" or exit 1;
+  close $ready or exit 1;
+  while (read(STDIN, my $buffer, 8192)) {}
+' "$paused_ready" < "$paused_fifo" > "$tmp_dir/paused-lock-output" 2>&1 &
+paused_lock_holder_pid=$!
+exec 8> "$paused_fifo"
 for _ in $(seq 1 80); do
-  [ -s "$state_root/$paused_ready" ] && break
+  [ -f "$paused_ready" ] && break
   sleep 0.05
 done
-[ -s "$state_root/$paused_ready" ] || fail "paused update did not reach rename"
-run_state_update "$paused_root" 'two.py' "$paused_record" &
+[ -f "$paused_ready" ] || fail "test lock holder did not acquire the state lock"
+( exec 8>&-; run_state_update "$paused_root" 'one.py' "$paused_record" ) &
+paused_one_pid=$!
+( exec 8>&-; run_state_update "$paused_root" 'two.py' "$paused_record" ) &
 paused_two_pid=$!
 sleep 0.1
-kill -0 "$paused_two_pid" 2>/dev/null || fail "second update bypassed the paused writer"
-printf 'release\n' > "$state_root/$paused_release"
+kill -0 "$paused_one_pid" 2>/dev/null || fail "first update bypassed the test lock"
+kill -0 "$paused_two_pid" 2>/dev/null || fail "second update bypassed the test lock"
+exec 8>&-
+wait "$paused_lock_holder_pid"
 wait "$paused_one_pid"
 wait "$paused_two_pid"
 jq -e '(.files | keys | sort) == ["one.py", "two.py"]' "$paused_state_file" >/dev/null \

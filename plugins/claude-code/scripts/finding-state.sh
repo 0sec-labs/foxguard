@@ -106,9 +106,39 @@ fg_state_cache_path_outside_repository() {
   fi
 }
 
+fg_state_canonical_cache_home() {
+  local cache_home=$1 probe=$1 parent suffix= resolved
+
+  case "$cache_home" in
+    /|/*) ;;
+    *) return 1 ;;
+  esac
+  case "$cache_home" in
+    *'//'|*/./*|*/../*|*/.|*/..) return 1 ;;
+  esac
+  while [ ! -e "$probe" ] && [ ! -L "$probe" ]; do
+    parent=${probe%/*}
+    [ "$parent" != "$probe" ] || return 1
+    [ -n "$parent" ] || parent=/
+    suffix="${probe##*/}${suffix:+/$suffix}"
+    probe=$parent
+  done
+  [ -d "$probe" ] || return 1
+  resolved=$(cd -P "$probe" 2>/dev/null && pwd -P) || return 1
+  if [ -n "$suffix" ]; then
+    if [ "$resolved" = / ]; then
+      printf '/%s\n' "$suffix"
+    else
+      printf '%s/%s\n' "$resolved" "$suffix"
+    fi
+  else
+    printf '%s\n' "$resolved"
+  fi
+}
+
 
 fg_state_root() {
-  local repo_root=$1 cache_home state_root resolved_state resolved_repo
+  local repo_root=$1 cache_home state_root resolved_repo
 
   resolved_repo=$(cd -P "$repo_root" 2>/dev/null && pwd -P) || return 1
 
@@ -124,16 +154,18 @@ fg_state_root() {
     /*) ;;
     *) return 1 ;;
   esac
+  cache_home=${cache_home%/}
+  [ -n "$cache_home" ] || cache_home=/
+  cache_home=$(fg_state_canonical_cache_home "$cache_home") || return 1
+  case "$cache_home" in
+    /) state_root="/foxguard/claude-code" ;;
+    *) state_root="$cache_home/foxguard/claude-code" ;;
+  esac
 
-  state_root="$cache_home/foxguard/claude-code"
   fg_state_cache_path_outside_repository "$state_root" "$resolved_repo" || return 1
-  (umask 077; mkdir -p "$state_root" >/dev/null 2>&1) || return 1
-  [ -d "$state_root" ] && [ ! -L "$state_root" ] || return 1
+  fg_state_ensure_root "$state_root" || return 1
   fg_state_cache_path_outside_repository "$state_root" "$resolved_repo" || return 1
-
-  resolved_state=$(cd -P "$state_root" 2>/dev/null && pwd -P) || return 1
-  fg_state_cache_path_outside_repository "$resolved_state" "$resolved_repo" || return 1
-  printf '%s\n' "$resolved_state"
+  printf '%s\n' "$state_root"
 }
 
 fg_state_session_key() {
@@ -186,18 +218,22 @@ fg_state_file_operation_path() {
   printf '%s/state-file-operation.pl\n' "${state_script%/*}"
 }
 
+fg_state_ensure_root() {
+  local state_root=$1 helper
+
+  command -v perl >/dev/null 2>&1 || return 1
+  helper=$(fg_state_file_operation_path) || return 1
+  perl "$helper" --root "$state_root" ensure-root
+}
+
 fg_state_file_operation() {
   local action=$1 helper
   shift
 
   command -v perl >/dev/null 2>&1 || return 1
   helper=$(fg_state_file_operation_path) || return 1
-  if [[ "${FG_STATE_LOCK_DIR_FD:-}" =~ ^[0-9]+$ ]]; then
-    perl "$helper" --fd "$FG_STATE_LOCK_DIR_FD" "$action" "$@"
-  else
-    [ -n "${FG_STATE_LOCKED_ROOT:-}" ] || return 1
-    perl "$helper" --root "$FG_STATE_LOCKED_ROOT" "$action" "$@"
-  fi
+  [ -n "${FG_STATE_LOCKED_ROOT:-}" ] || return 1
+  perl "$helper" --root "$FG_STATE_LOCKED_ROOT" "$action" "$@"
 }
 
 
@@ -205,7 +241,8 @@ fg_state_prepare_locked_state() {
   local repo_identity=$1 session_id=$2 repo_root state_root workspace_key session_key state_file
   # Locked actions are executable; re-derive every filesystem path from identity.
   unset FG_STATE_LOCKED_REPOSITORY FG_STATE_LOCKED_SESSION_ID \
-    FG_STATE_LOCKED_SESSION_KEY FG_STATE_LOCKED_ROOT FG_STATE_LOCKED_FILE
+    FG_STATE_LOCKED_SESSION_KEY FG_STATE_LOCKED_ROOT FG_STATE_LOCKED_FILE \
+    FG_STATE_LOCK_DIR_FD
   repo_root=$(fg_state_repository_root "$repo_identity") || return 1
   state_root=$(fg_state_root "$repo_root") || return 1
   workspace_key=$(fg_state_workspace_key "$repo_root") || return 1
@@ -465,10 +502,13 @@ fg_state_with_root_lock() {
   cache_home=${FG_STATE_LOCKED_ROOT%/foxguard/claude-code}
   [ -n "$cache_home" ] || cache_home=/
 
-  # The wrapper holds an inherited flock through the self-invoked action.
-  XDG_CACHE_HOME="$cache_home" perl "$lock_wrapper" "$FG_STATE_LOCKED_ROOT" .lock "$state_script" "$action" \
-    "$FG_STATE_MAX_BYTES" "$FG_STATE_MAX_OMITTED" "$FG_STATE_LOCKED_REPOSITORY" \
-    "$FG_STATE_LOCKED_SESSION_ID" "$@"
+  # The wrapper holds only the flock; every mutation reopens the derived root.
+  (
+    unset FG_STATE_LOCK_DIR_FD
+    XDG_CACHE_HOME="$cache_home" perl "$lock_wrapper" "$FG_STATE_LOCKED_ROOT" .lock "$state_script" "$action" \
+      "$FG_STATE_MAX_BYTES" "$FG_STATE_MAX_OMITTED" "$FG_STATE_LOCKED_REPOSITORY" \
+      "$FG_STATE_LOCKED_SESSION_ID" "$@"
+  )
 }
 
 
@@ -681,6 +721,7 @@ fg_state_run_locked_action() {
   local action=${1:-}
   local repo_identity session_id
   shift || return 1
+  [ -z "${FG_STATE_LOCK_DIR_FD+x}" ] || return 1
 
   case "$action" in
     --locked-update)

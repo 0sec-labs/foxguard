@@ -4,6 +4,11 @@ use warnings;
 use Errno qw(EAGAIN EWOULDBLOCK EEXIST);
 use Fcntl qw(:DEFAULT :flock F_SETFD S_IFMT S_IFREG S_IFDIR);
 
+my $no_follow = eval { Fcntl::O_NOFOLLOW() };
+exit 1 if $@ || !defined($no_follow);
+my $directory_only = eval { Fcntl::O_DIRECTORY() };
+exit 1 if $@ || !defined($directory_only);
+
 sub valid_basename {
     my ($name) = @_;
 
@@ -22,6 +27,44 @@ sub is_safe_directory {
     return @stat && (($stat[2] & S_IFMT) == S_IFDIR);
 }
 
+sub absolute_components {
+    my ($path) = @_;
+
+    return unless defined($path)
+        && $path =~ m{\A/}
+        && index($path, "\0") == -1;
+    return [] if $path eq q(/);
+    return if $path =~ m{/\z} || $path =~ m{//};
+    my @components = split m{/}, substr($path, 1), -1;
+    return unless @components;
+    for my $component (@components) {
+        return if !length($component)
+            || $component eq q(.)
+            || $component eq q(..);
+    }
+    return \@components;
+}
+
+sub open_absolute_directory {
+    my ($path) = @_;
+    my $components = absolute_components($path);
+    return unless $components;
+    my $flags = O_RDONLY | O_NONBLOCK | $directory_only | $no_follow;
+    my $current;
+
+    sysopen($current, q(/), $flags) or return;
+    return unless is_safe_directory($current);
+    for my $component (@{$components}) {
+        chdir($current) or return; # chdir FILEHANDLE uses fchdir.
+        my $next;
+        sysopen($next, $component, $flags) or return;
+        return unless is_safe_directory($next);
+        $current = $next;
+    }
+    chdir($current) or return;
+    return $current;
+}
+
 sub is_safe_lock {
     my ($lock) = @_;
     my @stat = stat($lock);
@@ -34,18 +77,10 @@ sub is_safe_lock {
 
 my ($root, $lock_name, @command) = @ARGV;
 exit 1 unless defined($root)
-    && $root =~ m{\A/}
-    && index($root, "\0") == -1
     && valid_basename($lock_name)
     && @command;
-my $no_follow = eval { Fcntl::O_NOFOLLOW() };
-exit 1 if $@ || !defined($no_follow);
-my $directory_only = eval { Fcntl::O_DIRECTORY() };
-exit 1 if $@ || !defined($directory_only);
-sysopen(my $directory, $root, O_RDONLY | O_NONBLOCK | $directory_only | $no_follow)
-    or exit 1;
-exit 1 unless is_safe_directory($directory);
-chdir($directory) or exit 1;
+my $directory = open_absolute_directory($root);
+exit 1 unless $directory;
 chmod 0700, q(.) or exit 1;
 
 my $old_umask = umask 0077;
@@ -69,9 +104,8 @@ for (1 .. 40) {
 exit 1 unless $locked;
 exit 1 unless is_safe_lock($lock);
 
-# Preserve the rooted directory and kernel-held lock through exec.
-defined fcntl($directory, F_SETFD, 0) or exit 1;
+close($directory) or exit 1;
+chdir(q(/)) or exit 1;
 defined fcntl($lock, F_SETFD, 0) or exit 1;
-$ENV{FG_STATE_LOCK_DIR_FD} = fileno($directory);
 exec @command;
 exit 127;

@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-use Errno qw(ENOENT);
+use Errno qw(ENOENT EEXIST);
 use Fcntl qw(:DEFAULT S_IFMT S_IFREG S_IFDIR);
 use File::Temp qw(tempfile);
 
@@ -22,11 +22,6 @@ sub valid_basename {
         && $name =~ /\A[A-Za-z0-9._-]+\z/;
 }
 
-sub valid_test_basename {
-    my ($name) = @_;
-
-    return valid_basename($name) && $name =~ /\Atest-[A-Za-z0-9_-]+\z/;
-}
 
 sub valid_limit {
     my ($limit) = @_;
@@ -51,23 +46,59 @@ sub is_regular_unlinked {
         && $stat[3] == 1;
 }
 
-sub open_root {
-    my ($kind, $value) = @_;
-    my $directory;
+sub absolute_components {
+    my ($path) = @_;
 
-    if ($kind eq q(--root)) {
-        exit 1 unless defined($value) && $value =~ m{\A/} && index($value, "\0") == -1;
-        sysopen($directory, $value, O_RDONLY | O_NONBLOCK | $directory_only | $no_follow)
-            or exit 1;
-    } elsif ($kind eq q(--fd)) {
-        exit 1 unless defined($value) && $value =~ /\A[0-9]+\z/;
-        open($directory, "<&=$value") or exit 1;
-    } else {
-        exit 1;
+    return unless defined($path)
+        && $path =~ m{\A/}
+        && index($path, "\0") == -1;
+    return [] if $path eq q(/);
+    return if $path =~ m{/\z} || $path =~ m{//};
+    my @components = split m{/}, substr($path, 1), -1;
+    return unless @components;
+    for my $component (@components) {
+        return if !length($component)
+            || $component eq q(.)
+            || $component eq q(..);
     }
+    return \@components;
+}
 
-    exit 1 unless is_directory($directory);
-    chdir($directory) or exit 1;
+sub open_absolute_directory {
+    my ($path, $create) = @_;
+    my $components = absolute_components($path);
+    return unless $components;
+    my $flags = O_RDONLY | O_NONBLOCK | $directory_only | $no_follow;
+    my $current;
+
+    sysopen($current, q(/), $flags) or return;
+    return unless is_directory($current);
+    for my $component (@{$components}) {
+        chdir($current) or return; # chdir FILEHANDLE uses fchdir.
+        my $next;
+        if (!sysopen($next, $component, $flags)) {
+            my $open_error = $!;
+            return unless $create && $open_error == ENOENT;
+            my $old_umask = umask 0077;
+            my $made = mkdir($component, 0700);
+            my $mkdir_error = $!;
+            umask $old_umask;
+            return unless $made || $mkdir_error == EEXIST;
+            sysopen($next, $component, $flags) or return;
+        }
+        return unless is_directory($next);
+        $current = $next;
+    }
+    chdir($current) or return;
+    return $current;
+}
+
+sub open_root {
+    my ($kind, $value, $create) = @_;
+
+    exit 1 unless $kind eq q(--root);
+    my $directory = open_absolute_directory($value, $create);
+    exit 1 unless $directory;
     chmod 0700, q(.) or exit 1;
     return $directory;
 }
@@ -149,33 +180,6 @@ END {
     cleanup_temp();
 }
 
-sub wait_for_test_release {
-    my $ready = $ENV{FG_STATE_TEST_TEMP_READY};
-    my $release = $ENV{FG_STATE_TEST_TEMP_RELEASE};
-
-    # Test-only rendezvous files are confined to the opened state directory.
-    return 1 unless defined($ready) && defined($release)
-        && valid_test_basename($ready) && valid_test_basename($release);
-    my ($ready_file, $ready_status) = open_safe_entry($ready);
-    my ($release_file, $release_status) = open_safe_entry($release);
-    return 1 unless $ready_file && $release_file;
-
-    sysopen(my $signal, $ready, O_WRONLY | O_NONBLOCK | $no_follow) or return 0;
-    my @signal_stat = stat($signal);
-    return 0 unless is_regular_unlinked(@signal_stat);
-    print {$signal} "$$\n" or return 0;
-    close($signal) or return 0;
-    for (1 .. 500) {
-        my ($file, $status) = open_safe_entry($release);
-        return 0 unless $file;
-        my $buffer = q();
-        my $count = sysread($file, $buffer, 16);
-        return 0 unless defined($count);
-        return 1 if $buffer eq "release\n";
-        select undef, undef, undef, 0.01;
-    }
-    return 0;
-}
 
 sub write_entry {
     my ($name, $limit) = @_;
@@ -214,8 +218,7 @@ sub write_entry {
             return 1;
         }
     }
-    unless (close($temp) && wait_for_test_release()
-        && target_is_safe_or_missing($name)) {
+    unless (close($temp) && target_is_safe_or_missing($name)) {
         cleanup_temp();
         return 1;
     }
@@ -235,8 +238,15 @@ sub write_entry {
 
 my ($anchor, $anchor_value, $action, @args) = @ARGV;
 exit 1 unless defined($anchor) && defined($anchor_value) && defined($action);
-my $directory = open_root($anchor, $anchor_value);
+exit 1 unless $action eq q(ensure-root)
+    || $action eq q(touch-read) || $action eq q(remove)
+    || $action eq q(write) || $action eq q(prune);
+exit 1 if $action eq q(ensure-root) && @args;
+my $directory = open_root($anchor, $anchor_value, $action eq q(ensure-root));
 
+if ($action eq q(ensure-root)) {
+    exit 0;
+}
 if ($action eq q(touch-read)) {
     exit 1 unless @args == 2 && valid_basename($args[0]) && valid_limit($args[1]);
     my ($file, $status) = open_safe_entry($args[0]);
