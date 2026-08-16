@@ -93,14 +93,42 @@ sub open_absolute_directory {
     return $current;
 }
 
+sub duplicate_locked_directory {
+    my $fd = $ENV{FG_STATE_LOCK_DIR_FD};
+    my $directory;
+
+    return unless defined($fd) && $fd =~ /\A(?:0|[1-9][0-9]*)\z/;
+    open($directory, q(<&), $fd) or return;
+    return $directory;
+}
+
+sub matches_locked_directory {
+    my ($directory, $locked_directory) = @_;
+    my @directory_stat = stat($directory);
+    my @locked_stat = stat($locked_directory);
+
+    return @directory_stat && @locked_stat
+        && (($directory_stat[2] & S_IFMT) == S_IFDIR)
+        && (($locked_stat[2] & S_IFMT) == S_IFDIR)
+        && $directory_stat[0] == $locked_stat[0]
+        && $directory_stat[1] == $locked_stat[1];
+}
+
+
 sub open_root {
     my ($kind, $value, $create) = @_;
 
     exit 1 unless $kind eq q(--root);
     my $directory = open_absolute_directory($value, $create);
     exit 1 unless $directory;
-    chmod 0700, q(.) or exit 1;
-    return $directory;
+    if ($create) {
+        chmod 0700, q(.) or exit 1;
+        return $directory;
+    }
+    my $locked_directory = duplicate_locked_directory();
+    exit 1 unless $locked_directory && matches_locked_directory($directory, $locked_directory);
+    chdir($locked_directory) or exit 1;
+    return $locked_directory;
 }
 
 sub open_safe_entry {

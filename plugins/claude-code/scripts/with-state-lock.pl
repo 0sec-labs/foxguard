@@ -104,8 +104,11 @@ for (1 .. 40) {
 exit 1 unless $locked;
 exit 1 unless is_safe_lock($lock);
 
-close($directory) or exit 1;
+my $directory_fd = fileno($directory);
+exit 1 unless defined($directory_fd);
 chdir(q(/)) or exit 1;
+defined fcntl($directory, F_SETFD, 0) or exit 1;
 defined fcntl($lock, F_SETFD, 0) or exit 1;
+$ENV{FG_STATE_LOCK_DIR_FD} = $directory_fd;
 exec @command;
 exit 127;

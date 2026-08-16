@@ -19,9 +19,12 @@ no_scanner_bin="$tmp_dir/no-scanner-bin"
 state_root="$cache_dir/foxguard/claude-code"
 
 cleanup() {
+  if [ -n "${binding_pid:-}" ]; then
+    kill "$binding_pid" 2>/dev/null || true
+    wait "$binding_pid" 2>/dev/null || true
+  fi
   rm -rf "$tmp_dir"
 }
-trap cleanup EXIT
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -405,7 +408,8 @@ run_state_update() {
 
 run_locked_action() {
   set +e
-  locked_action_output=$(XDG_CACHE_HOME="$cache_dir" PATH="$fake_bin:$PATH" "$state_helper" "$@" 2>&1)
+  locked_action_output=$(XDG_CACHE_HOME="$cache_dir" PATH="$fake_bin:$PATH" \
+    perl "$lock_wrapper" "$state_root" .lock "$state_helper" "$@" 2>&1)
   locked_action_status=$?
   set -e
 }
@@ -431,7 +435,8 @@ start_fifo_state_write() {
   local directory=$1 target=$2 fifo=$3 output=$4
 
   mkfifo "$fifo"
-  "$state_file_helper" --root "$directory" write "$target" 128 < "$fifo" > "$output" 2>&1 &
+  perl "$lock_wrapper" "$directory" .lock "$state_file_helper" --root "$directory" write "$target" 128 \
+    < "$fifo" > "$output" 2>&1 &
   fifo_write_pid=$!
   exec 9> "$fifo"
 }
@@ -563,6 +568,78 @@ assert_not_contains "$state_content" SOURCE_SNIPPET_SECRET
 assert_not_contains "$state_content" "$root"
 assert_not_contains "$(basename "$state_file")" "$session_id"
 direct_locked_record=$(record_for_rule test/direct-locked)
+if XDG_CACHE_HOME="$cache_dir" PATH="$fake_bin:$PATH" "$state_helper" \
+  --locked-update 131072 64 "$root" "$session_id" 'direct-without-fd.py' medium "$direct_locked_record"; then
+  fail "direct locked action ran without an inherited state directory fd"
+fi
+[ "$(cat "$state_file")" = "$state_content" ] \
+  || fail "unverified direct locked action changed cache state"
+
+binding_cache="$tmp_dir/locked-binding-cache"
+binding_state_root="$binding_cache/foxguard/claude-code"
+binding_original_root="$tmp_dir/locked-binding-original"
+binding_workspace="$tmp_dir/locked-binding-workspace"
+binding_session_id='locked-binding-session'
+mkdir -p "$binding_state_root" "$binding_workspace"
+git init -q "$binding_workspace"
+binding_workspace=$(CDPATH= cd -- "$binding_workspace" && pwd -P)
+binding_workspace_key=$(workspace_key_for_test "$binding_workspace")
+binding_session_key=$(session_key_for_test "$binding_session_id")
+binding_state_name="$binding_workspace_key-$binding_session_key.json"
+binding_ready="$tmp_dir/locked-binding-ready"
+binding_fifo="$tmp_dir/locked-binding.fifo"
+binding_replacement_json="$binding_state_root/replacement-stale.json"
+binding_replacement_temp="$binding_state_root/.state.replacement"
+mkfifo "$binding_fifo"
+exec 7<> "$binding_fifo"
+XDG_CACHE_HOME="$binding_cache" PATH="$fake_bin:$PATH" \
+  perl "$lock_wrapper" "$binding_state_root" .lock /bin/bash -c '
+    exec 7>&-
+    printf "ready\n" > "$1" || exit 1
+    IFS= read -r _ < "$2" || exit 1
+    exec "$3" --locked-update 131072 64 "$4" "$5" replacement.py medium "$6"
+  ' bash "$binding_ready" "$binding_fifo" "$state_helper" "$binding_workspace" \
+  "$binding_session_id" "$direct_locked_record" > "$tmp_dir/locked-binding-output" 2>&1 &
+binding_pid=$!
+for _ in $(seq 1 80); do
+  [ -f "$binding_ready" ] && break
+  sleep 0.05
+done
+[ -f "$binding_ready" ] || fail "locked binding child did not reach FIFO gate"
+mv "$binding_state_root" "$binding_original_root"
+mkdir "$binding_state_root"
+state_for_path 'replacement-stale.py' > "$binding_replacement_json"
+chmod 600 "$binding_replacement_json"
+printf 'sentinel\n' > "$binding_replacement_temp"
+touch -t 200001010000 "$binding_replacement_json" "$binding_replacement_temp"
+binding_replacement_json_content=$(cat "$binding_replacement_json")
+binding_replacement_json_mtime=$(file_mtime "$binding_replacement_json")
+binding_replacement_temp_mtime=$(file_mtime "$binding_replacement_temp")
+printf 'release\n' >&7
+exec 7>&-
+set +e
+wait "$binding_pid"
+binding_status=$?
+set -e
+unset binding_pid
+[ "$(cat "$binding_replacement_json")" = "$binding_replacement_json_content" ] \
+  || fail "locked action changed replacement stale JSON"
+[ "$(file_mtime "$binding_replacement_json")" = "$binding_replacement_json_mtime" ] \
+  || fail "locked action touched replacement stale JSON"
+[ "$(cat "$binding_replacement_temp")" = "sentinel" ] \
+  || fail "locked action pruned replacement temporary state"
+[ "$(file_mtime "$binding_replacement_temp")" = "$binding_replacement_temp_mtime" ] \
+  || fail "locked action touched replacement temporary state"
+[ ! -e "$binding_state_root/$binding_state_name" ] \
+  || fail "locked action wrote replacement state"
+if [ "$binding_status" = 0 ]; then
+  [ -f "$binding_original_root/$binding_state_name" ] \
+    || fail "successful locked action did not use original state root"
+else
+  [ ! -e "$binding_original_root/$binding_state_name" ] \
+    || fail "failed locked action mutated original state root"
+fi
+
 forged_fd_root="$tmp_dir/forged-fd-workspace"
 mkdir -p "$forged_fd_root"
 git init -q "$forged_fd_root"
