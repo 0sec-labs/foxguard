@@ -25,6 +25,7 @@ cleanup() {
   fi
   rm -rf "$tmp_dir"
 }
+trap cleanup EXIT
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
