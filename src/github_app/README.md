@@ -16,8 +16,8 @@ cargo build --release --features github-app --bin foxguard-github-app
 - `webhook.rs` — HMAC-SHA256 signature verification (`verify_signature`) and the `EventKind` router enum. 10 unit tests pin the verification contract: known-good vector, modified body, wrong secret, missing/empty/non-hex/short-length digest, trailing-whitespace tolerance, and the kind-routing map.
 - `auth.rs` — GitHub App JWT generation, installation-token exchange, and conservative in-memory token caching. It reads app credentials from `FOXGUARD_GITHUB_APP_ID` and either `FOXGUARD_GITHUB_PRIVATE_KEY` or an absolute `FOXGUARD_GITHUB_PRIVATE_KEY_PATH`, and keeps the outbound GitHub API base URL configurable for tests and allowlisted GitHub Enterprise hosts.
 - `installation_store.rs` — small JSON-backed installation registry. It records account metadata and selected repositories from `installation` / `installation_repositories` webhooks so self-hosted operators can recover install state across restarts without a database dependency.
-- `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, extracts installation IDs from JSON payloads, persists installation metadata, and admits pull-request work to a bounded queue (128 pending jobs and 4 workers by default). Replayed GitHub delivery IDs are deduplicated; concurrent updates for the same repository/PR coalesce so the newest head gets one follow-up scan instead of racing or being lost. Overload is acknowledged with `202 Accepted` and logged. Workers prepare installation auth, clone and scan pull-request heads in a bounded temp workspace, post foxguard PR review comments and a check run, and clear cached tokens when installations are deleted. The PR scan runs the full tree first (whole-repo cross-file taint context) and, only if it exceeds `FOXGUARD_SCAN_TIMEOUT_SECS` (default 60), falls back to a diff-scoped scan of just the PR's changed files (`--changed-files-from`), with non-code paths (`tests/fixtures`, `vendor`, `node_modules`, minified/`dist`/`build`) excluded on both paths.
-- `review.rs` — installation-token GitHub REST client for PR review comments and check runs. It deletes prior foxguard review comments, lists changed PR files, filters findings to commentable diff lines, posts inline comments using the shared CLI comment formatter, and creates a `foxguard` check run with up to 50 annotations.
+- `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, extracts installation IDs from JSON payloads, persists installation metadata, and admits pull-request work to a bounded queue (128 pending jobs and 4 workers by default). Replayed GitHub delivery IDs are deduplicated; concurrent updates for the same repository/PR coalesce so the newest head gets one follow-up scan instead of racing or being lost. Overload is acknowledged with `202 Accepted` and logged. Workers prepare installation auth, clone and scan pull-request heads in a bounded temp workspace, create or update one marker-tagged foxguard PR summary comment, delete legacy inline foxguard comments, post a check run with annotations, and clean up after completion.
+- `review.rs` — installation-token GitHub REST client for PR summary comments and check runs. It lists existing marker-tagged bot issue comments and legacy comments, lists changed PR files, filters findings to changed lines, creates or updates exactly one Markdown summary without inline comment payloads, and pins each finding link to the scanned PR-head SHA (with file-only findings linked without a line anchor). It deletes legacy inline foxguard comments and creates a `foxguard` check run with up to 50 annotations.
 
 ## App configuration (registered & live)
 
@@ -25,12 +25,12 @@ The production App is registered under `0sec-labs` and installed at `https://fox
 
   **Repository permissions**
   - `contents: read` — used by `git clone --filter=blob:none` of the PR head (`src/bin/foxguard_github_app.rs`).
-  - `pull_requests: read` — used to list PR files and existing comments (`src/github_app/review.rs`, `GET /repos/{owner}/{repo}/pulls/{n}/files`, `GET /repos/{owner}/{repo}/pulls/{n}/comments`).
-  - `pull_requests: write` — used to post and delete foxguard review comments (`POST` / `DELETE /repos/{owner}/{repo}/pulls/comments/{id}`).
+  - `pull_requests: read` — used to list PR files, marker-tagged bot summary comments, and legacy comments (`src/github_app/review.rs`, `GET /repos/{owner}/{repo}/pulls/{n}/files`, `/issues/{n}/comments`, and `/pulls/{n}/comments`).
+  - `pull_requests: write` — used to create or update the foxguard PR summary and delete legacy inline comments (`POST /repos/{owner}/{repo}/issues/{n}/comments`, `PATCH /repos/{owner}/{repo}/issues/comments/{id}`, `DELETE /repos/{owner}/{repo}/pulls/comments/{id}`).
   - `checks: write` — used to create the `foxguard` check run with annotations (`POST /repos/{owner}/{repo}/check-runs`).
 
   **Subscribed events**
-  - `pull_request` — triggers the clone + scan + comment + check-run loop.
+  - `pull_request` — triggers the clone + scan + review-summary + check-run loop.
   - `installation` — keeps `installation_store.rs` in sync when the App is installed, suspended, or uninstalled (also clears the cached installation token on deletion).
   - `installation_repositories` — keeps the registry in sync when a user adds or removes repos from an existing installation.
 
@@ -75,4 +75,4 @@ A reference Dockerfile lives at the repo root: [`Dockerfile.github-app`](../../D
 
 ## Status
 
-Live in production. The receiver covers the full App loop: verified webhook intake, installation metadata persistence (durable via a mounted volume), installation-token auth, bounded PR checkout + scan (full-tree with diff-scoped fallback on timeout, configurable via `FOXGUARD_SCAN_TIMEOUT_SECS`, noise-path exclusions), PR review comment posting filtered to changed lines, and check-run annotations.
+Live in production. The receiver covers the full App loop: verified webhook intake, installation metadata persistence (durable via a mounted volume), installation-token auth, bounded PR checkout + scan (full-tree with diff-scoped fallback on timeout, configurable via `FOXGUARD_SCAN_TIMEOUT_SECS`, noise-path exclusions), one updateable PR summary comment containing every eligible finding, legacy inline-comment cleanup, and check-run annotations.

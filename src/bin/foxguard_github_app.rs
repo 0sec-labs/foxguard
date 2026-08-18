@@ -6,7 +6,7 @@
 //!
 //! This binary receives webhook deliveries, verifies the signature,
 //! routes supported event types, and runs the Phase-1 GitHub App loop:
-//! `pull_request` -> clone -> scan -> PR review comments + check run.
+//! `pull_request` -> clone -> scan -> one PR review message + check run.
 //!
 //! Build:    `cargo build --release --features github-app --bin foxguard-github-app`
 //! Run:      `FOXGUARD_WEBHOOK_SECRET=xxx FOXGUARD_BIND=0.0.0.0:8080 foxguard-github-app`
@@ -31,7 +31,7 @@ use foxguard::github_app::auth::{
     AppCredentials, AuthError, GitHubAppAuthClient, InstallationToken, InstallationTokenCache,
 };
 use foxguard::github_app::installation_store::{InstallationMetadataInput, InstallationStore};
-use foxguard::github_app::review::GitHubReviewClient;
+use foxguard::github_app::review::{GitHubReviewClient, SourceRevision};
 use foxguard::github_app::webhook::{verify_signature, EventKind, SignatureError};
 use foxguard::report::github_pr::relative_path;
 use foxguard::Finding;
@@ -246,6 +246,7 @@ struct GitHubPullRequestHead {
 #[derive(Debug, Deserialize)]
 struct GitHubRepository {
     clone_url: String,
+    html_url: String,
     full_name: String,
 }
 
@@ -276,7 +277,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()?;
 
     let credentials = AppCredentials::from_env()?;
-    let review = GitHubReviewClient::new(credentials.api_base_url())?;
+    let review = GitHubReviewClient::new(credentials.api_base_url(), credentials.app_id())?;
     let installations = InstallationStore::from_env_or_default()?;
     let installations_path: Arc<Path> = Arc::from(installations.path());
     info!(path = %installations_path.display(), "installation store ready");
@@ -372,7 +373,7 @@ fn start_pull_request_workers(
                                 pr_number = result.pr_number,
                                 repo = result.repo,
                                 findings = result.findings.len(),
-                                posted_comments = result.posted_comments,
+                                review_messages = result.review_messages,
                                 deleted_comments = result.deleted_comments,
                                 posted_check_annotations = result.posted_check_annotations,
                                 "pull_request scan complete and GitHub surfaces updated"
@@ -646,8 +647,9 @@ struct PullRequestScanResult {
     pr_number: u64,
     repo: String,
     head_sha: String,
+    head_repo_web_url: String,
     findings: Vec<Finding>,
-    posted_comments: usize,
+    review_messages: usize,
     deleted_comments: usize,
     posted_check_annotations: usize,
 }
@@ -710,21 +712,22 @@ async fn process_pull_request_delivery(
     })
     .await
     .map_err(|error| format!("pull_request scan task failed: {error}"))??;
+    let source_revision = SourceRevision::new(&result.head_repo_web_url, &result.head_sha)
+        .map_err(|error| error.to_string())?;
 
     let review = state
         .review
         .post_pull_request_review(
             &result.repo,
             result.pr_number,
-            &result.head_sha,
             &result.findings,
-            None,
+            &source_revision,
             &token,
             changed_lines.as_ref(),
         )
         .await
         .map_err(|error| error.to_string())?;
-    result.posted_comments = review.posted_comments;
+    result.review_messages = review.review_messages;
     result.deleted_comments = review.deleted_comments;
     match state
         .review
@@ -824,8 +827,9 @@ fn run_pull_request_scan(
         pr_number: pull_request.number,
         repo: target_repo.to_string(),
         head_sha: pull_request.head.sha,
+        head_repo_web_url: pull_request.head.repo.html_url,
         findings,
-        posted_comments: 0,
+        review_messages: 0,
         deleted_comments: 0,
         posted_check_annotations: 0,
     })
@@ -1293,6 +1297,7 @@ mod tests {
                         "sha":"0123456789abcdef",
                         "repo":{
                             "clone_url":"https://github.com/0sec-labs/foxguard.git",
+                            "html_url":"https://github.com/0sec-labs/foxguard",
                             "full_name":"0sec-labs/foxguard"
                         }
                     }
@@ -1315,6 +1320,10 @@ mod tests {
         assert_eq!(pull_request.number, 7);
         assert_eq!(pull_request.head.sha, "0123456789abcdef");
         assert_eq!(pull_request.head.repo.full_name, "0sec-labs/foxguard");
+        assert_eq!(
+            pull_request.head.repo.html_url,
+            "https://github.com/0sec-labs/foxguard"
+        );
     }
 
     #[test]
