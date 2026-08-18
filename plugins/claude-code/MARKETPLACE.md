@@ -78,6 +78,9 @@ The hook was validated directly with:
 
 ```sh
 jq --version
+perl -MFcntl=:flock -e 'exit !eval { defined(Fcntl::O_NOFOLLOW()) && LOCK_EX }'
+
+bash plugins/claude-code/tests/test-compaction-state.sh
 
 printf '{"tool_input":{"file_path":"tests/fixtures/safe.py"}}' \
   | plugins/claude-code/scripts/scan-edited-file.sh
@@ -103,7 +106,7 @@ printf '{"tool_input":{"file_path":"/does/not/exist.py"}}' \
 
 Expected results:
 
-- `jq --version` succeeds.
+- `jq --version` and Perl no-follow `Fcntl` locking support succeed.
 - Clean supported files exit `0` and stay silent.
 - Missing files exit `0` and stay silent.
 - Finding input exits `2` and emits a compact finding summary to stderr.
@@ -112,6 +115,11 @@ Expected results:
   `tool_response.file_path`.
 - Scanner JSON parsing accepts the current `schema_version` object with a
   `findings` array.
+- The compaction-state test verifies metadata-only persistence and fingerprints,
+  cross-workspace isolation, clean-state removal, fail-open corrupt/error and
+  unavailable-lock handling, active-session liveness, per-path capacity
+  omissions, kernel-lock crash/concurrency recovery, and bounded opaque-ID
+  reminders. Run `/foxguard:scan` to review current findings.
 
 `claude plugin validate plugins/claude-code` passed with Claude Code `2.1.143`.
 Older local Claude Code builds have been observed hanging during validation;

@@ -6,6 +6,7 @@ Live security scanning inside [Claude Code](https://code.claude.com). Every file
 
 - **PostToolUse auto-scan** — every `Write` / `Edit` / `MultiEdit` triggers `foxguard --format json` on the changed file. Medium+ findings are surfaced to Claude on stderr; clean files are silent.
 - **SessionStart preamble** — Claude starts each session with foxguard's secure-coding defaults already in context.
+- **Compaction continuity** — successful file scans retain a bounded metadata-only reminder and restore it only after Claude Code compaction.
 - **Slash commands** for on-demand scans:
   - `/foxguard:setup` — verify install, set severity threshold
   - `/foxguard:scan [path]` — full scan, grouped and triaged by severity
@@ -85,8 +86,11 @@ plugins/claude-code/
 ├── .claude-plugin/plugin.json     # manifest
 ├── hooks/hooks.json               # PostToolUse + SessionStart
 ├── scripts/
+│   ├── finding-state.sh           # private metadata cache helpers
+│   ├── restore-unresolved-findings.sh  # compact-only SessionStart reminder
 │   ├── scan-edited-file.sh        # the PostToolUse scanner
-│   └── secure-defaults.txt        # SessionStart preamble
+│   ├── secure-defaults.txt        # SessionStart preamble
+│   └── with-state-lock.pl         # kernel-backed state lock wrapper
 ├── skills/
 │   ├── setup/SKILL.md             # /foxguard:setup
 │   ├── scan/SKILL.md              # /foxguard:scan
@@ -101,10 +105,27 @@ plugins/claude-code/
 
 ## Notes
 
-- The hook intentionally never blocks Claude on its own machinery: missing binary, parse errors, or unreadable inputs all exit `0`. Only real findings exit `2`.
-- The hook calls `foxguard` from `PATH` first, then falls back to `npx --yes foxguard`. It uses `jq` to parse Claude Code's hook JSON. If either dependency is unavailable it stays silent — run `/foxguard:setup` to fix that.
+- The hook intentionally never blocks Claude on its own machinery: missing binary, parse errors, unreadable inputs, or unavailable continuity locking all exit `0`. Only real findings exit `2`.
+- The hook calls `foxguard` from `PATH` first, then falls back to `npx --yes foxguard`. It uses `jq` to parse Claude Code's hook JSON. `jq` is required for scanning; Perl with `Fcntl` no-follow locking is required only for compaction continuity. If a dependency is unavailable, the affected hook behavior stays silent — run `/foxguard:setup` to fix that.
 - `--severity medium` is the default cutoff. Drop to `low` for stricter coverage; raise to `high` for noisier projects.
 - foxguard's exit codes: `0` clean, `1` findings, `2` error. The hook checks for findings via the JSON, not the exit code, so a piped error doesn't trigger a false alarm.
+- When capacity allows, successful scans keep only relative file paths,
+  thresholds, rule IDs, severities, locations, and fingerprints derived from
+  that metadata in a private user cache outside the repository—never snippets,
+  descriptions, scanner JSON, transcripts, credentials, or baselines. Cache
+  records are namespaced by a one-way repository-root identifier and session
+  ID, not a raw root path. Capacity pressure retains bounded opaque
+  omitted-path identifiers; if even those cannot fit, it retains a conservative
+  overflow flag so compaction can still warn.
+- Compaction output deliberately includes only opaque fingerprint IDs, severities,
+  and locations—not stored paths or rule IDs—so untrusted filenames and rule
+  text cannot enter model context. Run `/foxguard:scan` to review current
+  findings.
+- A hook keeps every workspace record for its session and refreshes its own
+  repository/session record, including on resumed compaction. Only sessions
+  inactive for one day are pruned when a later hook runs.
+- Compaction restoration is advisory feedback only. It does not replace a full
+  scan, diff scan, pre-commit hook, or CI enforcement.
 - This package is scoped to Claude Code. Broader agent or editor integration
   design should be tracked separately from the Claude Code marketplace release.
 

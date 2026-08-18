@@ -195,6 +195,14 @@ jobs:
       - run: bash -n benchmarks/run.sh
       - run: bash -n scripts/linux-codeql-dirty-frag.sh
       - run: bash -n scripts/smoke-github-app-image.sh
+      - run: bash -n plugins/claude-code/scripts/finding-state.sh
+      - run: perl -MFcntl=:flock -e 'exit !eval { defined(Fcntl::O_NOFOLLOW()) && LOCK_EX }'
+      - run: perl -c plugins/claude-code/scripts/with-state-lock.pl
+      - run: bash -n plugins/claude-code/scripts/restore-unresolved-findings.sh
+      - run: bash -n plugins/claude-code/scripts/scan-edited-file.sh
+      - run: bash -n plugins/claude-code/tests/test-compaction-state.sh
+      - run: jq empty plugins/claude-code/hooks/hooks.json
+      - run: bash plugins/claude-code/tests/test-compaction-state.sh
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
