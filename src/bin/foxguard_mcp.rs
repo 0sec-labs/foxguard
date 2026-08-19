@@ -309,6 +309,20 @@ fn diff_input_schema() -> Value {
                 "description": "Target branch or revision to compare against"
             }),
         );
+        properties.insert(
+            "codeql_base_db".to_string(),
+            json!({
+                "type": "string",
+                "description": "Pre-built CodeQL database for the base side; requires codeql_head_db"
+            }),
+        );
+        properties.insert(
+            "codeql_head_db".to_string(),
+            json!({
+                "type": "string",
+                "description": "Pre-built CodeQL database for the head side; requires codeql_base_db"
+            }),
+        );
     }
     schema
 }
@@ -489,6 +503,8 @@ fn diff_args(arguments: &Value) -> Result<DiffArgs, String> {
         format: OutputFormat::Json,
         severity: optional_severity(arguments, "severity")?,
         rules: optional_string(arguments, "rules")?,
+        codeql_base_db: optional_string(arguments, "codeql_base_db")?,
+        codeql_head_db: optional_string(arguments, "codeql_head_db")?,
         no_builtins: optional_bool(arguments, "no_builtins")?,
         output: None,
         github_pr: None,
@@ -778,5 +794,27 @@ fn optional_severity(value: &Value, key: &str) -> Result<Option<SeverityFilter>,
         "high" => Ok(Some(SeverityFilter::High)),
         "critical" => Ok(Some(SeverityFilter::Critical)),
         _ => Err(format!("{key} must be one of: low, medium, high, critical")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diff_interface_accepts_paired_codeql_databases() {
+        let schema = diff_input_schema();
+        assert!(schema["properties"]["codeql_base_db"].is_object());
+        assert!(schema["properties"]["codeql_head_db"].is_object());
+
+        let args = diff_args(&json!({
+            "path": "/workspace",
+            "target": "main",
+            "codeql_base_db": "/artifacts/base-db",
+            "codeql_head_db": "/artifacts/head-db"
+        }))
+        .expect("paired CodeQL database inputs should parse");
+        assert_eq!(args.codeql_base_db.as_deref(), Some("/artifacts/base-db"));
+        assert_eq!(args.codeql_head_db.as_deref(), Some("/artifacts/head-db"));
     }
 }

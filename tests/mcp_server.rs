@@ -169,6 +169,14 @@ fn test_mcp_server_lifecycle() {
         );
     }
 
+    let diff_schema = tools
+        .iter()
+        .find(|tool| tool["name"].as_str() == Some("scan_diff"))
+        .map(|tool| &tool["inputSchema"])
+        .expect("scan_diff schema");
+    assert!(diff_schema["properties"]["codeql_base_db"].is_object());
+    assert!(diff_schema["properties"]["codeql_head_db"].is_object());
+
     // 4. Send tools/call with scan_file on a known vulnerable fixture
     let fixture_dir = tempfile::tempdir()
         .unwrap_or_else(|error| panic!("failed to create temporary fixture directory: {error}"));

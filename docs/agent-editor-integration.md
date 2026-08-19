@@ -52,7 +52,7 @@ Common request fields:
 | `request_id` | string | Optional host correlation id echoed in the response. |
 | `command` | string | `scan-file`, `scan-workspace`, `diff`, `secrets`, `pqc`, `explain`, or `suppress`. |
 | `path` | string | File or workspace path. Required for `scan-file`; optional for workspace commands. |
-| `workspace_root` | string | Optional root for resolving relative `path`, `config`, `rules`, and `baseline`. |
+| `workspace_root` | string | Optional root for resolving relative `path`, `config`, `rules`, `baseline`, and CodeQL database paths. |
 | `severity` | string | Optional minimum severity: `low`, `medium`, `high`, or `critical`. |
 | `config` | string | Optional `.foxguard.yml` path. |
 | `rules` | string | Optional external Semgrep/OpenGrep-compatible rule file or directory. |
@@ -60,6 +60,8 @@ Common request fields:
 | `exclude` | string[] | Optional scan path prefixes/globs to skip. |
 | `baseline` | string | Optional baseline file. |
 | `base` | string | Diff base for `diff`; defaults to `main`. |
+| `codeql_base_db` | string | Pre-built base CodeQL database for `diff`; requires `codeql_head_db`. |
+| `codeql_head_db` | string | Pre-built head CodeQL database for `diff`; requires `codeql_base_db`. |
 | `explain` | bool | Include dataflow metadata where available. |
 | `max_file_size` | number | Optional byte limit, defaulting to the CLI default. |
 | `min_confidence` | number | Optional confidence threshold. |
@@ -133,6 +135,7 @@ Adapter command mapping:
 | Scan current file | `{ "command": "scan-file", "path": "src/app.py", "severity": "medium" }` |
 | Scan workspace | `{ "command": "scan-workspace", "workspace_root": ".", "severity": "medium" }` |
 | Diff scan | `{ "command": "diff", "base": "main", "workspace_root": "." }` |
+| Diff scan with paired CodeQL databases | `{ "command": "diff", "base": "main", "workspace_root": ".", "rules": "rules.yml", "codeql_base_db": "artifacts/base-db", "codeql_head_db": "artifacts/head-db" }` |
 | Secrets scan | `{ "command": "secrets", "workspace_root": "." }` |
 | PQ audit | `{ "command": "pqc", "workspace_root": ".", "severity": "medium" }` |
 | Explain finding | `{ "command": "explain", "path": ".", "finding": { "rule_id": "py/taint-sql-injection" } }` |

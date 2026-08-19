@@ -20,6 +20,7 @@ pub struct FoxguardConfig {
     pub project_root: PathBuf,
     pub scan: ScanConfig,
     pub secrets: SecretsConfig,
+    pub diff: DiffConfig,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -70,6 +71,12 @@ pub struct ScanConfig {
     /// is suppressed. Useful for silencing known false positives in test
     /// or fixture directories without a per-file ignore entry.
     pub suppressions: Vec<SuppressionPattern>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DiffConfig {
+    pub codeql_base_db: Option<String>,
+    pub codeql_head_db: Option<String>,
 }
 
 /// Tunable thresholds for pattern/heuristic rules.
@@ -136,6 +143,8 @@ struct RawFoxguardConfig {
     scan: RawScanConfig,
     #[serde(default)]
     secrets: RawSecretsConfig,
+    #[serde(default)]
+    diff: RawDiffConfig,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -175,6 +184,12 @@ struct RawScanConfig {
     sca_cache: Option<String>,
     #[serde(default)]
     suppressions: Vec<RawSuppressionPattern>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawDiffConfig {
+    codeql_base_db: Option<String>,
+    codeql_head_db: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -324,6 +339,17 @@ impl FoxguardConfig {
             .sca_cache
             .map(|path| resolve_value_path(config_dir, allowed_root, "scan.sca_cache", &path))
             .transpose()?;
+        let diff_codeql_base_db = raw
+            .diff
+            .codeql_base_db
+            .map(|path| resolve_value_path(config_dir, allowed_root, "diff.codeql_base_db", &path))
+            .transpose()?;
+        let diff_codeql_head_db = raw
+            .diff
+            .codeql_head_db
+            .map(|path| resolve_value_path(config_dir, allowed_root, "diff.codeql_head_db", &path))
+            .transpose()?;
+
         let scan_ignore_rules = raw
             .scan
             .ignore_rules
@@ -443,6 +469,10 @@ impl FoxguardConfig {
                 exclude_paths: secrets_exclude_paths,
                 exclude_path_file: secrets_exclude_path_file,
                 ignored_rules: raw.secrets.ignore_rules,
+            },
+            diff: DiffConfig {
+                codeql_base_db: diff_codeql_base_db,
+                codeql_head_db: diff_codeql_head_db,
             },
         })
     }
@@ -2061,5 +2091,39 @@ mod tests {
         assert_eq!(filtered[0].file, "src/app.py");
         assert_eq!(filtered[1].rule_id, "js/no-eval");
         assert_eq!(filtered[1].file, "src/main.js");
+    }
+    #[test]
+    fn loads_diff_codeql_database_pair() {
+        let repo = TempDir::new().expect("failed to create temp dir");
+        fs::create_dir_all(repo.path().join("codeql/base"))
+            .expect("failed to create base database");
+        fs::create_dir_all(repo.path().join("codeql/head"))
+            .expect("failed to create head database");
+        write_config(
+            repo.path(),
+            ".foxguard.yml",
+            "diff:\n  codeql_base_db: codeql/base\n  codeql_head_db: codeql/head\n",
+        );
+
+        let config = load_for_scan(repo.path(), None)
+            .expect("failed to load config")
+            .expect("expected config");
+
+        assert!(Path::new(
+            config
+                .diff
+                .codeql_base_db
+                .as_deref()
+                .expect("base database path")
+        )
+        .ends_with("codeql/base"));
+        assert!(Path::new(
+            config
+                .diff
+                .codeql_head_db
+                .as_deref()
+                .expect("head database path")
+        )
+        .ends_with("codeql/head"));
     }
 }
