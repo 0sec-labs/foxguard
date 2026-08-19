@@ -20,7 +20,6 @@
               "exact",
               "unsupported-fix-regex",
               "unsupported-language",
-              "unsupported-mode",
               "unsupported-construct",
               "unsupported-taint-shape",
               "unsupported-pattern-either-regex",
@@ -28,7 +27,6 @@
               "unsupported-pattern-regex",
               "engine-codeql",
               "engine-coccinelle",
-              "invalid-rule",
               "invalid-document",
               "file-import-failed",
               "loader-rejected"
