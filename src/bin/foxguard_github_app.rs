@@ -17,7 +17,7 @@ use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::{
@@ -429,12 +429,12 @@ struct AppState {
     installation_token_locks: Arc<tokio::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>>,
     /// Serializes external transitions for one durable delivery so a late
     /// `in_progress` PATCH cannot overwrite its cancellation.
-    check_lifecycle_locks: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    check_lifecycle_locks: Arc<tokio::sync::Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>>,
     /// Serializes authoritative head lookup and durable admission for one PR,
     /// closing the race where an older webhook finishes lookup after a newer
     /// delivery has already superseded it.
     pull_request_admission_locks:
-        Arc<tokio::sync::Mutex<HashMap<PullRequestKey, Arc<tokio::sync::Mutex<()>>>>>,
+        Arc<tokio::sync::Mutex<HashMap<PullRequestKey, Weak<tokio::sync::Mutex<()>>>>>,
     installations: Arc<Mutex<InstallationStore>>,
     /// The on-disk path the install store persists to, captured at
     /// startup so a persistence failure can be logged with the exact
@@ -498,6 +498,7 @@ impl PullRequestJob {
     fn from_stored(job: &StoredPullRequestJob) -> Self {
         let head_repo = GitHubRepository {
             clone_url: job.clone_url.clone(),
+            html_url: format!("https://github.com/{}", job.repository),
             full_name: job.repository.clone(),
         };
         Self {
@@ -782,7 +783,7 @@ fn start_pull_request_workers(
                             pr_number = result.pr_number,
                             repo = result.repo,
                             findings = result.findings.len(),
-                            posted_comments = result.posted_comments,
+                            review_messages = result.review_messages,
                             deleted_comments = result.deleted_comments,
                             posted_check_annotations = result.posted_check_annotations,
                             "pull_request scan complete and GitHub surfaces updated"
@@ -934,32 +935,52 @@ fn check_run_external_id(delivery_id: &str) -> String {
     format!("foxguard-pr-scan:{delivery_id}")
 }
 
+/// Return an owned lock for one key without retaining historical keys forever.
+///
+/// The map holds weak references only. Each acquisition drops dead entries
+/// before reusing or adding its key, keeping it bounded by live contention.
+async fn owned_keyed_lock<K>(
+    locks: &tokio::sync::Mutex<HashMap<K, Weak<tokio::sync::Mutex<()>>>>,
+    key: K,
+) -> tokio::sync::OwnedMutexGuard<()>
+where
+    K: Eq + std::hash::Hash,
+{
+    let lock = {
+        let mut locks = locks.lock().await;
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        match locks.entry(key) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if let Some(lock) = entry.get().upgrade() {
+                    lock
+                } else {
+                    let lock = Arc::new(tokio::sync::Mutex::new(()));
+                    entry.insert(Arc::downgrade(&lock));
+                    lock
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let lock = Arc::new(tokio::sync::Mutex::new(()));
+                entry.insert(Arc::downgrade(&lock));
+                lock
+            }
+        }
+    };
+    lock.lock_owned().await
+}
+
 async fn job_check_lifecycle_lock(
     state: &AppState,
     delivery_id: &str,
 ) -> tokio::sync::OwnedMutexGuard<()> {
-    let lock = {
-        let mut locks = state.check_lifecycle_locks.lock().await;
-        locks
-            .entry(delivery_id.to_string())
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-            .clone()
-    };
-    lock.lock_owned().await
+    owned_keyed_lock(&state.check_lifecycle_locks, delivery_id.to_string()).await
 }
 
 async fn pull_request_admission_lock(
     state: &AppState,
     key: &PullRequestKey,
 ) -> tokio::sync::OwnedMutexGuard<()> {
-    let lock = {
-        let mut locks = state.pull_request_admission_locks.lock().await;
-        locks
-            .entry(key.clone())
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-            .clone()
-    };
-    lock.lock_owned().await
+    owned_keyed_lock(&state.pull_request_admission_locks, key.clone()).await
 }
 
 fn check_create_definitely_did_not_happen(error: &ReviewError) -> bool {
@@ -972,6 +993,7 @@ fn check_create_definitely_did_not_happen(error: &ReviewError) -> bool {
         }
         ReviewError::InvalidApiBaseUrl(_)
         | ReviewError::InvalidRepository(_)
+        | ReviewError::InvalidRepositoryWebUrl(_)
         | ReviewError::InvalidEndpoint(_) => true,
     }
 }
@@ -1086,7 +1108,8 @@ async fn mark_job_check_running(
         .review
         .mark_check_run_running(
             &job.repository,
-            job.check_run_id.expect("check run id is set"),
+            job.check_run_id
+                .ok_or_else(|| "queued check-run attachment is missing its id".to_string())?,
             &token,
         )
         .await
@@ -1111,7 +1134,7 @@ async fn complete_failed_job_check(
         None => match ensure_queued_job_check_unlocked(state, job).await? {
             Some(CheckRunAttachment::Attached(persisted)) => persisted
                 .check_run_id
-                .expect("persisted check attachment has an id"),
+                .ok_or_else(|| "persisted check attachment is missing its id".to_string())?,
             Some(CheckRunAttachment::CancellationPending(_))
             | Some(CheckRunAttachment::IgnoredTerminal)
             | Some(CheckRunAttachment::Missing)
@@ -1734,9 +1757,12 @@ async fn admit_authoritative_pull_request(
         &token,
     )
     .await?;
-    state
-        .pull_request_dispatcher
-        .admit(job)
+    let dispatcher = state.pull_request_dispatcher.clone();
+    tokio::task::spawn_blocking(move || dispatcher.admit(job))
+        .await
+        .map_err(|error| {
+            PullRequestProcessError::Failed(format!("durable admission task failed: {error}"))
+        })?
         .map_err(PullRequestProcessError::Failed)
 }
 
@@ -2365,6 +2391,7 @@ mod tests {
     ) -> PullRequestJob {
         let head_repo = GitHubRepository {
             clone_url: format!("https://github.com/{repository}.git"),
+            html_url: format!("https://github.com/{repository}"),
             full_name: repository.to_string(),
         };
         PullRequestJob {
@@ -2413,7 +2440,7 @@ mod tests {
             AppState {
                 webhook_secret: b"test-webhook-secret".to_vec(),
                 auth: GitHubAppAuthClient::new(credentials).expect("auth client should build"),
-                review: GitHubReviewClient::new(review_url).expect("review client should build"),
+                review: GitHubReviewClient::new(review_url, 1).expect("review client should build"),
                 installation_tokens: Arc::new(tokio::sync::Mutex::new(
                     InstallationTokenCache::new(),
                 )),
@@ -2425,6 +2452,40 @@ mod tests {
                 pull_request_dispatcher,
             },
         )
+    }
+
+    #[tokio::test]
+    async fn keyed_locks_prune_released_entries() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let jobs = PullRequestJobStore::open(job_dir.path().join("pull-request-jobs.json"))
+            .expect("job store should open");
+        let (_state_dir, state) = test_state_with_review(jobs, "https://api.github.com");
+
+        {
+            let _guard = job_check_lifecycle_lock(&state, "delivery-1").await;
+            assert_eq!(state.check_lifecycle_locks.lock().await.len(), 1);
+        }
+        {
+            let _guard = job_check_lifecycle_lock(&state, "delivery-2").await;
+            assert_eq!(state.check_lifecycle_locks.lock().await.len(), 1);
+        }
+
+        let first_key = PullRequestKey {
+            repository: "owner/first".to_string(),
+            number: 1,
+        };
+        {
+            let _guard = pull_request_admission_lock(&state, &first_key).await;
+            assert_eq!(state.pull_request_admission_locks.lock().await.len(), 1);
+        }
+        let second_key = PullRequestKey {
+            repository: "owner/second".to_string(),
+            number: 2,
+        };
+        {
+            let _guard = pull_request_admission_lock(&state, &second_key).await;
+            assert_eq!(state.pull_request_admission_locks.lock().await.len(), 1);
+        }
     }
 
     fn signed_pull_request_headers(body: &[u8]) -> HeaderMap {
@@ -2731,9 +2792,12 @@ mod tests {
             let mut head_lookup = accept_stream();
             read_request(&mut head_lookup);
             write_response(&mut head_lookup, older_head);
+            let mut inline_review_request = accept_stream();
+            read_request(&mut inline_review_request);
+            write_response(&mut inline_review_request, "[]");
 
-            let mut render_request = accept_stream();
-            read_request(&mut render_request);
+            let mut summary_review_request = accept_stream();
+            read_request(&mut summary_review_request);
             let _ = render_started_tx.send(());
             let mut newer_request = None;
             loop {
@@ -2752,7 +2816,7 @@ mod tests {
                     Err(error) => panic!("mock server should accept newer request: {error}"),
                 }
             }
-            write_response(&mut render_request, "[]");
+            write_response(&mut summary_review_request, "[]");
 
             let (mut newer_request, was_read) = match newer_request {
                 Some(stream) => (stream, true),
@@ -2795,12 +2859,14 @@ mod tests {
                     "sha":"0123456789abcdef0123456789abcdef01234567",
                     "repo":{
                         "clone_url":"https://github.com/owner/repo.git",
+                        "html_url":"https://github.com/owner/repo",
                         "full_name":"owner/repo"
                     }
                 }
             },
             "repository":{
                 "clone_url":"https://github.com/owner/repo.git",
+                "html_url":"https://github.com/owner/repo",
                 "full_name":"owner/repo"
             }
         }"#;
@@ -2886,12 +2952,14 @@ mod tests {
                     "sha":"0123456789abcdef0123456789abcdef01234567",
                     "repo":{
                         "clone_url":"https://github.com/owner/repo.git",
+                        "html_url":"https://github.com/owner/repo",
                         "full_name":"owner/repo"
                     }
                 }
             },
             "repository":{
                 "clone_url":"https://github.com/owner/repo.git",
+                "html_url":"https://github.com/owner/repo",
                 "full_name":"owner/repo"
             }
         }"#;
@@ -3026,8 +3094,9 @@ mod tests {
                 pr_number: 7,
                 repo: "owner/repo".to_string(),
                 head_sha: H1.to_string(),
+                head_repo_web_url: "https://github.com/owner/repo".to_string(),
                 findings: Vec::new(),
-                posted_comments: 0,
+                review_messages: 0,
                 deleted_comments: 0,
                 posted_check_annotations: 0,
             };
@@ -3067,7 +3136,7 @@ mod tests {
             .await
             .expect("render task should join")
             .expect("old review should render before newer admission");
-        assert_eq!(rendered.posted_comments, 0);
+        assert_eq!(rendered.review_messages, 0);
         assert_eq!(rendered.deleted_comments, 0);
         assert!(matches!(
             newer.await.expect("newer admission task should join"),
