@@ -31,6 +31,7 @@ pub mod rust_lang;
 pub mod scala;
 pub mod scala_taint;
 pub mod semgrep_compat;
+pub mod semgrep_readiness;
 pub mod semgrep_taint;
 pub mod solidity;
 pub mod solidity_taint;

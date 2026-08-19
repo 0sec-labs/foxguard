@@ -1,0 +1,19 @@
+rules:
+  - id: migration/exact
+    message: Exact fixture
+    severity: WARNING
+    languages: [python]
+    pattern: eval(...)
+
+  - id: migration/degraded
+    message: Reduced matcher fixture
+    severity: WARNING
+    languages: [python]
+    pattern: eval(...)
+    pattern-not-regex: "(?"
+
+  - id: migration/skipped
+    message: Unsupported language fixture
+    severity: WARNING
+    languages: [lua]
+    pattern: eval(...)

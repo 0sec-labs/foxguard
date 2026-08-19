@@ -1,0 +1,6 @@
+rules:
+  - id: broken/document
+    message: Broken document
+    severity: WARNING
+    languages: [python]
+    pattern: [

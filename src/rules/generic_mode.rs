@@ -42,10 +42,19 @@
 //! token stream.
 
 use crate::rules::common::get_source_line;
-use crate::rules::semgrep_compat::PathFilter;
+use crate::rules::semgrep_compat::{
+    record_current_import_diagnostic, PathFilter, SemgrepImportDiagnostic,
+};
 use crate::rules::Rule;
 use crate::{Finding, Language, Severity};
 use fancy_regex::Regex;
+
+macro_rules! warn_import_reduction {
+    ($($arg:tt)*) => {{
+        record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
+        eprintln!($($arg)*);
+    }};
+}
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -355,9 +364,9 @@ fn build_mv_regex(metavariable: &str, regex: &str) -> Option<MvConstraint> {
     match compile_regex(regex) {
         Ok(re) => Some(MvConstraint::Regex { group, re }),
         Err(e) => {
-            eprintln!(
+            warn_import_reduction!(
                 "Warning: generic metavariable-regex for {metavariable} did not compile ({e}); \
-                 skipping constraint"
+             skipping constraint"
             );
             None
         }
@@ -369,7 +378,11 @@ fn build_mv_regex(metavariable: &str, regex: &str) -> Option<MvConstraint> {
 /// wrapper Semgrep uses is stripped first). Returns `None` (warn-skip) for
 /// anything outside that subset.
 fn build_mv_comparison(metavariable: Option<&str>, comparison: &str) -> Option<MvConstraint> {
-    let (group, op, literal, literal_is_lhs) = parse_generic_comparison(comparison)?;
+    let (group, op, literal, literal_is_lhs) =
+        parse_generic_comparison(comparison).or_else(|| {
+            record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
+            None
+        })?;
     // If the YAML supplies an explicit `metavariable:` key, prefer it (it names
     // the capture even when the comparison expression wraps it, e.g.
     // `int($AGE) < 7`). Otherwise use the metavar parsed from the expression.
@@ -961,9 +974,9 @@ fn build_either_matcher(entries: &[GenericEitherEntry]) -> Result<GenericMatcher
         if !entry.patterns.is_empty() {
             match build_patterns_block(&entry.patterns) {
                 Ok(m) => inner.push(m),
-                Err(e) => eprintln!(
+                Err(e) => warn_import_reduction!(
                     "Warning: generic pattern-either arm (patterns: block) did not build ({e}); \
-                     skipping arm"
+                 skipping arm"
                 ),
             }
             continue;
@@ -1040,17 +1053,13 @@ fn build_patterns_block(clauses: &[GenericPatternsClause]) -> Result<GenericMatc
         if let Some(ref re) = clause.pattern_regex {
             match compile_regex(re) {
                 Ok(r) => regexes.push(r),
-                Err(e) => eprintln!(
-                    "Warning: generic patterns clause has invalid pattern-regex: {e}; skipping clause"
-                ),
+                Err(e) => warn_import_reduction!("Warning: generic patterns clause has invalid pattern-regex: {e}; skipping clause"),
             }
         }
         if !clause.pattern_either.is_empty() {
             match build_either_matcher(&clause.pattern_either) {
                 Ok(m) => other_positives.push(m),
-                Err(e) => eprintln!(
-                    "Warning: generic patterns clause has invalid pattern-either: {e}; skipping clause"
-                ),
+                Err(e) => warn_import_reduction!("Warning: generic patterns clause has invalid pattern-either: {e}; skipping clause"),
             }
         }
         if let Some(ref pn) = clause.pattern_not {
@@ -1059,9 +1068,7 @@ fn build_patterns_block(clauses: &[GenericPatternsClause]) -> Result<GenericMatc
         if let Some(ref re) = clause.pattern_not_regex {
             match compile_regex(re) {
                 Ok(r) => negatives.push(GenericMatcher::Regex(r)),
-                Err(e) => eprintln!(
-                    "Warning: generic patterns clause has invalid pattern-not-regex: {e}; skipping clause"
-                ),
+                Err(e) => warn_import_reduction!("Warning: generic patterns clause has invalid pattern-not-regex: {e}; skipping clause"),
             }
         }
     }
@@ -1073,6 +1080,9 @@ fn build_patterns_block(clauses: &[GenericPatternsClause]) -> Result<GenericMatc
         .flat_map(|r| r.capture_names().flatten().map(|s| s.to_string()))
         .collect();
     let focus_named = focus.as_ref().is_some_and(|f| named.contains(f));
+    if focus.is_some() && !focus_named {
+        record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
+    }
     let constrained = !constraints.is_empty() || focus_named;
 
     // Assemble the list of positive matchers for the AND-block.

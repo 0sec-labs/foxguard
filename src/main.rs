@@ -7,7 +7,7 @@ use foxguard::baseline::write_baseline_at_root;
 use foxguard::cli::{
     BaselineArgs, BaselineScanArgs, ChangeModeArgs, Cli, Command, DiffArgs, InitArgs,
     InternalAddScanIgnoreRuleArgs, InternalArgs, InternalCommand, OutputFormat, PqcArgs, ScaArgs,
-    ScanArgs, SecretsArgs, TuiArgs,
+    ScanArgs, SecretsArgs, SemgrepReadinessArgs, SemgrepReadinessFormat, TuiArgs,
 };
 use foxguard::config::add_scan_ignore_rule;
 use foxguard::config::load_for_scan;
@@ -31,6 +31,7 @@ fn main() {
         Some(Command::Tui(args)) => run_tui(&args),
         Some(Command::Pqc(args)) => run_pqc(&args),
         Some(Command::Sca(args)) => run_sca(&args),
+        Some(Command::SemgrepReadiness(args)) => run_semgrep_readiness(&args),
         Some(Command::Internal(args)) => run_internal(&args),
         None => run_scan(&cli.scan),
     };
@@ -46,6 +47,53 @@ fn run_pqc(args: &PqcArgs) -> i32 {
 fn run_sca(args: &ScaArgs) -> i32 {
     let scan = args.to_scan_args();
     run_scan(&scan)
+}
+
+fn run_semgrep_readiness(args: &SemgrepReadinessArgs) -> i32 {
+    let report = match foxguard::rules::semgrep_readiness::assess_semgrep_migration_readiness(
+        Path::new(&args.rules),
+    ) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+
+    match args.format {
+        SemgrepReadinessFormat::Terminal => {
+            if args.output.is_some() {
+                eprintln!("Error: --output requires --format json");
+                return 2;
+            }
+            print!(
+                "{}",
+                foxguard::report::semgrep_migration::render_terminal(&report)
+            );
+        }
+        SemgrepReadinessFormat::Json => {
+            let output = match serde_json::to_string_pretty(&report) {
+                Ok(output) => output,
+                Err(error) => {
+                    eprintln!(
+                        "Error: failed to serialize migration readiness report: {}",
+                        error
+                    );
+                    return 2;
+                }
+            };
+            if let Some(path) = &args.output {
+                if let Err(error) = std::fs::write(path, format!("{}\n", output)) {
+                    eprintln!("Error: failed to write {}: {}", path, error);
+                    return 2;
+                }
+            } else {
+                println!("{}", output);
+            }
+        }
+    }
+
+    0
 }
 
 fn run_scan(scan: &ScanArgs) -> i32 {

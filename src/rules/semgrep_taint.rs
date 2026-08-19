@@ -69,11 +69,19 @@ use crate::rules::php_taint;
 use crate::rules::python_taint;
 use crate::rules::ruby_taint;
 use crate::rules::scala_taint;
+use crate::rules::semgrep_compat::{record_current_import_diagnostic, SemgrepImportDiagnostic};
 use crate::rules::solidity_taint;
 use crate::rules::swift_taint;
 use crate::rules::{FileContext, Rule};
 use crate::{Finding, Language, Severity};
 use serde_yaml_ng::Value as YamlValue;
+
+macro_rules! warn_import_reduction {
+    ($($arg:tt)*) => {{
+        record_current_import_diagnostic(SemgrepImportDiagnostic::UnsupportedConstruct);
+        eprintln!($($arg)*);
+    }};
+}
 
 // ─── Language-agnostic intermediate representation ───────────────────────
 //
@@ -4221,12 +4229,12 @@ pub fn parse_taint_rule(yaml: &YamlValue) -> TaintRuleParse {
     let source_negatives =
         compile_negative_patterns(&source_neg_strings, lang, &id, "pattern-sources");
     if !source_neg_strings.is_empty() && lang != Language::Python {
-        eprintln!(
+        warn_import_reduction!(
             "Warning: taint rule `{}` has `pattern-not` constraints inside \
-             `pattern-sources`; source-side enforcement requires an engine that \
-             threads a source byte range onto findings (Python only today) — \
-             this rule's language does not, so the constraint is compiled but \
-             not enforced",
+         `pattern-sources`; source-side enforcement requires an engine that \
+         threads a source byte range onto findings (Python only today) — \
+         this rule's language does not, so the constraint is compiled but \
+         not enforced",
             id
         );
     }
@@ -4254,12 +4262,12 @@ pub fn parse_taint_rule(yaml: &YamlValue) -> TaintRuleParse {
     let source_insides =
         compile_inside_patterns(&source_inside_strings, lang, &id, "pattern-sources");
     if !source_inside_strings.is_empty() && lang != Language::Python {
-        eprintln!(
+        warn_import_reduction!(
             "Warning: taint rule `{}` has `pattern-inside` constraints inside a \
-             `pattern-sources` `patterns:` block; source-side enforcement requires \
-             an engine that threads a source byte range onto findings (Python only \
-             today) — this rule's language does not, so the constraint is compiled \
-             but not enforced",
+         `pattern-sources` `patterns:` block; source-side enforcement requires \
+         an engine that threads a source byte range onto findings (Python only \
+         today) — this rule's language does not, so the constraint is compiled \
+         but not enforced",
             id
         );
     }
@@ -4307,7 +4315,7 @@ fn compile_propagators(
         return Vec::new();
     };
     let Some(seq) = node.as_sequence() else {
-        eprintln!(
+        warn_import_reduction!(
             "Warning: taint rule `{}` `pattern-propagators` must be a list; ignoring",
             rule_id
         );
@@ -4319,18 +4327,19 @@ fn compile_propagators(
         let from = entry.get("from").and_then(YamlValue::as_str);
         let to = entry.get("to").and_then(YamlValue::as_str);
         let (Some(pattern), Some(from), Some(to)) = (pattern, from, to) else {
-            eprintln!(
-                "Warning: taint rule `{}` propagator entry is missing `pattern`/`from`/`to`; skipping",
-                rule_id
-            );
+            warn_import_reduction!("Warning: taint rule `{}` propagator entry is missing `pattern`/`from`/`to`; skipping",
+            rule_id);
             continue;
         };
         match parse_arg_to_receiver_propagator(pattern, from, to) {
             Some(p) => out.push(p),
-            None => eprintln!(
+            None => warn_import_reduction!(
                 "Warning: taint rule `{}` propagator `{}` (from `{}` to `{}`) is not a supported \
-                 argument→receiver method-call shape; deferred (potential false negative)",
-                rule_id, pattern, from, to
+             argument→receiver method-call shape; deferred (potential false negative)",
+                rule_id,
+                pattern,
+                from,
+                to
             ),
         }
     }
@@ -4482,10 +4491,12 @@ fn compile_negative_patterns(
     for p in patterns {
         match crate::rules::semgrep_compat::CompiledAstPattern::try_new(p, lang) {
             Some(compiled) => out.push(compiled),
-            None => eprintln!(
+            None => warn_import_reduction!(
                 "Warning: taint rule `{}` {} `pattern-not: {}` did not parse into \
-                 a usable pattern; ignoring constraint (matcher stays broader)",
-                rule_id, role_label, p
+             a usable pattern; ignoring constraint (matcher stays broader)",
+                rule_id,
+                role_label,
+                p
             ),
         }
     }
@@ -4507,10 +4518,12 @@ fn compile_inside_patterns(
     for p in patterns {
         match crate::rules::semgrep_compat::CompiledAstPattern::try_new(p, lang) {
             Some(compiled) => out.push(compiled),
-            None => eprintln!(
+            None => warn_import_reduction!(
                 "Warning: taint rule `{}` {} `pattern-inside: {}` did not parse into \
-                 a usable pattern; ignoring constraint (matcher stays broader)",
-                rule_id, role_label, p
+             a usable pattern; ignoring constraint (matcher stays broader)",
+                rule_id,
+                role_label,
+                p
             ),
         }
     }
@@ -4613,7 +4626,7 @@ fn compile_entry(
     insides: &mut Vec<String>,
 ) {
     let Some(map) = entry.as_mapping() else {
-        eprintln!(
+        warn_import_reduction!(
             "Warning: taint rule `{}` {} entry is not a mapping; skipping",
             rule_id,
             role.label()
@@ -4666,12 +4679,10 @@ fn compile_entry(
     // `patterns:` semantics, which we don't support inside taint blocks — warn
     // and skip.
     if effective_keys.len() != 1 {
-        eprintln!(
-            "Warning: taint rule `{}` {} entry has {} keys (expected a single `pattern:`, `pattern-either:`, or `patterns:`); skipping entry",
-            rule_id,
-            role.label(),
-            effective_keys.len(),
-        );
+        warn_import_reduction!("Warning: taint rule `{}` {} entry has {} keys (expected a single `pattern:`, `pattern-either:`, or `patterns:`); skipping entry",
+        rule_id,
+        role.label(),
+        effective_keys.len(),);
         return;
     }
 
@@ -4679,7 +4690,7 @@ fn compile_entry(
     match k.as_str() {
         Some("pattern") => {
             let Some(pattern) = v.as_str() else {
-                eprintln!(
+                warn_import_reduction!(
                     "Warning: taint rule `{}` {} `pattern:` value must be a string; skipping entry",
                     rule_id,
                     role.label()
@@ -4688,7 +4699,7 @@ fn compile_entry(
             };
             match compile_pattern(pattern, role, lang) {
                 Some(m) => out.push(m),
-                None => eprintln!(
+                None => warn_import_reduction!(
                     "Warning: taint rule `{}` {} unsupported pattern shape `{}`; skipping entry",
                     rule_id,
                     role.label(),
@@ -4698,7 +4709,7 @@ fn compile_entry(
         }
         Some("pattern-either") => {
             let Some(inner) = v.as_sequence() else {
-                eprintln!(
+                warn_import_reduction!(
                     "Warning: taint rule `{}` {} `pattern-either:` must be a list; skipping",
                     rule_id,
                     role.label()
@@ -4706,7 +4717,7 @@ fn compile_entry(
                 return;
             };
             if inner.is_empty() {
-                eprintln!(
+                warn_import_reduction!(
                     "Warning: taint rule `{}` {} `pattern-either:` is empty; producing no matchers",
                     rule_id,
                     role.label()
@@ -5114,15 +5125,13 @@ fn compile_entry(
             );
         }
         Some(other) => {
-            eprintln!(
-                "Warning: taint rule `{}` {} uses unsupported key `{}` (only `pattern:`, `pattern-either:`, and `patterns:` are supported); skipping entry",
-                rule_id,
-                role.label(),
-                other
-            );
+            warn_import_reduction!("Warning: taint rule `{}` {} uses unsupported key `{}` (only `pattern:`, `pattern-either:`, and `patterns:` are supported); skipping entry",
+            rule_id,
+            role.label(),
+            other);
         }
         None => {
-            eprintln!(
+            warn_import_reduction!(
                 "Warning: taint rule `{}` {} entry has a non-string key; skipping",
                 rule_id,
                 role.label()
@@ -5168,7 +5177,7 @@ fn compile_patterns_block(
     insides: &mut Vec<String>,
 ) {
     let Some(inner) = v.as_sequence() else {
-        eprintln!(
+        warn_import_reduction!(
             "Warning: taint rule `{}` {} `patterns:` value must be a list; skipping entry",
             rule_id,
             role.label()
@@ -5177,7 +5186,7 @@ fn compile_patterns_block(
     };
 
     if inner.is_empty() {
-        eprintln!(
+        warn_import_reduction!(
             "Warning: taint rule `{}` {} `patterns:` block is empty; skipping entry",
             rule_id,
             role.label()
@@ -5221,10 +5230,10 @@ fn compile_patterns_block(
                 // the required region).
                 match sv.as_str() {
                     Some(p) if !p.trim().is_empty() => insides.push(p.to_string()),
-                    _ => eprintln!(
+                    _ => warn_import_reduction!(
                         "Warning: taint rule `{}` {} `patterns:` block has a \
-                         `pattern-inside:` whose value is not a non-empty string; \
-                         ignoring constraint",
+                     `pattern-inside:` whose value is not a non-empty string; \
+                     ignoring constraint",
                         rule_id,
                         role.label()
                     ),
@@ -5238,10 +5247,10 @@ fn compile_patterns_block(
                 // the matcher and produced false positives).
                 match sv.as_str() {
                     Some(p) if !p.trim().is_empty() => negatives.push(p.to_string()),
-                    _ => eprintln!(
+                    _ => warn_import_reduction!(
                         "Warning: taint rule `{}` {} `patterns:` block has a \
-                         `pattern-not:` whose value is not a non-empty string; \
-                         ignoring constraint",
+                     `pattern-not:` whose value is not a non-empty string; \
+                     ignoring constraint",
                         rule_id,
                         role.label()
                     ),
@@ -5249,10 +5258,10 @@ fn compile_patterns_block(
             }
             Some(constraint_key) if PATTERNS_CONSTRAINT_KEYS.contains(&constraint_key) => {
                 // Constraint-only key — drop with a warning (documented broadening).
-                eprintln!(
+                warn_import_reduction!(
                     "Warning: taint rule `{}` {} `patterns:` block contains `{}` \
-                     which foxguard cannot enforce inside a taint source/sink entry; \
-                     dropping constraint (matcher will be broader than the original rule)",
+                 which foxguard cannot enforce inside a taint source/sink entry; \
+                 dropping constraint (matcher will be broader than the original rule)",
                     rule_id,
                     role.label(),
                     constraint_key
@@ -5260,9 +5269,9 @@ fn compile_patterns_block(
                 let _ = sv; // sv is not used beyond the warning
             }
             Some(other) => {
-                eprintln!(
+                warn_import_reduction!(
                     "Warning: taint rule `{}` {} `patterns:` block contains unknown key `{}`; \
-                     skipping sub-item",
+                 skipping sub-item",
                     rule_id,
                     role.label(),
                     other
@@ -5273,9 +5282,9 @@ fn compile_patterns_block(
     }
 
     if out.len() == before {
-        eprintln!(
+        warn_import_reduction!(
             "Warning: taint rule `{}` {} `patterns:` block produced no expressible matchers; \
-             skipping entry",
+         skipping entry",
             rule_id,
             role.label()
         );
@@ -5527,9 +5536,7 @@ fn try_compile_string_literal_regex_source_block(
 
     // Validate the combined regex compiles (fancy-regex handles the lookaheads).
     if let Err(e) = crate::rules::semgrep_compat::compile_regex(&combined) {
-        eprintln!(
-            "Warning: taint rule `{rule_id}` string-literal-regex source did not compile ({e}); skipping entry"
-        );
+        warn_import_reduction!("Warning: taint rule `{rule_id}` string-literal-regex source did not compile ({e}); skipping entry");
         return false;
     }
 
@@ -7265,9 +7272,9 @@ fn try_compile_regex_constrained_callee_block(
         let regex = match crate::rules::semgrep_compat::compile_regex(re) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!(
+                warn_import_reduction!(
                     "Warning: taint rule `{}` {} `metavariable-regex` for `{}` is not a valid \
-                     regex ({}); refusing the bare-metavariable callee (FP-safe)",
+                 regex ({}); refusing the bare-metavariable callee (FP-safe)",
                     rule_id,
                     role.label(),
                     mv,

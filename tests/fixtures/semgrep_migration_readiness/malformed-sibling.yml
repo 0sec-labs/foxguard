@@ -1,0 +1,12 @@
+rules:
+  - id: transaction/exact-sibling
+    message: Valid sibling
+    severity: WARNING
+    languages: [python]
+    pattern: eval(...)
+
+  - id: transaction/invalid-sibling
+    message: Invalid sibling
+    severity: INVALID
+    languages: [python]
+    pattern: eval(...)

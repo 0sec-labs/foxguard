@@ -1,0 +1,11 @@
+rules:
+  - id: reduction/pattern-not-inside
+    message: Nested exclusion fixture
+    severity: WARNING
+    languages: [python]
+    pattern: eval(...)
+    pattern-not-inside:
+      patterns:
+        - metavariable-pattern:
+            metavariable: $X
+            pattern: safe(...)
