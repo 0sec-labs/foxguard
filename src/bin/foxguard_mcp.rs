@@ -1,6 +1,7 @@
 use foxguard::app::{execute_diff, execute_scan, execute_secrets, DiffExecution, ScanExecution};
 use foxguard::cli::{
-    ChangeModeArgs, DiffArgs, OutputFormat, ScanArgs, SecretsArgs, SeverityFilter,
+    ChangeModeArgs, DiffArgs, OutputFormat, PrSecurityPolicyArgs, ScanArgs, SecretsArgs,
+    SeverityFilter,
 };
 use foxguard::engine::ScanStats;
 use foxguard::report::{cbom::build_cbom, sarif::build_sarif};
@@ -465,6 +466,7 @@ fn scan_args(arguments: &Value, pq_mode: bool) -> Result<ScanArgs, String> {
         explain: optional_bool(arguments, "explain")?,
         fix: false,
         github_pr: None,
+        pr_security_policy: PrSecurityPolicyArgs::default(),
         quiet: true,
         output: None,
         max_file_size: optional_u64(arguments, "max_file_size")?.unwrap_or(DEFAULT_MAX_FILE_SIZE),
@@ -508,6 +510,7 @@ fn diff_args(arguments: &Value) -> Result<DiffArgs, String> {
         no_builtins: optional_bool(arguments, "no_builtins")?,
         output: None,
         github_pr: None,
+        pr_security_policy: PrSecurityPolicyArgs::default(),
         max_file_size: optional_u64(arguments, "max_file_size")?.unwrap_or(DEFAULT_MAX_FILE_SIZE),
     })
 }

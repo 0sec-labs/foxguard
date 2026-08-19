@@ -11,6 +11,9 @@ use foxguard::cli::{
 };
 use foxguard::config::add_scan_ignore_rule;
 use foxguard::config::load_for_scan;
+use foxguard::pr_policy::{
+    evaluate, write_pr_policy_result, PrPolicyEvaluation, PrPolicyNotEvaluated, PrSecurityPolicy,
+};
 use foxguard::tui::run_scan_tui;
 use foxguard::Finding;
 use serde::Serialize;
@@ -95,9 +98,44 @@ fn run_semgrep_readiness(args: &SemgrepReadinessArgs) -> i32 {
 
     0
 }
+fn write_pr_policy_not_evaluated_output(
+    output: Option<&str>,
+    policy: Option<&PrPolicyNotEvaluated>,
+) -> Result<(), String> {
+    match policy {
+        Some(policy) => write_pr_policy_result(output, policy),
+        None => Ok(()),
+    }
+}
+
+fn evaluate_pr_policy(
+    findings: &mut Vec<Finding>,
+    policy: Option<PrSecurityPolicy>,
+    output: Option<&str>,
+) -> Result<Option<PrPolicyEvaluation>, String> {
+    let Some(policy) = policy else {
+        return Ok(None);
+    };
+
+    let evaluation = evaluate(policy, std::mem::take(findings));
+    write_pr_policy_result(output, evaluation.report())?;
+    let report = evaluation.report();
+    eprintln!(
+        "PR security policy {} (scope {}, report >= {}, block >= {}): {} \
+         ({} included, {} blocking)",
+        report.version,
+        report.scope,
+        report.reporting_threshold,
+        report.blocking_threshold,
+        report.decision,
+        report.included_findings,
+        report.blocking_findings
+    );
+    Ok(Some(evaluation))
+}
 
 fn run_scan(scan: &ScanArgs) -> i32 {
-    let result = match execute_scan(scan) {
+    let mut result = match execute_scan(scan) {
         Ok(result) => result,
         Err(error) => {
             eprintln!("Error: {}", error);
@@ -109,9 +147,32 @@ fn run_scan(scan: &ScanArgs) -> i32 {
         eprintln!("{}", notice);
     }
 
+    let policy_evaluation = match evaluate_pr_policy(
+        &mut result.findings,
+        result.pr_security_policy,
+        result.args.pr_security_policy.policy_output.as_deref(),
+    ) {
+        Ok(evaluation) => evaluation,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+    if let Err(error) = write_pr_policy_not_evaluated_output(
+        result.args.pr_security_policy.policy_output.as_deref(),
+        result.pr_security_policy_not_evaluated.as_ref(),
+    ) {
+        eprintln!("Error: {}", error);
+        return 2;
+    }
+    let findings = policy_evaluation
+        .as_ref()
+        .map(|evaluation| evaluation.findings.as_slice())
+        .unwrap_or(result.findings.as_slice());
+
     // Apply auto-fixes if --fix is set
-    if scan.fix && !result.findings.is_empty() {
-        let files_fixed = foxguard::fix::apply_all_fixes(&result.findings, &scan.path);
+    if scan.fix && !findings.is_empty() {
+        let files_fixed = foxguard::fix::apply_all_fixes(findings, &scan.path);
         if files_fixed > 0 {
             eprintln!("Fixed findings in {} file(s)", files_fixed);
         }
@@ -126,7 +187,7 @@ fn run_scan(scan: &ScanArgs) -> i32 {
             if !result.args.quiet {
                 foxguard::report::terminal::clear_banner();
                 foxguard::report::terminal::print_findings_full(
-                    &result.findings,
+                    findings,
                     result.files_scanned,
                     result.duration,
                     foxguard::report::terminal::ReportOptions {
@@ -139,10 +200,14 @@ fn run_scan(scan: &ScanArgs) -> i32 {
         }
         _ => {
             if let Err(error) = foxguard::output::emit_scan_report(
-                &result.findings,
+                findings,
                 &result.args,
                 result.files_scanned,
                 result.duration,
+                policy_evaluation
+                    .as_ref()
+                    .map(|evaluation| evaluation.report()),
+                result.pr_security_policy_not_evaluated.as_ref(),
             ) {
                 eprintln!("Error: {}", error);
                 return 2;
@@ -152,20 +217,17 @@ fn run_scan(scan: &ScanArgs) -> i32 {
 
     if let Some(pr_number) = result.args.github_pr {
         let scan_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        if let Err(e) = foxguard::report::github_pr::post_pr_review(
-            &result.findings,
-            pr_number,
-            Some(&scan_root),
-        ) {
-            eprintln!("Warning: failed to post PR review: {}", e);
+        if let Err(error) =
+            foxguard::report::github_pr::post_pr_review(findings, pr_number, Some(&scan_root))
+        {
+            eprintln!("Warning: failed to post PR review: {}", error);
         }
     }
 
-    if !result.findings.is_empty() {
-        return 1;
-    }
-
-    0
+    policy_evaluation
+        .as_ref()
+        .map(|evaluation| evaluation.report().decision.exit_code())
+        .unwrap_or_else(|| if findings.is_empty() { 0 } else { 1 })
 }
 
 fn run_baseline(args: &BaselineArgs) -> i32 {
@@ -275,7 +337,7 @@ fn run_secrets(args: &SecretsArgs) -> i32 {
 }
 
 fn run_diff_cmd(args: &DiffArgs) -> i32 {
-    let result = match execute_diff(args) {
+    let mut result = match execute_diff(args) {
         Ok(result) => result,
         Err(error) => {
             eprintln!("Error: {}", error);
@@ -287,7 +349,28 @@ fn run_diff_cmd(args: &DiffArgs) -> i32 {
         eprintln!("{}", notice);
     }
 
-    let new_count = result.findings.len();
+    let policy_evaluation = match evaluate_pr_policy(
+        &mut result.findings,
+        result.pr_security_policy,
+        result.args.pr_security_policy.policy_output.as_deref(),
+    ) {
+        Ok(evaluation) => evaluation,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+    if let Err(error) = write_pr_policy_not_evaluated_output(
+        result.args.pr_security_policy.policy_output.as_deref(),
+        result.pr_security_policy_not_evaluated.as_ref(),
+    ) {
+        eprintln!("Error: {}", error);
+        return 2;
+    }
+    let findings = policy_evaluation
+        .as_ref()
+        .map(|evaluation| evaluation.findings.as_slice())
+        .unwrap_or(result.findings.as_slice());
 
     match result.args.format {
         OutputFormat::Terminal => {
@@ -296,17 +379,21 @@ fn run_diff_cmd(args: &DiffArgs) -> i32 {
                 return 2;
             }
             foxguard::report::terminal::print_findings(
-                &result.findings,
+                findings,
                 result.files_scanned,
                 result.duration,
             );
         }
         _ => {
             if let Err(error) = foxguard::output::emit_diff_report(
-                &result.findings,
+                findings,
                 &result.args,
                 result.files_scanned,
                 result.duration,
+                policy_evaluation
+                    .as_ref()
+                    .map(|evaluation| evaluation.report()),
+                result.pr_security_policy_not_evaluated.as_ref(),
             ) {
                 eprintln!("Error: {}", error);
                 return 2;
@@ -316,20 +403,17 @@ fn run_diff_cmd(args: &DiffArgs) -> i32 {
 
     if let Some(pr_number) = result.args.github_pr {
         let scan_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        if let Err(e) = foxguard::report::github_pr::post_pr_review(
-            &result.findings,
-            pr_number,
-            Some(&scan_root),
-        ) {
-            eprintln!("Warning: failed to post PR review: {}", e);
+        if let Err(error) =
+            foxguard::report::github_pr::post_pr_review(findings, pr_number, Some(&scan_root))
+        {
+            eprintln!("Warning: failed to post PR review: {}", error);
         }
     }
 
-    if new_count > 0 {
-        return 1;
-    }
-
-    0
+    policy_evaluation
+        .as_ref()
+        .map(|evaluation| evaluation.report().decision.exit_code())
+        .unwrap_or_else(|| if findings.is_empty() { 0 } else { 1 })
 }
 
 fn run_init(args: &InitArgs) -> i32 {

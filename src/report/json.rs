@@ -1,3 +1,4 @@
+use crate::pr_policy::{PrPolicyNotEvaluated, PrPolicyReport};
 use crate::{Finding, Severity, FINDING_SCHEMA_VERSION};
 use serde::Serialize;
 use std::time::Duration;
@@ -10,6 +11,8 @@ pub struct JsonReportMetadata<'a> {
     pub config: JsonConfigMetadata,
     pub target: JsonTargetMetadata<'a>,
     pub duration: Duration,
+    pub pr_security_policy: Option<&'a PrPolicyReport>,
+    pub pr_security_policy_not_evaluated: Option<&'a PrPolicyNotEvaluated>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +40,10 @@ struct JsonReportEnvelope<'a> {
     timing: TimingMetadata,
     finding_counts: FindingCounts,
     findings: &'a [Finding],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pr_security_policy: Option<&'a PrPolicyReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pr_security_policy_not_evaluated: Option<&'a PrPolicyNotEvaluated>,
 }
 
 #[derive(Debug, Serialize)]
@@ -111,6 +118,8 @@ pub fn build_json_report(
         },
         finding_counts: counts,
         findings,
+        pr_security_policy: metadata.pr_security_policy,
+        pr_security_policy_not_evaluated: metadata.pr_security_policy_not_evaluated,
     };
 
     serde_json::to_value(envelope).expect("Failed to serialize JSON report")
@@ -202,6 +211,8 @@ mod tests {
                     diff_base: None,
                 },
                 duration: Duration::from_millis(420),
+                pr_security_policy: None,
+                pr_security_policy_not_evaluated: None,
             },
         );
 
@@ -226,6 +237,44 @@ mod tests {
             Some(1)
         );
         assert_eq!(report["findings"].as_array().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn partial_scan_emits_not_evaluated_policy_status_not_repository_report() {
+        let policy = crate::pr_policy::PrPolicyNotEvaluated::new(
+            crate::pr_policy::PrSecurityPolicy::default(),
+            crate::pr_policy::PrPolicyNotEvaluatedReason::ChangedOnlyScan,
+        );
+        let report = build_json_report(
+            &[],
+            JsonReportMetadata {
+                command: "scan",
+                config: JsonConfigMetadata {
+                    source: "none",
+                    path: None,
+                },
+                target: JsonTargetMetadata {
+                    path: ".",
+                    kind: "directory",
+                    changed_only: true,
+                    files_scanned: 1,
+                    diff_base: None,
+                },
+                duration: Duration::default(),
+                pr_security_policy: None,
+                pr_security_policy_not_evaluated: Some(&policy),
+            },
+        );
+
+        assert!(report.get("pr_security_policy").is_none());
+        assert_eq!(
+            report["pr_security_policy_not_evaluated"]["reason"].as_str(),
+            Some("changed-only-scan")
+        );
+        assert_eq!(
+            report["pr_security_policy_not_evaluated"]["requested_scope"].as_str(),
+            Some("repository")
+        );
     }
 
     #[test]

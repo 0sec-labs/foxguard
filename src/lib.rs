@@ -14,6 +14,7 @@ pub mod git;
 pub mod github_app;
 pub mod output;
 pub mod path_identity;
+pub mod pr_policy;
 pub mod report;
 pub mod rules;
 pub mod scan_plan;

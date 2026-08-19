@@ -1,4 +1,5 @@
 use crate::cli::{DiffArgs, OutputFormat, ScanArgs, SecretsArgs};
+use crate::pr_policy::{PrPolicyNotEvaluated, PrPolicyReport};
 use crate::report::json::{
     build_json_report, JsonConfigMetadata, JsonReportMetadata, JsonTargetMetadata,
 };
@@ -19,6 +20,8 @@ pub fn emit_scan_report(
     args: &ScanArgs,
     files_scanned: usize,
     duration: Duration,
+    pr_security_policy: Option<&PrPolicyReport>,
+    pr_security_policy_not_evaluated: Option<&PrPolicyNotEvaluated>,
 ) -> Result<(), String> {
     match args.format {
         OutputFormat::Terminal => validate_terminal_output_path(args.output.as_deref()),
@@ -42,6 +45,8 @@ pub fn emit_scan_report(
                     diff_base: None,
                 },
                 duration,
+                pr_security_policy,
+                pr_security_policy_not_evaluated,
             },
         ),
         OutputFormat::Sarif => emit_sarif(findings, args.output.as_deref()),
@@ -72,6 +77,8 @@ pub fn emit_secrets_report(
                     diff_base: None,
                 },
                 duration,
+                pr_security_policy: None,
+                pr_security_policy_not_evaluated: None,
             },
         ),
         OutputFormat::Sarif => emit_sarif(findings, args.output.as_deref()),
@@ -85,6 +92,8 @@ pub fn emit_diff_report(
     args: &DiffArgs,
     files_scanned: usize,
     duration: Duration,
+    pr_security_policy: Option<&PrPolicyReport>,
+    pr_security_policy_not_evaluated: Option<&PrPolicyNotEvaluated>,
 ) -> Result<(), String> {
     match args.format {
         OutputFormat::Terminal => validate_terminal_output_path(args.output.as_deref()),
@@ -102,6 +111,8 @@ pub fn emit_diff_report(
                     diff_base: Some(&args.target),
                 },
                 duration,
+                pr_security_policy,
+                pr_security_policy_not_evaluated,
             },
         ),
         OutputFormat::Sarif => emit_sarif(findings, args.output.as_deref()),

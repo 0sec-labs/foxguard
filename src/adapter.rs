@@ -1,5 +1,11 @@
 use crate::app::{execute_diff, execute_scan, execute_secrets};
-use crate::cli::{ChangeModeArgs, DiffArgs, OutputFormat, ScanArgs, SecretsArgs, SeverityFilter};
+use crate::cli::{
+    ChangeModeArgs, DiffArgs, OutputFormat, PrSecurityPolicyArgs, ScanArgs, SecretsArgs,
+    SeverityFilter,
+};
+use crate::pr_policy::{
+    evaluate, PrPolicyNotEvaluated, PrPolicyReport, PrSecurityPolicy, PrSecurityPolicyInput,
+};
 use crate::{Finding, Severity};
 use serde::{Deserialize, Serialize};
 
@@ -66,6 +72,8 @@ pub struct AdapterRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_security_policy: Option<PrSecurityPolicyInput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codeql_base_db: Option<String>,
@@ -102,6 +110,7 @@ impl AdapterRequest {
             base: None,
             severity: None,
             config: None,
+            pr_security_policy: None,
             rules: None,
             codeql_base_db: None,
             codeql_head_db: None,
@@ -173,6 +182,10 @@ pub struct AdapterResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diff: Option<AdapterDiffSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_security_policy: Option<PrPolicyReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_security_policy_not_evaluated: Option<PrPolicyNotEvaluated>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub suppression: Option<AdapterSuppressionSuggestion>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -205,6 +218,8 @@ pub fn adapter_error_response(
         findings: Vec::new(),
         notices: Vec::new(),
         diff: None,
+        pr_security_policy: None,
+        pr_security_policy_not_evaluated: None,
         suppression: None,
         error: Some(error.into()),
     }
@@ -263,17 +278,23 @@ fn explain_response(request: &AdapterRequest) -> AdapterResponse {
     scan.explain = true;
     match execute_scan(&scan) {
         Ok(result) => {
-            let findings = select_findings(result.findings, request.finding.as_ref());
+            let pr_security_policy_not_evaluated = result.pr_security_policy_not_evaluated;
+            let (findings, pr_security_policy, policy_exit_code) =
+                apply_pr_security_policy(result.pr_security_policy, result.findings);
+            let findings = select_findings(findings, request.finding.as_ref());
             let summary = summarize(&findings, result.files_scanned, result.duration);
-            success_response(
+            let mut response = success_response(
                 request,
-                findings_exit_code(&findings),
+                policy_exit_code.unwrap_or_else(|| findings_exit_code(&findings)),
                 Some(summary),
                 findings,
                 result.notices,
                 None,
                 None,
-            )
+            );
+            response.pr_security_policy = pr_security_policy;
+            response.pr_security_policy_not_evaluated = pr_security_policy_not_evaluated;
+            response
         }
         Err(error) => request_error(request, error),
     }
@@ -283,17 +304,22 @@ fn run_scan_response(request: &AdapterRequest, path: String, pq_mode: bool) -> A
     let scan = scan_args(request, path, pq_mode);
     match execute_scan(&scan) {
         Ok(result) => {
-            let summary = summarize(&result.findings, result.files_scanned, result.duration);
-            let exit_code = findings_exit_code(&result.findings);
-            success_response(
+            let pr_security_policy_not_evaluated = result.pr_security_policy_not_evaluated;
+            let (findings, pr_security_policy, policy_exit_code) =
+                apply_pr_security_policy(result.pr_security_policy, result.findings);
+            let summary = summarize(&findings, result.files_scanned, result.duration);
+            let mut response = success_response(
                 request,
-                exit_code,
+                policy_exit_code.unwrap_or_else(|| findings_exit_code(&findings)),
                 Some(summary),
-                result.findings,
+                findings,
                 result.notices,
                 None,
                 None,
-            )
+            );
+            response.pr_security_policy = pr_security_policy;
+            response.pr_security_policy_not_evaluated = pr_security_policy_not_evaluated;
+            response
         }
         Err(error) => request_error(request, error),
     }
@@ -352,22 +378,27 @@ fn diff_response(request: &AdapterRequest) -> AdapterResponse {
     let args = adapter_diff_args(request, path, &base);
     match execute_diff(&args) {
         Ok(result) => {
-            let summary = summarize(&result.findings, result.files_scanned, result.duration);
-            let exit_code = findings_exit_code(&result.findings);
+            let pr_security_policy_not_evaluated = result.pr_security_policy_not_evaluated;
+            let (findings, pr_security_policy, policy_exit_code) =
+                apply_pr_security_policy(result.pr_security_policy, result.findings);
+            let summary = summarize(&findings, result.files_scanned, result.duration);
             let diff = AdapterDiffSummary {
                 base,
                 total_current: result.total_current,
                 existing_count: result.existing_count,
             };
-            success_response(
+            let mut response = success_response(
                 request,
-                exit_code,
+                policy_exit_code.unwrap_or_else(|| findings_exit_code(&findings)),
                 Some(summary),
-                result.findings,
+                findings,
                 result.notices,
                 Some(diff),
                 None,
-            )
+            );
+            response.pr_security_policy = pr_security_policy;
+            response.pr_security_policy_not_evaluated = pr_security_policy_not_evaluated;
+            response
         }
         Err(error) => request_error(request, error),
     }
@@ -398,6 +429,7 @@ fn adapter_diff_args(request: &AdapterRequest, path: &str, base: &str) -> DiffAr
         no_builtins: request.no_builtins,
         output: None,
         github_pr: None,
+        pr_security_policy: pr_security_policy_args(request),
         max_file_size: max_file_size(request),
     }
 }
@@ -456,6 +488,7 @@ fn scan_args(request: &AdapterRequest, path: String, pq_mode: bool) -> ScanArgs 
         explain: request.explain || pq_mode,
         fix: false,
         github_pr: None,
+        pr_security_policy: pr_security_policy_args(request),
         quiet: true,
         output: None,
         max_file_size: max_file_size(request),
@@ -468,6 +501,35 @@ fn scan_args(request: &AdapterRequest, path: String, pq_mode: bool) -> ScanArgs 
         sca_db: None,
         sca_cache: None,
     }
+}
+
+fn pr_security_policy_args(request: &AdapterRequest) -> PrSecurityPolicyArgs {
+    let Some(policy) = request.pr_security_policy.as_ref() else {
+        return PrSecurityPolicyArgs::default();
+    };
+
+    PrSecurityPolicyArgs {
+        pr_policy: true,
+        policy_version: policy.version,
+        scope: policy.scope,
+        reporting_threshold: policy.reporting_threshold.map(severity_filter),
+        blocking_threshold: policy.blocking_threshold,
+        policy_output: None,
+    }
+}
+
+fn apply_pr_security_policy(
+    policy: Option<PrSecurityPolicy>,
+    findings: Vec<Finding>,
+) -> (Vec<Finding>, Option<PrPolicyReport>, Option<u8>) {
+    let Some(policy) = policy else {
+        return (findings, None, None);
+    };
+
+    let evaluation = evaluate(policy, findings);
+    let exit_code = evaluation.report().decision.exit_code() as u8;
+    let report = evaluation.report().clone();
+    (evaluation.findings, Some(report), Some(exit_code))
 }
 
 fn success_response(
@@ -490,6 +552,8 @@ fn success_response(
         notices,
         diff,
         suppression,
+        pr_security_policy: None,
+        pr_security_policy_not_evaluated: None,
         error: None,
     }
 }
@@ -756,6 +820,108 @@ mod tests {
         };
         assert_eq!(summary.findings_total, response.findings.len());
         assert_eq!(summary.files_scanned, 1);
+    }
+
+    #[test]
+    fn adapter_scan_file_policy_is_explicitly_not_evaluated() {
+        let temp = must(tempfile::tempdir());
+        let file = temp.path().join("app.py");
+        if let Err(error) = std::fs::write(&file, "password = \"supersecret123\"\nDEBUG = True\n") {
+            panic!("{error}");
+        }
+
+        let mut request = AdapterRequest::new(AdapterCommand::ScanFile);
+        request.path = Some(file.to_string_lossy().into_owned());
+        request.pr_security_policy = Some(PrSecurityPolicyInput::default());
+
+        let response = execute_adapter_request(request);
+        assert!(
+            response.ok,
+            "unexpected adapter error: {:?}",
+            response.error
+        );
+        assert!(response.pr_security_policy.is_none());
+        assert_eq!(
+            response
+                .pr_security_policy_not_evaluated
+                .as_ref()
+                .map(|policy| policy.reason),
+            Some(crate::pr_policy::PrPolicyNotEvaluatedReason::PartialScan)
+        );
+    }
+
+    #[test]
+    fn adapter_nested_project_directory_is_not_a_repository_policy_scan() {
+        let temp = must(tempfile::tempdir());
+        let repo = temp.path();
+        let source = repo.join("src").join("app.py");
+        if let Err(error) = std::fs::create_dir_all(source.parent().expect("source parent")) {
+            panic!("{error}");
+        }
+        if let Err(error) = std::fs::write(repo.join(".foxguard.yml"), "scan: {}\n") {
+            panic!("{error}");
+        }
+        if let Err(error) = std::fs::write(&source, "print('safe')\n") {
+            panic!("{error}");
+        }
+
+        let mut request = AdapterRequest::new(AdapterCommand::ScanWorkspace);
+        request.path = Some(
+            source
+                .parent()
+                .expect("source parent")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        request.pr_security_policy = Some(PrSecurityPolicyInput::default());
+
+        let response = execute_adapter_request(request);
+
+        assert!(
+            response.ok,
+            "unexpected adapter error: {:?}",
+            response.error
+        );
+        assert!(response.pr_security_policy.is_none());
+        assert_eq!(
+            response
+                .pr_security_policy_not_evaluated
+                .as_ref()
+                .map(|policy| policy.reason),
+            Some(crate::pr_policy::PrPolicyNotEvaluatedReason::PartialScan)
+        );
+    }
+
+    #[test]
+    fn adapter_response_matches_shared_mixed_policy_contract() {
+        let (policy, findings, expected) = crate::pr_policy::contract_fixture::mixed_v1();
+        let (findings, pr_security_policy, policy_exit_code) =
+            apply_pr_security_policy(Some(policy), findings);
+        let request = AdapterRequest::new(AdapterCommand::ScanWorkspace);
+        let mut response = success_response(
+            &request,
+            policy_exit_code.expect("policy exit code"),
+            Some(summarize(
+                &findings,
+                findings.len(),
+                std::time::Duration::default(),
+            )),
+            findings,
+            Vec::new(),
+            None,
+            None,
+        );
+        response.pr_security_policy = pr_security_policy;
+
+        let encoded = must(serde_json::to_value(&response));
+        assert_eq!(response.pr_security_policy.as_ref(), Some(&expected));
+        assert_eq!(response.findings.len(), expected.included_findings);
+        assert_eq!(response.exit_code, expected.decision.exit_code() as u8);
+        assert_eq!(
+            encoded["pr_security_policy"]["decision"].as_str(),
+            Some("fail")
+        );
+        assert!(encoded.get("pr_security_policy_not_evaluated").is_none());
     }
 
     #[test]

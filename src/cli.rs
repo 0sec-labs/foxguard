@@ -1,4 +1,7 @@
 use crate::git::ChangeSelection;
+use crate::pr_policy::{
+    PrBlockingThreshold, PrSecurityPolicyInput, PrSecurityPolicyScope, PrSecurityPolicyVersion,
+};
 use clap::{Args, Parser, Subcommand};
 use serde::Deserialize;
 
@@ -55,6 +58,57 @@ impl ChangeModeArgs {
             Some(ChangeSelection::All)
         } else {
             None
+        }
+    }
+}
+
+/// Policy controls for a PR security result. These map surface-specific inputs
+/// into the shared resolver rather than implementing severity decisions here.
+#[derive(Args, Debug, Clone, Default)]
+pub struct PrSecurityPolicyArgs {
+    /// Evaluate this scan with the versioned PR security policy.
+    #[arg(long, default_value_t = false)]
+    pub pr_policy: bool,
+
+    /// PR security policy version.
+    #[arg(long = "pr-policy-version", value_enum)]
+    pub policy_version: Option<PrSecurityPolicyVersion>,
+
+    /// Scope evaluated by the PR security policy.
+    #[arg(long = "pr-scope", value_enum)]
+    pub scope: Option<PrSecurityPolicyScope>,
+
+    /// Minimum finding severity included in the PR policy report.
+    #[arg(long = "pr-reporting-threshold", value_enum)]
+    pub reporting_threshold: Option<SeverityFilter>,
+
+    /// Minimum included severity that fails the PR policy; `none` never blocks.
+    #[arg(long = "pr-blocking-threshold", value_enum)]
+    pub blocking_threshold: Option<PrBlockingThreshold>,
+
+    /// Write the effective policy result as JSON.
+    #[arg(long = "pr-policy-output", value_name = "PATH")]
+    pub policy_output: Option<String>,
+}
+
+impl PrSecurityPolicyArgs {
+    pub fn is_enabled(&self) -> bool {
+        self.pr_policy
+            || self.policy_version.is_some()
+            || self.scope.is_some()
+            || self.reporting_threshold.is_some()
+            || self.blocking_threshold.is_some()
+            || self.policy_output.is_some()
+    }
+
+    pub fn input(&self) -> PrSecurityPolicyInput {
+        PrSecurityPolicyInput {
+            version: self.policy_version,
+            scope: self.scope,
+            reporting_threshold: self
+                .reporting_threshold
+                .map(|severity| severity.to_severity()),
+            blocking_threshold: self.blocking_threshold,
         }
     }
 }
@@ -125,6 +179,9 @@ pub struct ScanArgs {
     /// Post findings as inline review comments on a GitHub PR
     #[arg(long)]
     pub github_pr: Option<u64>,
+
+    #[command(flatten)]
+    pub pr_security_policy: PrSecurityPolicyArgs,
 
     /// Suppress terminal output (exit code still reflects findings)
     #[arg(short, long)]
@@ -413,6 +470,9 @@ pub struct DiffArgs {
     #[arg(long)]
     pub github_pr: Option<u64>,
 
+    #[command(flatten)]
+    pub pr_security_policy: PrSecurityPolicyArgs,
+
     /// Maximum file size in bytes to scan (default: 1 MB)
     #[arg(long, default_value_t = 1_048_576)]
     pub max_file_size: u64,
@@ -666,6 +726,7 @@ impl PqcArgs {
             explain: self.explain,
             fix: false,
             github_pr: self.github_pr,
+            pr_security_policy: PrSecurityPolicyArgs::default(),
             quiet: self.quiet,
             output: self.output.clone(),
             max_file_size: self.max_file_size,
@@ -702,6 +763,7 @@ impl ScaArgs {
             explain: false,
             fix: false,
             github_pr: self.github_pr,
+            pr_security_policy: PrSecurityPolicyArgs::default(),
             quiet: self.quiet,
             output: self.output.clone(),
             max_file_size: self.max_file_size,
@@ -735,6 +797,7 @@ impl BaselineScanArgs {
             explain: self.explain,
             fix: self.fix,
             github_pr: self.github_pr,
+            pr_security_policy: PrSecurityPolicyArgs::default(),
             quiet: self.quiet,
             output: None,
             max_file_size: self.max_file_size,
