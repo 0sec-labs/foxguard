@@ -3096,6 +3096,10 @@ mod tests {
                 head_sha: H1.to_string(),
                 head_repo_web_url: "https://github.com/owner/repo".to_string(),
                 findings: Vec::new(),
+                policy_outcome: PullRequestPolicyOutcome::Evaluated(evaluate(
+                    foxguard::pr_policy::PrSecurityPolicy::default(),
+                    Vec::new(),
+                )),
                 review_messages: 0,
                 deleted_comments: 0,
                 posted_check_annotations: 0,

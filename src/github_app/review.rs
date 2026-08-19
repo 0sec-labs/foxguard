@@ -299,8 +299,6 @@ impl GitHubReviewClient {
         .await
     }
 
-
-
     async fn create_check_run(
         &self,
         repo: &RepositoryPath,
@@ -1148,8 +1146,6 @@ fn superseded_check_run_payload() -> Value {
         },
     })
 }
-
-
 
 fn check_run_annotations(findings: &[Finding]) -> Vec<Value> {
     findings
@@ -2376,7 +2372,7 @@ mod tests {
             None,
             r#"{"head":{"sha":"0123456789abcdef0123456789abcdef01234567"}}"#.to_string(),
         )]);
-        let client = GitHubReviewClient::new(&url).expect("client should build");
+        let client = GitHubReviewClient::new(&url, 1).expect("client should build");
         let head = client
             .pull_request_head_sha("octo-org/app", 7, "test-token")
             .await
@@ -2392,7 +2388,7 @@ mod tests {
             None,
             r#"{"check_runs":[{"id":90,"external_id":"other"},{"id":91,"external_id":"foxguard-pr-scan:delivery-1"}]}"#.to_string(),
         )]);
-        let client = GitHubReviewClient::new(&url).expect("client should build");
+        let client = GitHubReviewClient::new(&url, 1).expect("client should build");
         let check_run_id = client
             .find_check_run_by_external_id(
                 "octo-org/app",
@@ -2425,7 +2421,7 @@ mod tests {
             ),
         ];
         let (url, handle) = spawn_mock_server(responses);
-        let client = GitHubReviewClient::new(&url).expect("client should build");
+        let client = GitHubReviewClient::new(&url, 1).expect("client should build");
         let check_run_id = client
             .find_check_run_by_external_id(
                 "octo-org/app",
