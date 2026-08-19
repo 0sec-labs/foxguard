@@ -1151,6 +1151,8 @@ mod tests {
             format: OutputFormat::Json,
             severity: None,
             rules: None,
+            codeql_base_db: None,
+            codeql_head_db: None,
             no_builtins: false,
             output: None,
             github_pr: None,

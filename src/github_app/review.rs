@@ -1,7 +1,7 @@
 //! Pull request review posting for the GitHub App receiver.
 
 use crate::pr_policy::{PrPolicyEvaluation, PrPolicyNotEvaluated, PrPolicyReport};
-use crate::report::github_pr::{format_comment_body, COMMENT_MARKER};
+use crate::report::github_pr::COMMENT_MARKER;
 use crate::{Finding, Severity};
 use reqwest::Url;
 use serde::Deserialize;
@@ -1472,8 +1472,12 @@ mod tests {
     fn check_run_dependency_summary_encodes_untrusted_file_path() {
         let mut finding = dependency_finding(0);
         finding.file = "package`](<https://attacker.invalid>)\n[trick].json".to_string();
+        let policy = evaluate(
+            crate::pr_policy::PrSecurityPolicy::default(),
+            vec![finding.clone()],
+        );
 
-        let summary = check_run_summary(&[finding], 0);
+        let summary = check_run_summary(&[finding], 0, policy.report());
 
         assert!(summary.contains(
             "in `package%60%5D%28%3Chttps%3A//attacker.invalid%3E%29%0A%5Btrick%5D.json`"

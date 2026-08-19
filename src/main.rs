@@ -97,6 +97,7 @@ fn run_semgrep_readiness(args: &SemgrepReadinessArgs) -> i32 {
     }
 
     0
+}
 fn write_pr_policy_not_evaluated_output(
     output: Option<&str>,
     policy: Option<&PrPolicyNotEvaluated>,
