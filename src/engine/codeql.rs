@@ -595,10 +595,12 @@ pub fn scan_with_notices_for_target(
 
     let mut scanned_databases = HashSet::new();
     for (rule, database) in runnable_rules {
-        match run_codeql_database_analyze(database.as_path(), &rule.query) {
-            Ok(sarif) => {
+        match run_codeql_database_analyze(database.as_path(), &rule.query)
+            .and_then(|sarif| parse_sarif_findings(rule, &sarif))
+        {
+            Ok(parsed_findings) => {
                 scanned_databases.insert(database);
-                findings.extend(parse_sarif_findings(rule, &sarif));
+                findings.extend(parsed_findings);
             }
             Err(error) => notices.push(format!(
                 "Warning: CodeQL rule '{}' failed: {}",
@@ -674,33 +676,33 @@ fn run_codeql_database_analyze(database: &Path, query: &Path) -> Result<String, 
     }
 }
 
-fn parse_sarif_findings(rule: &CodeQlRule, sarif: &str) -> Vec<Finding> {
-    let Ok(root) = serde_json::from_str::<JsonValue>(sarif) else {
-        return Vec::new();
-    };
+fn parse_sarif_findings(rule: &CodeQlRule, sarif: &str) -> Result<Vec<Finding>, String> {
+    let root: JsonValue =
+        serde_json::from_str(sarif).map_err(|error| format!("invalid CodeQL SARIF: {error}"))?;
+    let mut findings = Vec::new();
 
-    root.get("runs")
+    for run in root
+        .get("runs")
         .and_then(JsonValue::as_array)
         .into_iter()
         .flatten()
-        .flat_map(|run| {
-            run.get("results")
-                .and_then(JsonValue::as_array)
-                .into_iter()
-                .flatten()
-        })
-        .filter_map(|result| {
-            normalized_finding_from_sarif_result(
+    {
+        let Some(results) = run.get("results").and_then(JsonValue::as_array) else {
+            continue;
+        };
+        for result in results {
+            if let Some(finding) = normalized_finding_from_sarif_result(
                 rule,
                 result,
                 CodeQlSnippetSource::LiveCheckout,
                 None,
-            )
-            .ok()
-            .flatten()
-        })
-        .map(|finding| finding.finding)
-        .collect()
+            )? {
+                findings.push(finding.finding);
+            }
+        }
+    }
+
+    Ok(findings)
 }
 
 fn parse_sarif_diff_findings(
@@ -1835,7 +1837,7 @@ select f, "found main"
 }
 "#;
 
-        let findings = parse_sarif_findings(&sample_rule(), sarif);
+        let findings = parse_sarif_findings(&sample_rule(), sarif).expect("valid SARIF");
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "kernel/codeql-test");
@@ -1845,6 +1847,13 @@ select f, "found main"
         assert_eq!(findings[0].end_column, 11);
         assert_eq!(findings[0].description, "CodeQL found this");
         assert_eq!(findings[0].tags, vec!["codeql".to_string()]);
+    }
+
+    #[test]
+    fn rejects_malformed_sarif_instead_of_silently_dropping_it() {
+        let error = parse_sarif_findings(&sample_rule(), "{").expect_err("invalid SARIF");
+
+        assert!(error.starts_with("invalid CodeQL SARIF:"));
     }
 
     #[test]
