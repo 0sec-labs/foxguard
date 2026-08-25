@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -82,13 +83,13 @@ fn collect_unstaged_paths(repo_root: &Path, scan_root: &Path) -> Result<Vec<Path
 }
 
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut unique = Vec::new();
+    let mut unique = HashSet::new();
     for path in paths {
         if !unique.contains(&path) {
-            unique.push(path);
+            unique.insert(path);
         }
     }
-    unique
+    unique.into_iter().collect()
 }
 
 fn collect_changed_paths(
