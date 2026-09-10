@@ -73,14 +73,11 @@ pub fn verify_signature(secret: &[u8], header: &str, body: &[u8]) -> Result<(), 
 }
 
 /// Subset of the GitHub event types this receiver currently routes.
-/// Any other event maps to [`EventKind::Other`] and is acknowledged
-/// with a 202 so GitHub's delivery dashboard stays clean instead of
-/// retrying.
+/// Unsupported events are acknowledged with 202 without further action.
 ///
-/// Variants are added as the matching handlers come online; today
-/// none of these events do anything beyond log + 202 from the
-/// binary, but having the enum landed early means follow-up PRs can
-/// wire handlers without re-touching this module.
+/// * `Installation` persists install metadata and repository membership.
+/// * `PullRequest` queues repository scans and publishes reviews and check runs.
+/// * `Ping` and `Other` are logged and acknowledged with 202.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventKind {
     /// `installation` / `installation_repositories` — App was added

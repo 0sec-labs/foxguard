@@ -9,7 +9,10 @@
 //! - `mode: taint` with `languages: [python]`, `languages: [javascript]` /
 //!   `[typescript]` / `[js]` / `[ts]`, `languages: [go]` / `[golang]`,
 //!   `languages: [java]`, `languages: [c]`, `languages: [kotlin]` /
-//!   `[kt]`, `languages: [ruby]` / `[rb]`, or `languages: [php]`.
+//!   `[kt]`, `languages: [ruby]` / `[rb]`, `languages: [php]`,
+//!   `languages: [csharp]` / `[cs]` / `[c#]`, `languages: [bash]` /
+//!   `[sh]` / `[shell]`, `languages: [solidity]` / `[sol]`,
+//!   `languages: [scala]`, `languages: [apex]`, or `languages: [swift]`.
 //!   Other languages are rejected with a warning and the rule is skipped;
 //!   non-taint rules fall through to the regular Semgrep bridge.
 //! - `pattern-sources`, `pattern-sinks`, `pattern-sanitizers` as lists of
@@ -30,7 +33,7 @@
 //! # Unsupported (rule is skipped with a warning)
 //!
 //! - Any `mode: taint` rule that does not target Python, JavaScript/TypeScript,
-//!   Go, Java, C, or Kotlin.
+//!   Go, Java, C, Kotlin, Ruby, PHP, C#, Bash, Solidity, Scala, Apex, or Swift.
 //! - Any `pattern:` string whose shape is not one of:
 //!   - bare identifier (`request`) — compiled to `ParamName`
 //!   - dotted attribute chain (`request.data`, `request.json`) — compiled

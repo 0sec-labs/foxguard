@@ -19,6 +19,11 @@ cargo build --release --features github-app --bin foxguard-github-app
 - `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, extracts installation IDs from JSON payloads, persists installation metadata, and admits pull-request work to a bounded queue (128 pending jobs and 4 workers by default). Replayed GitHub delivery IDs are deduplicated; concurrent updates for the same repository/PR coalesce so the newest head gets one follow-up scan instead of racing or being lost. Overload is acknowledged with `202 Accepted` and logged. Workers prepare installation auth, clone and scan pull-request heads in a bounded temp workspace, create or update one marker-tagged foxguard PR summary comment, delete legacy inline foxguard comments, post a check run with annotations, and clean up after completion.
 - `review.rs` — installation-token GitHub REST client for PR summary comments and check runs. It lists existing marker-tagged bot issue comments and legacy comments, lists changed PR files, filters findings to changed lines, creates or updates exactly one Markdown summary without inline comment payloads, and pins each finding link to the scanned PR-head SHA (with file-only findings linked without a line anchor). It deletes legacy inline foxguard comments and creates a `foxguard` check run with up to 50 annotations.
 
+Signed installation and pull-request payloads that cannot be decoded return
+`400 Bad Request`. Installation persistence failures return `503 Service Unavailable`
+rather than acknowledging an update that was not saved. After repairing the store,
+redeliver the failed event from GitHub's delivery dashboard or API.
+
 ## App configuration (registered & live)
 
 The production App is registered under `0sec-labs` and installed at `https://foxguard.0sec.ai`. It requests **exactly** the permissions and webhook events the receiver consumes — anything less fails at runtime, anything more is over-scoped:
