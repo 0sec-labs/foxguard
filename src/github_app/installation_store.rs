@@ -53,6 +53,7 @@ impl From<std::time::SystemTimeError> for InstallationStoreError {
 pub struct InstallationStore {
     path: PathBuf,
     registry: InstallationRegistry,
+    revision: u64,
 }
 
 impl InstallationStore {
@@ -78,7 +79,11 @@ impl InstallationStore {
         } else {
             InstallationRegistry::default()
         };
-        Ok(Self { path, registry })
+        Ok(Self {
+            path,
+            registry,
+            revision: 0,
+        })
     }
 
     pub fn upsert(
@@ -86,20 +91,12 @@ impl InstallationStore {
         input: InstallationMetadataInput,
     ) -> Result<(), InstallationStoreError> {
         let updated_at_unix = unix_now()?;
-        let key = input.installation_id.to_string();
-        let repositories = input.repositories.into_iter().collect();
-        self.registry.installations.insert(
-            key,
-            StoredInstallation {
-                installation_id: input.installation_id,
-                account_login: input.account_login,
-                account_id: input.account_id,
-                account_type: input.account_type,
-                repository_selection: input.repository_selection,
-                repositories,
-                updated_at_unix,
-            },
-        );
+        let installation = self
+            .registry
+            .installations
+            .entry(input.installation_id.to_string())
+            .or_insert_with(|| StoredInstallation::new_placeholder(input.installation_id));
+        installation.apply_metadata(input, updated_at_unix);
         self.save()
     }
 
@@ -155,6 +152,43 @@ impl InstallationStore {
         &self.path
     }
 
+    /// Captured before fetching GitHub state, so a refresh cannot overwrite
+    /// installation webhooks that arrived while the API request was in flight.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Apply a complete, authoritative installation list. Repository names are
+    /// retained unless the caller supplies a repository snapshot explicitly.
+    pub fn reconcile(
+        &mut self,
+        expected_revision: u64,
+        inputs: Vec<InstallationMetadataInput>,
+    ) -> Result<bool, InstallationStoreError> {
+        if self.revision != expected_revision {
+            return Ok(false);
+        }
+        let now = unix_now()?;
+        let mut refreshed = BTreeMap::new();
+        for input in inputs {
+            let key = input.installation_id.to_string();
+            let mut installation = self
+                .registry
+                .installations
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(|| StoredInstallation::new_placeholder(input.installation_id));
+            installation.apply_metadata(input, now);
+            refreshed.insert(key, installation);
+        }
+        let previous = std::mem::replace(&mut self.registry.installations, refreshed);
+        if let Err(error) = self.save() {
+            self.registry.installations = previous;
+            return Err(error);
+        }
+        Ok(true)
+    }
+
     #[cfg(test)]
     fn get(&self, installation_id: u64) -> Option<&StoredInstallation> {
         self.registry
@@ -162,7 +196,7 @@ impl InstallationStore {
             .get(&installation_id.to_string())
     }
 
-    fn save(&self) -> Result<(), InstallationStoreError> {
+    fn save(&mut self) -> Result<(), InstallationStoreError> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?; // foxguard: ignore[rs/no-path-traversal]
         }
@@ -178,6 +212,7 @@ impl InstallationStore {
         let bytes = serde_json::to_vec_pretty(&self.registry)?;
         std::fs::write(&temp_path, bytes)?; // foxguard: ignore[rs/no-path-traversal]
         std::fs::rename(&temp_path, &self.path)?; // foxguard: ignore[rs/no-path-traversal]
+        self.revision = self.revision.wrapping_add(1);
         Ok(())
     }
 }
@@ -189,7 +224,8 @@ pub struct InstallationMetadataInput {
     pub account_id: Option<u64>,
     pub account_type: Option<String>,
     pub repository_selection: Option<String>,
-    pub repositories: Vec<String>,
+    /// None preserves observed repositories; Some replaces an explicit snapshot.
+    pub repositories: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -219,6 +255,25 @@ struct StoredInstallation {
 }
 
 impl StoredInstallation {
+    fn apply_metadata(&mut self, input: InstallationMetadataInput, now: u64) {
+        if let Some(value) = input.account_login {
+            self.account_login = Some(value);
+        }
+        if let Some(value) = input.account_id {
+            self.account_id = Some(value);
+        }
+        if let Some(value) = input.account_type {
+            self.account_type = Some(value);
+        }
+        if let Some(value) = input.repository_selection {
+            self.repository_selection = Some(value);
+        }
+        if let Some(repositories) = input.repositories {
+            self.repositories = repositories.into_iter().collect();
+        }
+        self.updated_at_unix = now;
+    }
+
     fn new_placeholder(installation_id: u64) -> Self {
         Self {
             installation_id,
@@ -291,7 +346,10 @@ mod tests {
             account_id: Some(99),
             account_type: Some("Organization".to_string()),
             repository_selection: Some("selected".to_string()),
-            repositories: vec!["octo-org/app".to_string(), "octo-org/service".to_string()],
+            repositories: Some(vec![
+                "octo-org/app".to_string(),
+                "octo-org/service".to_string(),
+            ]),
         }) {
             panic!("upsert should persist: {error}");
         }
@@ -386,7 +444,7 @@ mod tests {
             account_id: Some(1),
             account_type: Some("Organization".to_string()),
             repository_selection: Some("all".to_string()),
-            repositories: vec!["acme/api".to_string()],
+            repositories: Some(vec!["acme/api".to_string()]),
         }) {
             let _ = std::fs::remove_dir_all(&base);
             panic!("save() should create missing parent dirs and persist: {error}");
@@ -411,7 +469,7 @@ mod tests {
             account_id: Some(5),
             account_type: Some("Organization".to_string()),
             repository_selection: Some("selected".to_string()),
-            repositories: vec!["octo-org/app".to_string()],
+            repositories: Some(vec!["octo-org/app".to_string()]),
         }) {
             panic!("upsert should persist: {error}");
         }
@@ -439,15 +497,102 @@ mod tests {
         assert!(installation.repositories.contains("octo-org/service"));
     }
 
+    fn metadata(id: u64, login: Option<&str>) -> InstallationMetadataInput {
+        InstallationMetadataInput {
+            installation_id: id,
+            account_login: login.map(str::to_owned),
+            account_id: None,
+            account_type: None,
+            repository_selection: None,
+            repositories: None,
+        }
+    }
+
     #[test]
-    fn path_accessor_reports_configured_store_path() {
-        // The operator-facing path is used when logging persistence
-        // failures so the operator knows which location is unwritable.
+    fn authoritative_refresh_repairs_placeholders_without_losing_observed_repositories() {
         let (_dir, path) = store_path();
-        let store = match InstallationStore::open(path.clone()) {
-            Ok(store) => store,
-            Err(error) => panic!("store should open: {error}"),
-        };
-        assert_eq!(store.path(), path.as_path());
+        let mut store = InstallationStore::open(path.clone()).unwrap();
+        store
+            .add_repositories(42, ["active/project".to_string()])
+            .unwrap();
+        store.upsert(metadata(99, Some("uninstalled"))).unwrap();
+        let revision = store.revision();
+        assert!(store
+            .reconcile(
+                revision,
+                vec![
+                    metadata(42, Some("active")),
+                    metadata(77, Some("previously-missed")),
+                ]
+            )
+            .unwrap());
+        let reloaded = InstallationStore::open(path).unwrap();
+        assert_eq!(
+            reloaded.get(42).unwrap().account_login.as_deref(),
+            Some("active")
+        );
+        assert!(reloaded
+            .get(42)
+            .unwrap()
+            .repositories
+            .contains("active/project"));
+        assert_eq!(
+            reloaded.get(77).unwrap().account_login.as_deref(),
+            Some("previously-missed")
+        );
+        assert!(reloaded.get(99).is_none());
+    }
+
+    #[test]
+    fn refresh_does_not_overwrite_a_concurrent_installation_webhook() {
+        let (_dir, path) = store_path();
+        let mut store = InstallationStore::open(path.clone()).unwrap();
+        let revision = store.revision();
+        store.upsert(metadata(42, Some("new-install"))).unwrap();
+        assert!(!store.reconcile(revision, vec![]).unwrap());
+        assert!(InstallationStore::open(path).unwrap().get(42).is_some());
+    }
+
+    #[test]
+    fn omitted_metadata_preserves_state_but_explicit_empty_repository_list_clears_it() {
+        let (_dir, path) = store_path();
+        let mut store = InstallationStore::open(path.clone()).unwrap();
+        let mut initial = metadata(42, Some("active"));
+        initial.repositories = Some(vec!["active/project".to_string()]);
+        store.upsert(initial).unwrap();
+        store.upsert(metadata(42, None)).unwrap();
+        let reloaded = InstallationStore::open(path.clone()).unwrap();
+        assert_eq!(
+            reloaded.get(42).unwrap().account_login.as_deref(),
+            Some("active")
+        );
+        assert!(reloaded
+            .get(42)
+            .unwrap()
+            .repositories
+            .contains("active/project"));
+        let mut cleared = metadata(42, None);
+        cleared.repositories = Some(vec![]);
+        store.upsert(cleared).unwrap();
+        assert!(InstallationStore::open(path)
+            .unwrap()
+            .get(42)
+            .unwrap()
+            .repositories
+            .is_empty());
+    }
+
+    #[test]
+    fn failed_refresh_keeps_previous_registry_in_memory() {
+        let (_dir, path) = store_path();
+        let mut store = InstallationStore::open(path.clone()).unwrap();
+        store.upsert(metadata(42, Some("active"))).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(store.reconcile(store.revision(), vec![]).is_err());
+        assert_eq!(
+            store.get(42).unwrap().account_login.as_deref(),
+            Some("active")
+        );
     }
 }

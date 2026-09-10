@@ -18,7 +18,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, Weak};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::State,
@@ -441,6 +441,7 @@ struct AppState {
     /// location an operator needs to fix (e.g. a read-only volume).
     installations_path: Arc<Path>,
     pull_request_dispatcher: PullRequestDispatcher,
+    internal_accounts: Arc<HashSet<String>>,
 }
 
 #[derive(Clone)]
@@ -584,6 +585,9 @@ struct GitHubRepositorySummary {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
+        .json()
+        .flatten_event(true)
+        .with_ansi(false)
         .with_env_filter(
             EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| EnvFilter::new("info,foxguard=debug")),
@@ -630,6 +634,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         installations: Arc::new(Mutex::new(installations)),
         installations_path,
         pull_request_dispatcher,
+        internal_accounts: Arc::new(
+            std::env::var("FOXGUARD_INTERNAL_ACCOUNTS")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+                .filter(|account| !account.is_empty())
+                .map(str::to_owned)
+                .collect(),
+        ),
     };
     let recovered = state
         .pull_request_dispatcher
@@ -639,6 +652,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     state.pull_request_dispatcher.schedule();
     start_pull_request_workers(state.clone(), pull_request_receiver, worker_count);
     start_pull_request_lifecycle_driver(state.clone());
+    start_installation_reconciliation(state.clone());
     info!(
         queue_capacity,
         worker_count, recovered, "pull_request workers ready"
@@ -669,6 +683,82 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
 
+    Ok(())
+}
+
+fn usage_scope(owner: &str, internal_accounts: &HashSet<String>) -> &'static str {
+    if internal_accounts.is_empty() || owner.is_empty() {
+        "unknown"
+    } else if internal_accounts
+        .iter()
+        .any(|account| account.eq_ignore_ascii_case(owner))
+    {
+        "internal"
+    } else {
+        "external"
+    }
+}
+
+fn start_installation_reconciliation(state: AppState) {
+    std::mem::drop(tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60 * 60));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if let Err(error) = reconcile_installations(&state).await {
+                warn!(event = "foxguard.installations.reconcile_failed", %error,
+                    "installation registry refresh failed; retaining existing state");
+            }
+        }
+    }));
+}
+
+async fn reconcile_installations(state: &AppState) -> Result<(), String> {
+    let revision = state
+        .installations
+        .lock()
+        .map_err(|error| error.to_string())?
+        .revision();
+    let inputs = state
+        .auth
+        .list_installations()
+        .await
+        .map_err(|error| error.to_string())?;
+    let total = inputs.len();
+    let mut internal = 0usize;
+    let mut external = 0usize;
+    let mut unknown = 0usize;
+    for input in &inputs {
+        match usage_scope(
+            input.account_login.as_deref().unwrap_or(""),
+            &state.internal_accounts,
+        ) {
+            "internal" => internal += 1,
+            "external" => external += 1,
+            _ => unknown += 1,
+        }
+    }
+    let applied = state
+        .installations
+        .lock()
+        .map_err(|error| error.to_string())?
+        .reconcile(revision, inputs)
+        .map_err(|error| error.to_string())?;
+    if applied {
+        info!(
+            event = "foxguard.installations.reconciled",
+            installed_total = total,
+            installed_internal = internal,
+            installed_external = external,
+            installed_unknown = unknown,
+            "installation registry refreshed from GitHub"
+        );
+    } else {
+        info!(
+            event = "foxguard.installations.reconcile_deferred",
+            "installation webhook arrived during refresh; retaining newer state"
+        );
+    }
     Ok(())
 }
 
@@ -753,6 +843,11 @@ fn start_pull_request_workers(
                     }
                 }
 
+                let scan_started = Instant::now();
+                let scope = usage_scope(
+                    job.key.repository.split('/').next().unwrap_or(""),
+                    &state.internal_accounts,
+                );
                 match process_pull_request_delivery(
                     state.clone(),
                     &job.delivery,
@@ -776,6 +871,10 @@ fn start_pull_request_workers(
                             );
                         }
                         info!(
+                            event = "foxguard.scan.completed",
+                            usage_scope = scope,
+                            duration_ms = scan_started.elapsed().as_millis() as u64,
+                            head_sha = stored.head_sha,
                             delivery = job.delivery,
                             worker_id,
                             installation_id = job.installation_id,
@@ -871,6 +970,12 @@ fn start_pull_request_workers(
                             }
                         }
                         warn!(
+                            event = "foxguard.scan.failed",
+                            usage_scope = scope,
+                            duration_ms = scan_started.elapsed().as_millis() as u64,
+                            repo = job.key.repository,
+                            pr_number = job.key.number,
+                            head_sha = stored.head_sha,
                             delivery = job.delivery,
                             worker_id,
                             installation_id = job.installation_id,
@@ -1585,42 +1690,48 @@ fn persist_installation_event(
         .lock()
         .map_err(|error| format!("installation store lock poisoned: {error}"))?;
 
-    match payload.action.as_deref() {
-        Some("deleted") => store
+    if payload.action.as_deref() == Some("deleted") {
+        return store
             .remove(installation.id)
-            .map_err(|error| error.to_string()),
-        Some("added") => {
-            let repositories = repository_names(payload.repositories_added.as_deref());
-            store
-                .add_repositories(installation.id, repositories)
-                .map(|()| true)
-                .map_err(|error| error.to_string())
-        }
-        Some("removed") => {
-            let repositories = repository_names(payload.repositories_removed.as_deref());
-            store
-                .remove_repositories(installation.id, repositories)
-                .map(|()| true)
-                .map_err(|error| error.to_string())
-        }
-        _ => store
-            .upsert(InstallationMetadataInput {
-                installation_id: installation.id,
-                account_login: installation
-                    .account
-                    .as_ref()
-                    .and_then(|account| account.login.clone()),
-                account_id: installation.account.as_ref().and_then(|account| account.id),
-                account_type: installation
-                    .account
-                    .as_ref()
-                    .and_then(|account| account.kind.clone()),
-                repository_selection: installation.repository_selection.clone(),
-                repositories: repository_names(payload.repositories.as_deref()),
-            })
-            .map(|()| true)
-            .map_err(|error| error.to_string()),
+            .map_err(|error| error.to_string());
     }
+    // Delta events carry account metadata too. Do not leave a placeholder
+    // forever when installation:created predates this store.
+    store
+        .upsert(InstallationMetadataInput {
+            installation_id: installation.id,
+            account_login: installation
+                .account
+                .as_ref()
+                .and_then(|account| account.login.clone()),
+            account_id: installation.account.as_ref().and_then(|account| account.id),
+            account_type: installation
+                .account
+                .as_ref()
+                .and_then(|account| account.kind.clone()),
+            repository_selection: installation.repository_selection.clone(),
+            repositories: payload
+                .repositories
+                .as_deref()
+                .map(|repositories| repository_names(Some(repositories))),
+        })
+        .map_err(|error| error.to_string())?;
+    match payload.action.as_deref() {
+        Some("added") => store
+            .add_repositories(
+                installation.id,
+                repository_names(payload.repositories_added.as_deref()),
+            )
+            .map_err(|error| error.to_string())?,
+        Some("removed") => store
+            .remove_repositories(
+                installation.id,
+                repository_names(payload.repositories_removed.as_deref()),
+            )
+            .map_err(|error| error.to_string())?,
+        _ => {}
+    }
+    Ok(true)
 }
 
 fn repository_names(repositories: Option<&[GitHubRepositorySummary]>) -> Vec<String> {
@@ -2388,6 +2499,15 @@ mod tests {
     use super::*;
     use foxguard::github_app::pull_request_job_store::PullRequestJobStatus;
 
+    #[test]
+    fn usage_classification_requires_configured_internal_accounts_and_an_owner() {
+        let internal = HashSet::from(["0sec-labs".to_string()]);
+        assert_eq!(usage_scope("0sec-labs", &HashSet::new()), "unknown");
+        assert_eq!(usage_scope("", &internal), "unknown");
+        assert_eq!(usage_scope("0SEC-Labs", &internal), "internal");
+        assert_eq!(usage_scope("independent-org", &internal), "external");
+    }
+
     fn pull_request_job(
         delivery: &str,
         repository: &str,
@@ -2455,6 +2575,7 @@ mod tests {
                 installations: Arc::new(Mutex::new(installations)),
                 installations_path,
                 pull_request_dispatcher,
+                internal_accounts: Arc::new(HashSet::new()),
             },
         )
     }
@@ -4413,6 +4534,7 @@ mod tests {
             installations: Arc::new(Mutex::new(installations)),
             installations_path,
             pull_request_dispatcher,
+            internal_accounts: Arc::new(HashSet::new()),
         };
         remember_test_token(&state).await;
 
