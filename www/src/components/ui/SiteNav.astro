@@ -51,14 +51,14 @@ const { backLink, backLabel } = Astro.props;
 
         // Use cache if less than 1 hour old
         if (cached && cachedAt && Date.now() - Number(cachedAt) < 3600000) {
-          if (el) el.innerHTML = '★ ' + cached;
+          if (el) el.textContent = '★ ' + cached;
         } else {
           const r = await fetch('https://api.github.com/repos/0sec-labs/foxguard');
           if (r.ok) {
             const d = await r.json();
             if (el && d.stargazers_count) {
               const count = d.stargazers_count.toLocaleString();
-              el.innerHTML = '★ ' + count;
+              el.textContent = '★ ' + count;
               localStorage.setItem('fg-stars', count);
               localStorage.setItem('fg-stars-at', String(Date.now()));
             }
