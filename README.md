@@ -78,6 +78,12 @@ foxguard --format sarif . > results.sarif
 foxguard --format semgrep-json .        # Semgrep CLI-compatible JSON
 ```
 
+Use `foxguard --fix src/` or `foxguard --fix src/app.py` to apply supported taint
+fixes in place. Targets are checked against the canonical scan directory or the
+selected file; findings outside that scope are skipped. Python command-injection
+fixes add `import subprocess` when needed, preserving module docstrings and future
+imports. Review generated changes before committing.
+
 ## Language Coverage
 
 | Language | Built-in rules | Taint tracking | Framework-aware rules |

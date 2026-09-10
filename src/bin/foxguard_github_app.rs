@@ -2669,8 +2669,29 @@ mod tests {
         let (second_request_tx, second_request_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = std::thread::spawn(move || {
             let read_request = |stream: &mut TcpStream| {
+                // Accepted sockets inherit nonblocking mode on macOS, unlike Linux.
+                stream
+                    .set_nonblocking(false)
+                    .expect("mock request stream should become blocking");
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .expect("mock request read should be bounded");
                 let mut request = [0_u8; 8192];
-                let _ = stream.read(&mut request);
+                let mut received = 0;
+                loop {
+                    let count = stream
+                        .read(&mut request[received..])
+                        .expect("mock server should read the request");
+                    assert!(count > 0, "mock request headers must fit and be complete");
+                    let start = received.saturating_sub(3);
+                    received += count;
+                    if request[start..received]
+                        .windows(4)
+                        .any(|bytes| bytes == b"\r\n\r\n")
+                    {
+                        break;
+                    }
+                }
             };
             let write_response = |stream: &mut TcpStream, body: &str| {
                 let response = format!(
@@ -2771,8 +2792,29 @@ mod tests {
         let (newer_request_tx, newer_request_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = std::thread::spawn(move || {
             let read_request = |stream: &mut TcpStream| {
+                // Accepted sockets inherit nonblocking mode on macOS, unlike Linux.
+                stream
+                    .set_nonblocking(false)
+                    .expect("mock request stream should become blocking");
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .expect("mock request read should be bounded");
                 let mut request = [0_u8; 8192];
-                let _ = stream.read(&mut request);
+                let mut received = 0;
+                loop {
+                    let count = stream
+                        .read(&mut request[received..])
+                        .expect("mock server should read the request");
+                    assert!(count > 0, "mock request headers must fit and be complete");
+                    let start = received.saturating_sub(3);
+                    received += count;
+                    if request[start..received]
+                        .windows(4)
+                        .any(|bytes| bytes == b"\r\n\r\n")
+                    {
+                        break;
+                    }
+                }
             };
             let write_response = |stream: &mut TcpStream, body: &str| {
                 let response = format!(

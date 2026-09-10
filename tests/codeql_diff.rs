@@ -301,7 +301,9 @@ fn paired_databases_use_sarif_identity_for_moved_findings() {
     fs::create_dir_all(&base).expect("failed to create base database directory");
     fs::create_dir_all(&head).expect("failed to create head database directory");
 
+    let outputs = TempDir::new().expect("failed to create isolated temporary output directory");
     let output = foxguard_diff(repo.path(), fake_bin.path())
+        .env("TMPDIR", outputs.path())
         .args([
             "--rules",
             rules.to_str().expect("non-UTF-8 rules path"),
@@ -331,6 +333,10 @@ fn paired_databases_use_sarif_identity_for_moved_findings() {
         Some("introduced database source")
     );
     assert_eq!(findings[0]["rule_id"].as_str(), Some("test/codeql-diff"));
+    assert!(
+        fs::read_dir(outputs.path()).unwrap().next().is_none(),
+        "raw CodeQL SARIF must not remain in the temporary directory after the comparison"
+    );
 }
 
 #[test]
