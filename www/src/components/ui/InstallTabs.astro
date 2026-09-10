@@ -24,11 +24,16 @@ const { id = 'install' } = Astro.props;
   };
   let currentCmd = 'npx foxguard .';
 
-  function flash() {
+  async function flash() {
     const cmdEl = document.querySelector(`[data-cmd="${id}"]`);
     const box = document.querySelector(`[data-area="${id}"]`)?.parentElement;
     if (!cmdEl || !box) return;
-    navigator.clipboard.writeText(currentCmd);
+    try {
+      await navigator.clipboard.writeText(currentCmd);
+    } catch {
+      // Leave the command visible without claiming a denied copy succeeded.
+      return;
+    }
     box.classList.remove('copy-flash');
     box.offsetWidth;
     box.classList.add('copy-flash');
