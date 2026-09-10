@@ -68,6 +68,11 @@ Common request fields:
 | `finding` | object | Selector for `explain` filtering and `suppress` suggestions. |
 | `suppression` | string | For `suppress`: `inline`, `config`, or `baseline`. |
 
+For `explain`, `finding.file` matches an exact path or a suffix beginning at a
+path separator (`/` or `\`). Selecting `app.py` does not select `myapp.py`.
+Inline suppression suggestions use the file extension's comment syntax,
+case-insensitively, including `#` for Ruby gemspec and TOML files.
+
 Response fields:
 
 | Field | Type | Meaning |
