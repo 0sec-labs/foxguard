@@ -209,6 +209,46 @@ jobs:
       - run: node --test scripts/verify-vscode-marketplace.test.mjs
       - run: bash -n scripts/release.sh
 
+  action-outputs:
+    name: Action Outputs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      BADGE_LABEL: 'audit "quoted" \ label'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Create clean scan fixture
+        run: |
+          mkdir -p "$RUNNER_TEMP/action-fixture"
+          printf 'print("safe")\n' > "$RUNNER_TEMP/action-fixture/safe.py"
+      - name: Scan through the composite action
+        id: scan
+        uses: ./action
+        with:
+          path: ${{ runner.temp }}/action-fixture
+          version: v0.12.0
+          upload-sarif: "false"
+          badge-label: ${{ env.BADGE_LABEL }}
+      - name: Consume public action outputs
+        env:
+          FINDINGS_COUNT: ${{ steps.scan.outputs.findings-count }}
+          SCAN_REPORT: ${{ steps.scan.outputs.sarif-file }}
+          BADGE_REPORT: ${{ steps.scan.outputs.badge-json }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          assert os.environ["FINDINGS_COUNT"] == "0", "missing or incorrect findings-count output"
+          with open(os.environ["SCAN_REPORT"]) as report_file:
+              report = json.load(report_file)
+          assert report["runs"][0]["results"] == []
+          with open(os.environ["BADGE_REPORT"]) as badge_file:
+              badge = json.load(badge_file)
+          assert badge["label"] == os.environ["BADGE_LABEL"]
+          assert badge["message"] == "clean"
+          PY
+
   precision-corpus-metadata:
     name: Precision Corpus Metadata
     runs-on: ubuntu-latest
