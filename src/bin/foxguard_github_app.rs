@@ -859,9 +859,10 @@ fn start_pull_request_workers(
                 .await
                 {
                     Ok(result) => {
+                        let finding_count = result.findings_for_transport().len();
                         if let Err(error) = state
                             .pull_request_dispatcher
-                            .mark_completed(&job.delivery, result.findings.len())
+                            .mark_completed(&job.delivery, finding_count)
                         {
                             error!(
                                 delivery = job.delivery,
@@ -881,7 +882,7 @@ fn start_pull_request_workers(
                             action = job.action,
                             pr_number = result.pr_number,
                             repo = result.repo,
-                            findings = result.findings.len(),
+                            findings = finding_count,
                             review_messages = result.review_messages,
                             deleted_comments = result.deleted_comments,
                             posted_check_annotations = result.posted_check_annotations,
