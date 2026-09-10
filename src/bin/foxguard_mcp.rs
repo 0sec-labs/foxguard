@@ -64,6 +64,7 @@ fn handle_request(request: &Value, registry: &RuleRegistry) -> Option<Value> {
 
     let result = match method {
         "initialize" => handle_initialize(),
+        "ping" => Ok(json!({})),
         "tools/list" => handle_tools_list(),
         "tools/call" => handle_tools_call(request, registry),
         _ => {
@@ -698,16 +699,13 @@ fn suggest_suppression(arguments: &Value) -> Result<Value, String> {
 }
 
 fn comment_prefix_for_path(path: &str) -> &'static str {
-    let file_name = match path.rsplit(['/', '\\']).next() {
-        Some(file_name) => file_name,
-        None => path,
-    };
-    let extension = match file_name.rsplit_once('.') {
-        Some((_, extension)) => extension,
-        None => "",
-    };
-
-    match extension {
+    let file_name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let extension = file_name
+        .rsplit_once('.')
+        .map(|(_, ext)| ext)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match extension.as_str() {
         "py" | "pyw" | "rb" | "rake" | "gemspec" | "yml" | "yaml" | "toml" | "sh" | "bash"
         | "zsh" => "#",
         _ => "//",
@@ -803,6 +801,18 @@ fn optional_severity(value: &Value, key: &str) -> Result<Option<SeverityFilter>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ping_returns_empty_result() {
+        let registry = RuleRegistry::empty();
+        let request = json!({"jsonrpc": "2.0", "id": "keepalive", "method": "ping"});
+        assert_eq!(
+            handle_request(&request, &registry),
+            Some(json!({"jsonrpc": "2.0", "id": "keepalive", "result": {}}))
+        );
+        let notification = json!({"jsonrpc": "2.0", "method": "ping"});
+        assert!(handle_request(&notification, &registry).is_none());
+    }
 
     #[test]
     fn diff_interface_accepts_paired_codeql_databases() {

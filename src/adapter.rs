@@ -599,10 +599,12 @@ fn select_findings(findings: Vec<Finding>, selector: Option<&AdapterFindingRef>)
                 .rule_id
                 .as_ref()
                 .is_none_or(|rule_id| &finding.rule_id == rule_id)
-                && selector
-                    .file
-                    .as_ref()
-                    .is_none_or(|file| finding.file == *file || finding.file.ends_with(file))
+                && selector.file.as_ref().is_none_or(|file| {
+                    finding
+                        .file
+                        .strip_suffix(file)
+                        .is_some_and(|prefix| prefix.is_empty() || prefix.ends_with(['/', '\\']))
+                })
                 && selector.line.is_none_or(|line| finding.line == line)
                 && selector
                     .column
@@ -722,10 +724,15 @@ fn is_absolute_path(path: &str) -> bool {
 }
 
 fn comment_prefix_for_path(path: &str) -> &'static str {
-    let lower = path.to_ascii_lowercase();
-    let extension = lower.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
-    match extension {
-        "py" | "pyw" | "rb" | "rake" | "yml" | "yaml" | "sh" | "bash" | "zsh" => "#",
+    let file_name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let extension = file_name
+        .rsplit_once('.')
+        .map(|(_, ext)| ext)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "py" | "pyw" | "rb" | "rake" | "gemspec" | "yml" | "yaml" | "toml" | "sh" | "bash"
+        | "zsh" => "#",
         _ => "//",
     }
 }
@@ -950,5 +957,78 @@ mod tests {
             Some("# foxguard: ignore[py/no-eval]")
         );
         assert_eq!(suppression.line, Some(12));
+    }
+
+    #[test]
+    fn explain_file_selector_rejects_partial_filename_matches() {
+        let workspace = must(tempfile::tempdir());
+        for name in ["app.py", "myapp.py"] {
+            must(std::fs::write(
+                workspace.path().join(name),
+                "DEBUG = True\n",
+            ));
+        }
+        let mut request = AdapterRequest::new(AdapterCommand::Explain);
+        request.workspace_root = Some(workspace.path().to_string_lossy().into_owned());
+        request.finding = Some(AdapterFindingRef {
+            rule_id: Some("py/no-debug-true".to_string()),
+            file: Some("app.py".to_string()),
+            line: None,
+            column: None,
+        });
+
+        let response = execute_adapter_request(request);
+        assert!(
+            response.ok,
+            "unexpected adapter error: {:?}",
+            response.error
+        );
+        let files: Vec<_> = response
+            .findings
+            .iter()
+            .map(|finding| std::path::Path::new(&finding.file).file_name().unwrap())
+            .collect();
+        assert_eq!(files, [std::ffi::OsStr::new("app.py")]);
+    }
+
+    #[test]
+    fn suppress_inline_comment_matches_file_type() {
+        // Gemspec and toml files use #, not //
+        let suggestion = suppression_suggestion(
+            AdapterSuppressionKind::Inline,
+            "rb/no-eval",
+            "mygem.gemspec",
+            Some(5),
+        );
+        assert_eq!(
+            suggestion.snippet.as_deref(),
+            Some("# foxguard: ignore[rb/no-eval]"),
+            "gemspec files should use # comment prefix"
+        );
+
+        let suggestion = suppression_suggestion(
+            AdapterSuppressionKind::Inline,
+            "rs/no-unsafe",
+            "Cargo.toml",
+            Some(12),
+        );
+        assert_eq!(
+            suggestion.snippet.as_deref(),
+            Some("# foxguard: ignore[rs/no-unsafe]"),
+            "toml files should use # comment prefix"
+        );
+
+        // Case-insensitive extension matching
+        let suggestion = suppression_suggestion(
+            AdapterSuppressionKind::Inline,
+            "py/no-eval",
+            "/PATH/TO/APP.PY",
+            Some(1),
+        );
+        assert_eq!(
+            suggestion.snippet.as_deref(),
+            Some("# foxguard: ignore[py/no-eval]"),
+            "case-insensitive extension matching should work for .PY"
+        );
     }
 }

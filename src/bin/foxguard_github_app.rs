@@ -1337,12 +1337,10 @@ fn pull_request_key(payload: &GitHubWebhookPayload) -> Option<PullRequestKey> {
     })
 }
 
-/// Webhook handler. Verifies the GitHub HMAC, parses the event type
-/// from the `X-GitHub-Event` header, and dispatches to a per-kind
-/// stub. Accepted deliveries return 202; a valid pull-request delivery whose
-/// authoritative head cannot be checked or whose durable write fails returns
-/// 503 so GitHub retries it. Verification failures return 401 and oversized or
-/// unparseable inputs return 400.
+/// Verify the GitHub HMAC and dispatch the event.
+/// Accepted deliveries return 202. Failed persistence or an unavailable
+/// authoritative PR head returns 503, leaving the delivery eligible for
+/// redelivery. Verification failures return 401; unparseable payloads return 400.
 async fn webhook(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1393,37 +1391,39 @@ async fn webhook(
                     if payload.action.as_deref() == Some("deleted") {
                         remove_cached_installation_token(&state, installation.id).await;
                     }
-                    let persisted = match persist_installation_event(&state, &payload) {
-                        Ok(persisted) => persisted,
-                        Err(error) => {
-                            // Surface at error level with the configured
-                            // path: a persistent failure here (e.g. a
-                            // read-only or unwritable store directory)
-                            // means install state is silently lost across
-                            // restarts, and an operator must see it.
-                            error!(
-                                delivery,
-                                installation_id = installation.id,
-                                path = %state.installations_path.display(),
-                                %error,
-                                "failed to persist installation metadata"
-                            );
-                            false
-                        }
-                    };
+                    if let Err(error) = persist_installation_event(&state, &payload) {
+                        // Surface at error level with the configured
+                        // path: a persistent failure here (e.g. a
+                        // read-only or unwritable store directory)
+                        // means install state is silently lost across
+                        // restarts, and an operator must see it.
+                        error!(
+                            delivery,
+                            installation_id = installation.id,
+                            path = %state.installations_path.display(),
+                            %error,
+                            "failed to persist installation metadata"
+                        );
+                        // Do not acknowledge an installation update that was not saved.
+                        return StatusCode::SERVICE_UNAVAILABLE;
+                    }
                     info!(
                         delivery,
                         installation_id = installation.id,
                         action = payload.action.as_deref().unwrap_or("?"),
-                        persisted,
-                        "installation event processed"
+                        "installation event persisted"
                     );
                 } else {
                     warn!(delivery, "installation event missing installation.id");
                 }
             }
             Err(error) => {
-                warn!(delivery, %error, "installation payload was not valid JSON");
+                warn!(
+                    delivery,
+                    %error,
+                    "installation payload was not valid JSON"
+                );
+                return StatusCode::BAD_REQUEST;
             }
         },
         EventKind::PullRequest => match parse_webhook_payload(&body) {
@@ -1542,7 +1542,12 @@ async fn webhook(
                 }
             }
             Err(error) => {
-                warn!(delivery, %error, "pull_request payload was not valid JSON");
+                warn!(
+                    delivery,
+                    %error,
+                    "pull_request payload was not valid JSON"
+                );
+                return StatusCode::BAD_REQUEST;
             }
         },
         EventKind::Other => {
@@ -4268,5 +4273,126 @@ mod tests {
         }
         // Each installation gets exactly one fetch.
         assert_eq!(fetch_count.load(Ordering::SeqCst), 4);
+    }
+
+    fn signed_installation_headers(body: &[u8], delivery: &str) -> HeaderMap {
+        use hmac::Mac;
+
+        let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(b"test-webhook-secret")
+            .expect("HMAC key should be accepted");
+        mac.update(body);
+        let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "X-Hub-Signature-256",
+            signature.parse().expect("signature header should parse"),
+        );
+        headers.insert(
+            "X-GitHub-Event",
+            "installation".parse().expect("event header should parse"),
+        );
+        headers.insert(
+            "X-GitHub-Delivery",
+            delivery.parse().expect("delivery header should parse"),
+        );
+        headers
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn installation_unparseable_payload_returns_400() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let jobs = PullRequestJobStore::open(job_dir.path().join("pull-request-jobs.json"))
+            .expect("job store should open");
+        let (review_url, _server_handle) = spawn_json_response_server(200, "{}");
+        let (_state_dir, state) = test_state_with_review(jobs, &review_url);
+        remember_test_token(&state).await;
+
+        let malformed_body = b"{";
+        assert_eq!(
+            webhook(
+                State(state),
+                signed_installation_headers(malformed_body, "delivery-malformed"),
+                axum::body::Bytes::from_static(malformed_body),
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn pull_request_unparseable_payload_returns_400() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let jobs = PullRequestJobStore::open(job_dir.path().join("pull-request-jobs.json"))
+            .expect("job store should open");
+        let (review_url, _server_handle) = spawn_json_response_server(200, "{}");
+        let (_state_dir, state) = test_state_with_review(jobs, &review_url);
+        remember_test_token(&state).await;
+
+        let malformed_body = b"{";
+        assert_eq!(
+            webhook(
+                State(state),
+                signed_pull_request_headers(malformed_body),
+                axum::body::Bytes::from_static(malformed_body),
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn installation_persistence_failure_returns_503() {
+        let job_dir = tempfile::tempdir().expect("job tempdir should be created");
+        let jobs = PullRequestJobStore::open(job_dir.path().join("pull-request-jobs.json"))
+            .expect("job store should open");
+
+        // Create an installation store whose save() will fail by
+        // replacing the target path with a directory, reproducing
+        // the native reproduction Main confirmed.
+        let install_dir = tempfile::tempdir().expect("install tempdir should be created");
+        let install_path = install_dir.path().join("installations.json");
+        let installations =
+            InstallationStore::open(install_path.clone()).expect("install store should open");
+        let installations_path: Arc<Path> = Arc::from(installations.path());
+        std::fs::create_dir(&install_path).expect("dir should replace store target");
+
+        let (pull_request_dispatcher, _receiver) = PullRequestDispatcher::new(1, jobs);
+        let credentials = AppCredentials::new(1, b"not-a-real-private-key".to_vec());
+        let (review_url, _server_handle) = spawn_json_response_server(200, "{}");
+        let review = GitHubReviewClient::new(&review_url, 1).expect("review client should build");
+        let state = AppState {
+            webhook_secret: b"test-webhook-secret".to_vec(),
+            auth: GitHubAppAuthClient::new(credentials).expect("auth client should build"),
+            review,
+            installation_tokens: Arc::new(tokio::sync::Mutex::new(InstallationTokenCache::new())),
+            installation_token_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            check_lifecycle_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            pull_request_admission_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            installations: Arc::new(Mutex::new(installations)),
+            installations_path,
+            pull_request_dispatcher,
+        };
+        remember_test_token(&state).await;
+
+        let body = br#"{
+            "action":"created",
+            "installation":{
+                "id":99,
+                "account":{"id":7,"login":"test-org","type":"Organization"},
+                "repository_selection":"selected"
+            },
+            "repositories":[
+                {"full_name":"test-org/test-repo"}
+            ]
+        }"#;
+        assert_eq!(
+            webhook(
+                State(state),
+                signed_installation_headers(body, "delivery-persist-fail"),
+                axum::body::Bytes::from_static(body),
+            )
+            .await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
     }
 }

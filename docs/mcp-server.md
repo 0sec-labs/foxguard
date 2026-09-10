@@ -4,6 +4,9 @@
 line-delimited JSON-RPC on stdio. It is intended for local agent clients that
 want structured security feedback while editing code.
 
+JSON-RPC `ping` requests return an empty result object (`{}`) with the original
+request ID. Notifications without an ID do not receive a response.
+
 ## Run
 
 Build from source:
