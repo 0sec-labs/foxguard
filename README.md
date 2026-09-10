@@ -66,6 +66,32 @@ repos:
 
 Integrations: [GitHub App](https://github.com/apps/foxguard-app/installations/new), [VS Code](https://marketplace.visualstudio.com/items?itemName=peaktwilight.foxguard), [Claude Code plugin](docs/claude-code-integration.md), and [MCP server](docs/mcp-server.md).
 
+### Hosted GitHub App operations
+
+`foxguard-github-app` writes newline-delimited JSON logs. Completed and failed
+scans use `event=foxguard.scan.completed` and `event=foxguard.scan.failed`, with
+delivery, installation, repository, PR, commit, duration, and `usage_scope`
+fields for correlation. Keep identifiers as log fields, not metric labels.
+
+Set `FOXGUARD_INTERNAL_ACCOUNTS` to a comma-separated list of your own GitHub
+accounts and organizations. Matching is case-insensitive. Other owners are
+classified as `external`; an unset list or missing owner produces `unknown`.
+External activity is not proof of a paying customer, and scans are not people.
+
+The installation registry is reconciled against all pages of GitHub's App
+installation API at startup and hourly. Failed refreshes retain existing state;
+concurrent webhooks take precedence. Sparse webhook metadata preserves known
+account details and observed repository names. Those names are not a complete
+inventory of an installation's accessible repositories.
+
+Persist `FOXGUARD_INSTALLATIONS_PATH` and `FOXGUARD_PULL_REQUEST_JOBS_PATH` on
+durable storage. Monitor `foxguard.installations.reconcile_failed` alongside
+scan failures; `foxguard.installations.reconciled` reports the total and
+internal/external/unknown installation counts after a successful refresh.
+Size `FOXGUARD_PR_WORKERS` against measured scanner peak memory and the
+container memory limit: child-process OOM kills can occur without restarting
+the hosted application.
+
 ## Quick Start
 
 ```sh

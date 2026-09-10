@@ -11,6 +11,8 @@ use std::fmt;
 use std::path::{Component, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use super::installation_store::InstallationMetadataInput;
+
 const DEFAULT_API_BASE_URL: &str = "https://api.github.com";
 const DEFAULT_API_HOST: &str = "api.github.com";
 const GITHUB_API_VERSION: &str = "2026-03-10";
@@ -293,6 +295,21 @@ impl InstallationTokenCache {
     }
 }
 
+#[derive(Deserialize)]
+struct ListedInstallation {
+    id: u64,
+    account: ListedAccount,
+    repository_selection: String,
+}
+
+#[derive(Deserialize)]
+struct ListedAccount {
+    login: String,
+    id: u64,
+    #[serde(rename = "type")]
+    kind: String,
+}
+
 #[derive(Clone)]
 pub struct GitHubAppAuthClient {
     http: reqwest::Client,
@@ -306,6 +323,44 @@ impl GitHubAppAuthClient {
             .user_agent("foxguard-github-app")
             .build()?;
         Ok(Self { http, credentials })
+    }
+
+    /// Fetch every page before returning, so a failed request cannot turn a
+    /// partial list into an authoritative deletion of existing installations.
+    pub async fn list_installations(&self) -> Result<Vec<InstallationMetadataInput>, AuthError> {
+        let jwt = self.credentials.jwt()?;
+        let url = format!(
+            "{}/app/installations",
+            self.credentials.api_base_url().trim_end_matches('/')
+        );
+        let mut installations = Vec::new();
+        for page in 1usize.. {
+            let rows = self
+                .http
+                .get(format!("{url}?per_page=100&page={page}")) // foxguard: ignore[rs/no-ssrf]
+                .bearer_auth(&jwt)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<Vec<ListedInstallation>>()
+                .await?;
+            let last_page = rows.len() < 100;
+            installations.extend(rows.into_iter().map(|row| InstallationMetadataInput {
+                installation_id: row.id,
+                account_login: Some(row.account.login),
+                account_id: Some(row.account.id),
+                account_type: Some(row.account.kind),
+                repository_selection: Some(row.repository_selection),
+                // /app/installations does not enumerate repository names.
+                repositories: None,
+            }));
+            if last_page {
+                break;
+            }
+        }
+        Ok(installations)
     }
 
     pub async fn create_installation_token(
