@@ -43,6 +43,7 @@ pub(super) struct TuiApp {
     pub(super) hover_index: Option<usize>,
     pub(super) show_notices: bool,
     pub(super) show_help: bool,
+    pub(super) help_scroll: u16,
     /// When on, a CNSA 2.0 migration-readiness strip is drawn at the bottom
     /// of the main scan body. Toggled by `Shift+N` (see `handle_key`). Chose
     /// `Shift+N` instead of the issue's suggested `Shift+C` because the
@@ -87,6 +88,7 @@ impl TuiApp {
             hover_index: None,
             show_notices: true,
             show_help: false,
+            help_scroll: 0,
             show_compliance_panel: false,
             runtime_notices: Vec::new(),
             active_request_id: 0,

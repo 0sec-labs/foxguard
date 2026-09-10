@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -470,27 +470,80 @@ fn parse_spatch_output(
 }
 
 fn diff_hunk_lines(output: &str) -> Vec<usize> {
-    static HUNK_RE: OnceLock<Regex> = OnceLock::new();
-    let hunk_re = HUNK_RE.get_or_init(|| {
-        Regex::new(r"^@@\s+-(?P<line>\d+)(?:,\d+)?\s+\+(?:\d+)(?:,\d+)?\s+@@")
+    static HUNK_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^@@\s+-(?P<line>\d+)(?:,(?P<count>\d+))?\s+\+\d+(?:,\d+)?\s+@@")
             .expect("invalid Coccinelle hunk regex")
     });
-    static CONTEXT_HUNK_RE: OnceLock<Regex> = OnceLock::new();
-    let context_hunk_re = CONTEXT_HUNK_RE.get_or_init(|| {
+    static CONTEXT_HUNK_RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"^\*\*\*\s+(?P<line>\d+)(?:,\d+)?\s+\*\*\*\*")
             .expect("invalid Coccinelle context hunk regex")
     });
 
-    output
-        .lines()
-        .filter_map(|line| {
-            hunk_re
-                .captures(line)
-                .or_else(|| context_hunk_re.captures(line))
-                .and_then(|captures| captures.name("line"))
-                .and_then(|line| line.as_str().parse::<usize>().ok())
-        })
-        .collect()
+    let mut findings = Vec::new();
+    let mut source_line = None;
+    let mut context_diff = false;
+    let mut pending_addition = None;
+    let mut has_removal = false;
+    for line in output.lines() {
+        let unified = HUNK_RE.captures(line);
+        let context = if unified.is_none() {
+            CONTEXT_HUNK_RE.captures(line)
+        } else {
+            None
+        };
+        if unified.is_some()
+            || context.is_some()
+            || line.starts_with("--- ")
+            || line.starts_with("+++ ")
+            || line.starts_with("*** ")
+        {
+            if let Some(line) = pending_addition.take() {
+                findings.push(line);
+            }
+            source_line = unified.as_ref().or(context.as_ref()).and_then(|captures| {
+                let start = captures.name("line")?.as_str().parse::<usize>().ok()?;
+                let empty = captures
+                    .name("count")
+                    .is_some_and(|count| count.as_str() == "0");
+                Some(start.saturating_add(usize::from(empty)).max(1))
+            });
+            context_diff = context.is_some();
+            has_removal = false;
+            continue;
+        }
+        let Some(current) = source_line else {
+            continue;
+        };
+        let marker = if context_diff {
+            match line.get(..2) {
+                Some("- " | "! ") => b'-',
+                Some("  ") => b' ',
+                _ => continue,
+            }
+        } else {
+            match line.as_bytes().first() {
+                Some(marker) => *marker,
+                None => continue,
+            }
+        };
+        match marker {
+            b'-' => {
+                findings.push(current);
+                has_removal = true;
+                pending_addition = None;
+                source_line = Some(current.saturating_add(1));
+            }
+            b' ' => source_line = Some(current.saturating_add(1)),
+            b'+' if !has_removal => {
+                pending_addition.get_or_insert(current);
+            }
+            _ => {}
+        }
+    }
+    if let Some(line) = pending_addition {
+        findings.push(line);
+    }
+    findings
 }
 
 fn file_line_matches(output: &str, target: &Path) -> Vec<usize> {
@@ -790,7 +843,7 @@ rules:
         .unwrap();
 
         let output = format!(
-            "--- {}\n+++ /tmp/cocci-output\n@@ -3,7 +3,7 @@\n",
+            "--- {}\n+++ /tmp/cocci-output\n@@ -1,4 +1,3 @@\n int f(void) {{\n   int ok = 0;\n-  crypto_aead_decrypt(skb);\n }}\n",
             target.display()
         );
         let findings = parse_spatch_output(&sample_rule(), &target, dir.path(), &output);
@@ -812,7 +865,7 @@ rules:
         .unwrap();
 
         let output = format!(
-            "*** {}\n--- /tmp/cocci-output\n***************\n*** 3,7 ****\n",
+            "*** {}\n--- /tmp/cocci-output\n***************\n*** 1,4 ****\n  int f(void) {{\n    int ok = 0;\n!   crypto_aead_decrypt(skb);\n  }}\n--- 1,4 ----\n  int f(void) {{\n    int ok = 0;\n!   checked_decrypt(skb);\n  }}\n",
             target.display()
         );
         let findings = parse_spatch_output(&sample_rule(), &target, dir.path(), &output);
@@ -820,5 +873,26 @@ rules:
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].line, 3);
         assert!(findings[0].snippet.contains("crypto_aead_decrypt"));
+    }
+
+    #[test]
+    fn replacement_and_insertion_diffs_preserve_original_source_locations() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("vulnerable.c");
+        std::fs::write(&target, "int f(void) {\n  setup();\n  decrypt();\n}\n").unwrap();
+        let replacement = "@@ -1,4 +1,4 @@\n int f(void) {\n   setup();\n-  decrypt();\n+  checked_decrypt();\n }\n";
+        let findings = parse_spatch_output(&sample_rule(), &target, dir.path(), replacement);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].line, 3);
+        assert_eq!(findings[0].snippet, "  decrypt();");
+
+        let insertion = "@@ -2,0 +3 @@\n+  check_guard();\n";
+        let findings = parse_spatch_output(&sample_rule(), &target, dir.path(), insertion);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].line, 3);
+        assert_eq!(findings[0].snippet, "  decrypt();");
+
+        let empty_hunk = "@@ -1,4 +1,4 @@\n int f(void) {\n   setup();\n   decrypt();\n }\n";
+        assert!(parse_spatch_output(&sample_rule(), &target, dir.path(), empty_hunk).is_empty());
     }
 }

@@ -3,6 +3,11 @@ set -euo pipefail
 
 # Prepare a tag-driven release for foxguard.
 # Usage: ./scripts/release.sh 0.3.3
+#
+# This script prepares release metadata and runs local verification.  It
+# NEVER pushes branches, creates tags, or publishes.  Use it on a release
+# branch, then open a PR.  After the PR merges to main, tag the verified
+# merge commit to trigger the existing Release workflow.
 
 VERSION="${1:?Usage: ./scripts/release.sh <version>}"
 TAG="v${VERSION}"
@@ -16,14 +21,18 @@ if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
+if [ -z "${BRANCH}" ] || [ "${BRANCH}" = "main" ]; then
+  echo "Prepare releases on a dedicated release branch"
+  exit 1
+fi
+
 if [ ! -f "${RELEASE_NOTES}" ]; then
   echo "Write release notes at ${RELEASE_NOTES} before preparing ${TAG}"
   exit 1
 fi
 
-# The versioned release note may be newly authored and untracked; the release
-# metadata commit below stages it. Every other local or staged change is a
-# release blocker so the tag always points at a deliberate, reviewable tree.
+# The new release note may be untracked. Every other local or staged change
+# blocks preparation so the release metadata can be reviewed independently.
 DIRTY_PATHS="$(
   {
     git diff --name-only
@@ -39,17 +48,13 @@ if [ -n "${UNEXPECTED_PATHS}" ]; then
   exit 1
 fi
 
-if [ "${BRANCH}" != "main" ]; then
-  echo "Run releases from main (current branch: ${BRANCH})"
-  exit 1
-fi
-
 if git rev-parse "${TAG}" >/dev/null 2>&1; then
   echo "Tag ${TAG} already exists locally"
   exit 1
 fi
 
-if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q .; then
+REMOTE_TAG="$(git ls-remote --tags origin "refs/tags/${TAG}")"
+if [ -n "${REMOTE_TAG}" ]; then
   echo "Tag ${TAG} already exists on origin"
   exit 1
 fi
@@ -71,6 +76,10 @@ done
 # to the version users are about to receive.
 perl -i -pe 's{(0sec-labs/foxguard/action)\@v[0-9]+\.[0-9]+\.[0-9]+}{$1\@v'"${VERSION}"'}g' README.md
 perl -i -pe 's{(\s+rev:\s+)v[0-9]+\.[0-9]+\.[0-9]+}{${1}v'"${VERSION}"'}g' README.md
+
+# Refresh Cargo.lock root-package version so that subsequent --locked checks
+# pass without fetching registry data or upgrading unrelated dependencies.
+cargo update --workspace --offline
 
 (
   cd vscode-extension
@@ -96,25 +105,39 @@ cargo test --locked --all-features
   npm pack --dry-run
 )
 
-echo "Committing release metadata..."
-git add Cargo.toml Cargo.lock packages/npm/package.json vscode-extension/package.json vscode-extension/package-lock.json README.md "${RELEASE_NOTES}"
-git commit -m "Prepare ${TAG} release metadata" -m "Bump crate, npm, and VS Code extension versions to ${VERSION} so the
-tag-driven release workflow can publish a coherent release.
-
-Constraint: Release automation now validates tag-to-version alignment before publishing
-Rejected: Keep manual publish steps in the local script | duplicates the release workflow and increases drift risk
-Confidence: high
-Scope-risk: narrow
-Reversibility: clean
-Directive: Use this script to prepare release metadata, then let the tag-triggered GitHub workflow publish artifacts
-Tested: cargo fmt --check; cargo clippy --locked --all-targets --all-features -- -D warnings; cargo test --locked --all-features; npm ci && npm run build (www); npm ci && npm run compile (vscode-extension); npm pack --dry-run (packages/npm)
-Not-tested: Live publish against GitHub Releases, npm, crates.io, and VS Code Marketplace"
-
-echo "Pushing branch and tag..."
-git push origin main
-git tag "${TAG}"
-git push origin "${TAG}"
-
 echo ""
-echo "=== ${TAG} queued ==="
-echo "GitHub Actions release workflow will build binaries, publish artifact attestations, and publish GitHub, crates.io, npm, and VS Code if the required secrets are configured."
+echo "=== ${TAG} metadata prepared ==="
+echo ""
+echo "The working tree now contains version bumps, updated lock files,"
+echo "README action-ref updates, and ${RELEASE_NOTES}."
+echo ""
+echo "To finish this release:"
+echo ""
+echo "  1. Review every changed file:"
+echo ""
+echo "       git diff"
+echo ""
+echo "  2. Commit the release metadata on this branch:"
+echo ""
+echo "       git add Cargo.toml Cargo.lock"
+echo "       git add packages/npm/package.json"
+echo "       git add vscode-extension/package.json vscode-extension/package-lock.json"
+echo "       git add README.md ${RELEASE_NOTES}"
+echo "       git commit -m \"Prepare ${TAG} release metadata\""
+echo ""
+echo "  3. Push the branch and open a pull request against main:"
+echo ""
+echo "       git push origin ${BRANCH}"
+echo ""
+echo "  4. After the PR passes required checks and is merged to main,"
+echo "     check out the merge commit and tag it:"
+echo ""
+echo "       git checkout main"
+echo "       git pull --ff-only"
+echo "       git tag ${TAG}"
+echo "       git push origin ${TAG}"
+echo ""
+echo "  5. The tag push triggers the Release workflow at"
+echo "     https://github.com/0sec-labs/foxguard/actions/workflows/release.yml"
+echo "     to build binaries, create a GitHub Release, and publish"
+echo "     to crates.io, npm, VS Code Marketplace, and GHCR."

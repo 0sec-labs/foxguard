@@ -1769,22 +1769,39 @@ select f
     /// End-to-end auto-DB run. Requires `codeql` on PATH plus the
     /// `codeql/cpp-all` library pack installed; CI runners don't have these
     /// so it stays `#[ignore]`'d. Run locally with:
-    ///   cargo test --test-threads=1 -- --ignored codeql_auto_database_runs_end_to_end
+    ///   cargo test --lib codeql_auto_database_runs_end_to_end -- --ignored --test-threads=1
     #[test]
     #[ignore = "requires codeql CLI and cpp-all qlpack on host"]
     fn codeql_auto_database_runs_end_to_end() {
-        if probe_codeql().is_err() {
-            eprintln!("codeql not on PATH — nothing to verify");
-            return;
-        }
+        probe_codeql().expect("the live integration test requires CodeQL on PATH");
         let source = TempDir::new().expect("source tempdir");
         std::fs::write(
             source.path().join("main.c"),
             "int main(void) { return 0; }\n",
         )
         .unwrap();
+        std::fs::write(
+            source.path().join("Makefile"),
+            "all:\n\tcc main.c -o main\n",
+        )
+        .unwrap();
 
         let query_dir = TempDir::new().expect("query tempdir");
+        std::fs::write(
+            query_dir.path().join("qlpack.yml"),
+            "name: foxguard/live-test\nversion: 0.0.0\ndependencies:\n  codeql/cpp-all: \"*\"\n",
+        )
+        .unwrap();
+        let install = Command::new("codeql")
+            .args(["pack", "install"])
+            .current_dir(query_dir.path())
+            .output()
+            .expect("CodeQL query dependencies should resolve");
+        assert!(
+            install.status.success(),
+            "CodeQL query dependencies failed: {}",
+            String::from_utf8_lossy(&install.stderr)
+        );
         let query_path = query_dir.path().join("trivial.ql");
         std::fs::write(
             &query_path,
@@ -1814,10 +1831,15 @@ select f, "found main"
 
         let result = scan_with_notices_for_target(&[rule], None, Some(source.path()));
         assert!(
-            !result.findings.is_empty() || result.notices.is_empty(),
-            "expected findings or zero notices, got notices: {:?}",
+            result.notices.is_empty(),
+            "unexpected CodeQL notices: {:?}",
             result.notices
         );
+        assert_eq!(result.findings.len(), 1);
+        assert_eq!(result.findings[0].rule_id, "test/trivial");
+        assert_eq!(result.findings[0].file, "main.c");
+        assert_eq!(result.findings[0].line, 1);
+        assert_eq!(result.findings[0].description, "found main");
     }
 
     #[test]

@@ -2503,3 +2503,87 @@ fn list_item_omits_crypto_chip_when_none() {
         "non-crypto finding should not have algorithm chip: {debug}"
     );
 }
+
+#[test]
+fn search_punctuation_is_text_and_does_not_open_help() {
+    let mut app = TuiApp::new(tui_args_for(".".into()));
+    app.show_launch = false;
+    app.handle_key(KeyEvent::from(KeyCode::Char('/')));
+    app.handle_key(KeyEvent::from(KeyCode::Char('?')));
+    assert_eq!(app.search_query, "?");
+    assert!(!app.show_help);
+    app.handle_key(KeyEvent::from(KeyCode::Esc));
+    app.handle_key(KeyEvent::from(KeyCode::Char('?')));
+    assert!(app.show_help);
+}
+
+#[test]
+fn interrupt_exits_from_launch_findings_and_every_modal() {
+    use crossterm::event::KeyModifiers;
+    for mode in [
+        "launch", "findings", "search", "help", "triage", "export", "severity",
+    ] {
+        let mut app = app_with_single_finding(None, None);
+        app.show_launch = mode == "launch";
+        match mode {
+            "search" => app.search_mode = true,
+            "help" => app.show_help = true,
+            "triage" => {
+                app.action_menu = Some(ActionMenu {
+                    actions: vec![TriageAction::AddToBaseline],
+                    selected: 0,
+                });
+            }
+            "export" => {
+                app.open_export_menu();
+                assert!(app.export_menu.is_some());
+            }
+            "severity" => {
+                app.open_severity_picker();
+                assert!(app.severity_picker.is_some());
+            }
+            _ => {}
+        }
+        assert!(
+            matches!(
+                app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+                ControlFlow::Exit
+            ),
+            "{mode}"
+        );
+    }
+}
+
+#[test]
+fn finding_home_and_end_respect_filtered_selection() {
+    let mut app = app_with_single_finding(None, None);
+    app.show_launch = false;
+    let mut second = app.result.as_ref().unwrap().findings[0].clone();
+    second.line += 1;
+    app.result.as_mut().unwrap().findings.push(second);
+    app.handle_key(KeyEvent::from(KeyCode::End));
+    assert_eq!(app.selected, 1);
+    app.handle_key(KeyEvent::from(KeyCode::Home));
+    assert_eq!(app.selected, 0);
+    app.search_query = "no-such-finding-unique".into();
+    app.clamp_selection();
+    app.handle_key(KeyEvent::from(KeyCode::End));
+    app.handle_key(KeyEvent::from(KeyCode::Home));
+    assert_eq!(app.selected, 0);
+    assert!(app.filtered_indices().is_empty());
+}
+
+#[test]
+fn diff_target_accepts_letters_and_digits_reserved_by_navigation() {
+    let mut app = TuiApp::new(tui_args_for(".".into()));
+    app.launch_mode = LaunchMode::Diff;
+    app.launch_diff_target.clear();
+    for ch in "fix/jkq1234".chars() {
+        assert!(matches!(
+            app.handle_key(KeyEvent::from(KeyCode::Char(ch))),
+            ControlFlow::Continue
+        ));
+    }
+    assert_eq!(app.launch_diff_target, "fix/jkq1234");
+    assert_eq!(app.launch_mode, LaunchMode::Diff);
+}

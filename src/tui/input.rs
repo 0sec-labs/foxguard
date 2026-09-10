@@ -15,7 +15,7 @@ use crate::config::{
     load_for_scan,
 };
 use crate::{Finding, Severity};
-use crossterm::event::{self, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
+use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use std::path::Path;
@@ -31,19 +31,66 @@ pub(super) enum ControlFlow {
 
 impl TuiApp {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> ControlFlow {
-        if matches!(key.code, KeyCode::Char('?')) {
-            self.show_help = !self.show_help;
+        if key.kind != event::KeyEventKind::Press {
+            return ControlFlow::Continue;
+        }
+        // Ctrl+C / Ctrl+Shift+C always exits, regardless of mode.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
+        {
+            return ControlFlow::Exit;
+        }
+        if key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
             return ControlFlow::Continue;
         }
 
         if self.show_help {
             return match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => {
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
                     self.show_help = false;
+                    self.help_scroll = 0;
+                    ControlFlow::Continue
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.help_scroll = self.help_scroll.saturating_sub(1);
+                    ControlFlow::Continue
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.help_scroll = self.help_scroll.saturating_add(1);
+                    ControlFlow::Continue
+                }
+                KeyCode::PageUp => {
+                    self.help_scroll = self.help_scroll.saturating_sub(8);
+                    ControlFlow::Continue
+                }
+                KeyCode::PageDown => {
+                    self.help_scroll = self.help_scroll.saturating_add(8);
+                    ControlFlow::Continue
+                }
+                KeyCode::Home => {
+                    self.help_scroll = 0;
+                    ControlFlow::Continue
+                }
+                KeyCode::End => {
+                    self.help_scroll = u16::MAX;
                     ControlFlow::Continue
                 }
                 _ => ControlFlow::Continue,
             };
+        }
+
+        if key.code == KeyCode::Char('?')
+            && !self.search_mode
+            && self.severity_picker.is_none()
+            && self.action_menu.is_none()
+            && self.export_menu.is_none()
+        {
+            self.show_help = true;
+            self.help_scroll = 0;
+            return ControlFlow::Continue;
         }
 
         if self.show_launch {
@@ -68,6 +115,17 @@ impl TuiApp {
 
         match key.code {
             KeyCode::Char('q') => ControlFlow::Exit,
+            KeyCode::Home => {
+                self.select_filtered_index(0);
+                ControlFlow::Continue
+            }
+            KeyCode::End => {
+                let len = self.filtered_indices().len();
+                if len > 0 {
+                    self.select_filtered_index(len - 1);
+                }
+                ControlFlow::Continue
+            }
             KeyCode::Char('j') | KeyCode::Down => {
                 self.move_selection(1);
                 ControlFlow::Continue
@@ -217,6 +275,10 @@ impl TuiApp {
 
     pub(super) fn handle_launch_key(&mut self, key: KeyCode) -> ControlFlow {
         match key {
+            KeyCode::Char(ch) if self.launch_mode == LaunchMode::Diff => {
+                self.launch_diff_target.push(ch);
+                ControlFlow::Continue
+            }
             KeyCode::Char('q') | KeyCode::Esc => ControlFlow::Exit,
             KeyCode::Up | KeyCode::Char('k') => {
                 self.launch_mode = self.launch_mode.previous();
@@ -244,10 +306,6 @@ impl TuiApp {
             }
             KeyCode::Backspace if self.launch_mode == LaunchMode::Diff => {
                 self.launch_diff_target.pop();
-                ControlFlow::Continue
-            }
-            KeyCode::Char(ch) if self.launch_mode == LaunchMode::Diff => {
-                self.launch_diff_target.push(ch);
                 ControlFlow::Continue
             }
             KeyCode::Enter => {

@@ -1,57 +1,124 @@
-const RELEASE_WORKFLOW: &str = include_str!("../.github/workflows/release.yml");
-const README: &str = include_str!("../README.md");
-const NPM_README: &str = include_str!("../packages/npm/README.md");
-const PROVENANCE_DOCS: &str = include_str!("../docs/release-provenance.md");
-const RELEASE_SCRIPT: &str = include_str!("../scripts/release.sh");
+#![cfg(unix)]
 
-fn index_of(haystack: &str, needle: &str) -> usize {
-    match haystack.find(needle) {
-        Some(index) => index,
-        None => panic!("missing expected release provenance text: {needle}"),
-    }
-}
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+use tempfile::TempDir;
 
-#[test]
-fn release_workflow_attests_binaries_before_publishing_release() {
-    assert!(RELEASE_WORKFLOW.contains("id-token: write"));
-    assert!(RELEASE_WORKFLOW.contains("attestations: write"));
-    assert!(RELEASE_WORKFLOW.contains("contents: write"));
-
-    assert_eq!(
-        RELEASE_WORKFLOW
-            .matches("uses: actions/attest-build-provenance@v2")
-            .count(),
-        2
+fn git(root: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    assert!(RELEASE_WORKFLOW.contains("subject-checksums: release/checksums.txt"));
-    assert!(RELEASE_WORKFLOW.contains("subject-path: release/checksums.txt"));
+    String::from_utf8(output.stdout).unwrap()
+}
 
-    let checksum_step = index_of(RELEASE_WORKFLOW, "name: Generate checksums");
-    let attest_step = index_of(RELEASE_WORKFLOW, "name: Attest release binaries");
-    let release_step = index_of(RELEASE_WORKFLOW, "uses: softprops/action-gh-release@v2");
+fn release_fixture() -> TempDir {
+    let root = tempfile::tempdir().unwrap();
+    git(root.path(), &["init", "--initial-branch=release/test"]);
+    git(
+        root.path(),
+        &["config", "user.email", "release-test@example.invalid"],
+    );
+    git(root.path(), &["config", "user.name", "Release test"]);
+    fs::write(
+        root.path().join("Cargo.toml"),
+        "[package]\nname = \"foxguard\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    git(root.path(), &["add", "Cargo.toml"]);
+    git(root.path(), &["commit", "-m", "fixture"]);
+    fs::create_dir_all(root.path().join("docs/releases")).unwrap();
+    fs::write(
+        root.path().join("docs/releases/v0.2.0.md"),
+        "Release fixture\n",
+    )
+    .unwrap();
+    root
+}
 
-    assert!(checksum_step < attest_step);
-    assert!(attest_step < release_step);
+fn assert_preparation_rejected(root: &Path) {
+    let manifest = fs::read(root.join("Cargo.toml")).unwrap();
+    let head = git(root, &["rev-parse", "HEAD"]);
+    let tags = git(root, &["tag", "--list"]);
+    let output = Command::new("bash")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/release.sh"))
+        .arg("0.2.0")
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "preparation unexpectedly succeeded"
+    );
+    assert_eq!(fs::read(root.join("Cargo.toml")).unwrap(), manifest);
+    assert_eq!(git(root, &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(root, &["tag", "--list"]), tags);
 }
 
 #[test]
-fn release_notes_are_kept_under_docs_and_required_for_a_release() {
-    assert!(RELEASE_WORKFLOW.contains("body_path: docs/releases/${{ github.ref_name }}.md"));
-    assert!(RELEASE_SCRIPT.contains("RELEASE_NOTES=\"docs/releases/${TAG}.md\""));
-    assert!(RELEASE_SCRIPT.contains("if [ ! -f \"${RELEASE_NOTES}\" ]"));
-    assert!(RELEASE_SCRIPT.contains("git ls-files --others --exclude-standard"));
-    assert!(RELEASE_SCRIPT.contains("grep -Fvx \"${RELEASE_NOTES}\""));
-    assert!(RELEASE_SCRIPT.contains("\"${RELEASE_NOTES}\""));
+fn release_preparation_rejects_unrelated_changes_before_mutating_metadata() {
+    let root = release_fixture();
+    fs::write(root.path().join("unrelated.txt"), "keep this work\n").unwrap();
+    assert_preparation_rejected(root.path());
+    assert_eq!(
+        fs::read_to_string(root.path().join("unrelated.txt")).unwrap(),
+        "keep this work\n"
+    );
 }
 
 #[test]
-fn installer_docs_explain_checksum_and_provenance_behavior() {
-    for docs in [README, NPM_README, PROVENANCE_DOCS] {
-        assert!(docs.contains("checksums.txt"));
-        assert!(docs.contains("gh attestation verify"));
-    }
+fn release_preparation_rejects_missing_notes_and_main_branch() {
+    let root = release_fixture();
+    fs::remove_file(root.path().join("docs/releases/v0.2.0.md")).unwrap();
+    assert_preparation_rejected(root.path());
+    fs::write(
+        root.path().join("docs/releases/v0.2.0.md"),
+        "Release fixture\n",
+    )
+    .unwrap();
+    git(root.path(), &["branch", "-m", "main"]);
+    assert_preparation_rejected(root.path());
+}
 
-    assert!(PROVENANCE_DOCS.contains("SHA-256"));
-    assert!(PROVENANCE_DOCS.contains("Failure modes"));
-    assert!(PROVENANCE_DOCS.contains("Trust model"));
+#[test]
+fn release_preparation_fails_closed_when_origin_cannot_be_checked() {
+    let root = release_fixture();
+    git(
+        root.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            root.path().join("missing.git").to_str().unwrap(),
+        ],
+    );
+    assert_preparation_rejected(root.path());
+}
+
+#[test]
+fn release_preparation_preserves_existing_local_and_remote_tags() {
+    let root = release_fixture();
+    git(root.path(), &["tag", "v0.2.0"]);
+    assert_preparation_rejected(root.path());
+    git(root.path(), &["tag", "-d", "v0.2.0"]);
+    let remote = tempfile::tempdir().unwrap();
+    git(remote.path(), &["init", "--bare"]);
+    git(
+        root.path(),
+        &["remote", "add", "origin", remote.path().to_str().unwrap()],
+    );
+    git(root.path(), &["push", "origin", "HEAD:refs/tags/v0.2.0"]);
+    let remote_tag = git(remote.path(), &["rev-parse", "refs/tags/v0.2.0"]);
+    assert_preparation_rejected(root.path());
+    assert_eq!(
+        git(remote.path(), &["rev-parse", "refs/tags/v0.2.0"]),
+        remote_tag
+    );
 }

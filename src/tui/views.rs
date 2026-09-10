@@ -781,17 +781,29 @@ impl TuiApp {
 
     pub(super) fn draw_launch_footer(&self, frame: &mut ratatui::Frame, area: Rect) {
         let left = Line::from(vec![
-            footer_key_span("h/l"),
+            footer_key_span(if self.launch_mode == LaunchMode::Diff {
+                "up/down"
+            } else {
+                "j/k"
+            }),
             Span::raw(" move  "),
-            footer_key_span("1-4"),
-            Span::raw(" jump  "),
+            footer_key_span(if self.launch_mode == LaunchMode::Diff {
+                "type"
+            } else {
+                "1-4"
+            }),
+            Span::raw(if self.launch_mode == LaunchMode::Diff {
+                " target  "
+            } else {
+                " jump  "
+            }),
             footer_key_span("Tab"),
             Span::raw(" cycle  "),
             footer_key_span("Enter"),
             Span::raw(" launch  "),
             footer_key_span("?"),
             Span::raw(" help  "),
-            footer_key_span("q"),
+            footer_key_span("Esc"),
             Span::raw(" quit"),
         ]);
         let right = Line::from(vec![
@@ -811,47 +823,89 @@ impl TuiApp {
         draw_status_bar(frame, area, left, right);
     }
 
-    pub(super) fn draw_help(&self, frame: &mut ratatui::Frame) {
-        let area = centered_rect(56, 42, frame.area());
+    pub(super) fn draw_help(&mut self, frame: &mut ratatui::Frame) {
+        let bounds = frame.area();
+        let width = bounds.width.saturating_sub(2).min(88);
+        let height = bounds.height.saturating_sub(2).min(32);
+        let area = Rect::new(
+            bounds.x + (bounds.width - width) / 2,
+            bounds.y + (bounds.height - height) / 2,
+            width,
+            height,
+        );
         frame.render_widget(Clear, area);
-        let help = Paragraph::new(Text::from(vec![
-            Line::from(Span::styled(
-                "foxguard tui help",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from("j/k or arrows  move between findings"),
-            Line::from("/              search findings"),
-            Line::from("0-4            set minimum severity filter"),
-            Line::from("c              cycle session confidence filter"),
-            Line::from("Shift+C        cycle list sort (severity | confidence)"),
-            Line::from("Tab            cycle open target between finding/source/sink"),
-            Line::from("i              open triage actions for the selected finding"),
-            Line::from("Enter          open the current target in your editor"),
-            Line::from("w              show or hide notices panel"),
-            Line::from("Shift+N        toggle CNSA 2.0 compliance panel"),
-            Line::from("e              export findings (CBOM / JSON / SARIF)"),
-            Line::from("PageUp/Down    scroll detail pane"),
-            Line::from("[/]            scroll notices pane"),
-            Line::from("mouse wheel    move between findings"),
-            Line::from("mouse click    select a finding"),
-            Line::from("Shift-drag     terminal-native text selection"),
-            Line::from("r              rescan"),
-            Line::from("q              quit"),
-            Line::from("? or Esc       close this help"),
-        ]))
-        .alignment(Alignment::Left)
-        .style(Style::default().bg(Color::Rgb(22, 24, 29)).fg(Color::White))
-        .block(
-            Block::default()
-                .title("help")
-                .borders(Borders::ALL)
-                .style(Style::default().bg(Color::Rgb(22, 24, 29))),
-        )
-        .wrap(Wrap { trim: false });
-        frame.render_widget(help, area);
+        let inner_width = width.saturating_sub(2).max(1) as usize;
+        let visible_rows = height.saturating_sub(2) as usize;
+        let shortcuts: &[&str] = if self.show_launch && self.launch_mode == LaunchMode::Diff {
+            &[
+                "Arrows/Tab     Select scan mode",
+                "Type           Edit target branch",
+                "Backspace      Delete target character",
+                "Enter          Launch diff scan",
+                "Esc or Ctrl+C  Quit",
+            ]
+        } else if self.show_launch {
+            &[
+                "j/k or arrows  Select scan mode",
+                "Tab            Cycle scan mode",
+                "1-4            Jump to a mode",
+                "Enter          Launch scan",
+                "Diff mode: type the target branch",
+                "Backspace      Edit diff target",
+                "q or Esc       Quit",
+                "Ctrl+C         Quit from any view",
+            ]
+        } else {
+            &[
+                "j/k or arrows  Move between findings",
+                "Home/End       First/last finding",
+                "/              Search findings",
+                "Enter/Esc      Leave search",
+                "0-4            Minimum severity",
+                "c              Confidence filter",
+                "Shift+C        Cycle sort order",
+                "Tab            Finding/source/sink",
+                "i              Triage selected finding",
+                "Enter or o     Open in your editor",
+                "w              Toggle notices",
+                "Shift+N        CNSA 2.0 panel",
+                "e              Export CBOM/JSON/SARIF",
+                "PageUp/Down    Scroll detail",
+                "[/]            Scroll notices",
+                "Mouse wheel    Move between findings",
+                "Mouse click    Select a finding",
+                "Shift-drag     Select terminal text",
+                "r              Rescan",
+                "q              Quit",
+                "Ctrl+C         Quit from any view",
+            ]
+        };
+        // Explicit ASCII wrapping keeps scroll bounds identical to rendered rows.
+        let lines: Vec<Line<'_>> = shortcuts
+            .iter()
+            .flat_map(|text| {
+                text.as_bytes().chunks(inner_width).map(|chunk| {
+                    Line::from(std::str::from_utf8(chunk).expect("help shortcuts are ASCII"))
+                })
+            })
+            .collect();
+        let max_scroll = lines
+            .len()
+            .saturating_sub(visible_rows)
+            .min(u16::MAX as usize) as u16;
+        self.help_scroll = self.help_scroll.min(max_scroll);
+        let title = format!("Help {}/{}", usize::from(self.help_scroll) + 1, lines.len());
+        let block = Block::default()
+            .title(title)
+            .title_bottom("Esc/? close | j/k PgUp/Dn scroll")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(22, 24, 29)).fg(Color::White));
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(block)
+                .scroll((self.help_scroll, 0)),
+            area,
+        );
     }
 
     pub(super) fn draw_action_menu(&self, frame: &mut ratatui::Frame) {

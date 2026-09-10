@@ -39,12 +39,14 @@ jobs:
         run: |
           tag_version="${GITHUB_REF_NAME#v}"
           cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          cargo_lock_version=$(python3 -c 'import tomllib; print(next(p["version"] for p in tomllib.load(open("Cargo.lock", "rb"))["package"] if p["name"] == "foxguard"))')
           npm_version=$(node -p "require('./packages/npm/package.json').version")
           vscode_version=$(node -p "require('./vscode-extension/package.json').version")
           vscode_lock_version=$(node -p "require('./vscode-extension/package-lock.json').version")
 
           for entry in \
             "Cargo.toml:${cargo_version}" \
+            "Cargo.lock:${cargo_lock_version}" \
             "packages/npm/package.json:${npm_version}" \
             "vscode-extension/package.json:${vscode_version}" \
             "vscode-extension/package-lock.json:${vscode_lock_version}"
@@ -112,9 +114,9 @@ jobs:
       - name: Build
         run: |
           if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
+            cross build --locked --release --bin foxguard --target ${{ matrix.target }}
           else
-            cargo build --release --target ${{ matrix.target }}
+            cargo build --locked --release --bin foxguard --target ${{ matrix.target }}
           fi
         shell: bash
 
@@ -187,7 +189,7 @@ jobs:
       - name: Publish crate
         run: |
           set +e
-          output=$(cargo publish --token "${{ secrets.CARGO_REGISTRY_TOKEN }}" 2>&1)
+          output=$(cargo publish --locked --token "${{ secrets.CARGO_REGISTRY_TOKEN }}" 2>&1)
           status=$?
           set -e
           echo "${output}"

@@ -35,7 +35,8 @@ while [ "$#" -gt 0 ]; do
 done
 echo "--- $last"
 echo "+++ /tmp/cocci-output"
-echo "@@ -{hunk_line},7 +{hunk_line},7 @@"
+echo "@@ -{hunk_line},1 +{hunk_line},0 @@"
+echo "-    err = crypto_aead_decrypt(req);"
 exit 0
 "#
     );
@@ -163,4 +164,48 @@ fn missing_spatch_skips_coccinelle_once_without_failing_scan() {
         1,
         "expected a single missing dependency warning, got: {stderr}"
     );
+}
+
+#[test]
+#[ignore = "requires a real spatch executable and its runtime support files"]
+fn real_coccinelle_reports_only_the_unguarded_call_without_editing_sources() {
+    let probe = Command::new("spatch")
+        .arg("--version")
+        .output()
+        .expect("the live integration test requires spatch on PATH");
+    assert!(probe.status.success());
+    let repo = repo_with_c_fixture();
+    fs::copy(
+        fixture_path("dirty_frag_safe.c"),
+        repo.path().join("safe.c"),
+    )
+    .unwrap();
+    let vulnerable = fs::read(repo.path().join("vulnerable.c")).unwrap();
+    let safe = fs::read(repo.path().join("safe.c")).unwrap();
+    let output = foxguard_cmd()
+        .current_dir(repo.path())
+        .args([".", "--no-builtins", "--rules"])
+        .arg(fixture_path("dirty-frag-rules.yml"))
+        .args(["--format", "json"])
+        .output()
+        .expect("foxguard should run the real semantic patch");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let findings = json_findings(&output.stdout);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0]["file"], "vulnerable.c");
+    assert_eq!(findings[0]["line"], 11);
+    assert!(findings[0]["snippet"]
+        .as_str()
+        .unwrap()
+        .contains("crypto_aead_decrypt"));
+    assert_eq!(
+        fs::read(repo.path().join("vulnerable.c")).unwrap(),
+        vulnerable
+    );
+    assert_eq!(fs::read(repo.path().join("safe.c")).unwrap(), safe);
 }
