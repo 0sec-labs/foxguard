@@ -175,14 +175,20 @@ else
     BADGE_COLOR="f59e0b"
 fi
 
-cat > "${BADGE_FILE}" <<BADGE_EOF
-{
-  "schemaVersion": 1,
-  "label": "${BADGE_LABEL}",
-  "message": "${BADGE_MESSAGE}",
-  "color": "${BADGE_COLOR}"
-}
-BADGE_EOF
+BADGE_LABEL="${BADGE_LABEL}" BADGE_MESSAGE="${BADGE_MESSAGE}" BADGE_COLOR="${BADGE_COLOR}" \
+python3 - <<'PY' > "${BADGE_FILE}"
+import json
+import os
+import sys
+
+json.dump({
+    "schemaVersion": 1,
+    "label": os.environ["BADGE_LABEL"],
+    "message": os.environ["BADGE_MESSAGE"],
+    "color": os.environ["BADGE_COLOR"],
+}, sys.stdout, indent=2)
+sys.stdout.write("\n")
+PY
 
 echo "badge-json=${BADGE_FILE}" >> "${GITHUB_OUTPUT:-/dev/null}"
 echo "Badge JSON written to: ${BADGE_FILE}"

@@ -44,15 +44,19 @@ inputs:
 outputs:
   findings-count:
     description: "Number of findings detected"
+    value: ${{ steps.scan.outputs.findings-count }}
   sarif-file:
     description: "Path to the SARIF output file"
+    value: ${{ steps.scan.outputs.sarif-file }}
   badge-json:
     description: "Path to shields.io endpoint JSON file for dynamic badges"
+    value: ${{ steps.scan.outputs.badge-json }}
 
 runs:
   using: "composite"
   steps:
     - name: Run Foxguard
+      id: scan
       shell: bash
       env:
         INPUT_PATH: ${{ inputs.path }}
