@@ -2127,52 +2127,6 @@ mod tests {
         analyze_tree(tree.root_node(), src, spec, None)
     }
 
-    #[test]
-    #[ignore]
-    fn dump_ast_for_debug() {
-        let src = r#"
-class Controller {
-    public void Handle() {
-        string cmd = Request.QueryString["cmd"];
-        Process.Start(cmd);
-    }
-}
-"#;
-        let Some(tree) = parse_file(src, Language::CSharp) else {
-            panic!("should parse");
-        };
-        fn dump(node: tree_sitter::Node, source: &str, depth: usize) {
-            let indent = "  ".repeat(depth);
-            let text = &source[node.byte_range()];
-            let text_short: String = text.chars().take(50).collect();
-            // Print field names for children via cursor
-            let mut cursor = node.walk();
-            let has_fields = cursor.goto_first_child();
-            if has_fields {
-                loop {
-                    let field_name = cursor.field_name().unwrap_or("<anon>");
-                    eprintln!(
-                        "{}{}.{} = {:?}",
-                        indent,
-                        node.kind(),
-                        field_name,
-                        cursor.node().kind()
-                    );
-                    if !cursor.goto_next_sibling() {
-                        break;
-                    }
-                }
-            }
-            eprintln!("{}{} = {:?}", indent, node.kind(), text_short);
-            let mut c = node.walk();
-            for child in node.children(&mut c) {
-                dump(child, source, depth + 1);
-            }
-        }
-        dump(tree.root_node(), src, 0);
-        panic!("dump complete — check stderr");
-    }
-
     // ── direct-unit tests (analyze_tree) ─────────────────────────────────
 
     #[test]
