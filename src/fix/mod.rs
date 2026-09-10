@@ -45,14 +45,22 @@ fn generate_fix(
     }
 }
 
-/// Apply byte-range edits to source, processing in reverse order so offsets stay valid.
+/// Apply edits in reverse byte order, skipping overlaps and duplicate edits.
 pub fn apply_edits(source: &str, edits: &mut [CodeEdit]) -> String {
     edits.sort_by_key(|e| std::cmp::Reverse(e.start_byte));
 
     let mut result = source.to_string();
     let mut last_start = usize::MAX;
+    let mut last_edit: Option<&CodeEdit> = None;
 
     for edit in edits.iter() {
+        if last_edit.is_some_and(|previous| {
+            previous.start_byte == edit.start_byte
+                && previous.end_byte == edit.end_byte
+                && previous.replacement == edit.replacement
+        }) {
+            continue;
+        }
         // Skip overlapping edits
         if edit.end_byte > last_start {
             continue;
@@ -61,6 +69,7 @@ pub fn apply_edits(source: &str, edits: &mut [CodeEdit]) -> String {
         let end = edit.end_byte.min(result.len());
         result.replace_range(start..end, &edit.replacement);
         last_start = edit.start_byte;
+        last_edit = Some(edit);
     }
 
     result
@@ -68,7 +77,14 @@ pub fn apply_edits(source: &str, edits: &mut [CodeEdit]) -> String {
 
 /// Generate and apply fixes for all fixable findings. Returns the number of files modified.
 pub fn apply_all_fixes(findings: &[Finding], scan_root: &str) -> usize {
-    let root = Path::new(scan_root);
+    let root = match Path::new(scan_root).canonicalize() {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("Error resolving scan root {}: {}", scan_root, error);
+            return 0;
+        }
+    };
+    let single_file = root.is_file();
 
     // Group findings by file
     let mut by_file: HashMap<&str, Vec<&Finding>> = HashMap::new();
@@ -81,7 +97,26 @@ pub fn apply_all_fixes(findings: &[Finding], scan_root: &str) -> usize {
     let mut files_fixed = 0;
 
     for (file, file_findings) in &by_file {
-        let file_path = root.join(file);
+        // Scanner finding paths are relative to the process directory, not the
+        // scan root. Resolve once and use the same target for reading and writing.
+        let file_path = match Path::new(file).canonicalize() {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        let in_scope = if single_file {
+            file_path == root
+        } else {
+            file_path.starts_with(&root)
+        };
+        if !in_scope {
+            eprintln!(
+                "Warning: skipping fix for {} — path escapes scan root {}",
+                file,
+                root.display()
+            );
+            continue;
+        }
+
         let source = match std::fs::read_to_string(&file_path) {
             Ok(s) => s,
             Err(_) => continue,
@@ -277,5 +312,70 @@ mod tests {
         // The 4..8 edit is applied first (higher start), then 2..6 is skipped because end_byte(6) > last_start(4).
         let result = apply_edits(source, &mut edits);
         assert_eq!(result, "abcdYY");
+    }
+
+    const FIXABLE_SOURCE: &str = "from flask import request\nimport os\n\ndef handler():\n    user_input = request.args.get(\"name\")\n    os.system(\"ls \" + user_input)\n";
+
+    fn scan_fixable_file(path: &Path) -> Vec<Finding> {
+        crate::engine::scan_directory(
+            &path.to_string_lossy(),
+            &crate::rules::RuleRegistry::new(),
+            1024 * 1024,
+            None,
+        )
+        .findings
+    }
+
+    #[test]
+    fn autofix_handles_cwd_relative_directory_and_file_targets() {
+        let workspace = tempfile::tempdir_in(".").expect("temporary workspace");
+        let file = workspace.path().join("app.py");
+        for scan_root in [workspace.path(), file.as_path()] {
+            std::fs::write(&file, FIXABLE_SOURCE).expect("write source");
+            let findings = scan_fixable_file(&file);
+            assert_eq!(apply_all_fixes(&findings, &scan_root.to_string_lossy()), 1);
+            let modified = std::fs::read_to_string(&file).expect("read fixed source");
+            assert!(!modified.contains("os.system("));
+            assert!(modified.contains("subprocess.run("));
+        }
+    }
+
+    #[test]
+    fn autofix_rejects_targets_outside_scan_root() {
+        let workspace = tempfile::tempdir().expect("temporary workspace");
+        let root = workspace.path().join("repo");
+        std::fs::create_dir(&root).expect("create scan root");
+        let victim = workspace.path().join("victim.py");
+        std::fs::write(&victim, FIXABLE_SOURCE).expect("write victim");
+        let mut findings = scan_fixable_file(&victim);
+
+        // Establish that these are real fixable findings, not unsupported rules.
+        assert_eq!(apply_all_fixes(&findings, &victim.to_string_lossy()), 1);
+        for path in [victim.clone(), root.join("../victim.py")] {
+            std::fs::write(&victim, FIXABLE_SOURCE).expect("restore victim");
+            for finding in &mut findings {
+                finding.file = path.to_string_lossy().into_owned();
+            }
+            assert_eq!(apply_all_fixes(&findings, &root.to_string_lossy()), 0);
+            assert_eq!(std::fs::read_to_string(&victim).unwrap(), FIXABLE_SOURCE);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn autofix_rejects_symlinks_outside_scan_root() {
+        let workspace = tempfile::tempdir().expect("temporary workspace");
+        let root = workspace.path().join("repo");
+        std::fs::create_dir(&root).expect("create scan root");
+        let victim = workspace.path().join("victim.py");
+        std::fs::write(&victim, FIXABLE_SOURCE).expect("write victim");
+        let link = root.join("app.py");
+        std::os::unix::fs::symlink(&victim, &link).expect("create escaping symlink");
+        let mut findings = scan_fixable_file(&victim);
+        for finding in &mut findings {
+            finding.file = link.to_string_lossy().into_owned();
+        }
+        assert_eq!(apply_all_fixes(&findings, &root.to_string_lossy()), 0);
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), FIXABLE_SOURCE);
     }
 }

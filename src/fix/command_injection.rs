@@ -36,11 +36,45 @@ pub fn fix_python(
 
     let replacement = format!("subprocess.run([{}])", list_items.join(", "));
 
-    Some(vec![CodeEdit {
+    let mut edits = vec![CodeEdit {
         start_byte: call_node.start_byte(),
         end_byte: call_node.end_byte(),
         replacement,
-    }])
+    }];
+    let mut imported = false;
+    let mut cursor = root.walk();
+    for statement in root.named_children(&mut cursor) {
+        if statement.kind() == "import_statement" {
+            let mut imports = statement.walk();
+            if statement
+                .named_children(&mut imports)
+                .any(|name| name.kind() == "dotted_name" && node_text(name, source) == "subprocess")
+            {
+                imported = true;
+                break;
+            }
+        }
+    }
+    if !imported {
+        // Keep shebangs, encoding comments, module docstrings and future imports first.
+        let mut cursor = root.walk();
+        let insertion = root
+            .named_children(&mut cursor)
+            .find(|node| match node.kind() {
+                "comment" | "future_import_statement" => false,
+                "expression_statement" => !node
+                    .named_child(0)
+                    .is_some_and(|child| matches!(child.kind(), "string" | "concatenated_string")),
+                _ => true,
+            })
+            .map_or(0, |node| node.start_byte());
+        edits.push(CodeEdit {
+            start_byte: insertion,
+            end_byte: insertion,
+            replacement: "import subprocess\n".to_string(),
+        });
+    }
+    Some(edits)
 }
 
 /// Fix JavaScript command injection: rewrite `exec(cmd)` to `execFile(name, [args])`.
@@ -308,11 +342,29 @@ mod tests {
     fn test_fix_python_os_system() {
         let source = r#"os.system("ls " + user_input)"#;
         let tree = parse_file(source, Language::Python).unwrap();
-        let edits = fix_python(source, &tree, 0, source.len()).unwrap();
-        assert_eq!(edits.len(), 1);
+        let mut edits = fix_python(source, &tree, 0, source.len()).unwrap();
         assert_eq!(
-            edits[0].replacement,
-            r#"subprocess.run(["ls", user_input])"#
+            crate::fix::apply_edits(source, &mut edits),
+            "import subprocess\nsubprocess.run([\"ls\", user_input])"
+        );
+    }
+
+    #[test]
+    fn python_command_fixes_preserve_preamble_and_share_import() {
+        let preamble = "#!/usr/bin/env python3\n\"\"\"Module documentation.\"\"\"\nfrom __future__ import annotations\n";
+        let source = format!("{preamble}os.system(\"ls \" + first)\nos.system(\"ls \" + second)\n");
+        let tree = parse_file(&source, Language::Python).unwrap();
+        let mut edits = Vec::new();
+        for name in ["first", "second"] {
+            let end = source.find(&format!("{name})")).unwrap() + name.len() + 1;
+            let start = source[..end].rfind("os.system(").unwrap();
+            edits.extend(fix_python(&source, &tree, start, end).unwrap());
+        }
+        assert_eq!(
+            crate::fix::apply_edits(&source, &mut edits),
+            format!(
+                "{preamble}import subprocess\nsubprocess.run([\"ls\", first])\nsubprocess.run([\"ls\", second])\n"
+            )
         );
     }
 
