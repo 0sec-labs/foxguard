@@ -298,16 +298,17 @@ impl InstallationTokenCache {
 #[derive(Deserialize)]
 struct ListedInstallation {
     id: u64,
-    account: ListedAccount,
+    account: Option<ListedAccount>,
     repository_selection: String,
 }
 
 #[derive(Deserialize)]
 struct ListedAccount {
-    login: String,
+    // Enterprise accounts use a slug instead of a repository-owner login.
+    login: Option<String>,
     id: u64,
     #[serde(rename = "type")]
-    kind: String,
+    kind: Option<String>,
 }
 
 #[derive(Clone)]
@@ -347,14 +348,20 @@ impl GitHubAppAuthClient {
                 .json::<Vec<ListedInstallation>>()
                 .await?;
             let last_page = rows.len() < 100;
-            installations.extend(rows.into_iter().map(|row| InstallationMetadataInput {
-                installation_id: row.id,
-                account_login: Some(row.account.login),
-                account_id: Some(row.account.id),
-                account_type: Some(row.account.kind),
-                repository_selection: Some(row.repository_selection),
-                // /app/installations does not enumerate repository names.
-                repositories: None,
+            installations.extend(rows.into_iter().map(|row| {
+                let (account_login, account_id, account_type) = row
+                    .account
+                    .map(|account| (account.login, Some(account.id), account.kind))
+                    .unwrap_or_default();
+                InstallationMetadataInput {
+                    installation_id: row.id,
+                    account_login,
+                    account_id,
+                    account_type,
+                    repository_selection: Some(row.repository_selection),
+                    // /app/installations does not enumerate repository names.
+                    repositories: None,
+                }
             }));
             if last_page {
                 break;
