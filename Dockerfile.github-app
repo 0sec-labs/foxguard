@@ -18,7 +18,7 @@ COPY . .
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && cargo build --release --features github-app --bin foxguard --bin foxguard-github-app
+    && cargo build --locked --release --features github-app --bin foxguard --bin foxguard-github-app
 
 FROM debian:bookworm-slim
 RUN apt-get update \
