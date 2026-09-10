@@ -631,10 +631,19 @@ pub fn scan_with_notices_for_target(
 fn run_codeql_database_analyze(database: &Path, query: &Path) -> Result<String, String> {
     use crate::engine::process::{wait_with_output_timeout, TimedOutput};
 
-    let output = tempfile::NamedTempFile::new()
-        .map_err(|e| format!("failed to create temporary SARIF output: {}", e))?;
-    let output_path = output.path().to_path_buf();
-    drop(output);
+    // Keep the output namespace reserved until CodeQL exits and its SARIF is read.
+    // Dropping a NamedTempFile before spawning loses ownership of that path.
+    let mut output_builder = tempfile::Builder::new();
+    output_builder.prefix("foxguard-codeql-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        output_builder.permissions(std::fs::Permissions::from_mode(0o700));
+    }
+    let output_dir = output_builder
+        .tempdir()
+        .map_err(|e| format!("failed to create temporary SARIF directory: {}", e))?;
+    let output_path = output_dir.path().join("results.sarif");
     let mut output_arg = OsString::from("--output=");
     output_arg.push(output_path.as_os_str());
 
