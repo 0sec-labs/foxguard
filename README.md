@@ -6,6 +6,8 @@
 
 <p align="center">
   <strong>Fast local security scanning for code, secrets, dependencies, and crypto risk.</strong>
+  <br />
+  <sub>Integrated into <a href="https://github.com/0sec-labs/0sec">0sec</a>, the open cybersecurity harness.</sub>
 </p>
 
 <p align="center">
