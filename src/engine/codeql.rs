@@ -1689,32 +1689,30 @@ rules:
 
     #[test]
     fn auto_db_skipped_cleanly_when_codeql_absent() {
-        // Force PATH to a directory that definitely does not contain a
-        // `codeql` binary, then exercise the auto-DB path. We expect the
-        // legacy "no database configured" notice (same as missing-target),
-        // not a crash.
-        let empty_path = TempDir::new().expect("tempdir for empty PATH");
+        const CHILD_ENV: &str = "FOXGUARD_TEST_CODEQL_ABSENT_CHILD";
+        if std::env::var_os(CHILD_ENV).is_none() {
+            // Keep PATH and database configuration local to a child process:
+            // sibling tests invoke Git and other tools concurrently.
+            let empty_path = TempDir::new().expect("tempdir for empty PATH");
+            let status = std::process::Command::new(
+                std::env::current_exe().expect("current test executable"),
+            )
+            .args([
+                "--exact",
+                "engine::codeql::tests::auto_db_skipped_cleanly_when_codeql_absent",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .env("PATH", empty_path.path())
+            .env_remove("FOXGUARD_CODEQL_DB")
+            .status()
+            .expect("run isolated CodeQL test");
+            assert!(status.success(), "isolated CodeQL test failed: {status}");
+            return;
+        }
+
         let scan_target = TempDir::new().expect("tempdir for scan target");
-
-        let prev_path = std::env::var_os("PATH");
-        // Safety: the test process is single-threaded for env mutation; we
-        // restore the original PATH before returning. If a future test
-        // parallelism change makes this flaky, move to a serial-test crate.
-        std::env::set_var("PATH", empty_path.path());
-        let prev_db = std::env::var_os("FOXGUARD_CODEQL_DB");
-        std::env::remove_var("FOXGUARD_CODEQL_DB");
-
         let result = scan_with_notices_for_target(&[sample_rule()], None, Some(scan_target.path()));
-
-        // Restore env before asserting so a failure doesn't poison sibling
-        // tests.
-        match prev_path {
-            Some(value) => std::env::set_var("PATH", value),
-            None => std::env::remove_var("PATH"),
-        }
-        if let Some(value) = prev_db {
-            std::env::set_var("FOXGUARD_CODEQL_DB", value);
-        }
 
         assert!(result.findings.is_empty());
         assert_eq!(result.candidate_rules, 1);
