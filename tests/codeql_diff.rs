@@ -291,6 +291,41 @@ fn foxguard_diff(repo: &Path, fake_codeql_dir: &Path) -> Command {
 }
 
 #[test]
+fn auto_db_skipped_cleanly_when_codeql_absent() {
+    let target = TempDir::new().expect("failed to create scan target");
+    let rules = write_rule(target.path());
+    fs::write(
+        target.path().join("app.c"),
+        "int main(void) { return 0; }\n",
+    )
+    .expect("failed to write source");
+    let empty_path = TempDir::new().expect("failed to create empty PATH");
+
+    // Restrict only the scanner child's environment; parallel tests still need Git.
+    let output = Command::new(env!("CARGO_BIN_EXE_foxguard"))
+        .current_dir(target.path())
+        .env("PATH", empty_path.path())
+        .env_remove("FOXGUARD_CODEQL_DB")
+        .args([".", "--no-builtins", "-f", "json", "--rules"])
+        .arg(&rules)
+        .output()
+        .expect("failed to execute foxguard scan");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("expected JSON scan report");
+    assert!(report["findings"]
+        .as_array()
+        .expect("findings array")
+        .is_empty());
+    assert!(
+        stderr.contains("test/codeql-diff") && stderr.contains("--codeql-db"),
+        "skipped CodeQL rule must report database configuration guidance: {stderr}"
+    );
+}
+
+#[test]
 fn paired_databases_use_sarif_identity_for_moved_findings() {
     let repo = setup_repo();
     let rules = write_rule(repo.path());

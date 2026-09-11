@@ -1688,46 +1688,6 @@ rules:
     }
 
     #[test]
-    fn auto_db_skipped_cleanly_when_codeql_absent() {
-        const CHILD_ENV: &str = "FOXGUARD_TEST_CODEQL_ABSENT_CHILD";
-        if std::env::var_os(CHILD_ENV).is_none() {
-            // Keep PATH and database configuration local to a child process:
-            // sibling tests invoke Git and other tools concurrently.
-            let empty_path = TempDir::new().expect("tempdir for empty PATH");
-            let status = std::process::Command::new(
-                std::env::current_exe().expect("current test executable"),
-            )
-            .args([
-                "--exact",
-                "engine::codeql::tests::auto_db_skipped_cleanly_when_codeql_absent",
-                "--nocapture",
-            ])
-            .env(CHILD_ENV, "1")
-            .env("PATH", empty_path.path())
-            .env_remove("FOXGUARD_CODEQL_DB")
-            .status()
-            .expect("run isolated CodeQL test");
-            assert!(status.success(), "isolated CodeQL test failed: {status}");
-            return;
-        }
-
-        let scan_target = TempDir::new().expect("tempdir for scan target");
-        let result = scan_with_notices_for_target(&[sample_rule()], None, Some(scan_target.path()));
-
-        assert!(result.findings.is_empty());
-        assert_eq!(result.candidate_rules, 1);
-        assert_eq!(result.notices.len(), 1);
-        // When codeql is absent we fall back to the legacy "configure a DB"
-        // notice — auto-build isn't possible, so the user is pointed at the
-        // explicit-DB flags.
-        assert!(
-            result.notices[0].contains("no database configured"),
-            "expected legacy notice, got: {}",
-            result.notices[0]
-        );
-    }
-
-    #[test]
     fn infers_cpp_from_query_import() {
         let mut file = NamedTempFile::new().expect("temp .ql");
         file.write_all(
