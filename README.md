@@ -15,6 +15,7 @@
   <a href="https://github.com/0sec-labs/foxguard"><img src="https://img.shields.io/badge/foxguard-clean-3fb950" alt="foxguard: clean" /></a>
   <a href="https://crates.io/crates/foxguard"><img src="https://img.shields.io/crates/v/foxguard?color=d97706&label=crates.io" alt="crates.io" /></a>
   <a href="https://www.npmjs.com/package/foxguard"><img src="https://img.shields.io/npm/v/foxguard?color=d97706&label=npm" alt="npm" /></a>
+  <a href="https://pypi.org/project/foxguard/"><img src="https://img.shields.io/pypi/v/foxguard?color=d97706&label=PyPI" alt="PyPI" /></a>
   <a href="https://github.com/apps/foxguard-app/installations/new"><img src="https://img.shields.io/badge/GitHub_App-Install-2ea44f?logo=github" alt="Install GitHub App" /></a>
 </p>
 
@@ -39,11 +40,18 @@ npx foxguard .
 
 ```sh
 npx foxguard .                                      # zero install
+pipx install foxguard                               # prebuilt CLI from PyPI
 curl -fsSL https://foxguard.dev/install.sh | sh     # prebuilt binary (macOS/Linux)
 cargo install foxguard                              # from source
 ```
 
-Prebuilt installs verify release binaries against `checksums.txt`. Release binaries also publish GitHub artifact attestations; use `gh attestation verify` for manual verification, or see [release provenance](docs/release-provenance.md).
+Standalone binary installers verify GitHub release binaries against `checksums.txt`. Release binaries also publish GitHub artifact attestations; use `gh attestation verify` for manual verification, or see [release provenance](docs/release-provenance.md).
+
+PyPI wheels support Python 3.9+ on Linux glibc 2.28+ (x86_64/ARM64), macOS
+(Intel/Apple Silicon), and Windows x86_64. In an existing Python virtual
+environment, use `python -m pip install foxguard` instead. These install the native
+CLI without a Rust compiler or a runtime binary download; no Python API is
+provided. Alpine/musl users should use the standalone Linux release binaries.
 
 **GitHub Action:**
 
