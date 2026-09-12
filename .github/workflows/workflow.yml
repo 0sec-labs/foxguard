@@ -59,6 +59,34 @@ jobs:
             fi
           done
 
+  build-python:
+    name: Build Python wheels
+    needs: preflight
+    permissions:
+      contents: read
+    uses: ./.github/workflows/python-wheels.yml
+
+  publish-pypi:
+    name: Publish PyPI
+    needs: [github-release, build-python]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/foxguard
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: python-wheel-*
+          merge-multiple: true
+          path: dist
+      - name: Publish wheels using trusted publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
   build:
     name: Build ${{ matrix.target }}
     needs: preflight
@@ -135,7 +163,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: build
+    needs: [build, build-python]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -147,6 +175,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
+          pattern: foxguard-*
 
       - name: Collect binaries
         run: |

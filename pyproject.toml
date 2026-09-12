@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin==1.15.0"]
+build-backend = "maturin"
+
+[project]
+name = "foxguard"
+dynamic = ["version"]
+description = "A security scanner as fast as a linter, written in Rust."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE", "LICENSE-APACHE"]
+
+[project.urls]
+Homepage = "https://foxguard.dev"
+Repository = "https://github.com/0sec-labs/foxguard"
+Issues = "https://github.com/0sec-labs/foxguard/issues"
+
+[tool.maturin]
+bindings = "bin"
+targets = [{ name = "foxguard", kind = "bin" }]
+locked = true
+strip = true
