@@ -99,7 +99,7 @@ Adapters should distinguish scanner findings from adapter failures:
 | Clean scan | Exit success and stay silent. |
 | Findings at or above threshold | Surface a compact summary to the host and use the host's actionable-feedback convention. |
 | `foxguard` missing | Exit success with a setup hint only when the host has an appropriate setup command. |
-| Missing or unreadable edited file | Exit success and stay silent. |
+| Missing or unreadable edited file | Do not block the host operation or replace prior findings with a clean scan. |
 | Invalid host payload | Exit success and stay silent. |
 | Scanner execution error | Prefer a concise diagnostic; do not fail closed unless the integration is an explicit CI/pre-commit gate. |
 
@@ -115,9 +115,11 @@ Live integrations should avoid dumping full JSON. A useful summary includes:
 - one line per finding: severity, rule id, line, description
 - a local rerun command, for example `foxguard --severity medium path/to/file`
 
-Adapters should parse the JSON report instead of relying only on process exit
-codes. foxguard exits `1` for findings and `2` for scanner errors, but JSON
-contents are the stable way to decide whether a host should receive feedback.
+Parse JSON from successful scans, including exit `1` (findings). Exit `2`,
+invalid JSON, and an empty report indicate a failed scan, not a clean result.
+Preserve previous diagnostics and surface a failure state. A live integration
+may still acknowledge the host event successfully without claiming that the
+scan succeeded.
 
 ## Command Surface
 

@@ -4,27 +4,9 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { isSupportedFile } from "./supportedFiles";
+import { extractFindings, type Finding } from "./report";
+import { ScanController } from "./scanController";
 
-/** Mirrors the JSON output of `foxguard --format json`. */
-interface Finding {
-  rule_id: string;
-  severity: "low" | "medium" | "high" | "critical";
-  cwe: string | null;
-  description: string;
-  file: string;
-  line: number;
-  column: number;
-  end_line: number;
-  end_column: number;
-  snippet: string;
-  fix_suggestion?: string;
-}
-
-/** Versioned envelope emitted by the CLI JSON reporter (v1.0.0+). */
-interface ReportEnvelope {
-  schema_version: string;
-  findings: Finding[];
-}
 
 interface ConfigMutationResult {
   config_path: string;
@@ -40,80 +22,158 @@ interface ProcessOptions {
   cwd?: string;
   maxBuffer?: number;
   timeout?: number;
-  allowNonZero?: boolean;
+  allowFindingExit?: boolean;
+  signal?: AbortSignal;
 }
 
+
 const configMutationQueues = new Map<string, Promise<void>>();
+const terminatingProcesses = new Set<Promise<void>>();
+
+// ---------------------------------------------------------------------------
+// Cancellation sentinel — distinguishes intentional abort from process errors
+// ---------------------------------------------------------------------------
+
+class ScanCancelledError extends Error {
+  constructor() {
+    super("Scan cancelled");
+    this.name = "ScanCancelledError";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Process execution
+// ---------------------------------------------------------------------------
 
 function runProcess(command: string, args: string[], options: ProcessOptions = {}): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(new ScanCancelledError());
+      return;
+    }
     const child = spawn(command, args, { // foxguard: ignore[js/no-command-injection]
       cwd: options.cwd,
       shell: process.platform === "win32",
+      detached: process.platform !== "win32",
       windowsHide: true,
     });
-
     let stdout = "";
     let stderr = "";
+    let bytes = 0;
     let settled = false;
+    let terminating = false;
+    let timer: NodeJS.Timeout | undefined;
     const maxBuffer = options.maxBuffer ?? 1024 * 1024;
 
-    const timer = options.timeout
-      ? setTimeout(() => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          child.kill();
-          reject(new Error(`command timed out after ${options.timeout}ms`));
-        }, options.timeout)
-      : undefined;
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
-      if (stdout.length + stderr.length > maxBuffer && !settled) {
-        settled = true;
-        child.kill();
-        reject(new Error("command output exceeded maxBuffer"));
+    const terminate = (): void => {
+      if (terminating || child.pid === undefined) {
+        return;
       }
-    });
+      terminating = true;
+      const pid = child.pid;
+      const cleanup = new Promise<void>((done) => {
+        if (process.platform === "win32") {
+          // Keep the parent alive until taskkill has identified its descendants.
+          const killer = spawn(
+            path.join(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"),
+            ["/PID", String(pid), "/T", "/F"],
+            { windowsHide: true },
+          );
+          const deadline = setTimeout(() => {
+            killer.kill();
+            child.kill();
+            done();
+          }, 1000);
+          killer.once("error", (error) => {
+            console.error("foxguard process-tree cleanup failed:", error);
+            child.kill();
+            clearTimeout(deadline);
+            done();
+          });
+          killer.once("close", (code) => {
+            if (code !== 0 && child.exitCode === null) {
+              child.kill();
+            }
+            clearTimeout(deadline);
+            done();
+          });
+        } else {
+          const signalGroup = (signal: NodeJS.Signals): void => {
+            try {
+              process.kill(-pid, signal);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+                console.error("foxguard process-group cleanup failed:", error);
+              }
+            }
+          };
+          signalGroup("SIGTERM");
+          // The group can outlive its leader; do not cancel escalation on the
+          // parent's exit while a wrapper's descendants are still running.
+          setTimeout(() => {
+            signalGroup("SIGKILL");
+            done();
+          }, 500);
+        }
+      });
+      terminatingProcesses.add(cleanup);
+      void cleanup.then(() => terminatingProcesses.delete(cleanup));
+    };
 
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-      if (stdout.length + stderr.length > maxBuffer && !settled) {
-        settled = true;
-        child.kill();
-        reject(new Error("command output exceeded maxBuffer"));
-      }
-    });
-
-    child.on("error", (error) => {
+    const finish = (error?: Error): void => {
       if (settled) {
         return;
       }
       settled = true;
-      if (timer) {
-        clearTimeout(timer);
-      }
-      reject(error);
-    });
-
-    child.on("close", (code) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (timer) {
-        clearTimeout(timer);
-      }
-      if (code === 0 || options.allowNonZero) {
-        resolve({ stdout, stderr });
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
+      child.stdout?.removeListener("data", onStdout);
+      child.stderr?.removeListener("data", onStderr);
+      child.stdout?.resume();
+      child.stderr?.resume();
+      if (error) {
+        reject(error);
       } else {
-        reject(new Error(stderr.trim() || `command exited with code ${code}`));
+        resolve({ stdout, stderr });
       }
+    };
+    const abort = (): void => {
+      finish(new ScanCancelledError());
+      terminate();
+    };
+    const append = (chunk: string, isError: boolean): void => {
+      if (settled) {
+        return;
+      }
+      bytes += Buffer.byteLength(chunk);
+      if (bytes > maxBuffer) {
+        finish(new Error("command output exceeded maxBuffer"));
+        terminate();
+      } else if (isError) {
+        stderr += chunk;
+      } else {
+        stdout += chunk;
+      }
+    };
+    const onStdout = (chunk: string): void => append(chunk, false);
+    const onStderr = (chunk: string): void => append(chunk, true);
+    child.stdout?.setEncoding("utf8").on("data", onStdout);
+    child.stderr?.setEncoding("utf8").on("data", onStderr);
+    child.once("error", (error) => finish(error));
+    child.once("close", (code) => {
+      finish(code === 0 || (options.allowFindingExit && code === 1)
+        ? undefined : new Error(stderr.trim() || `command exited with code ${code}`));
     });
+    options.signal?.addEventListener("abort", abort, { once: true });
+    if (options.timeout) {
+      timer = setTimeout(() => {
+        finish(new Error(`command timed out after ${options.timeout}ms`));
+        terminate();
+      }, options.timeout);
+    }
   });
 }
+
 
 async function withConfigMutationQueue<T>(configPath: string, operation: () => Promise<T>): Promise<T> {
   const key = path.resolve(configPath);
@@ -139,18 +199,6 @@ function parseConfigMutationResult(stdout: string): ConfigMutationResult {
   return parsed as ConfigMutationResult;
 }
 
-/**
- * Extract the findings array from CLI stdout.  Current foxguard wraps
- * findings in a {@link ReportEnvelope}; older versions emitted a bare
- * `Finding[]`.  This helper handles both shapes so the extension stays
- * backward-compatible.
- */
-function extractFindings(parsed: ReportEnvelope | Finding[]): Finding[] {
-  if (Array.isArray(parsed)) {
-    return parsed;                   // legacy bare array
-  }
-  return parsed.findings ?? [];      // versioned envelope
-}
 
 const SEVERITY_ORDER: Record<string, number> = {
   low: 0, medium: 1, high: 2, critical: 3,
@@ -182,6 +230,7 @@ function commentPrefix(languageId: string): string {
     case "kotlin":
     case "c":
     case "cpp":
+    case "haskell":
       return "//";
     default:
       return "//";
@@ -386,8 +435,17 @@ let diagnosticCollection: vscode.DiagnosticCollection;
 let outputChannel: vscode.OutputChannel;
 let statusBarItem: vscode.StatusBarItem;
 let cachedBinary: string | null | undefined;
+const scanCtrl = new ScanController();
+const pendingOpenScans = new Map<string, NodeJS.Timeout>();
+const failedDocuments = new Set<string>();
+let active = false;
+let binaryGeneration = 0;
+let binaryMissing = false;
+let binaryResolution: Promise<string | null | undefined> | undefined;
+let binaryDiscovery: AbortController | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
+  active = true;
   diagnosticCollection = vscode.languages.createDiagnosticCollection("foxguard");
   outputChannel = vscode.window.createOutputChannel("foxguard");
 
@@ -414,8 +472,48 @@ export function activate(context: vscode.ExtensionContext): void {
   // Scan on open
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument((doc) => {
-      // Small delay to let the editor settle
-      setTimeout(() => scanDocument(doc), 500);
+      const key = doc.uri.toString();
+      scanCtrl.cancelDocScan(key);
+      clearTimeout(pendingOpenScans.get(key));
+      pendingOpenScans.set(key, setTimeout(() => {
+        pendingOpenScans.delete(key);
+        scanDocument(doc);
+      }, 500));
+    })
+  );
+
+  // Cancel in-flight document scan when the user edits the file
+  // (the scan results would be for a stale version).
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      if (e.document.uri.scheme === "file") {
+        const key = e.document.uri.toString();
+        clearTimeout(pendingOpenScans.get(key));
+        pendingOpenScans.delete(key);
+        scanCtrl.cancelDocScan(key);
+        updateStatusBar(vscode.window.activeTextEditor);
+      }
+    })
+  );
+
+  // Cancel scans on configuration changes (severity, binary path, etc.)
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("foxguard")) {
+        scanCtrl.cancelAll();
+        for (const timer of pendingOpenScans.values()) {
+          clearTimeout(timer);
+        }
+        pendingOpenScans.clear();
+        failedDocuments.clear();
+        binaryGeneration += 1;
+        binaryDiscovery?.abort();
+        binaryResolution = undefined;
+        binaryMissing = false;
+        cachedBinary = undefined; // force re-resolve
+        vscode.workspace.textDocuments.forEach((doc) => scanDocument(doc));
+        updateStatusBar(vscode.window.activeTextEditor);
+      }
     })
   );
 
@@ -436,10 +534,18 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // Clear diagnostics when file closed
+  // Clear diagnostics when file closed; cancel any in-flight scan for it
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument((doc) => {
+      const key = doc.uri.toString();
+      clearTimeout(pendingOpenScans.get(key));
+      pendingOpenScans.delete(key);
+      failedDocuments.delete(key);
+      if (doc.uri.scheme === "file") {
+        scanCtrl.cancelDocScan(doc.uri.toString());
+      }
       diagnosticCollection.delete(doc.uri);
+      updateStatusBar(vscode.window.activeTextEditor);
     })
   );
 
@@ -567,7 +673,17 @@ export function activate(context: vscode.ExtensionContext): void {
   outputChannel.appendLine("foxguard extension activated");
 }
 
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
+  active = false;
+  binaryGeneration += 1;
+  scanCtrl.cancelAll();
+  binaryDiscovery?.abort();
+  binaryResolution = undefined;
+  for (const timer of pendingOpenScans.values()) {
+    clearTimeout(timer);
+  }
+  pendingOpenScans.clear();
+  await Promise.all(terminatingProcesses);
   diagnosticCollection?.dispose();
 }
 
@@ -610,10 +726,26 @@ function extractDescription(message: string): string {
 // ---------------------------------------------------------------------------
 
 function updateStatusBar(editor: vscode.TextEditor | undefined): void {
-  if (editor && isSupportedFile(editor.document.uri.fsPath)) {
-    statusBarItem.show();
-  } else {
+  if (!active) {
+    return;
+  }
+  if (!editor || editor.document.uri.scheme !== "file" || !isSupportedFile(editor.document.uri.fsPath)) {
     statusBarItem.hide();
+    return;
+  }
+  statusBarItem.show();
+  if (scanCtrl.running) {
+    setStatusScanning();
+  } else if (editor.document.isDirty) {
+    statusBarItem.text = "$(shield) foxguard (save to scan)";
+    statusBarItem.tooltip = "Save this document to scan its current contents.";
+  } else if (binaryMissing) {
+    statusBarItem.text = "$(shield) foxguard (not installed)";
+    statusBarItem.tooltip = "Install foxguard or configure foxguard.path.";
+  } else if (failedDocuments.has(editor.document.uri.toString())) {
+    setStatusFailed();
+  } else {
+    setStatusDone(diagnosticCollection.get(editor.document.uri)?.length ?? 0);
   }
 }
 
@@ -631,6 +763,12 @@ function setStatusDone(count: number): void {
     statusBarItem.tooltip = `${count} security issue${count === 1 ? "" : "s"} found`;
   }
 }
+
+function setStatusFailed(): void {
+  statusBarItem.text = "$(error) foxguard";
+  statusBarItem.tooltip = "Scan failed. See the foxguard output for details.";
+}
+
 
 // ---------------------------------------------------------------------------
 // Core scanning logic
@@ -668,156 +806,123 @@ async function resolveBinary(): Promise<string | null | undefined> {
   if (cachedBinary !== undefined) {
     return cachedBinary;
   }
-
-  const config = vscode.workspace.getConfiguration("foxguard");
-  const customPath = config.get<string>("path", "").trim();
-
+  if (binaryResolution) {
+    return binaryResolution;
+  }
+  const customPath = vscode.workspace.getConfiguration("foxguard").get<string>("path", "").trim();
   if (customPath) {
     cachedBinary = customPath;
-    return cachedBinary;
+    return customPath;
   }
-
-  // Check PATH
-  const found = await runProcess("foxguard", ["--version"], { timeout: 15_000 })
-    .then(() => true, () => false);
-  if (found) {
-    cachedBinary = "foxguard";
-    return cachedBinary;
+  const generation = binaryGeneration;
+  const discovery = new AbortController();
+  binaryDiscovery = discovery;
+  const resolution = (async (): Promise<string | null | undefined> => {
+    const found = await runProcess("foxguard", ["--version"], {
+      timeout: 15_000, signal: discovery.signal,
+    }).then(() => true, () => false);
+    if (found) {
+      return "foxguard";
+    }
+    if (generation !== binaryGeneration) {
+      return undefined;
+    }
+    const npxFound = await runProcess("npx", ["foxguard", "--version"], {
+      timeout: 15_000, signal: discovery.signal,
+    }).then(() => true, () => false);
+    return npxFound ? null : undefined;
+  })();
+  binaryResolution = resolution;
+  try {
+    const binary = await resolution;
+    if (generation === binaryGeneration) {
+      cachedBinary = binary;
+    }
+    return binary;
+  } finally {
+    if (binaryResolution === resolution) {
+      binaryResolution = undefined;
+      binaryDiscovery = undefined;
+    }
   }
-
-  // Try npx
-  const npxFound = await runProcess("npx", ["foxguard", "--version"], { timeout: 15_000 })
-    .then(() => true, () => false);
-  if (npxFound) {
-    cachedBinary = null; // sentinel: use npx
-    return cachedBinary;
-  }
-
-  cachedBinary = undefined; // not found
-  return cachedBinary;
 }
 
-function scanDocument(document: vscode.TextDocument): void {
+async function scanDocument(document: vscode.TextDocument): Promise<void> {
   const filePath = document.uri.fsPath;
-
-  if (!isSupportedFile(filePath)) {
+  const key = document.uri.toString();
+  if (!active || document.uri.scheme !== "file" || !isSupportedFile(filePath)) {
     return;
   }
-
-  // Don't scan untitled or virtual documents
-  if (document.uri.scheme !== "file") {
+  clearTimeout(pendingOpenScans.get(key));
+  pendingOpenScans.delete(key);
+  if (document.isClosed || document.isDirty) {
+    scanCtrl.cancelDocScan(key);
+    updateStatusBar(vscode.window.activeTextEditor);
     return;
   }
-
-  const config = vscode.workspace.getConfiguration("foxguard");
-  const minSeverity = config.get<string>("severity", "low");
-
-  setStatusScanning();
-
-  resolveBinary().then((binary) => {
-    if (binary === undefined) {
-      statusBarItem.text = "$(shield) foxguard (not installed)";
-      vscode.window
-        .showInformationMessage(
-          "foxguard not found. Install it to enable security scanning.",
-          "Install with npm",
-          "Install prebuilt binary"
-        )
-        .then((choice) => {
-          if (choice) {
-            const terminal = vscode.window.createTerminal("foxguard");
-            terminal.show();
-            if (choice === "Install prebuilt binary") {
-              terminal.sendText("curl -fsSL https://foxguard.dev/install.sh | sh");
-            } else {
-              terminal.sendText("npm install -g foxguard");
-            }
-          }
-        });
+  const request = scanCtrl.startDocScan(key);
+  const version = document.version;
+  const minSeverity = vscode.workspace.getConfiguration("foxguard").get<string>("severity", "low");
+  const current = (): boolean => active && scanCtrl.isDocCurrent(key, request)
+    && !document.isClosed && !document.isDirty && document.version === version;
+  updateStatusBar(vscode.window.activeTextEditor);
+  try {
+    const binary = await resolveBinary();
+    if (!current()) {
       return;
     }
-
-    let command: string;
-    let args: string[];
-
-    if (binary === null) {
-      command = "npx";
-      args = ["foxguard", "--format", "json", filePath];
-    } else {
-      command = binary;
-      args = ["--format", "json", filePath];
-    }
-
-    if (minSeverity && minSeverity !== "low") {
-      args.splice(args.indexOf("--format"), 0, "--severity", minSeverity);
-    }
-
-    // foxguard: ignore[js/no-command-injection]
-    runProcess(command, args, { maxBuffer: 10 * 1024 * 1024, timeout: 30_000, allowNonZero: true })
-      .then(({ stdout, stderr }) => {
-        if (stderr) {
-          outputChannel.appendLine(stderr.trim());
+    if (binary === undefined) {
+      binaryMissing = true;
+      void vscode.window.showInformationMessage(
+        "foxguard not found. Install it to enable security scanning.",
+        "Install with npm", "Install prebuilt binary",
+      ).then((choice) => {
+        if (choice && active) {
+          const terminal = vscode.window.createTerminal("foxguard");
+          terminal.show();
+          terminal.sendText(choice === "Install prebuilt binary"
+            ? "curl -fsSL https://foxguard.dev/install.sh | sh" : "npm install -g foxguard");
         }
-
-        if (!stdout.trim()) {
-          diagnosticCollection.set(document.uri, []);
-          setStatusDone(0);
-          return;
-        }
-
-        let findings: Finding[];
-        try {
-          findings = extractFindings(JSON.parse(stdout));
-        } catch (e) {
-          outputChannel.appendLine(`Parse error: ${e}`);
-          setStatusDone(0);
-          return;
-        }
-
-        const diagnostics: vscode.Diagnostic[] = findings
-          .filter((f) => meetsMinSeverity(f.severity, minSeverity))
-          .map((f) => {
-            const range = new vscode.Range(
-              Math.max(0, f.line - 1),
-              Math.max(0, f.column - 1),
-              Math.max(0, f.end_line - 1),
-              Math.max(0, f.end_column - 1)
-            );
-
-            const sev = severityEmoji(f.severity);
-            const cweTag = f.cwe ? ` (${f.cwe})` : "";
-            const fixHint = f.fix_suggestion ? `\nFix: ${f.fix_suggestion}` : "";
-            const message = `[${sev}] ${f.description}${cweTag}${fixHint}`;
-
-            const diag = new vscode.Diagnostic(
-              range,
-              message,
-              mapSeverity(f.severity)
-            );
-            diag.source = "foxguard";
-            diag.code = {
-              value: f.rule_id,
-              target: vscode.Uri.parse(
-                `https://github.com/0sec-labs/foxguard#built-in-coverage`
-              ),
-            };
-            return diag;
-          });
-
-        diagnosticCollection.set(document.uri, diagnostics);
-        setStatusDone(diagnostics.length);
-
-        if (diagnostics.length > 0) {
-          outputChannel.appendLine(
-            `${path.basename(filePath)}: ${diagnostics.length} issue${diagnostics.length === 1 ? "" : "s"}`
-          );
-        }
-      })
-      .catch((error) => {
-        outputChannel.appendLine(`Scan failed: ${error instanceof Error ? error.message : String(error)}`);
-        setStatusDone(0);
       });
-  });
+      return;
+    }
+    binaryMissing = false;
+    const args = ["--format", "json", filePath];
+    if (minSeverity !== "low") {
+      args.unshift("--severity", minSeverity);
+    }
+    if (binary === null) {
+      args.unshift("foxguard");
+    }
+    const { stdout, stderr } = await runProcess(binary ?? "npx", args, {
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 30_000,
+      allowFindingExit: true,
+      signal: request.signal,
+    });
+    if (!current()) {
+      return;
+    }
+    if (!stdout.trim()) {
+      throw new Error("Scanner returned an empty report.");
+    }
+    const findings = extractFindings(JSON.parse(stdout));
+    const diagnostics = findingsToDiagnostics(findings.filter((finding) => meetsMinSeverity(finding.severity, minSeverity)));
+    if (stderr.trim()) {
+      outputChannel.appendLine(stderr.trim());
+    }
+    diagnosticCollection.set(document.uri, diagnostics);
+    failedDocuments.delete(key);
+    outputChannel.appendLine(`${path.basename(filePath)}: ${diagnostics.length} issue${diagnostics.length === 1 ? "" : "s"}`);
+  } catch (error) {
+    if (!(error instanceof ScanCancelledError) && current()) {
+      failedDocuments.add(key);
+      outputChannel.appendLine(`Scan failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  } finally {
+    scanCtrl.finishDocScan(key, request);
+    updateStatusBar(vscode.window.activeTextEditor);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -825,105 +930,163 @@ function scanDocument(document: vscode.TextDocument): void {
 // ---------------------------------------------------------------------------
 
 async function scanWorkspace(): Promise<void> {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders) {
-    vscode.window.showInformationMessage("No workspace folder open.");
+  if (!active) {
     return;
   }
-
-  const binary = await resolveBinary();
-  if (binary === undefined) {
-    vscode.window.showInformationMessage("foxguard not found. Install it first.");
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) {
+    void vscode.window.showInformationMessage("No workspace folder open.");
     return;
   }
-
-  const rootPath = folders[0].uri.fsPath;
-
-  vscode.window.withProgress(
-    {
+  const rootPath = folder.uri.fsPath;
+  const contains = (key: string): boolean => {
+    const uri = vscode.Uri.parse(key);
+    const relative = path.relative(rootPath, uri.fsPath);
+    return uri.scheme === "file" && relative !== ".."
+      && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+  };
+  const request = scanCtrl.startWsScan(contains);
+  for (const [key, timer] of pendingOpenScans) {
+    if (contains(key)) {
+      clearTimeout(timer);
+      pendingOpenScans.delete(key);
+    }
+  }
+  const documents = new Map(vscode.workspace.textDocuments.map((document) => [
+    document.uri.toString(), { document, version: document.version, dirty: document.isDirty },
+  ]));
+  const minSeverity = vscode.workspace.getConfiguration("foxguard").get<string>("severity", "low");
+  const current = (): boolean => active && scanCtrl.isWsCurrent(request);
+  updateStatusBar(vscode.window.activeTextEditor);
+  try {
+    await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
       title: "foxguard: scanning workspace...",
-      cancellable: false,
-    },
-    () => {
-      return new Promise<void>((resolve) => {
-        let command: string;
-        let args: string[];
-
-        if (binary === null) {
-          command = "npx";
-          args = ["foxguard", "--format", "json", rootPath];
-        } else {
-          command = binary;
-          args = ["--format", "json", rootPath];
+      cancellable: true,
+    }, async (_progress, token) => {
+      const cancellation = token.onCancellationRequested(() => request.abort());
+      try {
+        if (token.isCancellationRequested) {
+          request.abort();
         }
-
-        // foxguard: ignore[js/no-command-injection]
-        runProcess(command, args, { maxBuffer: 50 * 1024 * 1024, timeout: 120_000, allowNonZero: true })
-          .then(({ stdout }) => {
-            if (!stdout.trim()) {
-              vscode.window.showInformationMessage("foxguard: no issues found in workspace.");
-              resolve();
-              return;
-            }
-
-            let findings: Finding[];
-            try {
-              findings = extractFindings(JSON.parse(stdout));
-            } catch {
-              resolve();
-              return;
-            }
-
-            // Group by file
-            const byFile = new Map<string, Finding[]>();
-            for (const f of findings) {
-              const existing = byFile.get(f.file) || [];
-              existing.push(f);
-              byFile.set(f.file, existing);
-            }
-
-            // Set diagnostics per file
-            for (const [filePath, fileFindings] of byFile) {
-              const uri = vscode.Uri.file(filePath);
-              const diagnostics = fileFindings.map((f) => {
-                const range = new vscode.Range(
-                  Math.max(0, f.line - 1),
-                  Math.max(0, f.column - 1),
-                  Math.max(0, f.end_line - 1),
-                  Math.max(0, f.end_column - 1)
-                );
-
-                const sev = severityEmoji(f.severity);
-                const cweTag = f.cwe ? ` (${f.cwe})` : "";
-                const fixHint = f.fix_suggestion ? `\nFix: ${f.fix_suggestion}` : "";
-                const diag = new vscode.Diagnostic(
-                  range,
-                  `[${sev}] ${f.description}${cweTag}${fixHint}`,
-                  mapSeverity(f.severity)
-                );
-                diag.source = "foxguard";
-                diag.code = {
-                  value: f.rule_id,
-                  target: vscode.Uri.parse(
-                    `https://github.com/0sec-labs/foxguard#built-in-coverage`
-                  ),
-                };
-                return diag;
-              });
-              diagnosticCollection.set(uri, diagnostics);
-            }
-
-            vscode.window.showInformationMessage(
-              `foxguard: ${findings.length} issue${findings.length === 1 ? "" : "s"} in ${byFile.size} file${byFile.size === 1 ? "" : "s"}.`
-            );
-            resolve();
-          })
-          .catch((error) => {
-            outputChannel.appendLine(`Workspace scan failed: ${error instanceof Error ? error.message : String(error)}`);
-            resolve();
-          });
-      });
+        const binary = await resolveBinary();
+        if (!current()) {
+          return;
+        }
+        if (binary === undefined) {
+          binaryMissing = true;
+          void vscode.window.showInformationMessage("foxguard not found. Install it first.");
+          return;
+        }
+        binaryMissing = false;
+        const args = ["--format", "json", rootPath];
+        if (minSeverity !== "low") {
+          args.unshift("--severity", minSeverity);
+        }
+        if (binary === null) {
+          args.unshift("foxguard");
+        }
+        const { stdout, stderr } = await runProcess(binary ?? "npx", args, {
+          maxBuffer: 50 * 1024 * 1024,
+          timeout: 120_000,
+          allowFindingExit: true,
+          signal: request.signal,
+        });
+        if (!current()) {
+          return;
+        }
+        if (!stdout.trim()) {
+          throw new Error("Scanner returned an empty report.");
+        }
+        const findings = extractFindings(JSON.parse(stdout));
+        const byFile = new Map<string, { uri: vscode.Uri; findings: Finding[] }>();
+        for (const [key, snapshot] of documents) {
+          if (contains(key)) {
+            byFile.set(key, { uri: snapshot.document.uri, findings: [] });
+          }
+        }
+        // A valid clean result clears old diagnostics, but only within this
+        // workspace and only for files whose scan ownership is unchanged.
+        diagnosticCollection.forEach((uri) => {
+          if (contains(uri.toString())) {
+            byFile.set(uri.toString(), { uri, findings: [] });
+          }
+        });
+        for (const finding of findings) {
+          const uri = vscode.Uri.file(path.resolve(rootPath, finding.file));
+          const key = uri.toString();
+          const group = byFile.get(key) ?? { uri, findings: [] };
+          group.findings.push(finding);
+          byFile.set(key, group);
+        }
+        let published = 0;
+        let skipped = 0;
+        const updates: Array<{ key: string; uri: vscode.Uri; diagnostics: vscode.Diagnostic[] }> = [];
+        for (const [key, group] of byFile) {
+          const snapshot = documents.get(key);
+          const document = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === key);
+          if (!scanCtrl.canPublishWorkspace(request, key)
+            || snapshot?.document.isClosed
+            || snapshot?.dirty
+            || document && (!snapshot || document !== snapshot.document
+              || document.isDirty || document.version !== snapshot.version)) {
+            skipped += 1;
+            continue;
+          }
+          const diagnostics = findingsToDiagnostics(group.findings.filter((finding) => meetsMinSeverity(finding.severity, minSeverity)));
+          updates.push({ key, uri: group.uri, diagnostics });
+          published += diagnostics.length;
+        }
+        // Prepare every diagnostic before committing any file, so a malformed
+        // later finding cannot leave a partially updated failed report.
+        for (const update of updates) {
+          diagnosticCollection.set(update.uri, update.diagnostics);
+          failedDocuments.delete(update.key);
+        }
+        if (stderr.trim()) {
+          outputChannel.appendLine(stderr.trim());
+        }
+        void vscode.window.showInformationMessage(
+          `foxguard: published ${published} issue${published === 1 ? "" : "s"}.`
+          + (skipped ? ` ${skipped} changed or out-of-scope file${skipped === 1 ? "" : "s"} left unchanged.` : ""),
+        );
+      } finally {
+        cancellation.dispose();
+      }
+    });
+  } catch (error) {
+    if (!(error instanceof ScanCancelledError) && current()) {
+      for (const document of vscode.workspace.textDocuments) {
+        if (contains(document.uri.toString())) {
+          failedDocuments.add(document.uri.toString());
+        }
+      }
+      outputChannel.appendLine(`Workspace scan failed: ${error instanceof Error ? error.message : String(error)}`);
+      void vscode.window.showErrorMessage("foxguard workspace scan failed. See the foxguard output for details.");
     }
-  );
+  } finally {
+    scanCtrl.finishWsScan(request);
+    updateStatusBar(vscode.window.activeTextEditor);
+  }
+}
+
+function findingsToDiagnostics(findings: Finding[]): vscode.Diagnostic[] {
+  return findings.map((finding) => {
+    const range = new vscode.Range(
+      Math.max(0, finding.line - 1), Math.max(0, finding.column - 1),
+      Math.max(0, finding.end_line - 1), Math.max(0, finding.end_column - 1),
+    );
+    const cwe = finding.cwe ? ` (${finding.cwe})` : "";
+    const fix = finding.fix_suggestion ? `\nFix: ${finding.fix_suggestion}` : "";
+    const diagnostic = new vscode.Diagnostic(
+      range, `[${severityEmoji(finding.severity)}] ${finding.description}${cwe}${fix}`,
+      mapSeverity(finding.severity),
+    );
+    diagnostic.source = "foxguard";
+    diagnostic.code = {
+      value: finding.rule_id,
+      target: vscode.Uri.parse("https://github.com/0sec-labs/foxguard#built-in-coverage"),
+    };
+    return diagnostic;
+  });
 }
