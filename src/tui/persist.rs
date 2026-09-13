@@ -100,6 +100,16 @@ pub(super) struct SessionStore {
     writable: bool,
 }
 
+struct SessionLock(File);
+
+impl Drop for SessionLock {
+    fn drop(&mut self) {
+        // Closing our descriptor alone does not release flock when a concurrent
+        // fork inherited the same open file description and has not exec'd yet.
+        let _ = FileExt::unlock(&self.0);
+    }
+}
+
 impl SessionStore {
     pub(super) fn new(base: &Path, project: &Path, mode: &str) -> Self {
         let mut hash = Sha256::new();
@@ -117,7 +127,7 @@ impl SessionStore {
         &self.path
     }
 
-    fn lock(&self) -> Result<File, String> {
+    fn lock(&self) -> Result<SessionLock, String> {
         let parent = self
             .path
             .parent()
@@ -133,7 +143,7 @@ impl SessionStore {
             .open(&lock_path)
             .map_err(|error| format!("cannot open review lock {}: {error}", lock_path.display()))?;
         FileExt::try_lock_exclusive(&lock).map_err(|error| format!("review state is busy or cannot be locked; retry after the other writer finishes: {error}"))?;
-        Ok(lock)
+        Ok(SessionLock(lock))
     }
 
     pub(super) fn load(&mut self) -> Result<SessionData, String> {
@@ -350,6 +360,21 @@ mod tests {
             .save(&marks(ReviewState::Reviewed), &BTreeMap::new())
             .is_err());
         assert!(!first.path().exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn completed_operation_releases_lock_despite_an_inherited_descriptor() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = SessionStore::new(directory.path(), directory.path(), "scan");
+        let lock = store.lock().unwrap();
+        // A concurrent fork can inherit this open file description before exec.
+        let inherited = lock.0.try_clone().unwrap();
+        drop(lock);
+        store
+            .load()
+            .expect("the completed operation must release its lock");
+        drop(inherited);
     }
 
     #[test]
