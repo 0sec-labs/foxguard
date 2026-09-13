@@ -103,44 +103,24 @@ foxguard tui .`}</code></pre>
 
         <div class="rounded-xl border border-noir-800 overflow-hidden">
           <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">.foxguard.yml</div>
-          <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# Minimum severity to report (low | medium | high | critical)
-severity: medium
+          <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`scan:
+  # Minimum severity: low | medium | high | critical
+  severity: medium
+  min_confidence: 0.7
 
-# Paths to exclude from scanning (glob patterns)
-exclude:
-  - "vendor/**"
-  - "node_modules/**"
-  - "**/*.test.ts"
-  - "migrations/**"
+  # Optional saved findings: a JSON file, not a branch name.
+  # baseline: .foxguard-baseline.json
 
-# Rules to disable by ID
-disable:
-  - py-hardcoded-secret    # Handled by vault integration
-  - go-md5-usage           # Legacy checksums, not security-critical
-
-# Output format (terminal | json | sarif)
-format: terminal
-
-# Enable post-quantum crypto audit
-pqc: false
-
-# Enable secrets scanning
-secrets: true
-
-# Baseline branch for diff-only mode
-# baseline: main
-
-# Maximum file size to scan (bytes)
-max-file-size: 1048576
-
-# Number of threads (0 = auto-detect)
-threads: 0`}</code></pre>
+secrets:
+  # Exclusions for the separate "foxguard secrets" command.
+  exclude_paths:
+    - tests/fixtures`}</code></pre>
         </div>
 
         <div class="mt-6 rounded-xl border border-noir-800 bg-noir-900/30 p-6">
           <h3 class="font-heading text-noir-100 text-sm mb-3">CLI flags override config</h3>
           <p class="text-noir-400 text-sm leading-relaxed">
-            Every config option has a matching CLI flag, and flags win over <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">.foxguard.yml</code>. Run <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">foxguard --help</code> for the full list.
+            Explicit CLI values override corresponding configuration defaults. Output format, <code class="text-fox-light">--exclude</code>, and <code class="text-fox-light">--max-file-size</code> are CLI options, not YAML fields. Run <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">foxguard --help</code> for the full list.
           </p>
         </div>
       </section>
@@ -312,14 +292,14 @@ foxguard . --severity high
           <div>
             <h3 class="font-heading text-noir-100 text-base mb-3">Inline comments</h3>
             <p class="text-noir-400 text-sm mb-3 leading-relaxed">
-              Add a <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">foxguard-ignore</code> comment on the line above a finding to suppress it. Optionally specify the rule ID.
+              Add a <code class="text-fox-light bg-noir-900 px-1.5 py-0.5 rounded">foxguard: ignore[rule/id]</code> comment on the finding line or the line above it. Omit the brackets to suppress all rules on that line. Suppress only after reviewing the finding.
             </p>
             <div class="rounded-xl border border-noir-800 overflow-hidden">
               <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">example.py</div>
-              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# foxguard-ignore: py-hardcoded-secret — rotated via vault
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# foxguard: ignore[py/no-hardcoded-secret] — reviewed test fixture
 API_KEY = "sk-test-placeholder"
 
-# foxguard-ignore — suppress all rules on next line
+# foxguard: ignore — suppress all rules on the next line
 password = get_config("db_password")`}</code></pre>
             </div>
           </div>
@@ -332,9 +312,10 @@ password = get_config("db_password")`}</code></pre>
             </p>
             <div class="rounded-xl border border-noir-800 overflow-hidden">
               <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">.foxguard.yml</div>
-              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`disable:
-  - py-hardcoded-secret
-  - go-md5-usage`}</code></pre>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`scan:
+  disable_rules:
+    - py/no-hardcoded-secret
+    - go/no-weak-crypto`}</code></pre>
             </div>
           </div>
 
@@ -342,41 +323,73 @@ password = get_config("db_password")`}</code></pre>
           <div>
             <h3 class="font-heading text-noir-100 text-base mb-3">Path exclusion</h3>
             <p class="text-noir-400 text-sm mb-3 leading-relaxed">
-              Exclude entire directories or file patterns from scanning.
+              Use repeatable <code class="text-fox-light">--exclude</code> flags for directory prefixes or glob patterns, or your repository's <code class="text-fox-light">.gitignore</code>.
             </p>
             <div class="rounded-xl border border-noir-800 overflow-hidden">
-              <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">.foxguard.yml</div>
-              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`exclude:
-  - "vendor/**"
-  - "testdata/**"
-  - "**/*_test.go"
-  - "legacy/**"`}</code></pre>
+              <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard --exclude "vendor/**" \\
+  --exclude "testdata/**" \\
+  --exclude "**/*_test.go" \\
+  --exclude "legacy/**" .`}</code></pre>
             </div>
           </div>
 
           <!-- Baseline -->
           <div>
-            <h3 class="font-heading text-noir-100 text-base mb-3">Baseline / diff-only mode</h3>
+            <h3 class="font-heading text-noir-100 text-base mb-3">Saved baselines and Git diff</h3>
             <p class="text-noir-400 text-sm mb-3 leading-relaxed">
-              Report only findings introduced since a baseline branch. Adopt foxguard on an existing codebase without drowning in pre-existing issues.
+              A saved baseline is a JSON snapshot; Git diff compares against a branch.
+              CLI baseline scans suppress matching findings. Terminal review keeps them
+              available and separates introduced, recurring, and resolved entries.
             </p>
             <div class="rounded-xl border border-noir-800 overflow-hidden">
               <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
-              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# Only show findings not present on main
-foxguard diff main`}</code></pre>
+              <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`# Save the current findings
+foxguard baseline --output .foxguard/baseline.json .
+
+# Report findings not in the saved baseline
+foxguard --baseline .foxguard/baseline.json .
+
+# Review current findings alongside baseline history
+foxguard tui --baseline .foxguard/baseline.json .
+
+# Independently compare against a Git branch
+foxguard diff main .`}</code></pre>
             </div>
+            <p class="mt-3 text-noir-400 text-sm leading-relaxed">
+              Resolved means not reported under the current scope, rules, and filters—not
+              verified fixed. Compare equivalent scan settings. Baseline identity includes
+              file and source location; moving a finding can appear as introduced plus resolved.
+              Historical entries do not contain current source context.
+            </p>
           </div>
 
           <!-- TUI triage -->
           <div>
             <h3 class="font-heading text-noir-100 text-base mb-3">TUI triage</h3>
             <p class="text-noir-400 text-sm mb-3 leading-relaxed">
-              Review findings one by one in the terminal UI, suppress with a keybinding, or export what remains.
+              Choose Scan, Diff, Secrets, or PQC, then review findings without leaving the terminal.
+              Wide screens show a split view; use the detail toggle on smaller screens.
             </p>
             <div class="rounded-xl border border-noir-800 overflow-hidden">
               <div class="bg-noir-900/50 border-b border-noir-800 px-5 py-2 text-xs text-noir-500 font-mono">terminal</div>
               <pre class="px-5 py-4 text-sm font-mono text-noir-200 overflow-x-auto"><code>{`foxguard tui .`}</code></pre>
             </div>
+            <ul class="mt-4 space-y-2 text-noir-400 text-sm leading-relaxed">
+              <li><kbd class="font-mono text-noir-200">v</kbd> expands detail; PageUp/PageDown scroll source context, dataflow, and fixes. Esc returns to the list.</li>
+              <li>Enter or <kbd class="font-mono text-noir-200">o</kbd> opens the selected finding/source/sink using a nonblank VISUAL, then EDITOR, or an installed terminal editor (nvim, vim, nano, vi). Headless terminals do not require xdg-open. For example, set <code class="font-mono text-noir-200">VISUAL="nvim"</code> or <code class="font-mono text-noir-200">EDITOR="code --wait"</code>. Missing or invalid editors leave the TUI open with setup guidance.</li>
+              <li><kbd class="font-mono text-noir-200">/</kbd> edits search, Enter applies it, and Ctrl+U clears the draft. Esc cancels edits and restores the prior query; outside editing or expanded detail, Esc clears filters.</li>
+              <li><kbd class="font-mono text-noir-200">0–4</kbd> set minimum severity, <kbd class="font-mono text-noir-200">c</kbd> cycles confidence, and Shift+C changes sorting.</li>
+              <li><kbd class="font-mono text-noir-200">f</kbd> cycles All, Unreviewed, Todo, Reviewed, and Ignore. The list shows visible/total counts and review progress.</li>
+              <li><kbd class="font-mono text-noir-200">i</kbd> opens single-finding triage. Review marks persist in per-user storage, scoped to the canonical project root and scan mode; baseline and configuration actions change repository files.</li>
+              <li>Space checks a finding; <kbd class="font-mono text-noir-200">a</kbd> toggles visible selections. Hidden selections remain selected. <kbd class="font-mono text-noir-200">x</kbd> opens a batch preview with exact targets, hidden counts, destination, and rule/file or project-wide effects. Only <kbd class="font-mono text-noir-200">y</kbd> applies it; Esc cancels without writing. Successful configuration writes are not rolled back if another target fails.</li>
+              <li>Shift+F manages named search, severity, confidence, review, sort, and baseline filters. In that menu, Enter loads, <kbd class="font-mono text-noir-200">s</kbd> saves, and <kbd class="font-mono text-noir-200">d</kbd> confirms deletion. Replacement requires confirmation.</li>
+              <li>Storage errors leave changes visibly UNSAVED rather than silently clobbering another terminal. Shift+F provides <kbd class="font-mono text-noir-200">w</kbd> to retry, <kbd class="font-mono text-noir-200">r</kbd> to confirm reloading, and Shift+R to confirm backing up the on-disk review file and resetting this project/mode. Reload/reset discards unsaved changes; unsaved marks are not included in the backup.</li>
+              <li>With <code class="font-mono text-noir-200">--baseline</code>, <kbd class="font-mono text-noir-200">b</kbd> cycles all current, introduced, recurring, and resolved entries. Resolved means absent under the current scan scope—not verified fixed. Historical rows are read-only, support search and expanded detail, and have no saved source, severity, or confidence. Switch to current findings to triage or export.</li>
+              <li><kbd class="font-mono text-noir-200">e</kbd> exports all current scan results—not just filtered rows—to CBOM, JSON, or SARIF in the working directory. Existing reports require <kbd class="font-mono text-noir-200">y</kbd> to replace; Esc cancels. Symlinks are rejected.</li>
+              <li><kbd class="font-mono text-noir-200">?</kbd> opens scrollable help. Ctrl+C quits from any view, including search and confirmation dialogs.</li>
+              <li>The loading card shows indeterminate activity and actual elapsed time. Ctrl+C also exits during scanning.</li>
+            </ul>
           </div>
         </div>
       </section>

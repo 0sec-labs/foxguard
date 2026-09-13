@@ -107,6 +107,7 @@ the hosted application.
 ```sh
 foxguard .                              # scan everything
 foxguard diff main .                    # only new findings vs main
+foxguard tui .                          # interactive terminal review
 foxguard secrets .                      # leaked credentials and keys
 foxguard sca .                          # dependency vulnerabilities from OSV
 foxguard pqc .                          # post-quantum crypto audit
@@ -119,6 +120,89 @@ fixes in place. Targets are checked against the canonical scan directory or the
 selected file; findings outside that scope are skipped. Python command-injection
 fixes add `import subprocess` when needed, preserving module docstrings and future
 imports. Review generated changes before committing.
+
+File read, metadata, and directory-traversal failures in the native code scanner
+exit `2` instead of producing a successful report or overwriting a baseline.
+Intentional exclusions and unsupported, binary, or oversized files remain skips;
+inspect the skipped-file notices when checking scan coverage.
+
+## Terminal Review
+
+Run `foxguard tui .` and choose **Scan**, **Diff**, **Secrets**, or **PQC** with
+the arrows or Tab. In Diff mode, type the target branch before pressing Enter.
+Wide terminals show findings beside their detail; smaller terminals use a list
+with an expandable detail view. Source context, dataflow, and fixes remain
+scrollable whenever the finding provides them.
+The loading card shows indeterminate activity and actual elapsed time, not a
+percentage estimate. Ctrl+C exits during scanning.
+
+| Key | Action |
+|-----|--------|
+| `j` / `k`, arrows, Home / End | Move between findings |
+| `v` | Expand detail or return to the list/split view |
+| PageUp / PageDown | Page the list, or scroll visible detail |
+| `/`, Enter | Edit and apply a search |
+| Ctrl+U | Clear the search being edited |
+| Esc | Close a modal, cancel search edits, leave expanded detail, or clear applied filters |
+| `0`–`4`, `c`, Shift+C | Minimum severity, confidence threshold, and sort order |
+| `f` | Cycle All → Unreviewed → Todo → Reviewed → Ignore |
+| `i` | Preview and apply triage actions |
+| Space, `a`, `x` | Check one finding, toggle visible selections, and preview a batch action |
+| Shift+F | Save, load, replace, or delete named filters; recover review storage |
+| `b` | Cycle baseline categories when a comparison is available |
+| Tab, Enter / `o` | Choose finding/source/sink and open it in your editor |
+| `w`, `[` / `]` | Show notices and scroll their history; newest notices appear first |
+| `e` | Export CBOM, JSON, or SARIF |
+| `?`, `q` / Ctrl+C | Help and quit; Ctrl+C also works inside every modal |
+
+Enter and `o` use a nonblank `$VISUAL`, then `$EDITOR`. Without either setting,
+foxguard looks for `nvim`, `vim`, `nano`, or `vi` on `PATH` before considering an
+available desktop opener. Headless terminals do not require `xdg-open`.
+For example, run `VISUAL="nvim" foxguard tui .` or set
+`EDITOR='code --wait'`. A broken explicit editor setting is reported rather than
+silently replaced; if no editor is available, the TUI stays open with setup
+guidance. Supported editors jump to the selected finding/source/sink line.
+
+Review marks persist automatically in per-user storage, scoped to the canonical
+project root and scan mode (including the target in Diff mode). Named filters
+restore search, severity, confidence, review status, sorting, and baseline category
+when loaded with Shift+F. They do not change repository scan configuration.
+The list shows visible/total findings and review progress; changing filters or
+sorting keeps the same finding selected when it remains visible. Canceling search
+edits restores the previously applied query.
+
+Checked findings survive filter changes. `x` opens batch actions; Enter shows the
+exact targets, hidden-selection count, destination, and effect scope. Only `y`
+applies the preview; Enter again does not confirm it, and Esc cancels without
+writing. Baseline actions add exact fingerprints. Rule/file and project-wide
+configuration actions can also affect unselected findings, as the preview warns.
+If a configuration target fails, successful writes remain and outcomes are
+reported; the batch is not a transaction.
+
+Storage uses `$XDG_STATE_HOME/foxguard/tui` (or
+`~/.local/state/foxguard/tui`) on Linux, Application Support on macOS, and
+`%LOCALAPPDATA%` on Windows. Atomic writes and revision checks prevent one terminal
+from silently overwriting another. Storage errors leave local changes visibly
+**UNSAVED**. In Shift+F, `w` retries saving, `r` explicitly reloads from disk, and
+Shift+R confirms a backup-and-reset of the current project/mode. Reload/reset can
+discard unsaved changes; reset preserves the previous on-disk bytes, not unsaved
+marks. Review storage contains fingerprints and filter settings, not source code.
+
+Exports include the current scan's results, not just the visible filtered rows,
+and are written to the current working directory. Existing regular files require
+an explicit `y` confirmation; Esc cancels. Writes are atomic and destination
+symlinks, including dangling links, are rejected.
+
+Use `foxguard tui --baseline .foxguard/baseline.json .` to review a saved
+baseline comparison. Unlike CLI suppression, terminal review retains current
+findings and separates **introduced**, **recurring**, and **resolved** entries.
+Resolved means absent from the current scan's output, not verified remediation:
+compare equivalent scope, rules, and thresholds. Baseline identity includes the
+file and source location, so moving a finding can appear as introduced plus
+resolved. Resolved rows are read-only historical metadata; only search applies,
+and `v` expands their scrollable details. Switch back to a current-finding category
+to triage or export the current scan.
+Git Diff remains a separate comparison against a branch.
 
 ## Language Coverage
 

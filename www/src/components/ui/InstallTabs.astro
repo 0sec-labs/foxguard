@@ -3,62 +3,94 @@ interface Props {
   id?: string;
 }
 const { id = 'install' } = Astro.props;
+const commands = {
+  npx: { label: 'npx', command: 'npx foxguard .', description: 'Run without a global install. Requires Node.js.' },
+  pypi: { label: 'PyPI', command: 'pipx install foxguard', description: 'Python 3.9+ native wheels: Linux (glibc 2.28+), macOS, and Windows x86_64. No Rust compiler needed.' },
+  curl: { label: 'curl', command: 'curl -fsSL https://foxguard.dev/install.sh | sh', description: 'Install a checksum-verified standalone binary on macOS or Linux.' },
+  cargo: { label: 'cargo', command: 'cargo install foxguard', description: 'Build the CLI from source with the Rust toolchain.' },
+};
+const rootId = `${id}-installation`;
 ---
 
-<div data-install-box class="rounded-xl border border-noir-800 overflow-hidden mx-auto transition-all duration-300" style="width: 440px; max-width: 100%;">
-  <div class="flex border-b border-noir-800">
-    <button data-tab="npx" data-group={id} class={`install-tab-${id} flex-1 px-4 py-2 text-sm text-noir-100 border-b-2 border-fox cursor-pointer`}>npx</button>
-    <button data-tab="curl" data-group={id} class={`install-tab-${id} flex-1 px-4 py-2 text-sm text-noir-600 border-b-2 border-transparent hover:text-noir-400 transition-colors cursor-pointer`}>curl</button>
-    <button data-tab="cargo" data-group={id} class={`install-tab-${id} flex-1 px-4 py-2 text-sm text-noir-600 border-b-2 border-transparent hover:text-noir-400 transition-colors cursor-pointer`}>cargo</button>
+<div id={rootId} data-install-box class="rounded-xl border border-noir-800 overflow-hidden mx-auto transition-all duration-300" style="width: 440px; max-width: 100%;">
+  <div role="tablist" aria-label="Installation method" class="flex border-b border-noir-800">
+    {Object.entries(commands).map(([key, option]) => (
+      <button
+        type="button"
+        role="tab"
+        id={`${rootId}-${key}`}
+        data-tab={key}
+        aria-controls={`${rootId}-command`}
+        aria-selected={key === 'npx'}
+        tabindex={key === 'npx' ? 0 : -1}
+        class={`flex-1 px-4 py-2 text-sm border-b-2 cursor-pointer transition-colors ${key === 'npx' ? 'text-noir-100 border-fox' : 'text-noir-600 border-transparent hover:text-noir-400'}`}
+      >{option.label}</button>
+    ))}
   </div>
-  <button data-area={id} class="w-full px-5 py-3 font-mono text-sm flex items-center justify-center cursor-pointer hover:bg-noir-900/30 active:scale-95 transition-all">
-    <code data-cmd={id} class="text-fox-light transition-all duration-200 whitespace-nowrap overflow-hidden text-ellipsis">npx foxguard .</code>
-  </button>
+  <div role="tabpanel" id={`${rootId}-command`} aria-labelledby={`${rootId}-npx`}>
+    <button type="button" data-copy-command aria-label={`Copy command: ${commands.npx.command}`} class="w-full px-5 py-3 font-mono text-sm flex items-center justify-center cursor-pointer hover:bg-noir-900/30 active:scale-95 transition-all">
+      <code data-command class="text-fox-light whitespace-nowrap overflow-hidden text-ellipsis">{commands.npx.command}</code>
+    </button>
+    <p data-install-description class="px-5 pb-2 text-xs text-noir-400">{commands.npx.description}</p>
+    <p data-copy-status role="status" aria-live="polite" class="px-5 pb-3 text-xs text-noir-400">Click the command to copy.</p>
+  </div>
 </div>
 
-<script define:vars={{ id }}>
-  const cmds = {
-    npx: 'npx foxguard .',
-    curl: 'curl -fsSL https://foxguard.dev/install.sh | sh',
-    cargo: 'cargo install foxguard',
-  };
-  let currentCmd = 'npx foxguard .';
+<script define:vars={{ rootId, commands }}>
+  (() => {
+    const root = document.getElementById(rootId);
+    if (!root) return;
+    const tabs = Array.from(root.querySelectorAll('[role="tab"]'));
+    const panel = root.querySelector('[role="tabpanel"]');
+    const commandEl = root.querySelector('[data-command]');
+    const descriptionEl = root.querySelector('[data-install-description]');
+    const copyButton = root.querySelector('[data-copy-command]');
+    const statusEl = root.querySelector('[data-copy-status]');
+    let currentCommand = commands.npx.command;
 
-  async function flash() {
-    const cmdEl = document.querySelector(`[data-cmd="${id}"]`);
-    const box = document.querySelector(`[data-area="${id}"]`)?.parentElement;
-    if (!cmdEl || !box) return;
-    try {
-      await navigator.clipboard.writeText(currentCmd);
-    } catch {
-      // Leave the command visible without claiming a denied copy succeeded.
-      return;
-    }
-    box.classList.remove('copy-flash');
-    box.offsetWidth;
-    box.classList.add('copy-flash');
-    cmdEl.classList.add('text-green-400');
-    cmdEl.classList.remove('text-fox-light');
-    setTimeout(() => {
-      cmdEl.classList.remove('text-green-400');
-      cmdEl.classList.add('text-fox-light');
-    }, 400);
-  }
-
-  document.querySelector(`[data-area="${id}"]`)?.addEventListener('click', flash);
-
-  document.querySelectorAll(`.install-tab-${id}`).forEach(tab => {
-    tab.addEventListener('click', () => {
-      const key = tab.dataset.tab;
-      currentCmd = cmds[key];
-      document.querySelector(`[data-cmd="${id}"]`).textContent = currentCmd;
-      document.querySelectorAll(`.install-tab-${id}`).forEach(t => {
-        t.classList.remove('text-noir-100', 'border-fox');
-        t.classList.add('text-noir-600', 'border-transparent');
+    function selectTab(tab, focus = false) {
+      const option = commands[tab.dataset.tab];
+      if (!option) return;
+      currentCommand = option.command;
+      commandEl.textContent = option.command;
+      descriptionEl.textContent = option.description;
+      copyButton.setAttribute('aria-label', `Copy command: ${option.command}`);
+      panel.setAttribute('aria-labelledby', tab.id);
+      statusEl.textContent = 'Click the command to copy.';
+      tabs.forEach(candidate => {
+        const selected = candidate === tab;
+        candidate.setAttribute('aria-selected', String(selected));
+        candidate.tabIndex = selected ? 0 : -1;
+        candidate.classList.toggle('text-noir-100', selected);
+        candidate.classList.toggle('border-fox', selected);
+        candidate.classList.toggle('text-noir-600', !selected);
+        candidate.classList.toggle('border-transparent', !selected);
       });
-      tab.classList.add('text-noir-100', 'border-fox');
-      tab.classList.remove('text-noir-600', 'border-transparent');
-      flash();
+      if (focus) tab.focus();
+    }
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => selectTab(tab));
+      tab.addEventListener('keydown', event => {
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        selectTab(tabs[next], true);
+      });
     });
-  });
+
+    copyButton.addEventListener('click', async () => {
+      const command = currentCommand;
+      try {
+        await navigator.clipboard.writeText(command);
+        if (currentCommand === command) statusEl.textContent = 'Copied to clipboard.';
+      } catch {
+        if (currentCommand === command) statusEl.textContent = 'Clipboard unavailable. Select and copy the command manually.';
+      }
+    });
+  })();
 </script>
