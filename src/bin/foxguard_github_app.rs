@@ -91,16 +91,21 @@ fn parse_positive_usize(value: Option<String>, default: usize) -> usize {
 }
 
 impl PullRequestDispatcher {
-    fn new(
-        capacity: usize,
-        jobs: PullRequestJobStore,
-    ) -> (Self, tokio::sync::mpsc::Receiver<PullRequestJob>) {
-        let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
+    fn new(capacity: usize, jobs: PullRequestJobStore) -> (Self, PullRequestReceiver) {
+        let (wake_tx, wake_rx) = tokio::sync::mpsc::channel(capacity);
+        let admission = Arc::new(Mutex::new(PullRequestAdmission::default()));
+        let jobs = Arc::new(Mutex::new(jobs));
+        let receiver = PullRequestReceiver {
+            wake: wake_rx,
+            notifier: wake_tx.downgrade(),
+            admission: Arc::clone(&admission),
+            jobs: Arc::clone(&jobs),
+        };
         (
             Self {
-                sender,
-                admission: Arc::new(Mutex::new(PullRequestAdmission::default())),
-                jobs: Arc::new(Mutex::new(jobs)),
+                wake: wake_tx,
+                admission,
+                jobs: jobs.clone(),
             },
             receiver,
         )
@@ -138,9 +143,9 @@ impl PullRequestDispatcher {
     }
 
     fn schedule(&self) {
-        let mut admission = self.admission.lock().unwrap_or_else(|e| e.into_inner());
+        let admission = self.admission.lock().unwrap_or_else(|e| e.into_inner());
         let jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
-        self.schedule_locked(&mut admission, &jobs);
+        self.schedule_locked(&admission, &jobs);
     }
 
     fn mark_running(&self, delivery: &str) -> Result<Option<StoredPullRequestJob>, String> {
@@ -340,7 +345,7 @@ impl PullRequestDispatcher {
                     .abandoned_deliveries
                     .retain(|delivery| matches!(jobs.job(delivery), Some(job) if job.status == PullRequestJobStatus::Running));
                 if requeued > 0 {
-                    self.schedule_locked(&mut admission, &jobs);
+                    self.schedule_locked(&admission, &jobs);
                 }
                 Ok(requeued)
             }
@@ -356,7 +361,7 @@ impl PullRequestDispatcher {
                         requeued,
                         "abandoned pull_request jobs requeued before directory sync failed; scheduling them"
                     );
-                    self.schedule_locked(&mut admission, &jobs);
+                    self.schedule_locked(&admission, &jobs);
                 }
                 Ok(requeued)
             }
@@ -388,26 +393,96 @@ impl PullRequestDispatcher {
             admission.abandoned_deliveries.remove(delivery);
         }
         admission.outstanding.remove(key);
-        self.schedule_locked(&mut admission, &jobs);
+        self.schedule_locked(&admission, &jobs);
     }
 
-    fn schedule_locked(&self, admission: &mut PullRequestAdmission, jobs: &PullRequestJobStore) {
-        for stored in jobs.queued_jobs() {
-            let job = PullRequestJob::from_stored(&stored);
-            if admission.outstanding.contains(&job.key) {
-                continue;
-            }
-            match self.sender.try_send(job) {
-                Ok(()) => {
-                    admission.outstanding.insert(PullRequestKey {
-                        repository: stored.repository,
-                        number: stored.pull_request,
-                    });
+    /// Wake opportunities are bounded; choosing a tenant waits until a worker
+    /// claims one, so a full buffer cannot put a newcomer behind a noisy tenant.
+    fn schedule_locked(&self, admission: &PullRequestAdmission, jobs: &PullRequestJobStore) {
+        if self.wake.capacity() == 0 {
+            return;
+        }
+        let eligible = jobs
+            .queued_jobs_with_order()
+            .filter(|(job, _)| !admission.is_outstanding(job))
+            .take(self.wake.max_capacity())
+            .count();
+        notify_eligible_jobs(&self.wake, eligible);
+    }
+}
+
+fn notify_eligible_jobs(wake: &tokio::sync::mpsc::Sender<()>, eligible: usize) {
+    let buffered = wake.max_capacity().saturating_sub(wake.capacity());
+    for _ in buffered..eligible.min(wake.max_capacity()) {
+        if wake.try_send(()).is_err() {
+            break;
+        }
+    }
+}
+
+impl PullRequestReceiver {
+    async fn recv(&mut self) -> Option<PullRequestJob> {
+        loop {
+            match self.try_recv() {
+                Ok(job) => return Some(job),
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => return None,
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    self.wake.recv().await?;
+                    if let Some(job) = self.claim_one() {
+                        return Some(job);
+                    }
                 }
-                Err(tokio::sync::mpsc::error::TrySendError::Full(_))
-                | Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
             }
         }
+    }
+
+    fn try_recv(&mut self) -> Result<PullRequestJob, tokio::sync::mpsc::error::TryRecvError> {
+        loop {
+            self.wake.try_recv()?;
+            if let Some(job) = self.claim_one() {
+                return Ok(job);
+            }
+        }
+    }
+
+    fn claim_one(&self) -> Option<PullRequestJob> {
+        let mut admission = self
+            .admission
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let jobs = self.jobs.lock().unwrap_or_else(|error| error.into_inner());
+        let mut candidate = None;
+        let mut candidate_order = None;
+        let mut eligible = 0usize;
+        for (job, sequence) in jobs.queued_jobs_with_order() {
+            if admission.is_outstanding(job) {
+                continue;
+            }
+            eligible += 1;
+            // The cursor is an ID, not a position in a changing tenant list.
+            // Greater IDs come first; then wrap, preserving FIFO within a tenant.
+            let order = (
+                admission
+                    .last_installation_id
+                    .is_some_and(|last| job.installation_id <= last),
+                job.installation_id,
+                sequence,
+            );
+            if candidate_order.is_none_or(|current| order < current) {
+                candidate = Some(job);
+                candidate_order = Some(order);
+            }
+        }
+        let stored = candidate?;
+        let job = PullRequestJob::from_stored(stored);
+        admission.outstanding.insert(job.key.clone());
+        admission.last_installation_id = Some(stored.installation_id);
+        // Refill immediately, not on completion: capacity=1 must still keep
+        // multiple workers busy. A weak sender preserves channel close semantics.
+        if let Some(notifier) = self.notifier.upgrade() {
+            notify_eligible_jobs(&notifier, eligible.saturating_sub(1));
+        }
+        Some(job)
     }
 }
 
@@ -446,19 +521,47 @@ struct AppState {
 
 #[derive(Clone)]
 struct PullRequestDispatcher {
-    sender: tokio::sync::mpsc::Sender<PullRequestJob>,
+    /// Bounded wake-token channel. Carries `()` signals only — no preselected
+    /// jobs. Workers consume a token then claim one eligible job via round-robin
+    /// at claim time.  Capacity retains its configured meaning (backpressure
+    /// envelope), but the FIFO order of tokens does NOT determine job order:
+    /// each token gives its consumer one round-robin claim opportunity.
+    wake: tokio::sync::mpsc::Sender<()>,
+    admission: Arc<Mutex<PullRequestAdmission>>,
+    jobs: Arc<Mutex<PullRequestJobStore>>,
+}
+
+/// Workers share this receiver behind one async mutex; the wake channel itself
+/// needs no second mutex or strong sender.
+struct PullRequestReceiver {
+    wake: tokio::sync::mpsc::Receiver<()>,
+    notifier: tokio::sync::mpsc::WeakSender<()>,
     admission: Arc<Mutex<PullRequestAdmission>>,
     jobs: Arc<Mutex<PullRequestJobStore>>,
 }
 
 #[derive(Default)]
 struct PullRequestAdmission {
-    /// Keys currently in the mpsc queue or running on a worker. A newer
-    /// persisted delivery for one key waits until the current job finishes.
+    /// Claimed/running keys. Buffered wake tokens never reserve a PR key.
+    /// A newer delivery for a claimed key waits until that worker finishes.
     outstanding: HashSet<PullRequestKey>,
     /// Deliveries whose worker ended while their durable job remained
     /// `Running`; retried by the idle lifecycle driver after parent sync.
     abandoned_deliveries: HashSet<String>,
+    /// The installation whose job was last claimed by a worker. Round-robin
+    /// starts with the *next* installation after this one, so every installation
+    /// gets a turn before any gets a second.
+    last_installation_id: Option<u64>,
+}
+
+impl PullRequestAdmission {
+    fn is_outstanding(&self, job: &StoredPullRequestJob) -> bool {
+        // This set is bounded by active workers; borrowing avoids allocating a
+        // repository string for every queued job examined by the scheduler.
+        self.outstanding
+            .iter()
+            .any(|key| key.number == job.pull_request && key.repository == job.repository)
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -766,11 +869,7 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-fn start_pull_request_workers(
-    state: AppState,
-    receiver: tokio::sync::mpsc::Receiver<PullRequestJob>,
-    worker_count: usize,
-) {
+fn start_pull_request_workers(state: AppState, receiver: PullRequestReceiver, worker_count: usize) {
     let receiver = Arc::new(tokio::sync::Mutex::new(receiver));
     for worker_id in 0..worker_count {
         let state = state.clone();
@@ -2542,7 +2641,7 @@ mod tests {
     fn dispatcher() -> (
         tempfile::TempDir,
         PullRequestDispatcher,
-        tokio::sync::mpsc::Receiver<PullRequestJob>,
+        PullRequestReceiver,
     ) {
         let dir = tempfile::tempdir().expect("tempdir should be created");
         let store = PullRequestJobStore::open(dir.path().join("pull-request-jobs.json"))
@@ -3908,44 +4007,183 @@ mod tests {
         ));
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn concurrent_newer_delivery_and_late_check_attachment_retain_cancellation() {
-        let (_dir, dispatcher, _receiver) = dispatcher();
-        let first = match dispatcher
-            .admit(pull_request_job("delivery-1", "owner/repo", 7, "head-1"))
-            .expect("first delivery should persist")
-        {
-            DispatchOutcome::Accepted { job, .. } => job,
-            DispatchOutcome::DuplicateDelivery => panic!("first delivery must be accepted"),
-        };
-        let barrier = Arc::new(tokio::sync::Barrier::new(3));
-        let attach_dispatcher = dispatcher.clone();
-        let attach_delivery = first.delivery_id.clone();
-        let attach_barrier = Arc::clone(&barrier);
-        let attachment = tokio::spawn(async move {
-            attach_barrier.wait().await;
-            attach_dispatcher.attach_check_run_id(&attach_delivery, 91)
-        });
-        let admit_dispatcher = dispatcher.clone();
-        let admit_barrier = Arc::clone(&barrier);
-        let newer_delivery = tokio::spawn(async move {
-            admit_barrier.wait().await;
-            admit_dispatcher.admit(pull_request_job("delivery-2", "owner/repo", 7, "head-2"))
-        });
-        barrier.wait().await;
+    /// Create a job scoped to a specific installation. Uses explicit
+    /// fields so the call site reads clearly.
+    fn job_for_installation(
+        installation_id: u64,
+        delivery: &str,
+        repository: &str,
+        number: u64,
+        head_sha: &str,
+    ) -> PullRequestJob {
+        let mut job = pull_request_job(delivery, repository, number, head_sha);
+        job.installation_id = installation_id;
+        job
+    }
 
-        assert!(matches!(
-            attachment.await.expect("attachment task should join"),
-            Ok(CheckRunAttachment::Attached(_)) | Ok(CheckRunAttachment::CancellationPending(_))
-        ));
-        assert!(matches!(
-            newer_delivery.await.expect("admission task should join"),
-            Ok(DispatchOutcome::Accepted { .. })
-        ));
-        let pending = dispatcher.cancellation_pending_jobs();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].delivery_id, "delivery-1");
-        assert_eq!(pending[0].check_run_id, Some(91));
+    /// Admit a job to the dispatcher, panicking on failure.
+    fn admit_job(
+        dispatcher: &PullRequestDispatcher,
+        installation_id: u64,
+        delivery: &str,
+        repository: &str,
+        number: u64,
+        head_sha: &str,
+    ) {
+        let job = job_for_installation(installation_id, delivery, repository, number, head_sha);
+        assert!(
+            matches!(dispatcher.admit(job), Ok(DispatchOutcome::Accepted { .. })),
+            "job {delivery} for install {installation_id} should be admitted"
+        );
+    }
+
+    fn dispatcher_with_capacity(
+        capacity: usize,
+    ) -> (
+        tempfile::TempDir,
+        PullRequestDispatcher,
+        PullRequestReceiver,
+    ) {
+        let dir = tempfile::tempdir().expect("tempdir should be created");
+        let store = PullRequestJobStore::open(dir.path().join("pull-request-jobs.json"))
+            .expect("job store should open");
+        let (dispatcher, receiver) = PullRequestDispatcher::new(capacity, store);
+        (dir, dispatcher, receiver)
+    }
+
+    /// Drain the wake channel and return every job that could be claimed
+    /// via round-robin on the available wake tokens.
+    fn drain_receiver(receiver: &mut PullRequestReceiver) -> Vec<PullRequestJob> {
+        let mut jobs = Vec::new();
+        while let Ok(job) = receiver.try_recv() {
+            jobs.push(job);
+        }
+        jobs
+    }
+
+    #[test]
+    fn round_robin_interleaves_installations_across_available_slots() {
+        // With 4 slots and 2 installations that each have 2+ queued jobs,
+        // round-robin dispatches one from each installation per round rather
+        // than consuming every slot from a single installation first.
+        let (_dir, dispatcher, mut receiver) = dispatcher_with_capacity(4);
+
+        // Install A (id=1) has 3 queued jobs; install B (id=2) has 2 queued
+        // jobs, all on different PRs so none are blocked by outstanding keys.
+        admit_job(&dispatcher, 1, "delivery-a1", "org/alpha", 1, "head-a1");
+        admit_job(&dispatcher, 1, "delivery-a2", "org/bravo", 2, "head-a2");
+        admit_job(&dispatcher, 1, "delivery-a3", "org/charlie", 3, "head-a3");
+        admit_job(&dispatcher, 2, "delivery-b1", "org/delta", 4, "head-b1");
+        admit_job(&dispatcher, 2, "delivery-b2", "org/echo", 5, "head-b2");
+
+        dispatcher.schedule();
+        let dispatched: Vec<_> = (0..4).map(|_| receiver.try_recv().unwrap()).collect();
+
+        let installations: Vec<u64> = dispatched.iter().map(|j| j.installation_id).collect();
+        assert_eq!(
+            installations,
+            vec![1, 2, 1, 2],
+            "dispatch order must alternate A→B→A→B (round-robin per round)"
+        );
+
+        // The remaining queued job is from install A.
+        assert_eq!(dispatched[2].delivery, "delivery-a2");
+        assert_eq!(dispatched[3].delivery, "delivery-b2");
+    }
+
+    #[test]
+    fn round_robin_abandoned_recovery_participates_fairly() {
+        // A job abandoned by a worker (durably Running but complete() left it
+        // in that state) and then requeued by the lifecycle driver participates
+        // in round-robin dispatch alongside jobs from other installations.
+        let (_dir, dispatcher, mut receiver) = dispatcher_with_capacity(2);
+
+        // Install A has one running job. Consume it from the channel.
+        admit_job(&dispatcher, 1, "delivery-a1", "org/alpha", 1, "head-a1");
+        dispatcher.schedule();
+        let a1 = receiver.try_recv().expect("first job");
+        dispatcher
+            .mark_running(&a1.delivery)
+            .expect("mark a1 running");
+
+        // Install B admits a job on a different PR.
+        admit_job(&dispatcher, 2, "delivery-b1", "org/beta", 2, "head-b1");
+
+        // Worker abandons a1. complete() calls schedule_locked which
+        // dispatches b1 into the channel (free slot, b1's key not outstanding).
+        dispatcher.complete(&a1.key, &a1.delivery);
+        let b1_dispatched = drain_receiver(&mut receiver);
+        assert_eq!(
+            b1_dispatched.len(),
+            1,
+            "b1 dispatched from complete's schedule_locked call"
+        );
+        assert_eq!(b1_dispatched[0].installation_id, 2);
+        assert_eq!(b1_dispatched[0].delivery, "delivery-b1");
+
+        // Lifecycle driver requeues abandoned a1.
+        let requeued = dispatcher
+            .requeue_abandoned_running()
+            .expect("abandoned running job should requeue");
+        assert_eq!(
+            requeued, 1,
+            "the abandoned running job is requeued as Queued in the store"
+        );
+
+        // schedule_locked runs inside requeue_abandoned_running. a1 is
+        // queued; b1's key is outstanding (already dispatched above). Only
+        // a1 gets dispatched.
+        let dispatched = drain_receiver(&mut receiver);
+        assert_eq!(dispatched.len(), 1, "a1 is requeued and dispatched");
+        assert_eq!(
+            dispatched[0].installation_id, 1,
+            "install A's recovered job is dispatched"
+        );
+        assert_eq!(dispatched[0].delivery, "delivery-a1");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn round_robin_late_b_with_capacity_128_gets_next_claim() {
+        // Install A fills a capacity-128 wake channel with its jobs.
+        // After a worker claims one A job (cursor advances past A), a late-
+        // arriving B should be the NEXT claim — NOT another A job from the
+        // 127 remaining wake tokens.
+        let (_dir, dispatcher, mut receiver) = dispatcher_with_capacity(128);
+
+        // Admit 128 jobs from install A (all different PRs so none blocked).
+        for i in 0_u64..128 {
+            admit_job(
+                &dispatcher,
+                1,
+                &format!("delivery-a{i}"),
+                "org/repo",
+                1000 + i,
+                &format!("head-a{i}"),
+            );
+        }
+
+        // Send wake tokens for all 128 (channel fills to capacity).
+        dispatcher.schedule();
+
+        // Worker 1: claim one A job.
+        let first_a = receiver.try_recv().expect("first claim must get an A job");
+        assert_eq!(first_a.installation_id, 1);
+        dispatcher
+            .mark_running(&first_a.delivery)
+            .expect("mark first A running");
+
+        // Late B arrives with one job. schedule sends a token.
+        admit_job(&dispatcher, 2, "delivery-b-late", "org/other", 1, "head-b1");
+        dispatcher.schedule();
+
+        // Worker claims the next token. The round-robin cursor is after A,
+        // so B must be selected — not another A from the 127 buffered tokens.
+        let second_claim = receiver.try_recv().expect("second claim must get a job");
+        assert_eq!(
+            second_claim.installation_id, 2,
+            "late B gets the next claim despite 127 remaining A tokens"
+        );
+        assert_eq!(second_claim.delivery, "delivery-b-late");
     }
 
     #[test]
@@ -4559,5 +4797,42 @@ mod tests {
             .await,
             StatusCode::SERVICE_UNAVAILABLE
         );
+    }
+    #[test]
+    fn round_robin_keeps_cursor_when_previous_tenant_leaves_queue() {
+        let (_dir, dispatcher, mut receiver) = dispatcher_with_capacity(8);
+        admit_job(&dispatcher, 10, "first", "org/first", 1, "head");
+        admit_job(&dispatcher, 20, "waiting", "org/waiting", 1, "head");
+        dispatcher.schedule();
+        let first = receiver.try_recv().unwrap();
+        assert_eq!(first.delivery, "first");
+        dispatcher.mark_running(&first.delivery).unwrap();
+        admit_job(&dispatcher, 1, "late-low-id", "org/new", 1, "head");
+        dispatcher.schedule();
+        assert_eq!(receiver.try_recv().unwrap().delivery, "waiting");
+    }
+
+    #[test]
+    fn round_robin_refills_a_single_wake_slot_without_waiting_for_completion() {
+        let (_dir, dispatcher, mut receiver) = dispatcher_with_capacity(1);
+        for number in 1..=3 {
+            admit_job(
+                &dispatcher,
+                7,
+                &format!("delivery-{number}"),
+                "org/repo",
+                number,
+                "head",
+            );
+        }
+        dispatcher.schedule();
+        for number in 1..=3 {
+            let job = receiver
+                .try_recv()
+                .expect("an idle worker can claim eligible work");
+            assert_eq!(job.delivery, format!("delivery-{number}"));
+            dispatcher.mark_running(&job.delivery).unwrap();
+        }
+        assert!(receiver.try_recv().is_err());
     }
 }

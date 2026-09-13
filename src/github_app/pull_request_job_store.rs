@@ -244,6 +244,15 @@ impl PullRequestJobStore {
         jobs_with_status(&self.registry, PullRequestJobStatus::Queued)
     }
 
+    /// Borrow queued jobs with their durable FIFO order, without cloning payloads.
+    pub fn queued_jobs_with_order(&self) -> impl Iterator<Item = (&StoredPullRequestJob, u64)> {
+        self.registry
+            .jobs
+            .values()
+            .filter(|job| job.status == PullRequestJobStatus::Queued)
+            .map(|job| (job, job.sequence))
+    }
+
     pub fn cancellation_pending_jobs(&self) -> Vec<StoredPullRequestJob> {
         jobs_with_status(&self.registry, PullRequestJobStatus::CancellationPending)
     }

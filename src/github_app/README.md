@@ -16,7 +16,7 @@ cargo build --release --features github-app --bin foxguard-github-app
 - `webhook.rs` — HMAC-SHA256 signature verification (`verify_signature`) and the `EventKind` router enum. 10 unit tests pin the verification contract: known-good vector, modified body, wrong secret, missing/empty/non-hex/short-length digest, trailing-whitespace tolerance, and the kind-routing map.
 - `auth.rs` — GitHub App JWT generation, installation-token exchange, and conservative in-memory token caching. It reads app credentials from `FOXGUARD_GITHUB_APP_ID` and either `FOXGUARD_GITHUB_PRIVATE_KEY` or an absolute `FOXGUARD_GITHUB_PRIVATE_KEY_PATH`, and keeps the outbound GitHub API base URL configurable for tests and allowlisted GitHub Enterprise hosts.
 - `installation_store.rs` — small JSON-backed installation registry. It records account metadata and selected repositories from `installation` / `installation_repositories` webhooks so self-hosted operators can recover install state across restarts without a database dependency.
-- `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies the signature, routes by `X-GitHub-Event`, extracts installation IDs from JSON payloads, persists installation metadata, and admits pull-request work to a bounded queue (128 pending jobs and 4 workers by default). Replayed GitHub delivery IDs are deduplicated; concurrent updates for the same repository/PR coalesce so the newest head gets one follow-up scan instead of racing or being lost. Overload is acknowledged with `202 Accepted` and logged. Workers prepare installation auth, clone and scan pull-request heads in a bounded temp workspace, create or update one marker-tagged foxguard PR summary comment, delete legacy inline foxguard comments, post a check run with annotations, and clean up after completion.
+- `src/bin/foxguard_github_app.rs` — axum-based HTTP server with `/healthz` and `/webhook` endpoints. Verifies signatures, routes events, persists installation metadata and pull-request jobs, and schedules eligible work fairly across installations. Defaults are 4 workers and a 128-slot wake buffer; the durable backlog is not bounded by that buffer. Replayed delivery IDs are deduplicated, and updates to the same repository/PR coalesce behind its active scan. Workers prepare installation auth, clone and scan PR heads in a bounded temporary workspace, update one marker-tagged summary comment, delete legacy inline comments, post check-run annotations, and clean up.
 - `review.rs` — installation-token GitHub REST client for PR summary comments and check runs. It lists existing marker-tagged bot issue comments and legacy comments, lists changed PR files, filters findings to changed lines, creates or updates exactly one Markdown summary without inline comment payloads, and pins each finding link to the scanned PR-head SHA (with file-only findings linked without a line anchor). It deletes legacy inline foxguard comments and creates a `foxguard` check run with up to 50 annotations.
 
 Signed installation and pull-request payloads that cannot be decoded return
@@ -40,6 +40,39 @@ The production App is registered under `0sec-labs` and installed at `https://fox
   - `installation_repositories` — keeps the registry in sync when a user adds or removes repos from an existing installation.
 
   `ping` is delivered automatically by GitHub at webhook setup; the receiver handles it but it is not a subscribable event.
+
+## Fair scheduling
+
+Workers choose jobs **when they are ready to claim work**, not when a webhook
+fills the wake channel. Jobs remain in the durable store until eligible.
+
+- Each claim advances a round-robin installation-ID cursor. The next waiting
+  installation after that cursor gets a turn, wrapping at the end; removing the
+  previous installation does not reset the cursor and starve other tenants.
+- Within an installation, the oldest eligible durable queue sequence wins.
+  A claimed/running repository/PR key is excluded, but it does not block other
+  PRs from that installation. Superseded heads and replayed deliveries retain
+  the existing deduplication and coalescing behavior.
+- Wake tokens carry no preselected job or tenant. A newly waiting installation
+  joins the next available round-robin turn rather than sitting behind another
+  installation's buffered jobs.
+- Claiming a job immediately replenishes available wake capacity. Even a
+  one-slot buffer can keep multiple workers busy; replenishment does not wait
+  for the claimed scan to finish.
+- Recovery and lifecycle changes use the same durable queue and eligibility
+  checks. If every remaining job is blocked by an active PR, completion wakes
+  the scheduler to consider them again.
+
+This is non-preemptive fairness at dispatch, not a per-installation concurrency
+limit: running scans finish normally, and one tenant can use every idle worker
+when no other tenant is waiting. A late tenant waits for a free worker and its
+round-robin turn; it is not guaranteed the immediately next slot if other tenants
+are also waiting.
+
+`FOXGUARD_PR_WORKERS` bounds active workers (default 4).
+`FOXGUARD_PR_QUEUE_CAPACITY` bounds only buffered wake signals (default 128), not
+the durable backlog or disk usage. No new configuration is required.
+
 
 ## Running locally
 
@@ -76,7 +109,7 @@ curl -sS -X POST http://127.0.0.1:8080/webhook \
 
 ## Self-hosting
 
-A reference Dockerfile lives at the repo root: [`Dockerfile.github-app`](../../Dockerfile.github-app). It builds the binary with the `github-app` feature, drops to a non-root user, and exposes `:8080`. Operators can deploy it to anything that runs containers (Fly.io, Railway, ECS, a tiny VM); the only persistent state is the install metadata JSON file, which is fine on a single small mounted volume.
+A reference Dockerfile lives at the repo root: [`Dockerfile.github-app`](../../Dockerfile.github-app). It builds the binary with the `github-app` feature, drops to a non-root user, and exposes `:8080`. Operators can deploy it on a container host such as Fly.io, Railway, ECS, or a VM. Persist both the installation registry and pull-request job store on the mounted volume; the durable queue is not a disk quota.
 
 ## Status
 
