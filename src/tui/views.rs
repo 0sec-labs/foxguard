@@ -124,7 +124,7 @@ impl TuiApp {
         };
         let heading_height = if logo_height > 0 { 1 } else { 2 };
         let path_height = if compact { 1 } else { 2 };
-        let card_height = if compact { 1 } else { 2 };
+        let card_height = if compact { 1 } else { 3 };
         let target_height = if compact { 1 } else { 2 };
         let height = (logo_height + heading_height + path_height + card_height * 4 + target_height)
             .min(page[0].height);
@@ -250,7 +250,9 @@ impl TuiApp {
         let block = Block::default()
             .style(Style::default().bg(background))
             .padding(Padding::new(2, 2, 0, 0));
-        let inner = block.inner(area);
+        let mut inner = block.inner(area);
+        inner.y += inner.height.saturating_sub(1) / 2;
+        inner.height = inner.height.min(1);
         frame.render_widget(block, area);
         if selected {
             frame.render_widget(
@@ -291,6 +293,55 @@ impl TuiApp {
     }
 
     pub(super) fn draw_header(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let block = panel_block(None, HEADER_BG);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        let status = if self.session_dirty {
+            "UNSAVED"
+        } else if self.session_error.is_some() {
+            "state error"
+        } else {
+            ""
+        };
+        let mode = request_mode_label(&self.request);
+        let category = if inner.height < 3
+            && self
+                .result
+                .as_ref()
+                .is_some_and(|result| result.baseline_comparison.is_some())
+        {
+            format!(" [b] {}", self.baseline_filter.label())
+        } else {
+            String::new()
+        };
+        let prefix_width = "foxguard".len() + mode.len() + category.len() + 4;
+        let path = fit_location(
+            short_path(&self.request.path),
+            (inner.width as usize).saturating_sub(prefix_width + status.len() + 2),
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    "foxguard",
+                    Style::default()
+                        .fg(LOGO_PRIMARY)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  {mode}{category}  "),
+                    Style::default().fg(TEXT_MUTED),
+                ),
+                Span::raw(path),
+                Span::styled(format!("  {status}"), Style::default().fg(ERROR_TEXT)),
+            ])),
+            Rect::new(inner.x, inner.y, inner.width, inner.height.min(1)),
+        );
+        if inner.height < 2 {
+            return;
+        }
+        let Some(result) = &self.result else {
+            return;
+        };
         let mut filters = Vec::new();
         if !self.search_query.is_empty() {
             filters.push(format!("/{}", self.search_query));
@@ -312,95 +363,66 @@ impl TuiApp {
                 filters.push(format!("sort {}", self.sort_mode.label()));
             }
         }
-        let comparison = self
-            .result
-            .as_ref()
-            .and_then(|result| result.baseline_comparison.as_ref());
-        let mut summary = vec![Span::styled(
-            "foxguard",
-            Style::default()
-                .fg(LOGO_PRIMARY)
-                .add_modifier(Modifier::BOLD),
-        )];
-        if self.session_dirty {
-            summary.push(Span::styled(
-                " UNSAVED",
-                Style::default()
-                    .fg(LOGO_PRIMARY)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        } else if self.session_error.is_some() {
-            summary.push(Span::styled(
-                " state error",
-                Style::default().fg(ERROR_TEXT),
-            ));
-        }
-        summary.push(Span::raw(format!(
-            " {} ",
-            request_mode_label(&self.request)
-        )));
-        if comparison.is_some() && area.height < 4 && !filters.is_empty() {
-            summary.push(Span::raw(filters.join(" | ")));
+        let findings_label = if result.findings.len() == 1 {
+            "finding"
         } else {
-            summary.push(Span::raw(short_path(&self.request.path)));
-            if let Some(result) = &self.result {
-                summary.push(Span::styled(
-                    format!(
-                        "  {} findings  {} files  {:.2}s",
-                        result.findings.len(),
-                        result.files_scanned,
-                        result.duration.as_secs_f64()
-                    ),
-                    Style::default().fg(TEXT_MUTED),
-                ));
-                if let Some(diff) = &result.diff_summary {
-                    append_diff_summary(&mut summary, diff);
-                }
-            }
+            "findings"
+        };
+        let files_label = if result.files_scanned == 1 {
+            "file"
+        } else {
+            "files"
+        };
+        let mut stats = vec![Span::raw(if filters.is_empty() {
+            format!(
+                "{} {findings_label} · {} {files_label} · {:.2}s",
+                result.findings.len(),
+                result.files_scanned,
+                result.duration.as_secs_f64()
+            )
+        } else {
+            format!(
+                "{} {findings_label} · {}",
+                result.findings.len(),
+                filters.join(" · ")
+            )
+        })];
+        if let Some(diff) = &result.diff_summary {
+            append_diff_summary(&mut stats, diff);
         }
-        let mut lines = vec![Line::from(summary)];
-        if let Some(comparison) = comparison {
-            let counts = if area.width < 76 {
-                format!(
-                    "b {} | +{} ={} -{}",
-                    self.baseline_filter.label(),
-                    comparison.introduced.len(),
-                    comparison.recurring.len(),
-                    comparison.resolved.len()
-                )
-            } else {
-                format!(
-                    "b {} | introduced {} | recurring {} | resolved {}",
-                    self.baseline_filter.label(),
-                    comparison.introduced.len(),
-                    comparison.recurring.len(),
-                    comparison.resolved.len()
-                )
-            };
-            lines.push(Line::from(Span::styled(
-                counts,
-                Style::default().fg(LOGO_PRIMARY),
-            )));
-        }
-        if comparison.is_none() || area.height >= 4 {
-            if !filters.is_empty() {
-                lines.push(Line::from(filters.join(" | ")));
-            } else if self.baseline_filter == BaselineFilter::Resolved {
-                lines.push(Line::from("Historical metadata; only search applies"));
-            } else if let Some(result) = &self.result {
-                let mut badges = severity_badge_spans(&severity_counts(&result.findings));
-                if self.baseline_filter != BaselineFilter::All {
-                    badges.insert(0, Span::raw("Current scan: "));
-                }
-                lines.push(Line::from(badges));
-            }
+        if inner.width >= 96 && filters.is_empty() {
+            stats.push(Span::raw("    "));
+            stats.extend(severity_badge_spans(&severity_counts(&result.findings)));
         }
         frame.render_widget(
-            Paragraph::new(Text::from(lines))
-                .block(panel_block(None, HEADER_BG))
-                .style(Style::default().fg(TEXT_PRIMARY)),
-            area,
+            Paragraph::new(Line::from(stats)),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
         );
+        if inner.height >= 3 {
+            if let Some(comparison) = &result.baseline_comparison {
+                let counts = if inner.width < 76 {
+                    format!(
+                        "Baseline [b] {} · +{} ={} -{}",
+                        self.baseline_filter.label(),
+                        comparison.introduced.len(),
+                        comparison.recurring.len(),
+                        comparison.resolved.len()
+                    )
+                } else {
+                    format!(
+                        "Baseline [b] {} · {} introduced · {} recurring · {} resolved",
+                        self.baseline_filter.label(),
+                        comparison.introduced.len(),
+                        comparison.recurring.len(),
+                        comparison.resolved.len()
+                    )
+                };
+                frame.render_widget(
+                    Paragraph::new(counts).style(Style::default().fg(TEXT_MUTED)),
+                    Rect::new(inner.x, inner.y + 2, inner.width, 1),
+                );
+            }
+        }
     }
 
     pub(super) fn draw_body(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -455,6 +477,7 @@ impl TuiApp {
                                 finding,
                                 self.review_state_at(*index),
                                 self.checked_findings.contains(index),
+                                findings_area.width.saturating_sub(5) as usize,
                             );
                             if hover == Some(display_index) && self.selected != display_index {
                                 item = item.style(Style::default().bg(PANEL_BG));
@@ -467,41 +490,17 @@ impl TuiApp {
                 };
 
                 let filtered_len = filtered.len();
-                let list_title = self
-                    .result
-                    .as_ref()
-                    .map(|result| {
-                        let review = self.review_filter_label().unwrap_or("all");
-                        if !self.checked_findings.is_empty() {
-                            format!(
-                                "{} {filtered_len}/{} | {} selected",
-                                self.baseline_filter.label(),
-                                result.findings.len(),
-                                self.checked_findings.len()
-                            )
-                        } else if result.baseline_comparison.is_some() {
-                            format!(
-                                "{} {filtered_len}/{} | {review} | {} reviewed",
-                                self.baseline_filter.label(),
-                                result.findings.len(),
-                                self.reviewed_count
-                            )
-                        } else if findings_area.width < 64 {
-                            format!(
-                                "{filtered_len}/{} {review} · {} reviewed",
-                                result.findings.len(),
-                                self.reviewed_count
-                            )
-                        } else {
-                            format!(
-                                "{} {filtered_len}/{} · {review} · {} reviewed",
-                                mode_findings_title(&result.mode),
-                                result.findings.len(),
-                                self.reviewed_count
-                            )
-                        }
-                    })
-                    .unwrap_or_else(|| "findings".to_string());
+                let total = self.result.as_ref().map_or(0, |r| r.findings.len());
+                let list_title = {
+                    let base = format!("Findings {filtered_len}/{total}");
+                    if !self.checked_findings.is_empty() {
+                        format!("{base} · {} selected", self.checked_findings.len())
+                    } else if self.reviewed_count > 0 && filtered_len > 0 {
+                        format!("{base} · {} reviewed", self.reviewed_count)
+                    } else {
+                        base
+                    }
+                };
 
                 if items.is_empty() && self.result.is_some() {
                     // Empty state with recovery hints
@@ -570,18 +569,69 @@ impl TuiApp {
             }
 
             if let Some(detail_area) = detail_area {
-                let title = if self.show_detail_view {
-                    "Detail · PgUp/PgDn scroll · Esc back"
-                } else {
-                    "Detail · v expand · PgUp/PgDn scroll"
-                };
+                let (detail_content, action_area) =
+                    if detail_area.height >= 5 && self.selected_finding().is_some() {
+                        let split = Layout::vertical([Constraint::Min(1), Constraint::Length(2)])
+                            .split(detail_area);
+                        (split[0], split[1])
+                    } else {
+                        (detail_area, Rect::default())
+                    };
+                self.detail_area = detail_content;
+
                 render_scrollable_panel(
                     frame,
-                    detail_area,
+                    detail_content,
                     Paragraph::new(self.detail_text()),
-                    panel_block(Some(title), DETAIL_BG),
+                    panel_block(Some("Detail"), DETAIL_BG),
                     &mut self.detail_scroll,
                 );
+
+                if action_area.height > 0 {
+                    let Some(finding) = self.selected_finding() else {
+                        return;
+                    };
+                    let focuses = available_open_focuses(finding);
+                    let mut action_spans = if self.can_handle_finding_mouse() {
+                        vec![footer_key_span("Enter"), Span::raw(" open")]
+                    } else {
+                        Vec::new()
+                    };
+                    if !action_spans.is_empty() && focuses.len() > 1 {
+                        action_spans.extend([
+                            Span::raw("  "),
+                            footer_key_span("Tab"),
+                            Span::raw(" target"),
+                        ]);
+                        if action_area.width >= 58 {
+                            for focus in focuses {
+                                action_spans.push(Span::raw(" "));
+                                action_spans.push(open_focus_span(
+                                    open_focus_label(focus),
+                                    open_focus_color(finding, focus),
+                                    focus == self.open_focus,
+                                ));
+                            }
+                        }
+                    }
+                    let label = open_focus_label(self.open_focus);
+                    let location = fit_location(
+                        open_focus_location(finding, self.open_focus),
+                        (action_area.width as usize).saturating_sub(label.len() + 4),
+                    );
+                    frame.render_widget(
+                        Paragraph::new(vec![
+                            Line::from(action_spans),
+                            Line::from(vec![
+                                Span::styled(format!("{label}  "), Style::default().fg(TEXT_MUTED)),
+                                Span::raw(location),
+                            ]),
+                        ])
+                        .block(Block::default().padding(Padding::new(1, 1, 0, 0)))
+                        .style(Style::default().bg(DETAIL_BG).fg(TEXT_PRIMARY)),
+                        action_area,
+                    );
+                }
             }
         }
 
@@ -676,36 +726,36 @@ impl TuiApp {
             return Text::from("");
         };
 
+        let mut identity = vec![
+            severity_badge_span(finding.severity),
+            Span::raw("  "),
+            Span::styled(
+                finding.rule_id.clone(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+        ];
+        if let Some(cwe) = &finding.cwe {
+            identity.push(Span::styled(
+                format!("  {cwe}"),
+                Style::default().fg(TEXT_MUTED),
+            ));
+        }
         let mut lines = vec![
-            Line::from(vec![
-                severity_badge_span(finding.severity),
-                Span::raw("  "),
-                Span::styled(
-                    finding.description.clone(),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            Line::from(""),
-            metadata_line("Rule", &finding.rule_id),
-            metadata_line(
-                "Location",
-                &format!(
+            Line::from(identity),
+            Line::from(Span::styled(
+                format!(
                     "{}:{}:{}",
                     display_path(&finding.file),
                     finding.line,
                     finding.column
                 ),
-            ),
+                Style::default().fg(TEXT_MUTED),
+            )),
+            Line::from(""),
+            Line::from(finding.description.clone()),
         ];
-
-        if let Some(cwe) = finding.cwe.as_ref() {
-            lines.push(metadata_line("CWE", cwe));
-        }
-        if !finding.tags.is_empty() {
-            lines.push(metadata_line("Tags", &finding.tags.join(", ")));
-        }
-        if let Some(review) = self.review_summary_for_finding(finding) {
-            lines.push(metadata_line("Review", &review));
+        if let Some(review) = self.review_state_for(finding) {
+            lines.push(metadata_line("Review", review.label()));
         }
 
         if let Some(algorithm) = finding.crypto_algorithm.as_ref() {
@@ -725,24 +775,27 @@ impl TuiApp {
             )));
         }
 
-        if let Some(context_lines) = self.source_context_lines(finding) {
+        let source_lines = self.source_context_lines(finding);
+        if let Some(context_lines) = source_lines {
             lines.push(Line::from(""));
             lines.push(section_heading("Context", Color::Yellow));
             lines.extend(context_lines);
+        } else {
+            // Fall back to snippet when source context is unavailable (secrets
+            // mode, loading, or no source file found).
+            lines.push(Line::from(""));
+            lines.push(section_heading("Snippet", Color::Yellow));
+            for line in finding.snippet.lines() {
+                lines.push(Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(Color::Gray),
+                )));
+            }
         }
-
-        lines.push(Line::from(""));
-        lines.push(section_heading("Snippet", Color::Yellow));
-        for line in finding.snippet.lines() {
-            lines.push(Line::from(Span::styled(
-                line.to_string(),
-                Style::default().fg(Color::Gray),
-            )));
+        if !finding.tags.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(metadata_line("Tags", &finding.tags.join(", ")));
         }
-
-        lines.push(Line::from(""));
-        lines.push(section_heading("Open", Color::Cyan));
-        lines.extend(open_target_lines(finding, self.open_focus));
 
         if finding_has_dataflow(finding) {
             lines.push(Line::from(""));
@@ -769,7 +822,7 @@ impl TuiApp {
         match self.source_context_cache.as_ref() {
             Some(SourceContextCache::Ready {
                 key: cached_key,
-                lines,
+                lines: Ok(lines),
             }) if *cached_key == key => Some(lines.clone()),
             Some(SourceContextCache::Loading { key: cached_key }) if *cached_key == key => None,
             _ => None,
@@ -821,119 +874,35 @@ impl TuiApp {
         }
         if self.baseline_filter == BaselineFilter::Resolved {
             frame.render_widget(
-                Paragraph::new("b category  / find  v detail  ? help  q")
-                    .style(Style::default().bg(FOOTER_BG).fg(TEXT_PRIMARY)),
+                Paragraph::new(if self.show_detail_view && area.width < 64 {
+                    "PgUp/Dn scroll  b  /  v list  ? help  q"
+                } else if self.show_detail_view || area.width >= 100 {
+                    "PgUp/Dn scroll  b category  / find  v list  ? help  q"
+                } else {
+                    "b category  / find  v detail  ? help  q"
+                })
+                .style(Style::default().bg(FOOTER_BG).fg(TEXT_PRIMARY)),
                 area,
             );
             return;
         }
-        let is_narrow = area.width < 80;
-
-        let mut shortcuts = vec![
-            ("/", "find"),
-            ("Space", "select"),
-            ("x", "batch"),
-            ("F", "views"),
-        ];
-        if area.width >= 64 {
-            shortcuts.extend([("v", "detail"), ("a", "all")]);
-            if self
-                .result
-                .as_ref()
-                .and_then(|result| result.baseline_comparison.as_ref())
-                .is_some()
-            {
-                shortcuts.push(("b", "base"));
-            }
-        }
-        if area.width >= 104 {
-            shortcuts.extend([("i", "triage"), ("f", "review"), ("e", "export")]);
-        }
-        if area.width >= 150 {
-            shortcuts.extend([("c", "confidence"), ("C", "sort"), ("w", "notices")]);
-        }
-        shortcuts.extend([("?", ""), ("q", "")]);
-        let mut key_spans = Vec::new();
-        for (index, (key, description)) in shortcuts.into_iter().enumerate() {
-            if index > 0 {
-                key_spans.push(Span::raw(" "));
-            }
-            key_spans.push(footer_key_span(key));
-            if !description.is_empty() {
-                key_spans.push(Span::raw(format!(" {description}")));
-            }
-        }
-
-        let mut right_spans: Vec<Span<'static>> = Vec::new();
-
-        // Right-side status indicators — compress on narrow
-        if self.session_min_confidence > 0.0 {
-            let filtered_len = self.filtered_indices().len();
-            let total = self.total_after_severity_and_search();
-            if is_narrow {
-                right_spans.push(footer_value_span(&format!(
-                    "c{:.0} {}/{}",
-                    self.session_min_confidence * 100.0,
-                    filtered_len,
-                    total
-                )));
+        let shortcuts = if area.width < 64 {
+            if self.show_detail_view {
+                "PgUp/Dn scroll  v list  / find  ?  q"
             } else {
-                right_spans.push(footer_label_span("conf"));
-                right_spans.push(Span::raw(" "));
-                right_spans.push(footer_value_span(&format!(
-                    "≥ {:.2} ({}/{})",
-                    self.session_min_confidence, filtered_len, total
-                )));
+                "Enter open  v detail  / find  ? help  q"
             }
-            right_spans.push(Span::raw("  "));
-        }
-
-        if self.sort_mode != SortMode::default() {
-            if is_narrow {
-                right_spans.push(footer_value_span(self.sort_mode.label()));
-            } else {
-                right_spans.push(footer_label_span("sort"));
-                right_spans.push(Span::raw(" "));
-                right_spans.push(footer_value_span(self.sort_mode.label()));
-            }
-            right_spans.push(Span::raw("  "));
-        }
-
-        // Review filter status
-        if let Some(rf) = self.review_filter_label() {
-            if is_narrow {
-                right_spans.push(footer_value_span(rf));
-            } else {
-                right_spans.push(footer_label_span("review"));
-                right_spans.push(Span::raw(" "));
-                right_spans.push(footer_value_span(rf));
-            }
-            right_spans.push(Span::raw("  "));
-        }
-
-        let search_text = if self.search_mode {
-            format!("/{}", self.search_query)
-        } else if self.search_query.is_empty() {
-            String::new()
+        } else if area.width < 100 {
+            "j/k browse  v detail  / find  Space select  x batch  ? help  q"
+        } else if self.show_detail_view {
+            "j/k browse  PgUp/Dn scroll  v list  / find  Space select  x batch  ? help  q quit"
         } else {
-            self.search_query.clone()
+            "j/k browse  PgUp/Dn scroll  v expand  / find  Space select  x batch  ? help  q quit"
         };
-        if !search_text.is_empty() {
-            if is_narrow {
-                right_spans.push(footer_value_span(&search_text));
-            } else {
-                right_spans.push(footer_label_span("search"));
-                right_spans.push(Span::raw(" "));
-                right_spans.push(footer_value_span(&search_text));
-            }
-        }
-
-        let right_line = if right_spans.is_empty() {
-            Line::from("")
-        } else {
-            Line::from(right_spans)
-        };
-        draw_status_bar(frame, area, Line::from(key_spans), right_line);
+        frame.render_widget(
+            Paragraph::new(shortcuts).style(Style::default().bg(FOOTER_BG).fg(TEXT_PRIMARY)),
+            area,
+        );
     }
 
     pub(super) fn draw_launch_footer(&self, frame: &mut ratatui::Frame, area: Rect) {

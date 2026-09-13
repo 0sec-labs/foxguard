@@ -21,8 +21,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::Terminal;
 use std::fs;
 use std::io::{self, IsTerminal};
@@ -140,7 +139,7 @@ enum WorkerMessage {
     SourceContext {
         request_id: u64,
         key: SourceContextCacheKey,
-        lines: Vec<Line<'static>>,
+        lines: Result<Vec<Line<'static>>, String>,
     },
 }
 
@@ -246,13 +245,16 @@ fn start_source_context_load(
     tx: Sender<WorkerMessage>,
 ) {
     std::thread::spawn(move || {
-        let lines = match fs::read_to_string(&key.path) {
-            Ok(source) => render_source_context(&source, &finding, 2),
-            Err(error) => vec![Line::from(Span::styled(
-                format!("Unable to load source context: {}", error),
-                Style::default().fg(Color::DarkGray),
-            ))],
-        };
+        let lines = fs::read_to_string(&key.path)
+            .map_err(|error| format!("Unable to load source context: {error}"))
+            .and_then(|source| {
+                let lines = render_source_context(&source, &finding, 2);
+                if source.is_empty() || lines.is_empty() {
+                    Err("Finding location is outside the current source file".to_string())
+                } else {
+                    Ok(lines)
+                }
+            });
 
         let _ = tx.send(WorkerMessage::SourceContext {
             request_id,

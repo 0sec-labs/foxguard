@@ -65,7 +65,10 @@ impl TuiApp {
                         let entry = &comparison.resolved[index];
                         ListItem::new(vec![
                             Line::from(entry.rule_id.as_str()),
-                            Line::from(format!("{}:{}", entry.file, entry.line)),
+                            Line::from(super::widgets::fit_location(
+                                format!("{}:{}", entry.file, entry.line),
+                                list_area.width.saturating_sub(5) as usize,
+                            )),
                         ])
                     })
                     .collect();
@@ -110,7 +113,7 @@ impl TuiApp {
                 frame,
                 detail_area,
                 Paragraph::new(text).style(Style::default().fg(TEXT_PRIMARY)),
-                panel_block(Some("Historical detail - v / PgUp/Dn"), DETAIL_BG),
+                panel_block(Some("Historical detail · read-only"), DETAIL_BG),
                 &mut self.detail_scroll,
             );
         }

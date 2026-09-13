@@ -133,6 +133,16 @@ the arrows or Tab. In Diff mode, type the target branch before pressing Enter.
 Wide terminals show findings beside their detail; smaller terminals use a list
 with an expandable detail view. Source context, dataflow, and fixes remain
 scrollable whenever the finding provides them.
+
+The header separates scan statistics from baseline categories. Selected source
+ranges are highlighted inline, without extra annotation rows. Opening controls
+stay below the live detail pane while its content scrolls, and shortened file
+locations retain their line and column suffixes. Search and dialogs own their
+shortcuts while active.
+
+If source context cannot be loaded, the saved finding snippet remains available.
+Secrets use redacted snippets rather than loading raw source into the detail pane.
+
 The loading card shows indeterminate activity and actual elapsed time, not a
 percentage estimate. Ctrl+C exits during scanning.
 

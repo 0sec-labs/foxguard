@@ -5,8 +5,8 @@ use super::state::{
 };
 use super::widgets::{
     available_open_focuses, cnsa2_deadline_chip_span, compare_findings, compare_findings_by,
-    confidence_badge_span, dataflow_lines, finding_list_index_at_position, open_target_lines,
-    pop_stashed_event, render_source_context, stash_event,
+    confidence_badge_span, dataflow_lines, finding_list_index_at_position, pop_stashed_event,
+    render_source_context, stash_event,
 };
 use super::{
     open_command_spec_from_editor, open_command_spec_with_environment, resolve_finding_path,
@@ -573,310 +573,35 @@ fn dataflow_lines_show_fallback_when_no_trace_exists() {
 }
 
 #[test]
-fn open_target_lines_show_finding_even_without_trace_details() {
-    let finding = Finding {
-        rule_id: "js/no-command-injection".to_string(),
-        severity: Severity::High,
-        file: "src/main.js".to_string(),
-        line: 42,
-        column: 7,
-        end_line: 42,
-        end_column: 18,
-        description: "untrusted input reaches exec".to_string(),
-        snippet: "exec(cmd)".to_string(),
-        cwe: None,
-        source_line: None,
-        source_description: None,
-        sink_line: None,
-        sink_description: None,
-        fix_suggestion: None,
-        sink_start_byte: None,
-        sink_end_byte: None,
-        confidence: crate::default_confidence(),
-        taint_hops: None,
-        tags: vec![],
-        crypto_algorithm: None,
-        cnsa2_deadline: None,
-        dep_name: None,
-        dep_version: None,
-        dep_ecosystem: None,
-        dep_purl: None,
-        dep_vulnerability_id: None,
-        dep_fixed_version: None,
-        dep_source: None,
-        dep_vulnerability_severity: None,
-        dep_path: vec![],
-        crypto_material: None,
-    };
-
-    let rendered = open_target_lines(&finding, OpenFocus::Finding)
-        .into_iter()
-        .map(|line| line.to_string())
-        .collect::<Vec<_>>();
-
-    assert!(rendered
-        .iter()
-        .any(|line| line.contains("Enter opens") && line.contains("finding")));
-    assert!(rendered
-        .iter()
-        .any(|line| line.contains("@ src/main.js:42:7")));
-}
-
-#[test]
-fn render_source_context_includes_surrounding_lines_and_caret() {
-    let finding = Finding {
-        rule_id: "js/no-command-injection".to_string(),
-        severity: Severity::High,
-        file: "src/main.js".to_string(),
-        line: 3,
-        column: 6,
-        end_line: 3,
-        end_column: 9,
-        description: "untrusted input reaches exec".to_string(),
-        snippet: "exec(cmd)".to_string(),
-        cwe: None,
-        source_line: None,
-        source_description: None,
-        sink_line: None,
-        sink_description: None,
-        fix_suggestion: None,
-        sink_start_byte: None,
-        sink_end_byte: None,
-        confidence: crate::default_confidence(),
-        taint_hops: None,
-        tags: vec![],
-        crypto_algorithm: None,
-        cnsa2_deadline: None,
-        dep_name: None,
-        dep_version: None,
-        dep_ecosystem: None,
-        dep_purl: None,
-        dep_vulnerability_id: None,
-        dep_fixed_version: None,
-        dep_source: None,
-        dep_vulnerability_severity: None,
-        dep_path: vec![],
-        crypto_material: None,
-    };
-
-    let rendered = render_source_context(
-        "const user = req.query.user;\nconst cmd = user;\nexec(cmd);\nconsole.log(cmd);\n",
-        &finding,
-        1,
-    )
-    .into_iter()
-    .map(|line| line.to_string())
-    .collect::<Vec<_>>();
-
-    assert!(rendered
-        .iter()
-        .any(|line| line.contains("2 | const cmd = user;")));
-    assert!(rendered
-        .iter()
-        .any(|line| { line.contains("exec(cmd);") && line.contains("|") && line.contains(">") }));
-    assert!(rendered.iter().any(|line| line.contains("^")));
-    assert!(rendered
-        .iter()
-        .any(|line| line.contains("selected range") && line.starts_with("     | ")));
-    assert!(rendered
-        .iter()
-        .any(|line| line.contains("4 | console.log(cmd);")));
-}
-
-#[test]
-fn render_source_context_aligns_caret_after_wide_glyphs() {
-    let finding = Finding {
-        rule_id: "js/no-command-injection".to_string(),
-        severity: Severity::High,
-        file: "src/main.js".to_string(),
-        line: 1,
-        column: 2,
-        end_line: 1,
-        end_column: 6,
-        description: "untrusted input reaches exec".to_string(),
-        snippet: "exec(cmd)".to_string(),
-        cwe: None,
-        source_line: None,
-        source_description: None,
-        sink_line: None,
-        sink_description: None,
-        fix_suggestion: None,
-        sink_start_byte: None,
-        sink_end_byte: None,
-        confidence: crate::default_confidence(),
-        taint_hops: None,
-        tags: vec![],
-        crypto_algorithm: None,
-        cnsa2_deadline: None,
-        dep_name: None,
-        dep_version: None,
-        dep_ecosystem: None,
-        dep_purl: None,
-        dep_vulnerability_id: None,
-        dep_fixed_version: None,
-        dep_source: None,
-        dep_vulnerability_severity: None,
-        dep_path: vec![],
-        crypto_material: None,
-    };
-
-    let caret = render_source_context("😀exec(cmd);\n", &finding, 0)
-        .into_iter()
-        .map(|line| line.to_string())
-        .find(|line| line.contains("selected range"))
-        .expect("caret line");
-
-    assert!(
-        caret.contains("|   ^^^^ selected range"),
-        "caret should start after the emoji's two display cells: {caret:?}"
-    );
-}
-
-#[test]
-fn render_source_context_aligns_caret_after_tabs() {
-    let finding = Finding {
-        rule_id: "js/no-command-injection".to_string(),
-        severity: Severity::High,
-        file: "src/main.js".to_string(),
-        line: 1,
-        column: 2,
-        end_line: 1,
-        end_column: 6,
-        description: "untrusted input reaches exec".to_string(),
-        snippet: "exec(cmd)".to_string(),
-        cwe: None,
-        source_line: None,
-        source_description: None,
-        sink_line: None,
-        sink_description: None,
-        fix_suggestion: None,
-        sink_start_byte: None,
-        sink_end_byte: None,
-        confidence: crate::default_confidence(),
-        taint_hops: None,
-        tags: vec![],
-        crypto_algorithm: None,
-        cnsa2_deadline: None,
-        dep_name: None,
-        dep_version: None,
-        dep_ecosystem: None,
-        dep_purl: None,
-        dep_vulnerability_id: None,
-        dep_fixed_version: None,
-        dep_source: None,
-        dep_vulnerability_severity: None,
-        dep_path: vec![],
-        crypto_material: None,
-    };
-
-    let caret = render_source_context("\texec(cmd);\n", &finding, 0)
-        .into_iter()
-        .map(|line| line.to_string())
-        .find(|line| line.contains("selected range"))
-        .expect("caret line");
-
-    assert!(
-        caret.contains("|     ^^^^ selected range"),
-        "caret should start after the expanded tab's four display cells: {caret:?}"
-    );
-}
-
-#[test]
-fn render_source_context_aligns_caret_after_combining_marks() {
-    let finding = Finding {
-        rule_id: "js/no-command-injection".to_string(),
-        severity: Severity::High,
-        file: "src/main.js".to_string(),
-        line: 1,
-        column: 3,
-        end_line: 1,
-        end_column: 7,
-        description: "untrusted input reaches exec".to_string(),
-        snippet: "exec(cmd)".to_string(),
-        cwe: None,
-        source_line: None,
-        source_description: None,
-        sink_line: None,
-        sink_description: None,
-        fix_suggestion: None,
-        sink_start_byte: None,
-        sink_end_byte: None,
-        confidence: crate::default_confidence(),
-        taint_hops: None,
-        tags: vec![],
-        crypto_algorithm: None,
-        cnsa2_deadline: None,
-        dep_name: None,
-        dep_version: None,
-        dep_ecosystem: None,
-        dep_purl: None,
-        dep_vulnerability_id: None,
-        dep_fixed_version: None,
-        dep_source: None,
-        dep_vulnerability_severity: None,
-        dep_path: vec![],
-        crypto_material: None,
-    };
-
-    let caret = render_source_context("e\u{301}exec(cmd);\n", &finding, 0)
-        .into_iter()
-        .map(|line| line.to_string())
-        .find(|line| line.contains("selected range"))
-        .expect("caret line");
-
-    assert!(
-        caret.contains("|  ^^^^ selected range"),
-        "caret should start after the combined glyph's one display cell: {caret:?}"
-    );
-}
-
-#[test]
-fn render_source_context_uses_single_cell_width_for_combined_glyph_selection() {
-    let finding = Finding {
-        rule_id: "js/no-command-injection".to_string(),
-        severity: Severity::High,
-        file: "src/main.js".to_string(),
-        line: 1,
-        column: 1,
-        end_line: 1,
-        end_column: 3,
-        description: "combined glyph".to_string(),
-        snippet: "e\u{301}".to_string(),
-        cwe: None,
-        source_line: None,
-        source_description: None,
-        sink_line: None,
-        sink_description: None,
-        fix_suggestion: None,
-        sink_start_byte: None,
-        sink_end_byte: None,
-        confidence: crate::default_confidence(),
-        taint_hops: None,
-        tags: vec![],
-        crypto_algorithm: None,
-        cnsa2_deadline: None,
-        dep_name: None,
-        dep_version: None,
-        dep_ecosystem: None,
-        dep_purl: None,
-        dep_vulnerability_id: None,
-        dep_fixed_version: None,
-        dep_source: None,
-        dep_vulnerability_severity: None,
-        dep_path: vec![],
-        crypto_material: None,
-    };
-
-    let caret = render_source_context("e\u{301}x\n", &finding, 0)
-        .into_iter()
-        .map(|line| line.to_string())
-        .find(|line| line.contains("selected range"))
-        .expect("caret line");
-
-    assert!(
-        caret.contains("| ^ selected range"),
-        "combined glyph selection should occupy one display cell: {caret:?}"
-    );
+fn source_ranges_preserve_graphemes_and_expanded_tabs_inline() {
+    for (source, column, end_column, selected) in [
+        ("😀exec(cmd);", 2, 6, "exec"),
+        ("\texec(cmd);", 2, 6, "exec"),
+        ("e\u{301}exec(cmd);", 3, 7, "exec"),
+        ("e\u{301}x", 1, 3, "e\u{301}"),
+    ] {
+        let mut finding = source_context_finding();
+        finding.line = 1;
+        finding.end_line = 1;
+        finding.column = column;
+        finding.end_column = end_column;
+        let rendered = render_source_context(source, &finding, 0);
+        assert_eq!(rendered.len(), 1, "one source row, without annotation rows");
+        let highlighted: String = rendered[0]
+            .spans
+            .iter()
+            .filter(|span| {
+                span.style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::UNDERLINED)
+            })
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(highlighted, selected, "{source:?}");
+        assert!(rendered[0]
+            .to_string()
+            .ends_with(&source.replace('\t', "    ")));
+    }
 }
 
 #[test]
@@ -966,7 +691,7 @@ fn stale_source_context_worker_messages_are_ignored() {
     tx.send(WorkerMessage::SourceContext {
         request_id: 40,
         key: key.clone(),
-        lines: vec![Line::from("old request")],
+        lines: Ok(vec![Line::from("old request")]),
     })
     .expect("send old request");
     app.handle_worker_messages(&rx);
@@ -980,7 +705,7 @@ fn stale_source_context_worker_messages_are_ignored() {
     tx.send(WorkerMessage::SourceContext {
         request_id: 41,
         key: other_key,
-        lines: vec![Line::from("wrong finding")],
+        lines: Ok(vec![Line::from("wrong finding")]),
     })
     .expect("send wrong finding");
     app.handle_worker_messages(&rx);
@@ -1125,17 +850,6 @@ fn available_open_focuses_include_description_only_source_and_sink() {
         available_open_focuses(&finding),
         vec![OpenFocus::Finding, OpenFocus::Source, OpenFocus::Sink]
     );
-
-    let rendered = open_target_lines(&finding, OpenFocus::Source)
-        .into_iter()
-        .map(|line| line.to_string())
-        .collect::<Vec<_>>();
-    assert!(rendered
-        .iter()
-        .any(|line| line.contains("source") && line.contains("sink")));
-    assert!(rendered
-        .iter()
-        .any(|line| line.contains("@ src/main.js:42")));
 }
 
 #[test]
@@ -1520,12 +1234,10 @@ fn render_source_context_marks_each_line_of_multiline_findings() {
     assert!(rendered
         .iter()
         .any(|line| line.contains("baz);") && line.contains(">") && line.contains("|")));
-    assert!(
-        rendered
-            .iter()
-            .filter(|line| line.contains("selected range"))
-            .count()
-            >= 3
+    assert_eq!(
+        rendered.len(),
+        3,
+        "multiline ranges must not double source rows"
     );
 }
 
@@ -1764,9 +1476,6 @@ fn session_confidence_filter_hides_low_confidence_findings() {
         1,
         "only the high-confidence finding should survive"
     );
-    // The "total before confidence filter" count should still be 2 for
-    // the footer's "X of Y" summary.
-    assert_eq!(app.total_after_severity_and_search(), 2);
 }
 
 #[test]
@@ -2523,7 +2232,7 @@ fn narrow_detail_keeps_dataflow_and_fix_reachable_and_escape_returns_to_list() {
     assert!(pages.contains("use_safe_api"), "{pages}");
     assert!(render_app(&mut app, 40, 12).contains("use_safe_api"));
     app.handle_key(KeyEvent::from(KeyCode::Esc));
-    assert!(render_app(&mut app, 40, 12).contains("1/1 all"));
+    assert!(render_app(&mut app, 40, 12).contains("1/1"));
     assert_eq!(app.selected_finding().unwrap().rule_id, selected);
 }
 
@@ -2573,19 +2282,19 @@ fn review_queue_advances_identity_and_rejects_previous_source_context() {
     let (request_id, old_key, _) = app.prepare_source_context_load().unwrap();
     app.apply_action(TriageAction::MarkReviewed).unwrap();
     assert_eq!(app.selected_finding().unwrap().rule_id, "other/rule");
-    assert!(render_app(&mut app, 60, 18).contains("1/2 unreviewed"));
+    assert!(render_app(&mut app, 60, 18).contains("1/2"));
     let (_, new_key, _) = app.prepare_source_context_load().unwrap();
     let (tx, rx) = mpsc::channel();
     tx.send(WorkerMessage::SourceContext {
         request_id,
         key: old_key,
-        lines: vec![Line::from("stale source")],
+        lines: Ok(vec![Line::from("stale source")]),
     })
     .unwrap();
     tx.send(WorkerMessage::SourceContext {
         request_id,
         key: new_key,
-        lines: vec![Line::from("current source")],
+        lines: Ok(vec![Line::from("current source")]),
     })
     .unwrap();
     app.handle_worker_messages(&rx);
@@ -3138,4 +2847,41 @@ fn notice_scrolling_reaches_wrapped_tail_and_returns_to_start() {
     assert!(render_app(&mut app, 100, 30).contains("XYZ"));
     app.handle_key(KeyEvent::from(KeyCode::Char('[')));
     assert!(render_app(&mut app, 100, 30).contains("xxxxxxxx"));
+}
+
+#[test]
+fn unavailable_source_keeps_the_saved_finding_snippet() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().display().to_string();
+    let finding = source_context_finding();
+    let mut app = TuiApp::new(tui_args_for(path.clone()));
+    install_result(&mut app, tui_execution_with(path, finding.clone()));
+    let (request_id, key, queued) = app.prepare_source_context_load().unwrap();
+    let (tx, rx) = mpsc::channel();
+    start_source_context_load(request_id, key, queued, tx.clone());
+    let result = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    tx.send(result).unwrap();
+    app.handle_worker_messages(&rx);
+    assert!(app.source_context_lines(&finding).is_none());
+    assert!(text_to_plain(&app.detail_text()).contains(&finding.snippet));
+    assert_eq!(app.notice_count(), 1);
+}
+
+#[test]
+fn compact_detail_keeps_location_suffix_and_opening_controls_while_scrolling() {
+    let mut finding = source_context_finding();
+    finding.file = "a/very/long/directory/that/does/not/fit/in/a/compact/pane/main.js".into();
+    finding.line = 1234;
+    finding.column = 56;
+    finding.description = "Long explanation ".repeat(40);
+    let mut app = tui_app_with_findings(vec![finding]);
+    app.show_launch = false;
+    app.show_detail_view = true;
+    let initial = render_app(&mut app, 40, 12);
+    assert!(initial.contains("main.js:1234:56"));
+    app.handle_key(KeyEvent::from(KeyCode::PageDown));
+    let scrolled = render_app(&mut app, 40, 12);
+    assert!(scrolled.contains("main.js:1234:56"));
+    assert!(scrolled.contains("Enter"));
+    assert_ne!(initial, scrolled);
 }

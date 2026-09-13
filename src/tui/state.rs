@@ -61,7 +61,6 @@ pub(super) struct TuiApp {
     pub(super) show_detail_view: bool,
     /// Derived once when results, filters, sort order, or review marks change.
     cached_filtered: Vec<usize>,
-    cached_without_confidence: usize,
     pub(super) reviewed_count: usize,
     pub(super) identity_root: PathBuf,
     pub(super) finding_keys: Vec<String>,
@@ -123,7 +122,6 @@ impl TuiApp {
             review_filter: ReviewFilter::All,
             show_detail_view: false,
             cached_filtered: Vec::new(),
-            cached_without_confidence: 0,
             reviewed_count: 0,
             identity_root,
             finding_keys: Vec::new(),
@@ -174,7 +172,6 @@ impl TuiApp {
         self.search_restore_query.clear();
         self.search_restore_selection = None;
         self.cached_filtered.clear();
-        self.cached_without_confidence = 0;
         self.reviewed_count = 0;
         let request_id = self.next_request_id;
         self.next_request_id += 1;
@@ -244,6 +241,9 @@ impl TuiApp {
                         Some(SourceContextCache::Loading { key: pending }) if *pending == key
                     ) {
                         changed = true;
+                        if let Err(error) = &lines {
+                            self.push_runtime_notice(error.clone());
+                        }
                         self.source_context_cache = Some(SourceContextCache::Ready { key, lines });
                     }
                 }
@@ -388,7 +388,6 @@ impl TuiApp {
         let previous = self.visible_indices().get(self.selected).copied();
         self.cached_filtered.clear();
         self.cached_resolved.clear();
-        self.cached_without_confidence = 0;
         self.reviewed_count = 0;
 
         if let Some(result) = self.result.as_ref() {
@@ -400,11 +399,9 @@ impl TuiApp {
                     && self.review_filter.matches(review)
                     && (self.baseline_filter == BaselineFilter::All
                         || self.baseline_kinds.get(index) == Some(&self.baseline_filter))
+                    && finding.confidence + 1e-6 >= self.session_min_confidence
                 {
-                    self.cached_without_confidence += 1;
-                    if finding.confidence + 1e-6 >= self.session_min_confidence {
-                        self.cached_filtered.push(index);
-                    }
+                    self.cached_filtered.push(index);
                 }
             }
             let sort_mode = self.sort_mode;
@@ -486,11 +483,6 @@ impl TuiApp {
 
     pub(super) fn filtered_indices(&self) -> &[usize] {
         &self.cached_filtered
-    }
-
-    /// Findings matching the other active filters, before confidence is applied.
-    pub(super) fn total_after_severity_and_search(&self) -> usize {
-        self.cached_without_confidence
     }
 
     /// Whether any non-default filter is active that could be cleared.
@@ -612,11 +604,6 @@ impl TuiApp {
         )
         .map(|path| path.display().to_string())
         .unwrap_or_else(|error| format!("unavailable ({error})"))
-    }
-
-    pub(super) fn review_summary_for_finding(&self, finding: &Finding) -> Option<String> {
-        self.review_state_for(finding)
-            .map(|state| format!("review {}", state.label()))
     }
 
     pub(super) fn push_runtime_notice(&mut self, notice: String) {
@@ -922,6 +909,6 @@ pub(super) enum SourceContextCache {
     },
     Ready {
         key: SourceContextCacheKey,
-        lines: Vec<Line<'static>>,
+        lines: Result<Vec<Line<'static>>, String>,
     },
 }

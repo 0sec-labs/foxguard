@@ -1,5 +1,5 @@
 use super::state::{OpenFocus, ReviewState, SeverityCounts, SortMode};
-use crate::app::{DiffSummary, TuiMode};
+use crate::app::DiffSummary;
 use crate::cli::TuiArgs;
 use crate::{Finding, Severity};
 use crossterm::event::{self, Event, MouseEvent, MouseEventKind};
@@ -159,6 +159,7 @@ pub(super) fn list_item(
     finding: &Finding,
     review_state: Option<ReviewState>,
     checked: bool,
+    width: usize,
 ) -> ListItem<'static> {
     let mut title_spans = vec![
         Span::styled(
@@ -207,10 +208,40 @@ pub(super) fn list_item(
     ListItem::new(vec![
         Line::from(title_spans),
         Line::from(Span::styled(
-            format!("{}:{}", display_path(&finding.file), finding.line),
+            fit_location(
+                format!(
+                    "{}:{}:{}",
+                    display_path(&finding.file),
+                    finding.line,
+                    finding.column
+                ),
+                width,
+            ),
             Style::default().fg(Color::Gray),
         )),
     ])
+}
+
+pub(super) fn fit_location(location: String, width: usize) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    if location.width() <= width {
+        return location;
+    }
+    if width < 3 {
+        return ".".repeat(width);
+    }
+    let mut used = 3;
+    let mut start = location.len();
+    for (index, grapheme) in location.grapheme_indices(true).rev() {
+        let next = grapheme.width();
+        if used + next > width {
+            break;
+        }
+        used += next;
+        start = index;
+    }
+    format!("...{}", &location[start..])
 }
 
 /// Compact advisory chip rendered in the list row for findings that carry a
@@ -365,41 +396,6 @@ pub(super) fn dataflow_lines(finding: &Finding, active_focus: OpenFocus) -> Vec<
     lines
 }
 
-pub(super) fn open_target_lines(finding: &Finding, active_focus: OpenFocus) -> Vec<Line<'static>> {
-    let active_location = open_focus_location(finding, active_focus);
-    let mut selector = vec![Span::styled(
-        "Enter opens ",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::BOLD),
-    )];
-
-    for (index, focus) in available_open_focuses(finding).into_iter().enumerate() {
-        if index > 0 {
-            selector.push(Span::raw(" "));
-        }
-        selector.push(open_focus_span(
-            open_focus_label(focus),
-            open_focus_color(finding, focus),
-            focus == active_focus,
-        ));
-    }
-
-    selector.push(Span::raw("  "));
-    selector.push(Span::styled(
-        "@ ",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::BOLD),
-    ));
-    selector.push(Span::styled(
-        active_location,
-        Style::default().fg(Color::White),
-    ));
-
-    vec![Line::from(selector)]
-}
-
 pub(super) fn render_source_context(
     source: &str,
     finding: &Finding,
@@ -426,15 +422,8 @@ pub(super) fn render_source_context(
         let is_highlighted = (finding.line..=highlighted_end).contains(&number);
         let rendered = render_context_line(source_lines[number - 1], finding, number);
         let marker = if is_highlighted { "> " } else { "  " };
-        let text_style = if is_highlighted {
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::Gray)
-        };
-
-        lines.push(Line::from(vec![
+        let text_style = Style::default().fg(Color::Gray);
+        let mut spans = vec![
             Span::styled(
                 marker,
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
@@ -444,18 +433,39 @@ pub(super) fn render_source_context(
                 Style::default().fg(Color::DarkGray),
             ),
             Span::styled("| ", Style::default().fg(Color::DarkGray)),
-            Span::styled(rendered.text, text_style),
-        ]));
-
-        if let Some((offset, highlight_width)) = rendered.highlight {
-            lines.push(context_caret_line(width, offset, highlight_width, accent));
+        ];
+        if let Some((offset, width)) = rendered.highlight {
+            let mut cell = 0;
+            let mut start = 0;
+            let mut end = rendered.text.len();
+            for (index, grapheme) in rendered.text.grapheme_indices(true) {
+                if cell == offset {
+                    start = index;
+                }
+                if cell >= offset + width {
+                    end = index;
+                    break;
+                }
+                cell += grapheme.width();
+            }
+            spans.push(Span::styled(rendered.text[..start].to_owned(), text_style));
+            spans.push(Span::styled(
+                rendered.text[start..end].to_owned(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            ));
+            spans.push(Span::styled(rendered.text[end..].to_owned(), text_style));
+        } else {
+            spans.push(Span::styled(rendered.text, text_style));
         }
+        lines.push(Line::from(spans));
     }
 
     lines
 }
 
-fn open_focus_location(finding: &Finding, focus: OpenFocus) -> String {
+pub(super) fn open_focus_location(finding: &Finding, focus: OpenFocus) -> String {
     match focus {
         OpenFocus::Finding => format!(
             "{}:{}:{}",
@@ -476,7 +486,7 @@ fn open_focus_location(finding: &Finding, focus: OpenFocus) -> String {
     }
 }
 
-fn open_focus_label(focus: OpenFocus) -> &'static str {
+pub(super) fn open_focus_label(focus: OpenFocus) -> &'static str {
     match focus {
         OpenFocus::Finding => "finding",
         OpenFocus::Source => "source",
@@ -484,7 +494,7 @@ fn open_focus_label(focus: OpenFocus) -> &'static str {
     }
 }
 
-fn open_focus_color(finding: &Finding, focus: OpenFocus) -> Color {
+pub(super) fn open_focus_color(finding: &Finding, focus: OpenFocus) -> Color {
     match focus {
         OpenFocus::Finding => flow_accent_color(finding.severity),
         OpenFocus::Source => Color::Yellow,
@@ -492,7 +502,7 @@ fn open_focus_color(finding: &Finding, focus: OpenFocus) -> Color {
     }
 }
 
-fn open_focus_span(label: &str, color: Color, selected: bool) -> Span<'static> {
+pub(super) fn open_focus_span(label: &str, color: Color, selected: bool) -> Span<'static> {
     let style = if selected {
         Style::default()
             .fg(open_focus_selected_fg(color))
@@ -689,27 +699,6 @@ fn cell_offset_for_char_boundary(
     clusters.last().map(|cluster| cluster.end_cell).unwrap_or(0)
 }
 
-fn context_caret_line(
-    line_number_width: usize,
-    caret_offset: usize,
-    caret_width: usize,
-    accent: Color,
-) -> Line<'static> {
-    let caret_width = caret_width.max(1);
-
-    Line::from(vec![
-        Span::raw("  "),
-        Span::raw(" ".repeat(line_number_width + 1)),
-        Span::styled("| ", Style::default().fg(Color::DarkGray)),
-        Span::raw(" ".repeat(caret_offset)),
-        Span::styled(
-            "^".repeat(caret_width),
-            Style::default().fg(accent).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" selected range", Style::default().fg(Color::DarkGray)),
-    ])
-}
-
 struct RenderedContextLine {
     text: String,
     highlight: Option<(usize, usize)>,
@@ -894,17 +883,6 @@ fn review_badge_span(state: ReviewState) -> Span<'static> {
     Span::styled(format!(" {} ", state.label()), style)
 }
 
-pub(super) fn footer_label_span(label: &str) -> Span<'static> {
-    Span::styled(
-        label.to_string(),
-        Style::default().fg(TEXT_MUTED).add_modifier(Modifier::BOLD),
-    )
-}
-
-pub(super) fn footer_value_span(value: &str) -> Span<'static> {
-    Span::styled(value.to_string(), Style::default().fg(TEXT_PRIMARY))
-}
-
 pub(super) fn footer_key_span(key: &str) -> Span<'static> {
     Span::styled(
         key.to_string(),
@@ -992,14 +970,6 @@ pub(super) fn render_scrollable_panel(
     *scroll = (*scroll).min(maximum);
     frame.render_widget(block, area);
     frame.render_widget(paragraph.scroll((*scroll, 0)), inner);
-}
-
-pub(super) fn mode_findings_title(mode: &TuiMode) -> &'static str {
-    match mode {
-        TuiMode::Scan => "Findings",
-        TuiMode::Diff { .. } => "New Findings",
-        TuiMode::Secrets => "Secrets",
-    }
 }
 
 pub(super) fn request_mode_label(args: &TuiArgs) -> &'static str {
