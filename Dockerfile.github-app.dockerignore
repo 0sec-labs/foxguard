@@ -1,7 +1,10 @@
-# Only the Rust sources and embedded rules belong in this build context.
+# Only Rust sources, bundled grammars, and embedded rules belong in this build context.
 **
 !Cargo.toml
 !Cargo.lock
+!build.rs
+!vendor/
+!vendor/**
 !src/
 !src/**
 !rules/

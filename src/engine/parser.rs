@@ -35,9 +35,9 @@ fn parse_source_for_path(
         Language::Yaml => tree_sitter_yaml::LANGUAGE.into(),
         Language::Dockerfile => tree_sitter_containerfile::LANGUAGE.into(),
         Language::NginxConf | Language::ApacheConf | Language::HAProxyConf | Language::Manifest => {
-            tree_sitter_bash::LANGUAGE.into()
+            super::language::BASH_LANGUAGE.into()
         }
-        Language::Bash => tree_sitter_bash::LANGUAGE.into(),
+        Language::Bash => super::language::BASH_LANGUAGE.into(),
         Language::Ocaml => tree_sitter_ocaml::LANGUAGE_OCAML.into(),
         Language::Scala => tree_sitter_scala::LANGUAGE.into(),
         Language::Elixir => tree_sitter_elixir::LANGUAGE.into(),
@@ -242,5 +242,26 @@ contract Token {
             .expect("JSON parser should produce a tree");
 
         assert!(!tree.root_node().has_error());
+    }
+
+    #[test]
+    fn parses_bash_read_write_redirect() {
+        // regression: tree-sitter-bash 0.23.3 lacked '<>' (LT_GT) token in
+        // file_redirect — valid bash read-write redirect produced ERROR nodes.
+        let source = "exec 7<> \"$binding_fifo\"\n";
+        let tree = parse_path(source, Language::Bash, Path::new("test.sh"))
+            .expect("Bash parser should produce a tree");
+
+        assert!(!tree.root_node().has_error());
+    }
+
+    #[test]
+    fn rejects_malformed_bash() {
+        // Genuinely invalid bash must still produce parse errors.
+        let source = "if [[ -f /tmp/x ]\n"; // missing closing ']]'
+        let tree = parse_path(source, Language::Bash, Path::new("test.sh"))
+            .expect("Bash parser should produce a tree");
+
+        assert!(tree.root_node().has_error());
     }
 }

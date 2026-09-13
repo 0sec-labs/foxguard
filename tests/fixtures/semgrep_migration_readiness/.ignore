@@ -1,0 +1,3 @@
+# Deliberately malformed YAML for explicit-path migration-readiness tests.
+# Exclude only this document from directory scans; keep the test corpus visible.
+/invalid-document.yml

@@ -1,5 +1,6 @@
 pub mod coccinelle;
 pub mod codeql;
+pub(crate) mod language;
 pub mod parser;
 pub mod process;
 pub mod scanner;

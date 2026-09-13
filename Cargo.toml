@@ -30,7 +30,7 @@ tree-sitter-c = "0.24"
 tree-sitter-c-sharp = "0.23"
 tree-sitter-swift = "0.7"
 tree-sitter-kotlin-sg = "0.4"
-tree-sitter-bash = "0.23"
+tree-sitter-language = "0.1"
 tree-sitter-hcl = "1.1"
 tree-sitter-solidity = "1.2"
 tree-sitter-yaml = "0.7"
@@ -112,5 +112,8 @@ required-features = ["github-app"]
 [[bin]]
 name = "foxguard_process_test_helper"
 path = "tests/bin/process_test_helper.rs"
+
+[build-dependencies]
+cc = "1.1"
 
 [dev-dependencies]
