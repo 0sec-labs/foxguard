@@ -1,14 +1,13 @@
 use super::state::{
-    ActionMenu, ExportFormat, ExportMenu, LaunchMode, OpenFocus, ReviewState, SeverityPicker,
-    TriageAction, TuiApp, SEVERITY_PICKER_CHOICES,
+    ActionMenu, BaselineFilter, ExportFormat, ExportMenu, LaunchMode, OpenFocus, ReviewState,
+    SeverityPicker, TriageAction, TuiApp, SEVERITY_PICKER_CHOICES,
 };
 use super::widgets::{
-    display_path, drain_queued_scroll_events, finding_list_index_at_position, finding_review_key,
-    preview_line,
+    display_path, drain_queued_scroll_events, finding_list_index_at_position, preview_line,
 };
 use super::{open_command_spec, resolve_finding_path, OpenTarget, TerminalSession};
 use crate::app::TuiMode;
-use crate::baseline::append_finding_to_baseline_at_root;
+use crate::baseline::{append_finding_to_baseline_at_root, fingerprint_finding_at_root};
 use crate::config::{
     add_disabled_rule_to_config, add_scan_ignore_rule, add_secrets_ignored_rule,
     add_severity_override_to_config, current_severity_override, is_rule_disabled_in_config,
@@ -26,20 +25,33 @@ pub(super) enum ControlFlow {
     Rescan,
     OpenSelected,
     ApplyAction(TriageAction),
+    ApplyBatch,
     Exit,
 }
 
 impl TuiApp {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> ControlFlow {
-        if key.kind != event::KeyEventKind::Press {
+        if key.kind == event::KeyEventKind::Release
+            || (key.kind == event::KeyEventKind::Repeat && key.code == KeyCode::Enter)
+        {
             return ControlFlow::Continue;
         }
-        // Ctrl+C / Ctrl+Shift+C always exits, regardless of mode.
+        // Ctrl+C / Ctrl+Shift+C always exits.
         if key.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
         {
             return ControlFlow::Exit;
         }
+        // Modified shortcuts must not consume ordinary text typed into search.
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char('u')
+            && self.search_mode
+        {
+            self.search_query.clear();
+            self.clamp_selection();
+            return ControlFlow::Continue;
+        }
+        // Catch-all: any other Ctrl/Alt combination is ignored (not re-mapped).
         if key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
@@ -81,6 +93,12 @@ impl TuiApp {
                 _ => ControlFlow::Continue,
             };
         }
+        if self.saved_view_menu.is_some() {
+            return self.handle_saved_view_key(key.code);
+        }
+        if self.batch_menu.is_some() {
+            return self.handle_batch_key(key.code);
+        }
 
         if key.code == KeyCode::Char('?')
             && !self.search_mode
@@ -95,6 +113,13 @@ impl TuiApp {
 
         if self.show_launch {
             return self.handle_launch_key(key.code);
+        }
+        if self.scanning {
+            return if key.code == KeyCode::Char('q') {
+                ControlFlow::Exit
+            } else {
+                ControlFlow::Continue
+            };
         }
 
         if self.severity_picker.is_some() {
@@ -112,15 +137,51 @@ impl TuiApp {
         if self.search_mode {
             return self.handle_search_key(key.code);
         }
+        if self.error.is_some() {
+            match key.code {
+                KeyCode::Home => {
+                    self.detail_scroll = 0;
+                    return ControlFlow::Continue;
+                }
+                KeyCode::End => {
+                    self.detail_scroll = u16::MAX;
+                    return ControlFlow::Continue;
+                }
+                KeyCode::Char('q' | 'r' | 'w' | 'F' | '[' | ']')
+                | KeyCode::PageUp
+                | KeyCode::PageDown => {}
+                _ => return ControlFlow::Continue,
+            }
+        }
 
         match key.code {
             KeyCode::Char('q') => ControlFlow::Exit,
+            KeyCode::Char(' ') => {
+                self.toggle_checked_finding();
+                ControlFlow::Continue
+            }
+            KeyCode::Char('a') => {
+                self.toggle_visible_selection();
+                ControlFlow::Continue
+            }
+            KeyCode::Char('x') => {
+                self.open_batch_menu();
+                ControlFlow::Continue
+            }
+            KeyCode::Char('F') => {
+                self.open_saved_views();
+                ControlFlow::Continue
+            }
+            KeyCode::Char('b') => {
+                self.cycle_baseline_filter();
+                ControlFlow::Continue
+            }
             KeyCode::Home => {
                 self.select_filtered_index(0);
                 ControlFlow::Continue
             }
             KeyCode::End => {
-                let len = self.filtered_indices().len();
+                let len = self.visible_indices().len();
                 if len > 0 {
                     self.select_filtered_index(len - 1);
                 }
@@ -135,7 +196,21 @@ impl TuiApp {
                 ControlFlow::Continue
             }
             KeyCode::Char('/') => {
+                self.search_restore_query.clone_from(&self.search_query);
+                self.search_restore_selection = self.visible_indices().get(self.selected).copied();
                 self.search_mode = true;
+                ControlFlow::Continue
+            }
+            KeyCode::Esc => {
+                if self.show_detail_view {
+                    self.show_detail_view = false;
+                } else if self.has_active_filter() {
+                    self.clear_active_filters();
+                    self.push_runtime_notice(
+                        "all filters cleared (search, severity, confidence, review, baseline)"
+                            .to_string(),
+                    );
+                }
                 ControlFlow::Continue
             }
             KeyCode::Char('0') => {
@@ -171,22 +246,34 @@ impl TuiApp {
                 self.show_compliance_panel = !self.show_compliance_panel;
                 ControlFlow::Continue
             }
+            KeyCode::Char('e') if self.baseline_filter == BaselineFilter::Resolved => {
+                self.push_runtime_notice("historical rows are metadata only; switch baseline category to export current findings".into());
+                ControlFlow::Continue
+            }
             KeyCode::Char('e') => self.open_export_menu(),
             KeyCode::Char('i') => self.open_action_menu(),
             KeyCode::PageDown => {
-                self.scroll_detail(8);
+                if self.detail_area.height > 0 {
+                    self.scroll_detail(self.detail_area.height.saturating_sub(2).max(1) as i32);
+                } else {
+                    self.move_selection(self.list_area.height.saturating_sub(2).max(1) as isize);
+                }
                 ControlFlow::Continue
             }
             KeyCode::PageUp => {
-                self.scroll_detail(-8);
+                if self.detail_area.height > 0 {
+                    self.scroll_detail(-(self.detail_area.height.saturating_sub(2).max(1) as i32));
+                } else {
+                    self.move_selection(-(self.list_area.height.saturating_sub(2).max(1) as isize));
+                }
                 ControlFlow::Continue
             }
             KeyCode::Char(']') => {
-                self.scroll_notices(3);
+                self.scroll_notices(1);
                 ControlFlow::Continue
             }
             KeyCode::Char('[') => {
-                self.scroll_notices(-3);
+                self.scroll_notices(-1);
                 ControlFlow::Continue
             }
             KeyCode::Tab => {
@@ -205,6 +292,16 @@ impl TuiApp {
                 self.cycle_sort_mode();
                 ControlFlow::Continue
             }
+            // v: toggle between list+detail split and full-list view
+            KeyCode::Char('v') => {
+                self.toggle_detail_view();
+                ControlFlow::Continue
+            }
+            // f: cycle review-status filter
+            KeyCode::Char('f') => {
+                self.cycle_review_filter();
+                ControlFlow::Continue
+            }
             _ => ControlFlow::Continue,
         }
     }
@@ -215,6 +312,9 @@ impl TuiApp {
             && self.severity_picker.is_none()
             && self.action_menu.is_none()
             && self.export_menu.is_none()
+            && self.batch_menu.is_none()
+            && self.saved_view_menu.is_none()
+            && !self.scanning
             && !self.search_mode
     }
 
@@ -223,6 +323,12 @@ impl TuiApp {
             kind @ (MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) => {
                 let last_kind = drain_queued_scroll_events(kind);
                 match last_kind {
+                    MouseEventKind::ScrollUp if self.show_detail_view || self.error.is_some() => {
+                        self.scroll_detail(-1)
+                    }
+                    MouseEventKind::ScrollDown if self.show_detail_view || self.error.is_some() => {
+                        self.scroll_detail(1)
+                    }
                     MouseEventKind::ScrollUp => self.move_selection(-1),
                     MouseEventKind::ScrollDown => self.move_selection(1),
                     _ => {}
@@ -232,7 +338,7 @@ impl TuiApp {
                 if let Some(index) = finding_list_index_at_position(
                     self.list_area,
                     self.list_state.offset(),
-                    self.filtered_indices().len(),
+                    self.visible_indices().len(),
                     mouse.column,
                     mouse.row,
                 ) {
@@ -243,7 +349,7 @@ impl TuiApp {
                 self.hover_index = finding_list_index_at_position(
                     self.list_area,
                     self.list_state.offset(),
-                    self.filtered_indices().len(),
+                    self.visible_indices().len(),
                     mouse.column,
                     mouse.row,
                 );
@@ -254,10 +360,22 @@ impl TuiApp {
 
     pub(super) fn handle_search_key(&mut self, key: KeyCode) -> ControlFlow {
         match key {
-            KeyCode::Esc => self.search_mode = false,
-            KeyCode::Enter => {
+            KeyCode::Esc => {
+                self.search_query = std::mem::take(&mut self.search_restore_query);
                 self.search_mode = false;
                 self.clamp_selection();
+                if let Some(index) = self.search_restore_selection.take().and_then(|original| {
+                    self.visible_indices()
+                        .iter()
+                        .position(|index| *index == original)
+                }) {
+                    self.select_filtered_index(index);
+                }
+            }
+            KeyCode::Enter => {
+                self.search_mode = false;
+                self.search_restore_query.clear();
+                self.search_restore_selection = None;
             }
             KeyCode::Backspace => {
                 self.search_query.pop();
@@ -269,7 +387,6 @@ impl TuiApp {
             }
             _ => {}
         }
-
         ControlFlow::Continue
     }
 
@@ -361,6 +478,7 @@ impl TuiApp {
         self.export_menu = Some(ExportMenu {
             formats: vec![ExportFormat::Cbom, ExportFormat::Json, ExportFormat::Sarif],
             selected: 0,
+            overwrite: None,
         });
         ControlFlow::Continue
     }
@@ -369,35 +487,75 @@ impl TuiApp {
         let Some(menu) = self.export_menu.as_mut() else {
             return ControlFlow::Continue;
         };
-
-        match key {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                self.export_menu = None;
-                ControlFlow::Continue
+        if let Some(path) = menu.overwrite.as_ref() {
+            match key {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    let path = path.clone();
+                    let format = menu.formats[menu.selected];
+                    self.export_menu = None;
+                    self.export_findings_to_with_atomic_write(format, &path, true);
+                }
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') => {
+                    self.export_menu = None;
+                }
+                _ => {}
             }
+            return ControlFlow::Continue;
+        }
+        match key {
+            KeyCode::Esc | KeyCode::Char('q') => self.export_menu = None,
             KeyCode::Char('j') | KeyCode::Down => {
                 menu.selected = (menu.selected + 1).min(menu.formats.len().saturating_sub(1));
-                ControlFlow::Continue
             }
-            KeyCode::Char('k') | KeyCode::Up => {
-                menu.selected = menu.selected.saturating_sub(1);
-                ControlFlow::Continue
-            }
+            KeyCode::Char('k') | KeyCode::Up => menu.selected = menu.selected.saturating_sub(1),
             KeyCode::Enter => {
                 let format = menu.formats[menu.selected];
-                self.export_menu = None;
-                self.export_findings(format);
-                ControlFlow::Continue
+                self.export_with_overwrite_check(format, format.filename().into());
             }
-            _ => ControlFlow::Continue,
+            _ => {}
+        }
+        ControlFlow::Continue
+    }
+
+    pub(super) fn export_with_overwrite_check(
+        &mut self,
+        format: ExportFormat,
+        path: std::path::PathBuf,
+    ) {
+        self.export_menu = None;
+        match path.symlink_metadata() {
+            Ok(metadata) if metadata.is_file() => {
+                self.export_menu = Some(ExportMenu {
+                    formats: vec![format],
+                    selected: 0,
+                    overwrite: Some(path),
+                });
+            }
+            Ok(_) => {
+                self.show_notices = true;
+                self.push_runtime_notice(format!(
+                    "export refused: {} is not a regular file (symlinks are not followed)",
+                    path.display()
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.export_findings_to_with_atomic_write(format, &path, false);
+            }
+            Err(error) => {
+                self.show_notices = true;
+                self.push_runtime_notice(format!("export failed: {}: {error}", path.display()));
+            }
         }
     }
 
-    pub(super) fn export_findings(&mut self, format: ExportFormat) {
-        self.export_findings_to(format, format.filename().as_ref());
-    }
-
-    pub(super) fn export_findings_to(&mut self, format: ExportFormat, path: &std::path::Path) {
+    /// Write beside the destination, then atomically publish; never follow a
+    /// destination symlink or replace an existing file without confirmation.
+    pub(super) fn export_findings_to_with_atomic_write(
+        &mut self,
+        format: ExportFormat,
+        path: &std::path::Path,
+        overwrite: bool,
+    ) {
         let findings = match self.result.as_ref() {
             Some(r) => &r.findings,
             None => return,
@@ -426,7 +584,39 @@ impl TuiApp {
             );
         }
 
-        match std::fs::write(path, &content) {
+        let write_result = (|| -> Result<(), String> {
+            match path.symlink_metadata() {
+                Ok(metadata) if !metadata.is_file() => {
+                    return Err(format!("{} is not a regular file", path.display()));
+                }
+                Ok(_) if !overwrite => {
+                    return Err(format!(
+                        "{} already exists; export again to confirm replacement",
+                        path.display()
+                    ));
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.to_string()),
+            }
+            let dir = path
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            let mut tmp = tempfile::NamedTempFile::new_in(dir)
+                .map_err(|e| format!("cannot create temp file: {e}"))?;
+            std::io::Write::write_all(&mut tmp, content.as_bytes())
+                .map_err(|e| format!("write failed: {e}"))?;
+            if overwrite {
+                tmp.persist(path)
+            } else {
+                tmp.persist_noclobber(path)
+            }
+            .map_err(|e| format!("cannot publish {}: {e}", path.display()))?;
+            Ok(())
+        })();
+
+        match write_result {
             Ok(()) => {
                 self.push_runtime_notice(format!(
                     "exported {} findings to {}",
@@ -435,6 +625,7 @@ impl TuiApp {
                 ));
             }
             Err(err) => {
+                self.show_notices = true;
                 self.push_runtime_notice(format!("export failed: {}", err));
             }
         }
@@ -469,10 +660,6 @@ impl TuiApp {
     }
 
     pub(super) fn cycle_session_min_confidence(&mut self) {
-        // Cycle 0.0 → 0.7 → 0.9 → 1.0 → 0.0. The exact thresholds mirror
-        // common "high-confidence only" review presets without requiring a
-        // numeric prompt — the feature is deliberately a display filter,
-        // not a scan-time knob (see `scan.min_confidence` in config for that).
         self.session_min_confidence = match self.session_min_confidence {
             value if value <= 0.0 => 0.7,
             value if value < 0.85 => 0.9,
@@ -512,9 +699,6 @@ impl TuiApp {
             return;
         };
 
-        // Pre-select the current override if the user already dialed this
-        // rule once before — saves a keystroke and makes the popup's current
-        // value visible as the highlighted row.
         let current = current_severity_override(
             Path::new(&self.request.path),
             self.request.config.as_deref(),
@@ -691,8 +875,19 @@ impl TuiApp {
             .selected_finding()
             .cloned()
             .ok_or_else(|| "no finding selected".to_string())?;
-        let review_key = finding_review_key(&finding);
+        let result = self.apply_action_to_finding(action, &finding)?;
+        self.clamp_selection();
+        if action.review_mark().is_some() {
+            self.flush_review_session()?;
+        }
+        Ok(result)
+    }
 
+    pub(super) fn apply_action_to_finding(
+        &mut self,
+        action: TriageAction,
+        finding: &Finding,
+    ) -> Result<bool, String> {
         match action {
             TriageAction::AddToBaseline => {
                 let baseline_path = self.baseline_path_for_actions()?;
@@ -705,7 +900,8 @@ impl TuiApp {
                     config.as_ref().map(|config| config.project_root.as_path()),
                 );
                 let added =
-                    append_finding_to_baseline_at_root(&baseline_path, &finding, &identity_root)?;
+                    append_finding_to_baseline_at_root(&baseline_path, finding, &identity_root)?;
+                self.request.baseline = Some(baseline_path.to_string_lossy().into_owned());
                 if added {
                     self.push_runtime_notice(format!(
                         "added finding to baseline {}",
@@ -723,7 +919,7 @@ impl TuiApp {
                 let (config_path, added) = add_scan_ignore_rule(
                     Path::new(&self.request.path),
                     self.request.config.as_deref(),
-                    &finding,
+                    finding,
                 )?;
                 if added {
                     self.push_runtime_notice(format!(
@@ -761,11 +957,6 @@ impl TuiApp {
                 Ok(true)
             }
             TriageAction::LowerSeverity => {
-                // `LowerSeverity` opens the severity picker; the picker
-                // dispatches `ApplySeverityOverride(sev)` when the user picks.
-                // We should never land here for a direct apply, but keep the
-                // arm so adding the variant to `available_actions_for_finding`
-                // stays exhaustive without requiring two layers of state.
                 self.open_severity_picker();
                 Ok(false)
             }
@@ -827,23 +1018,26 @@ impl TuiApp {
                 Ok(true)
             }
             TriageAction::MarkReviewed => {
-                self.review_states.insert(review_key, ReviewState::Reviewed);
+                let key = fingerprint_finding_at_root(finding, &self.identity_root);
+                self.update_review_mark(&key, Some(ReviewState::Reviewed));
                 self.push_runtime_notice("marked finding as reviewed".to_string());
                 Ok(false)
             }
             TriageAction::MarkTodo => {
-                self.review_states.insert(review_key, ReviewState::Todo);
+                let key = fingerprint_finding_at_root(finding, &self.identity_root);
+                self.update_review_mark(&key, Some(ReviewState::Todo));
                 self.push_runtime_notice("marked finding as todo".to_string());
                 Ok(false)
             }
             TriageAction::MarkIgnoreCandidate => {
-                self.review_states
-                    .insert(review_key, ReviewState::IgnoreCandidate);
+                let key = fingerprint_finding_at_root(finding, &self.identity_root);
+                self.update_review_mark(&key, Some(ReviewState::IgnoreCandidate));
                 self.push_runtime_notice("marked finding as ignore candidate".to_string());
                 Ok(false)
             }
             TriageAction::ClearReviewState => {
-                self.review_states.remove(&review_key);
+                let key = fingerprint_finding_at_root(finding, &self.identity_root);
+                self.update_review_mark(&key, None);
                 self.push_runtime_notice("cleared review state".to_string());
                 Ok(false)
             }
@@ -942,20 +1136,20 @@ impl TuiApp {
                 lines
             }
             TriageAction::MarkReviewed => vec![
-                preview_line("session", "mark as reviewed"),
-                Line::from("no files are changed"),
+                preview_line("review state", "mark as reviewed"),
+                Line::from("saved per project and scan mode; repository unchanged"),
             ],
             TriageAction::MarkTodo => vec![
-                preview_line("session", "mark as todo"),
-                Line::from("no files are changed"),
+                preview_line("review state", "mark as todo"),
+                Line::from("saved per project and scan mode; repository unchanged"),
             ],
             TriageAction::MarkIgnoreCandidate => vec![
-                preview_line("session", "mark as ignore candidate"),
-                Line::from("no files are changed"),
+                preview_line("review state", "mark as ignore candidate"),
+                Line::from("saved per project and scan mode; repository unchanged"),
             ],
             TriageAction::ClearReviewState => vec![
-                preview_line("session", "clear review mark"),
-                Line::from("no files are changed"),
+                preview_line("review state", "clear review mark"),
+                Line::from("saved per project and scan mode; repository unchanged"),
             ],
         }
     }

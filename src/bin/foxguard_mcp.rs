@@ -594,7 +594,8 @@ fn scan_stats_value(stats: &ScanStats) -> Value {
         "binary_files": stats.binary_files,
         "read_error_files": stats.read_error_files,
         "minified_files": stats.minified_files,
-        "parse_error_files": stats.parse_error_files
+        "parse_error_files": stats.parse_error_files,
+        "walk_errors": stats.walk_errors
     })
 }
 

@@ -1,17 +1,16 @@
 use super::input::ControlFlow;
 use super::state::{
-    ActionMenu, ExportFormat, LaunchMode, OpenFocus, ReviewState, SortMode, SourceContextCache,
-    TriageAction, TuiApp,
+    ActionMenu, ExportFormat, LaunchMode, OpenFocus, SortMode, SourceContextCache, TriageAction,
+    TuiApp,
 };
 use super::widgets::{
     available_open_focuses, cnsa2_deadline_chip_span, compare_findings, compare_findings_by,
-    confidence_badge_span, crypto_algorithm_chip_span, dataflow_lines,
-    finding_list_index_at_position, list_item, loading_copy, loading_shimmer_line,
-    open_target_lines, pop_stashed_event, render_source_context, stash_event, truncate_text,
+    confidence_badge_span, dataflow_lines, finding_list_index_at_position, open_target_lines,
+    pop_stashed_event, render_source_context, stash_event,
 };
 use super::{
-    open_command_spec_from_editor, resolve_finding_path, start_source_context_load, OpenTarget,
-    WorkerMessage,
+    open_command_spec_from_editor, open_command_spec_with_environment, resolve_finding_path,
+    start_source_context_load, OpenTarget, WorkerMessage,
 };
 use crate::app::{TuiExecution, TuiMode};
 use crate::cli::TuiArgs;
@@ -24,6 +23,10 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
+
+fn install_result(app: &mut TuiApp, result: TuiExecution) {
+    app.install_scan_result(result);
+}
 
 fn tui_args_for(path: String) -> TuiArgs {
     TuiArgs {
@@ -82,6 +85,7 @@ fn source_context_finding() -> Finding {
 
 fn tui_execution_with(path: String, finding: Finding) -> TuiExecution {
     TuiExecution {
+        baseline_comparison: None,
         mode: TuiMode::Scan,
         path,
         findings: vec![finding],
@@ -174,8 +178,8 @@ fn open_command_spec_uses_code_goto_format() {
         line: 27,
     };
 
-    let command = open_command_spec_from_editor(&target, Some("code --wait".to_string()))
-        .expect("command should build");
+    let command =
+        open_command_spec_from_editor(&target, "code --wait").expect("command should build");
 
     assert_eq!(command.program, "code");
     assert_eq!(
@@ -195,8 +199,8 @@ fn open_command_spec_normalizes_windows_editor_names() {
         line: 27,
     };
 
-    let command = open_command_spec_from_editor(&target, Some("Code.exe --wait".to_string()))
-        .expect("command should build");
+    let command =
+        open_command_spec_from_editor(&target, "Code.exe --wait").expect("command should build");
     assert_eq!(command.program, "Code.exe");
     assert_eq!(
         command.args,
@@ -207,8 +211,7 @@ fn open_command_spec_normalizes_windows_editor_names() {
         ]
     );
 
-    let command = open_command_spec_from_editor(&target, Some("code.cmd".to_string()))
-        .expect("command should build");
+    let command = open_command_spec_from_editor(&target, "code.cmd").expect("command should build");
     assert_eq!(command.program, "code.cmd");
     assert_eq!(
         command.args,
@@ -219,17 +222,17 @@ fn open_command_spec_normalizes_windows_editor_names() {
 #[test]
 fn open_command_spec_preserves_quoted_editor_args() {
     let target = OpenTarget {
-        path: PathBuf::from("/tmp/project/src/main.rs"),
+        path: PathBuf::from("/tmp/project/src/file with spaces & punctuation.rs"),
         line: 27,
     };
 
     let command = open_command_spec_from_editor(
         &target,
-        Some("code --user-data-dir \"/tmp/editor data\" --wait".to_string()),
+        r#""/tmp/editor bin/code" --user-data-dir "/tmp/editor data" --wait"#,
     )
     .expect("command should build");
 
-    assert_eq!(command.program, "code");
+    assert_eq!(command.program, "/tmp/editor bin/code");
     assert_eq!(
         command.args,
         vec![
@@ -237,7 +240,7 @@ fn open_command_spec_preserves_quoted_editor_args() {
             "/tmp/editor data".to_string(),
             "--wait".to_string(),
             "-g".to_string(),
-            "/tmp/project/src/main.rs:27".to_string()
+            "/tmp/project/src/file with spaces & punctuation.rs:27".to_string()
         ]
     );
 }
@@ -249,42 +252,13 @@ fn open_command_spec_uses_vim_line_format() {
         line: 8,
     };
 
-    let command = open_command_spec_from_editor(&target, Some("nvim".to_string()))
-        .expect("command should build");
+    let command = open_command_spec_from_editor(&target, "nvim").expect("command should build");
 
     assert_eq!(command.program, "nvim");
     assert_eq!(
         command.args,
         vec!["+8".to_string(), "/tmp/project/src/main.rs".to_string()]
     );
-}
-
-#[test]
-fn begin_scan_resets_runtime_notices_and_updates_request_id() {
-    let mut app = TuiApp::new(TuiArgs {
-        path: ".".to_string(),
-        config: None,
-        severity: None,
-        rules: None,
-        no_builtins: false,
-        changes: Default::default(),
-        exclude: Vec::new(),
-        baseline: None,
-        diff: None,
-        secrets: false,
-        explain: false,
-        max_file_size: 1_048_576,
-        pq_mode: false,
-    });
-    app.runtime_notices.push("stale notice".to_string());
-
-    let first = app.begin_scan();
-    let second = app.begin_scan();
-
-    assert_eq!(first, 1);
-    assert_eq!(second, 2);
-    assert!(app.runtime_notices.is_empty());
-    assert_eq!(app.active_request_id, 2);
 }
 
 #[test]
@@ -340,36 +314,6 @@ fn launch_key_enter_starts_selected_mode() {
 }
 
 #[test]
-fn loading_copy_uses_selected_launch_mode() {
-    let mut app = TuiApp::new(TuiArgs {
-        path: ".".to_string(),
-        config: None,
-        severity: None,
-        rules: None,
-        no_builtins: false,
-        changes: Default::default(),
-        exclude: Vec::new(),
-        baseline: None,
-        diff: Some("origin/main".to_string()),
-        secrets: false,
-        explain: false,
-        max_file_size: 1_048_576,
-        pq_mode: false,
-    });
-    app.launch_mode = LaunchMode::Diff;
-
-    let (headline, subline) = loading_copy(&app);
-    assert_eq!(headline, "Scanning diff");
-    assert!(subline.contains("origin/main"));
-}
-
-#[test]
-fn loading_shimmer_line_respects_requested_width() {
-    let spans = loading_shimmer_line("walking files", 12, 4);
-    assert_eq!(spans.len(), 14);
-}
-
-#[test]
 fn compare_findings_prioritizes_higher_severity() {
     let critical = Finding {
         rule_id: "js/no-command-injection".to_string(),
@@ -414,12 +358,6 @@ fn compare_findings_prioritizes_higher_severity() {
         compare_findings(&critical, &medium),
         std::cmp::Ordering::Less
     );
-}
-
-#[test]
-fn truncate_text_adds_ellipsis_when_needed() {
-    assert_eq!(truncate_text("abcdef", 3), "abc...");
-    assert_eq!(truncate_text("abc", 3), "abc");
 }
 
 #[test]
@@ -953,7 +891,7 @@ fn prepare_source_context_load_sets_loading_once() {
     let mut app = TuiApp::new(tui_args_for(path.clone()));
     app.show_launch = false;
     app.active_request_id = 17;
-    app.result = Some(tui_execution_with(path, finding.clone()));
+    install_result(&mut app, tui_execution_with(path, finding.clone()));
 
     let Some((request_id, key, queued_finding)) = app.prepare_source_context_load() else {
         panic!("expected source context load request");
@@ -981,7 +919,7 @@ fn source_context_lines_reads_cache_only_and_worker_populates_ready() {
     let mut app = TuiApp::new(tui_args_for(path.clone()));
     app.show_launch = false;
     app.active_request_id = 23;
-    app.result = Some(tui_execution_with(path, finding.clone()));
+    install_result(&mut app, tui_execution_with(path, finding.clone()));
 
     assert!(app.source_context_lines(&finding).is_none());
     assert!(app.source_context_cache.is_none());
@@ -1019,7 +957,7 @@ fn stale_source_context_worker_messages_are_ignored() {
     let mut app = TuiApp::new(tui_args_for(".".to_string()));
     app.show_launch = false;
     app.active_request_id = 41;
-    app.result = Some(tui_execution_with(".".to_string(), finding));
+    install_result(&mut app, tui_execution_with(".".to_string(), finding));
 
     let (_, key, _) = app
         .prepare_source_context_load()
@@ -1217,49 +1155,53 @@ fn cycle_open_focus_advances_through_available_targets() {
         max_file_size: 1_048_576,
         pq_mode: false,
     });
-    app.result = Some(TuiExecution {
-        mode: TuiMode::Scan,
-        path: ".".to_string(),
-        findings: vec![Finding {
-            rule_id: "js/no-command-injection".to_string(),
-            severity: Severity::High,
-            file: "src/main.js".to_string(),
-            line: 42,
-            column: 7,
-            end_line: 42,
-            end_column: 18,
-            description: "untrusted input reaches exec".to_string(),
-            snippet: "exec(cmd)".to_string(),
-            cwe: None,
-            source_line: Some(12),
-            source_description: Some("user-controlled query param".to_string()),
-            sink_line: Some(42),
-            sink_description: Some("value is passed into exec".to_string()),
-            fix_suggestion: None,
-            sink_start_byte: None,
-            sink_end_byte: None,
-            confidence: crate::default_confidence(),
-            taint_hops: None,
-            tags: vec![],
-            crypto_algorithm: None,
-            cnsa2_deadline: None,
-            dep_name: None,
-            dep_version: None,
-            dep_ecosystem: None,
-            dep_purl: None,
-            dep_vulnerability_id: None,
-            dep_fixed_version: None,
-            dep_source: None,
-            dep_vulnerability_severity: None,
-            dep_path: vec![],
-            crypto_material: None,
-        }],
-        files_scanned: 1,
-        duration: Duration::from_secs(1),
-        explain: true,
-        diff_summary: None,
-        notices: Vec::new(),
-    });
+    install_result(
+        &mut app,
+        TuiExecution {
+            baseline_comparison: None,
+            mode: TuiMode::Scan,
+            path: ".".to_string(),
+            findings: vec![Finding {
+                rule_id: "js/no-command-injection".to_string(),
+                severity: Severity::High,
+                file: "src/main.js".to_string(),
+                line: 42,
+                column: 7,
+                end_line: 42,
+                end_column: 18,
+                description: "untrusted input reaches exec".to_string(),
+                snippet: "exec(cmd)".to_string(),
+                cwe: None,
+                source_line: Some(12),
+                source_description: Some("user-controlled query param".to_string()),
+                sink_line: Some(42),
+                sink_description: Some("value is passed into exec".to_string()),
+                fix_suggestion: None,
+                sink_start_byte: None,
+                sink_end_byte: None,
+                confidence: crate::default_confidence(),
+                taint_hops: None,
+                tags: vec![],
+                crypto_algorithm: None,
+                cnsa2_deadline: None,
+                dep_name: None,
+                dep_version: None,
+                dep_ecosystem: None,
+                dep_purl: None,
+                dep_vulnerability_id: None,
+                dep_fixed_version: None,
+                dep_source: None,
+                dep_vulnerability_severity: None,
+                dep_path: vec![],
+                crypto_material: None,
+            }],
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: true,
+            diff_summary: None,
+            notices: Vec::new(),
+        },
+    );
 
     app.cycle_open_focus();
     assert_eq!(app.open_focus, OpenFocus::Source);
@@ -1308,49 +1250,53 @@ fn open_action_menu_is_available_in_scan_mode() {
         max_file_size: 1_048_576,
         pq_mode: false,
     });
-    app.result = Some(TuiExecution {
-        mode: TuiMode::Scan,
-        path: ".".to_string(),
-        findings: vec![Finding {
-            rule_id: "js/no-command-injection".to_string(),
-            severity: Severity::High,
-            file: "src/main.js".to_string(),
-            line: 42,
-            column: 7,
-            end_line: 42,
-            end_column: 18,
-            description: "untrusted input reaches exec".to_string(),
-            snippet: "exec(cmd)".to_string(),
-            cwe: None,
-            source_line: None,
-            source_description: None,
-            sink_line: None,
-            sink_description: None,
-            fix_suggestion: None,
-            sink_start_byte: None,
-            sink_end_byte: None,
-            confidence: crate::default_confidence(),
-            taint_hops: None,
-            tags: vec![],
-            crypto_algorithm: None,
-            cnsa2_deadline: None,
-            dep_name: None,
-            dep_version: None,
-            dep_ecosystem: None,
-            dep_purl: None,
-            dep_vulnerability_id: None,
-            dep_fixed_version: None,
-            dep_source: None,
-            dep_vulnerability_severity: None,
-            dep_path: vec![],
-            crypto_material: None,
-        }],
-        files_scanned: 1,
-        duration: Duration::from_secs(1),
-        explain: false,
-        diff_summary: None,
-        notices: Vec::new(),
-    });
+    install_result(
+        &mut app,
+        TuiExecution {
+            baseline_comparison: None,
+            mode: TuiMode::Scan,
+            path: ".".to_string(),
+            findings: vec![Finding {
+                rule_id: "js/no-command-injection".to_string(),
+                severity: Severity::High,
+                file: "src/main.js".to_string(),
+                line: 42,
+                column: 7,
+                end_line: 42,
+                end_column: 18,
+                description: "untrusted input reaches exec".to_string(),
+                snippet: "exec(cmd)".to_string(),
+                cwe: None,
+                source_line: None,
+                source_description: None,
+                sink_line: None,
+                sink_description: None,
+                fix_suggestion: None,
+                sink_start_byte: None,
+                sink_end_byte: None,
+                confidence: crate::default_confidence(),
+                taint_hops: None,
+                tags: vec![],
+                crypto_algorithm: None,
+                cnsa2_deadline: None,
+                dep_name: None,
+                dep_version: None,
+                dep_ecosystem: None,
+                dep_purl: None,
+                dep_vulnerability_id: None,
+                dep_fixed_version: None,
+                dep_source: None,
+                dep_vulnerability_severity: None,
+                dep_path: vec![],
+                crypto_material: None,
+            }],
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        },
+    );
     app.show_launch = false;
 
     let flow = app.handle_key(KeyEvent::from(KeyCode::Char('i')));
@@ -1379,49 +1325,53 @@ fn open_action_menu_is_available_in_secrets_mode() {
         max_file_size: 1_048_576,
         pq_mode: false,
     });
-    app.result = Some(TuiExecution {
-        mode: TuiMode::Secrets,
-        path: ".".to_string(),
-        findings: vec![Finding {
-            rule_id: "secret/github-token".to_string(),
-            severity: Severity::Critical,
-            file: "src/main.js".to_string(),
-            line: 12,
-            column: 5,
-            end_line: 12,
-            end_column: 28,
-            description: "Possible GitHub personal access token detected".to_string(),
-            snippet: "token = [REDACTED]".to_string(),
-            cwe: Some("CWE-798".to_string()),
-            source_line: None,
-            source_description: None,
-            sink_line: None,
-            sink_description: None,
-            fix_suggestion: None,
-            sink_start_byte: None,
-            sink_end_byte: None,
-            confidence: crate::default_confidence(),
-            taint_hops: None,
-            tags: vec![],
-            crypto_algorithm: None,
-            cnsa2_deadline: None,
-            dep_name: None,
-            dep_version: None,
-            dep_ecosystem: None,
-            dep_purl: None,
-            dep_vulnerability_id: None,
-            dep_fixed_version: None,
-            dep_source: None,
-            dep_vulnerability_severity: None,
-            dep_path: vec![],
-            crypto_material: None,
-        }],
-        files_scanned: 1,
-        duration: Duration::from_secs(1),
-        explain: false,
-        diff_summary: None,
-        notices: Vec::new(),
-    });
+    install_result(
+        &mut app,
+        TuiExecution {
+            baseline_comparison: None,
+            mode: TuiMode::Secrets,
+            path: ".".to_string(),
+            findings: vec![Finding {
+                rule_id: "secret/github-token".to_string(),
+                severity: Severity::Critical,
+                file: "src/main.js".to_string(),
+                line: 12,
+                column: 5,
+                end_line: 12,
+                end_column: 28,
+                description: "Possible GitHub personal access token detected".to_string(),
+                snippet: "token = [REDACTED]".to_string(),
+                cwe: Some("CWE-798".to_string()),
+                source_line: None,
+                source_description: None,
+                sink_line: None,
+                sink_description: None,
+                fix_suggestion: None,
+                sink_start_byte: None,
+                sink_end_byte: None,
+                confidence: crate::default_confidence(),
+                taint_hops: None,
+                tags: vec![],
+                crypto_algorithm: None,
+                cnsa2_deadline: None,
+                dep_name: None,
+                dep_version: None,
+                dep_ecosystem: None,
+                dep_purl: None,
+                dep_vulnerability_id: None,
+                dep_fixed_version: None,
+                dep_source: None,
+                dep_vulnerability_severity: None,
+                dep_path: vec![],
+                crypto_material: None,
+            }],
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        },
+    );
     app.show_launch = false;
 
     let flow = app.handle_key(KeyEvent::from(KeyCode::Char('i')));
@@ -1460,75 +1410,6 @@ fn handle_action_menu_enter_applies_selected_action() {
         ControlFlow::ApplyAction(TriageAction::IgnoreRuleInFile)
     ));
     assert!(app.action_menu.is_none());
-}
-
-#[test]
-fn apply_action_review_state_is_session_only() {
-    let mut app = TuiApp::new(TuiArgs {
-        path: ".".to_string(),
-        config: None,
-        severity: None,
-        rules: None,
-        no_builtins: false,
-        changes: Default::default(),
-        exclude: Vec::new(),
-        baseline: None,
-        diff: None,
-        secrets: false,
-        explain: false,
-        max_file_size: 1_048_576,
-        pq_mode: false,
-    });
-    let finding = Finding {
-        rule_id: "js/no-command-injection".to_string(),
-        severity: Severity::High,
-        file: "src/main.js".to_string(),
-        line: 42,
-        column: 7,
-        end_line: 42,
-        end_column: 18,
-        description: "untrusted input reaches exec".to_string(),
-        snippet: "exec(cmd)".to_string(),
-        cwe: None,
-        source_line: None,
-        source_description: None,
-        sink_line: None,
-        sink_description: None,
-        fix_suggestion: None,
-        sink_start_byte: None,
-        sink_end_byte: None,
-        confidence: crate::default_confidence(),
-        taint_hops: None,
-        tags: vec![],
-        crypto_algorithm: None,
-        cnsa2_deadline: None,
-        dep_name: None,
-        dep_version: None,
-        dep_ecosystem: None,
-        dep_purl: None,
-        dep_vulnerability_id: None,
-        dep_fixed_version: None,
-        dep_source: None,
-        dep_vulnerability_severity: None,
-        dep_path: vec![],
-        crypto_material: None,
-    };
-    app.result = Some(TuiExecution {
-        mode: TuiMode::Scan,
-        path: ".".to_string(),
-        findings: vec![finding.clone()],
-        files_scanned: 1,
-        duration: Duration::from_secs(1),
-        explain: true,
-        diff_summary: None,
-        notices: Vec::new(),
-    });
-
-    let changed = app
-        .apply_action(TriageAction::MarkReviewed)
-        .expect("review action should succeed");
-    assert!(!changed);
-    assert_eq!(app.review_state_for(&finding), Some(ReviewState::Reviewed));
 }
 
 #[test]
@@ -1859,20 +1740,25 @@ fn session_confidence_filter_hides_low_confidence_findings() {
         file: "b.js".to_string(),
         ..base.clone()
     };
-    app.result = Some(TuiExecution {
-        mode: TuiMode::Scan,
-        path: ".".to_string(),
-        findings: vec![base.clone(), low_conf.clone()],
-        files_scanned: 2,
-        duration: Duration::from_secs(1),
-        explain: false,
-        diff_summary: None,
-        notices: Vec::new(),
-    });
+    install_result(
+        &mut app,
+        TuiExecution {
+            baseline_comparison: None,
+            mode: TuiMode::Scan,
+            path: ".".to_string(),
+            findings: vec![base.clone(), low_conf.clone()],
+            files_scanned: 2,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        },
+    );
 
     assert_eq!(app.filtered_indices().len(), 2);
 
     app.session_min_confidence = 0.7;
+    app.clamp_selection();
     assert_eq!(
         app.filtered_indices().len(),
         1,
@@ -1900,49 +1786,53 @@ fn open_action_menu_in_scan_mode_exposes_new_triage_actions() {
         max_file_size: 1_048_576,
         pq_mode: false,
     });
-    app.result = Some(TuiExecution {
-        mode: TuiMode::Scan,
-        path: ".".to_string(),
-        findings: vec![Finding {
-            rule_id: "js/rule".to_string(),
-            severity: Severity::High,
-            file: "a.js".to_string(),
-            line: 1,
-            column: 1,
-            end_line: 1,
-            end_column: 5,
-            description: "desc".to_string(),
-            snippet: "x".to_string(),
-            cwe: None,
-            source_line: None,
-            source_description: None,
-            sink_line: None,
-            sink_description: None,
-            fix_suggestion: None,
-            sink_start_byte: None,
-            sink_end_byte: None,
-            confidence: crate::default_confidence(),
-            taint_hops: None,
-            tags: vec![],
-            crypto_algorithm: None,
-            cnsa2_deadline: None,
-            dep_name: None,
-            dep_version: None,
-            dep_ecosystem: None,
-            dep_purl: None,
-            dep_vulnerability_id: None,
-            dep_fixed_version: None,
-            dep_source: None,
-            dep_vulnerability_severity: None,
-            dep_path: vec![],
-            crypto_material: None,
-        }],
-        files_scanned: 1,
-        duration: Duration::from_secs(1),
-        explain: false,
-        diff_summary: None,
-        notices: Vec::new(),
-    });
+    install_result(
+        &mut app,
+        TuiExecution {
+            baseline_comparison: None,
+            mode: TuiMode::Scan,
+            path: ".".to_string(),
+            findings: vec![Finding {
+                rule_id: "js/rule".to_string(),
+                severity: Severity::High,
+                file: "a.js".to_string(),
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 5,
+                description: "desc".to_string(),
+                snippet: "x".to_string(),
+                cwe: None,
+                source_line: None,
+                source_description: None,
+                sink_line: None,
+                sink_description: None,
+                fix_suggestion: None,
+                sink_start_byte: None,
+                sink_end_byte: None,
+                confidence: crate::default_confidence(),
+                taint_hops: None,
+                tags: vec![],
+                crypto_algorithm: None,
+                cnsa2_deadline: None,
+                dep_name: None,
+                dep_version: None,
+                dep_ecosystem: None,
+                dep_purl: None,
+                dep_vulnerability_id: None,
+                dep_fixed_version: None,
+                dep_source: None,
+                dep_vulnerability_severity: None,
+                dep_path: vec![],
+                crypto_material: None,
+            }],
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        },
+    );
     app.show_launch = false;
 
     let _ = app.handle_key(KeyEvent::from(KeyCode::Char('i')));
@@ -2003,16 +1893,20 @@ fn apply_action_lower_severity_writes_override_and_replaces() {
         dep_path: vec![],
         crypto_material: None,
     };
-    app.result = Some(TuiExecution {
-        mode: TuiMode::Scan,
-        path: repo.path().display().to_string(),
-        findings: vec![finding.clone()],
-        files_scanned: 1,
-        duration: Duration::from_secs(1),
-        explain: false,
-        diff_summary: None,
-        notices: Vec::new(),
-    });
+    install_result(
+        &mut app,
+        TuiExecution {
+            baseline_comparison: None,
+            mode: TuiMode::Scan,
+            path: repo.path().display().to_string(),
+            findings: vec![finding.clone()],
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        },
+    );
 
     let rescan = app
         .apply_action(TriageAction::ApplySeverityOverride(Severity::Low))
@@ -2076,16 +1970,20 @@ fn apply_action_disable_rule_globally_appends_and_detects_duplicate() {
         dep_path: vec![],
         crypto_material: None,
     };
-    app.result = Some(TuiExecution {
-        mode: TuiMode::Scan,
-        path: repo.path().display().to_string(),
-        findings: vec![finding.clone()],
-        files_scanned: 1,
-        duration: Duration::from_secs(1),
-        explain: false,
-        diff_summary: None,
-        notices: Vec::new(),
-    });
+    install_result(
+        &mut app,
+        TuiExecution {
+            baseline_comparison: None,
+            mode: TuiMode::Scan,
+            path: repo.path().display().to_string(),
+            findings: vec![finding.clone()],
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        },
+    );
 
     let first = app
         .apply_action(TriageAction::DisableRuleGlobally)
@@ -2272,23 +2170,21 @@ fn tui_app_with_findings(findings: Vec<Finding>) -> TuiApp {
         max_file_size: 1_048_576,
         pq_mode: false,
     });
-    app.result = Some(TuiExecution {
-        mode: TuiMode::Scan,
-        path: ".".to_string(),
-        findings,
-        files_scanned: 1,
-        duration: Duration::from_secs(1),
-        explain: false,
-        diff_summary: None,
-        notices: Vec::new(),
-    });
+    install_result(
+        &mut app,
+        TuiExecution {
+            baseline_comparison: None,
+            mode: TuiMode::Scan,
+            path: ".".to_string(),
+            findings,
+            files_scanned: 1,
+            duration: Duration::from_secs(1),
+            explain: false,
+            diff_summary: None,
+            notices: Vec::new(),
+        },
+    );
     app
-}
-
-#[test]
-fn compliance_panel_defaults_off() {
-    let app = tui_app_with_findings(vec![]);
-    assert!(!app.show_compliance_panel);
 }
 
 #[test]
@@ -2392,7 +2288,7 @@ fn text_to_strings(text: &Text<'static>) -> Vec<String> {
 
 #[test]
 fn detail_text_renders_crypto_algorithm_and_cnsa2_deadline_lines() {
-    let mut app = app_with_single_finding(Some("RSA".to_string()), Some("2030".to_string()));
+    let app = app_with_single_finding(Some("RSA".to_string()), Some("2030".to_string()));
 
     let rendered = text_to_strings(&app.detail_text());
 
@@ -2412,7 +2308,7 @@ fn detail_text_renders_crypto_algorithm_and_cnsa2_deadline_lines() {
 
 #[test]
 fn detail_text_omits_crypto_lines_when_both_fields_absent() {
-    let mut app = app_with_single_finding(None, None);
+    let app = app_with_single_finding(None, None);
 
     let rendered = text_to_strings(&app.detail_text());
 
@@ -2477,31 +2373,10 @@ fn export_writes_cbom_file() {
     let mut app = tui_app_with_findings(vec![cnsa_finding("pq/rsa", Some("2030"))]);
     app.show_launch = false;
     let path = dir.path().join("findings.cbom.json");
-    app.export_findings_to(ExportFormat::Cbom, &path);
+    app.export_findings_to_with_atomic_write(ExportFormat::Cbom, &path, false);
     assert!(path.exists(), "CBOM file should exist");
     let content = std::fs::read_to_string(&path).expect("read");
     assert!(content.contains("CycloneDX"));
-}
-
-#[test]
-fn crypto_algorithm_chip_renders_padded_name_with_magenta_background() {
-    let span = crypto_algorithm_chip_span("RSA");
-    assert_eq!(span.content, " RSA ");
-    assert_eq!(span.style.bg, Some(Color::Magenta));
-    assert_eq!(span.style.fg, Some(Color::White));
-    assert!(!span.style.add_modifier.contains(Modifier::BOLD));
-}
-
-#[test]
-fn list_item_omits_crypto_chip_when_none() {
-    let app = app_with_single_finding(None, None);
-    let finding = &app.result.as_ref().unwrap().findings[0];
-    let item = list_item(finding, None);
-    let debug = format!("{:?}", item);
-    assert!(
-        !debug.contains("Magenta"),
-        "non-crypto finding should not have algorithm chip: {debug}"
-    );
 }
 
 #[test]
@@ -2561,6 +2436,7 @@ fn finding_home_and_end_respect_filtered_selection() {
     let mut second = app.result.as_ref().unwrap().findings[0].clone();
     second.line += 1;
     app.result.as_mut().unwrap().findings.push(second);
+    app.clamp_selection();
     app.handle_key(KeyEvent::from(KeyCode::End));
     assert_eq!(app.selected, 1);
     app.handle_key(KeyEvent::from(KeyCode::Home));
@@ -2586,4 +2462,680 @@ fn diff_target_accepts_letters_and_digits_reserved_by_navigation() {
     }
     assert_eq!(app.launch_diff_target, "fix/jkq1234");
     assert_eq!(app.launch_mode, LaunchMode::Diff);
+}
+
+fn render_app(app: &mut TuiApp, width: u16, height: u16) -> String {
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content
+        .chunks(width as usize)
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn launch_keeps_every_mode_path_and_exit_visible_at_responsive_boundaries() {
+    for (width, height) in [(100, 30), (60, 18), (40, 12)] {
+        let mut app = TuiApp::new(tui_args_for(
+            "/workspace/project/tests/fixtures/vulnerable.py".into(),
+        ));
+        let screen = render_app(&mut app, width, height);
+        for required in [
+            "Scan",
+            "Diff",
+            "Secrets",
+            "PQC",
+            "Path:",
+            "vulnerable.py",
+            "Enter",
+            "quit",
+        ] {
+            assert!(
+                screen.contains(required),
+                "{width}x{height} hides {required}:\n{screen}"
+            );
+        }
+    }
+}
+
+#[test]
+fn narrow_detail_keeps_dataflow_and_fix_reachable_and_escape_returns_to_list() {
+    let mut app = app_with_single_finding(None, None);
+    let finding = &mut app.result.as_mut().unwrap().findings[0];
+    finding.source_line = Some(1);
+    finding.source_description = Some("untrusted source".into());
+    finding.sink_line = Some(10);
+    finding.sink_description = Some("dangerous sink".into());
+    finding.fix_suggestion = Some("use_safe_api".into());
+    let selected = app.selected_finding().unwrap().rule_id.clone();
+    app.handle_key(KeyEvent::from(KeyCode::Char('v')));
+    let mut pages = render_app(&mut app, 40, 12);
+    for _ in 0..10 {
+        app.handle_key(KeyEvent::from(KeyCode::PageDown));
+        pages.push_str(&render_app(&mut app, 40, 12));
+    }
+    assert!(pages.contains("Dataflow"), "{pages}");
+    assert!(pages.contains("use_safe_api"), "{pages}");
+    assert!(render_app(&mut app, 40, 12).contains("use_safe_api"));
+    app.handle_key(KeyEvent::from(KeyCode::Esc));
+    assert!(render_app(&mut app, 40, 12).contains("1/1 all"));
+    assert_eq!(app.selected_finding().unwrap().rule_id, selected);
+}
+
+#[test]
+fn editing_search_preserves_literal_u_and_cancellation_restores_applied_query() {
+    use crossterm::event::KeyModifiers;
+    let mut app = app_with_single_finding(None, None);
+    app.handle_key(KeyEvent::from(KeyCode::Char('/')));
+    for ch in "uses".chars() {
+        app.handle_key(KeyEvent::from(KeyCode::Char(ch)));
+    }
+    assert_eq!(app.filtered_indices().len(), 1);
+    app.handle_key(KeyEvent::from(KeyCode::Enter));
+    app.handle_key(KeyEvent::from(KeyCode::Char('/')));
+    app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    for ch in "unmatched".chars() {
+        app.handle_key(KeyEvent::from(KeyCode::Char(ch)));
+    }
+    assert!(render_app(&mut app, 60, 18).contains("/unmatched"));
+    assert!(app.filtered_indices().is_empty());
+    app.handle_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(app.search_query, "uses");
+    assert_eq!(
+        app.selected_finding().unwrap().rule_id,
+        "crypto/pq-vulnerable"
+    );
+    app.handle_key(KeyEvent::from(KeyCode::Esc));
+    assert!(!app.has_active_filter());
+    review_keys(
+        &mut app,
+        [KeyCode::Char('/'), KeyCode::Char('z'), KeyCode::Esc],
+    );
+    assert!(app.search_query.is_empty());
+    assert!(!app.has_active_filter());
+}
+
+#[test]
+fn review_queue_advances_identity_and_rejects_previous_source_context() {
+    let mut app = app_with_single_finding(None, None);
+    let mut second = app.selected_finding().unwrap().clone();
+    second.file = "other.rs".into();
+    second.rule_id = "other/rule".into();
+    second.severity = Severity::Low;
+    app.result.as_mut().unwrap().findings.push(second);
+    app.clamp_selection();
+    app.handle_key(KeyEvent::from(KeyCode::Char('f')));
+    let (request_id, old_key, _) = app.prepare_source_context_load().unwrap();
+    app.apply_action(TriageAction::MarkReviewed).unwrap();
+    assert_eq!(app.selected_finding().unwrap().rule_id, "other/rule");
+    assert!(render_app(&mut app, 60, 18).contains("1/2 unreviewed"));
+    let (_, new_key, _) = app.prepare_source_context_load().unwrap();
+    let (tx, rx) = mpsc::channel();
+    tx.send(WorkerMessage::SourceContext {
+        request_id,
+        key: old_key,
+        lines: vec![Line::from("stale source")],
+    })
+    .unwrap();
+    tx.send(WorkerMessage::SourceContext {
+        request_id,
+        key: new_key,
+        lines: vec![Line::from("current source")],
+    })
+    .unwrap();
+    app.handle_worker_messages(&rx);
+    let detail = text_to_strings(&app.detail_text()).join("\n");
+    assert!(detail.contains("current source"));
+    assert!(!detail.contains("stale source"));
+    app.handle_key(KeyEvent::from(KeyCode::Char('f'))); // Todo
+    assert!(app.selected_finding().is_none());
+    app.handle_key(KeyEvent::from(KeyCode::Char('f'))); // Reviewed
+    assert_eq!(
+        app.selected_finding().unwrap().rule_id,
+        "crypto/pq-vulnerable"
+    );
+    app.handle_key(KeyEvent::from(KeyCode::Char('f'))); // Ignore
+    assert!(app.selected_finding().is_none());
+    app.handle_key(KeyEvent::from(KeyCode::Char('f'))); // All
+    assert_eq!(app.filtered_indices().len(), 2);
+}
+
+#[test]
+fn sort_changes_preserve_the_finding_not_its_previous_row() {
+    let mut app = app_with_single_finding(None, None);
+    app.result.as_mut().unwrap().findings[0].confidence = 0.3;
+    let mut second = app.selected_finding().unwrap().clone();
+    second.rule_id = "other/rule".into();
+    second.severity = Severity::Low;
+    second.confidence = 0.95;
+    app.result.as_mut().unwrap().findings.push(second);
+    app.clamp_selection();
+    app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+    app.handle_key(KeyEvent::from(KeyCode::Char('C')));
+    assert_eq!(app.selected_finding().unwrap().rule_id, "other/rule");
+    app.handle_key(KeyEvent::from(KeyCode::Char('3')));
+    assert_eq!(
+        app.selected_finding().unwrap().rule_id,
+        "crypto/pq-vulnerable"
+    );
+}
+
+#[test]
+fn export_requires_explicit_confirmation_and_cancellation_preserves_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("findings.json");
+    std::fs::write(&path, "previous report").unwrap();
+    let mut app = app_with_single_finding(None, None);
+    app.export_with_overwrite_check(ExportFormat::Json, path.clone());
+    assert!(render_app(&mut app, 40, 12).contains("Confirm overwrite"));
+    app.handle_key(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "previous report");
+    app.handle_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "previous report");
+    app.export_with_overwrite_check(ExportFormat::Json, path.clone());
+    app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+    let report: Vec<Finding> =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(report[0].rule_id, "crypto/pq-vulnerable");
+}
+
+#[cfg(unix)]
+#[test]
+fn export_rejects_dangling_symlinks_and_rechecks_after_confirmation() {
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("unrelated.json");
+    let path = dir.path().join("findings.json");
+    std::fs::write(&target, "unrelated report").unwrap();
+    std::fs::write(&path, "previous report").unwrap();
+    let mut app = app_with_single_finding(None, None);
+    app.export_with_overwrite_check(ExportFormat::Json, path.clone());
+    std::fs::remove_file(&path).unwrap();
+    symlink(&target, &path).unwrap();
+    app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "unrelated report"
+    );
+    assert!(path.symlink_metadata().unwrap().file_type().is_symlink());
+    std::fs::remove_file(&target).unwrap();
+    app.export_with_overwrite_check(ExportFormat::Json, path.clone());
+    assert!(!target.exists());
+    assert!(path.symlink_metadata().unwrap().file_type().is_symlink());
+    assert!(app.export_menu.is_none());
+}
+
+#[test]
+fn newest_notice_is_visible_in_a_small_review_view() {
+    let mut app = app_with_single_finding(None, None);
+    for index in 0..10 {
+        app.push_runtime_notice(format!("earlier notification {index}"));
+    }
+    app.push_runtime_notice("latest notification".into());
+    assert!(render_app(&mut app, 40, 12).contains("latest notification"));
+}
+
+fn review_keys(app: &mut TuiApp, keys: impl IntoIterator<Item = KeyCode>) {
+    for key in keys {
+        match app.handle_key(KeyEvent::from(key)) {
+            ControlFlow::Continue => {}
+            ControlFlow::ApplyBatch => {
+                app.apply_batch().unwrap();
+            }
+            _ => panic!("unexpected control flow while reviewing"),
+        }
+    }
+}
+
+#[test]
+fn batch_confirmation_preserves_hidden_targets_without_retargeting_the_queue() {
+    let findings = ["alpha.js", "beta.js", "gamma.js"].map(|file| {
+        let mut finding = source_context_finding();
+        finding.file = file.into();
+        finding
+    });
+    let mut app = tui_app_with_findings(findings.to_vec());
+    app.show_launch = false;
+    review_keys(
+        &mut app,
+        [KeyCode::Char(' '), KeyCode::Down, KeyCode::Char(' ')],
+    );
+    app.search_query = "gamma.js".into();
+    app.clamp_selection();
+    review_keys(
+        &mut app,
+        [
+            KeyCode::Char('x'),
+            KeyCode::Enter,
+            KeyCode::Enter,
+            KeyCode::Esc,
+        ],
+    );
+    app.search_query.clear();
+    app.review_filter = super::state::ReviewFilter::Reviewed;
+    app.clamp_selection();
+    assert!(
+        app.filtered_indices().is_empty(),
+        "Enter and cancellation must not mark anything"
+    );
+
+    app.review_filter = super::state::ReviewFilter::Unreviewed;
+    app.search_query = "gamma.js".into();
+    app.clamp_selection();
+    review_keys(
+        &mut app,
+        [KeyCode::Char('x'), KeyCode::Enter, KeyCode::Char('y')],
+    );
+    app.search_query.clear();
+    app.review_filter = super::state::ReviewFilter::Reviewed;
+    app.clamp_selection();
+    assert_eq!(app.filtered_indices(), &[0, 1]);
+    app.review_filter = super::state::ReviewFilter::Unreviewed;
+    app.clamp_selection();
+    assert_eq!(app.filtered_indices(), &[2]);
+}
+
+#[test]
+fn batch_rejects_replaced_findings_even_when_result_indices_are_reused() {
+    let mut app = tui_app_with_findings(vec![source_context_finding()]);
+    app.show_launch = false;
+    review_keys(
+        &mut app,
+        [KeyCode::Char('a'), KeyCode::Char('x'), KeyCode::Enter],
+    );
+    let mut replacement = source_context_finding();
+    replacement.file = "different.js".into();
+    install_result(&mut app, tui_execution_with(".".into(), replacement));
+    assert!(app.apply_batch().is_err());
+    app.review_filter = super::state::ReviewFilter::Reviewed;
+    app.clamp_selection();
+    assert!(app.filtered_indices().is_empty());
+    app.review_filter = super::state::ReviewFilter::Unreviewed;
+    app.clamp_selection();
+    assert_eq!(app.selected_finding().unwrap().file, "different.js");
+}
+
+#[test]
+fn named_review_queue_survives_restart_through_a_project_path_alias() {
+    let project = tempfile::tempdir().unwrap();
+    let storage = tempfile::tempdir().unwrap();
+    let findings: Vec<_> = [
+        ("tracked/alpha.js", "alpha", Severity::High, 0.9),
+        ("tracked/low-confidence.js", "alpha", Severity::High, 0.5),
+        ("tracked/beta.js", "beta", Severity::High, 0.9),
+        ("tracked/low-severity.js", "alpha", Severity::Low, 0.9),
+        ("pending/alpha.js", "alpha", Severity::High, 0.9),
+    ]
+    .into_iter()
+    .map(|(file, description, severity, confidence)| {
+        let mut finding = source_context_finding();
+        finding.file = project.path().join(file).to_string_lossy().into_owned();
+        finding.description = description.into();
+        finding.severity = severity;
+        finding.confidence = confidence;
+        finding
+    })
+    .collect();
+    let open = |path: String| {
+        let mut app = TuiApp::new(tui_args_for(path.clone()));
+        app.session_root = Some(storage.path().to_path_buf());
+        app.activate_review_session();
+        let mut result = tui_execution_with(path, findings[0].clone());
+        result.findings = findings.clone();
+        install_result(&mut app, result);
+        app.show_launch = false;
+        app
+    };
+    let mut first = open(project.path().to_string_lossy().into_owned());
+    first.search_query = "tracked/".into();
+    first.clamp_selection();
+    review_keys(
+        &mut first,
+        [
+            KeyCode::Char('a'),
+            KeyCode::Char('x'),
+            KeyCode::Enter,
+            KeyCode::Char('y'),
+        ],
+    );
+    first.search_query = "alpha".into();
+    first.min_severity = Some(Severity::High);
+    first.session_min_confidence = 0.7;
+    first.review_filter = super::state::ReviewFilter::Reviewed;
+    first.clamp_selection();
+    assert_eq!(first.filtered_indices(), &[0]);
+    review_keys(
+        &mut first,
+        [KeyCode::Char('F'), KeyCode::Char('s')]
+            .into_iter()
+            .chain("alpha queue".chars().map(KeyCode::Char))
+            .chain([KeyCode::Enter, KeyCode::Esc]),
+    );
+    drop(first);
+
+    let mut reopened = open(project.path().join(".").to_string_lossy().into_owned());
+    review_keys(&mut reopened, [KeyCode::Char('F'), KeyCode::Enter]);
+    assert_eq!(reopened.filtered_indices(), &[0]);
+    assert_eq!(reopened.selected_finding().unwrap().file, findings[0].file);
+    reopened.review_filter = super::state::ReviewFilter::Unreviewed;
+    reopened.clamp_selection();
+    assert_eq!(reopened.filtered_indices(), &[4]);
+}
+
+#[test]
+fn batch_config_partial_failure_preserves_success_and_failed_selection() {
+    let project = tempfile::tempdir().unwrap();
+    let path = project.path().to_string_lossy().into_owned();
+    let config = project.path().join(".foxguard.yml");
+    let mut args = tui_args_for(path.clone());
+    args.config = Some(config.to_string_lossy().into_owned());
+    let mut app = TuiApp::new(args);
+    let mut first = source_context_finding();
+    first.file = project.path().join("a.js").to_string_lossy().into_owned();
+    let mut second = first.clone();
+    second.file = project.path().join("b.js").to_string_lossy().into_owned();
+    let mut result = tui_execution_with(path, first.clone());
+    result.findings.push(second);
+    install_result(&mut app, result);
+    app.show_launch = false;
+    // A config edited after scanning can fail for one rule/file pair only.
+    std::fs::write(
+        &config,
+        "scan:\n  ignore_rules:\n    - path: b.js\n      rules: invalid\n",
+    )
+    .unwrap();
+    review_keys(&mut app, [KeyCode::Char('a'), KeyCode::Char('x')]);
+    review_keys(&mut app, std::iter::repeat_n(KeyCode::Down, 5));
+    review_keys(&mut app, [KeyCode::Enter, KeyCode::Char('y')]);
+
+    let saved: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+    let ignores = saved["scan"]["ignore_rules"].as_sequence().unwrap();
+    assert!(ignores
+        .iter()
+        .any(|entry| entry["path"].as_str() == Some("a.js")
+            && entry["rules"].as_sequence().is_some_and(|rules| rules
+                .iter()
+                .any(|rule| rule.as_str() == Some(first.rule_id.as_str())))));
+    assert!(ignores
+        .iter()
+        .any(|entry| entry["path"].as_str() == Some("b.js")
+            && entry["rules"].as_str() == Some("invalid")));
+    app.search_query = "b.js".into();
+    app.clamp_selection();
+    assert!(render_app(&mut app, 100, 30).contains("[x]"));
+    app.search_query = "a.js".into();
+    app.clamp_selection();
+    assert!(!render_app(&mut app, 100, 30).contains("[x]"));
+}
+
+#[test]
+fn resolved_entries_remain_read_only_and_reachable_in_a_narrow_terminal() {
+    let mut result = tui_execution_with(".".into(), source_context_finding());
+    result.baseline_comparison = Some(crate::baseline::BaselineComparison {
+        introduced: vec![0],
+        recurring: Vec::new(),
+        resolved: (0..8)
+            .map(|index| crate::baseline::BaselineEntry {
+                fingerprint: format!("{index:064x}"),
+                rule_id: format!("historical/rule-{index}"),
+                file: format!("retired-{index}.js"),
+                line: index + 1,
+            })
+            .collect(),
+    });
+    let mut app = TuiApp::new(tui_args_for(".".into()));
+    install_result(&mut app, result);
+    app.show_launch = false;
+    app.set_baseline_filter(super::state::BaselineFilter::Resolved);
+    review_keys(&mut app, [KeyCode::End]);
+    assert!(render_app(&mut app, 40, 12).contains("retired-7.js:8"));
+    review_keys(
+        &mut app,
+        [
+            KeyCode::Char(' '),
+            KeyCode::Char('a'),
+            KeyCode::Char('x'),
+            KeyCode::Char('i'),
+            KeyCode::Char('e'),
+        ],
+    );
+    assert!(app.selected_finding().is_none());
+    assert!(app.batch_menu.is_none());
+    assert!(app.action_menu.is_none());
+    assert!(app.export_menu.is_none());
+    app.show_notices = false;
+    review_keys(&mut app, [KeyCode::Char('v')]);
+    assert!(render_app(&mut app, 40, 12).contains("retired-7.js"));
+    review_keys(&mut app, [KeyCode::PageDown]);
+    assert!(!render_app(&mut app, 40, 12).contains("retired-7.js"));
+    review_keys(&mut app, [KeyCode::PageUp]);
+    assert!(render_app(&mut app, 40, 12).contains("retired-7.js"));
+}
+
+#[test]
+fn enter_release_and_repeat_do_not_dispatch_actions() {
+    let mut app = app_with_single_finding(None, None);
+    for kind in [
+        crossterm::event::KeyEventKind::Release,
+        crossterm::event::KeyEventKind::Repeat,
+    ] {
+        let mut key = KeyEvent::from(KeyCode::Enter);
+        key.kind = kind;
+        assert!(matches!(app.handle_key(key), ControlFlow::Continue));
+    }
+    assert!(matches!(
+        app.handle_key(KeyEvent::from(KeyCode::Enter)),
+        ControlFlow::OpenSelected
+    ));
+}
+
+#[test]
+fn repeat_events_preserve_navigation_and_search_input() {
+    let mut app = app_with_single_finding(None, None);
+    let mut second = app.selected_finding().unwrap().clone();
+    second.file = "other.rs".into();
+    second.rule_id = "other/rule".into();
+    app.result.as_mut().unwrap().findings.push(second);
+    app.clamp_selection();
+    for (code, selected) in [(KeyCode::Down, 1), (KeyCode::Char('k'), 0)] {
+        let mut key = KeyEvent::from(code);
+        key.kind = crossterm::event::KeyEventKind::Repeat;
+        assert!(matches!(app.handle_key(key), ControlFlow::Continue));
+        assert_eq!(app.selected, selected);
+    }
+    app.handle_key(KeyEvent::from(KeyCode::Char('/')));
+    for _ in 0..3 {
+        let mut key = KeyEvent::from(KeyCode::Char('e'));
+        key.kind = crossterm::event::KeyEventKind::Repeat;
+        assert!(matches!(app.handle_key(key), ControlFlow::Continue));
+    }
+    assert_eq!(app.search_query, "eee");
+}
+
+#[test]
+fn enter_is_consumed_by_help_and_triage_dialogs() {
+    let mut app = app_with_single_finding(None, None);
+    app.handle_key(KeyEvent::from(KeyCode::Char('?')));
+    assert!(matches!(
+        app.handle_key(KeyEvent::from(KeyCode::Enter)),
+        ControlFlow::Continue
+    ));
+    assert!(app.show_help);
+    app.handle_key(KeyEvent::from(KeyCode::Esc));
+    app.handle_key(KeyEvent::from(KeyCode::Char('i')));
+    assert!(matches!(
+        app.handle_key(KeyEvent::from(KeyCode::Enter)),
+        ControlFlow::ApplyAction(_)
+    ));
+    app.open_severity_picker();
+    assert!(matches!(
+        app.handle_key(KeyEvent::from(KeyCode::Enter)),
+        ControlFlow::ApplyAction(TriageAction::ApplySeverityOverride(_))
+    ));
+    assert!(matches!(
+        app.handle_key(KeyEvent::from(KeyCode::Enter)),
+        ControlFlow::OpenSelected
+    ));
+}
+
+#[test]
+fn enter_waits_for_scan_completion_before_opening_findings() {
+    let mut app = TuiApp::new(tui_args_for(".".into()));
+    assert!(matches!(
+        app.handle_key(KeyEvent::from(KeyCode::Enter)),
+        ControlFlow::Rescan
+    ));
+    app.begin_scan();
+    assert!(matches!(
+        app.handle_key(KeyEvent::from(KeyCode::Enter)),
+        ControlFlow::Continue
+    ));
+    install_result(
+        &mut app,
+        tui_execution_with(".".into(), source_context_finding()),
+    );
+    app.scanning = false;
+    assert!(matches!(
+        app.handle_key(KeyEvent::from(KeyCode::Enter)),
+        ControlFlow::OpenSelected
+    ));
+}
+
+fn finding_target() -> OpenTarget {
+    OpenTarget {
+        path: PathBuf::from("/tmp/project/src/main.rs"),
+        line: 27,
+    }
+}
+
+#[test]
+fn editor_configuration_precedes_fallback_and_ignores_blank_visual() {
+    let target = finding_target();
+    let selected = open_command_spec_with_environment(
+        &target,
+        Some("hx"),
+        Some("code --wait"),
+        Some("xdg-open"),
+        |_| true,
+    )
+    .unwrap();
+    assert_eq!(selected.program, "hx");
+    let selected = open_command_spec_with_environment(
+        &target,
+        Some(" \t"),
+        Some("code --wait"),
+        Some("xdg-open"),
+        |_| true,
+    )
+    .unwrap();
+    assert_eq!(selected.program, "code");
+}
+
+#[test]
+fn invalid_explicit_editors_never_fall_back_or_expose_arguments() {
+    let target = finding_target();
+    for (visual, editor, variable) in [
+        (
+            Some("missing --token sensitive-value"),
+            Some("vim"),
+            "VISUAL",
+        ),
+        (None, Some("missing --token sensitive-value"), "EDITOR"),
+        (Some("hx --token 'sensitive-value"), Some("vim"), "VISUAL"),
+        (Some("''"), Some("vim"), "VISUAL"),
+    ] {
+        let error = open_command_spec_with_environment(
+            &target,
+            visual,
+            editor,
+            Some("xdg-open"),
+            |program| matches!(program, "nvim" | "vim" | "xdg-open"),
+        )
+        .err()
+        .expect("invalid editor selection must fail");
+        assert!(error.contains(variable));
+        assert!(!error.contains("sensitive-value"));
+    }
+}
+
+#[test]
+fn terminal_editor_priority_precedes_desktop_fallback() {
+    let target = finding_target();
+    for (available, expected) in [
+        (&["nvim", "vim", "xdg-open"][..], "nvim"),
+        (&["vi", "xdg-open"][..], "vi"),
+    ] {
+        let selected =
+            open_command_spec_with_environment(&target, None, None, Some("xdg-open"), |program| {
+                available.contains(&program)
+            })
+            .unwrap();
+        assert_eq!(selected.program, expected);
+        assert_eq!(selected.args, ["+27", "/tmp/project/src/main.rs"]);
+    }
+}
+
+#[test]
+fn desktop_fallback_requires_permission_and_an_available_opener() {
+    let target = finding_target();
+    let selected =
+        open_command_spec_with_environment(&target, None, None, Some("xdg-open"), |program| {
+            program == "xdg-open"
+        })
+        .unwrap();
+    assert_eq!(selected.program, "xdg-open");
+    assert_eq!(selected.args, ["/tmp/project/src/main.rs"]);
+    for desktop in [None, Some("xdg-open")] {
+        let error = open_command_spec_with_environment(&target, None, None, desktop, |program| {
+            matches!(program, "open" | "notepad")
+        })
+        .err()
+        .expect("invalid editor selection must fail");
+        assert!(error.contains("VISUAL"));
+        assert!(error.contains("EDITOR"));
+    }
+}
+
+#[test]
+fn helix_receives_the_line_as_part_of_the_filename_argument() {
+    let selected = open_command_spec_from_editor(&finding_target(), "hx").unwrap();
+    assert_eq!(selected.args, ["/tmp/project/src/main.rs:27"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn executable_probe_requires_a_regular_executable_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("editor");
+    std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(!super::executable_available(
+        directory.path().to_str().unwrap()
+    ));
+    assert!(!super::executable_available(path.to_str().unwrap()));
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(super::executable_available(path.to_str().unwrap()));
+}
+
+#[test]
+fn notice_scrolling_reaches_wrapped_tail_and_returns_to_start() {
+    let mut app = app_with_single_finding(None, None);
+    // This fits the outer panel width but wraps after horizontal padding.
+    app.push_runtime_notice(format!("{} XYZ", "x".repeat(95)));
+    let _ = render_app(&mut app, 100, 30);
+    app.handle_key(KeyEvent::from(KeyCode::Char(']')));
+    assert!(render_app(&mut app, 100, 30).contains("XYZ"));
+    for _ in 0..10 {
+        app.handle_key(KeyEvent::from(KeyCode::Char(']')));
+    }
+    assert!(render_app(&mut app, 100, 30).contains("XYZ"));
+    app.handle_key(KeyEvent::from(KeyCode::Char('[')));
+    assert!(render_app(&mut app, 100, 30).contains("xxxxxxxx"));
 }

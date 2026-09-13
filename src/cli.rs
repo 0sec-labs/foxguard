@@ -507,7 +507,7 @@ pub struct TuiArgs {
     #[arg(long)]
     pub exclude: Vec<String>,
 
-    /// Apply a baseline file to suppress known findings
+    /// Compare findings with a saved baseline, keeping known findings reviewable
     #[arg(long)]
     pub baseline: Option<String>,
 

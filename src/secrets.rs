@@ -151,24 +151,6 @@ fn patterns() -> &'static [SecretPattern] {
     })
 }
 
-fn redact_match(line: &str, start: usize, end: usize) -> String {
-    // Defensive: snap to nearest char boundary outward so partial codepoints
-    // are redacted, not leaked. (The regex crate guarantees valid boundaries.)
-    let mut s = start;
-    while s > 0 && !line.is_char_boundary(s) {
-        s -= 1;
-    }
-    let mut e = end;
-    while e < line.len() && !line.is_char_boundary(e) {
-        e += 1;
-    }
-    let mut redacted = String::with_capacity(line.len());
-    redacted.push_str(&line[..s]);
-    redacted.push_str("[REDACTED]");
-    redacted.push_str(&line[e..]);
-    redacted
-}
-
 pub fn scan_directory(root: &str, max_file_size: u64) -> Vec<Finding> {
     scan_directory_with_config(root, &SecretScanConfig::default(), max_file_size)
 }
@@ -230,6 +212,7 @@ pub fn scan_paths_with_config_and_notices(
     let patterns = patterns();
     let mut findings = Vec::new();
     let mut notices = Vec::new();
+    let mut line_matches = Vec::new();
 
     for path in paths {
         if config.should_skip_path(root, path) {
@@ -260,47 +243,74 @@ pub fn scan_paths_with_config_and_notices(
         };
 
         for (line_idx, line) in source.lines().enumerate() {
+            line_matches.clear();
             for pattern in patterns {
+                for matched in pattern.regex.find_iter(line) {
+                    line_matches.push((pattern, matched.range()));
+                }
+            }
+            if !line_matches
+                .iter()
+                .any(|(pattern, _)| !config.should_skip_rule(pattern.rule_id))
+            {
+                continue;
+            }
+
+            // Redact every recognized secret, including ignored rules, before
+            // sharing a snippet between findings on this line.
+            line_matches.sort_by_key(|(_, range)| range.start);
+            let mut snippet = String::with_capacity(line.len());
+            let mut cursor = 0;
+            for (_, range) in &line_matches {
+                if range.end <= cursor {
+                    continue;
+                }
+                if range.start >= cursor {
+                    snippet.push_str(&line[cursor..range.start]);
+                    snippet.push_str("[REDACTED]");
+                }
+                cursor = range.end;
+            }
+            snippet.push_str(&line[cursor..]);
+
+            for (pattern, matched) in &line_matches {
                 if config.should_skip_rule(pattern.rule_id) {
                     continue;
                 }
-
-                for matched in pattern.regex.find_iter(line) {
-                    findings.push(Finding {
-                        rule_id: pattern.rule_id.to_string(),
-                        severity: pattern.severity,
-                        cwe: pattern.cwe.map(str::to_string),
-                        description: pattern.description.to_string(),
-                        file: path.display().to_string(),
-                        line: line_idx + 1,
-                        column: matched.start() + 1,
-                        end_line: line_idx + 1,
-                        end_column: matched.end() + 1,
-                        snippet: redact_match(line, matched.start(), matched.end()),
-                        source_line: None,
-                        source_description: None,
-                        sink_line: None,
-                        sink_description: None,
-                        fix_suggestion: None,
-                        sink_start_byte: None,
-                        sink_end_byte: None,
-                        confidence: crate::default_confidence(),
-                        taint_hops: None,
-                        tags: vec![],
-                        crypto_algorithm: None,
-                        cnsa2_deadline: None,
-                        dep_name: None,
-                        dep_version: None,
-                        dep_ecosystem: None,
-                        dep_purl: None,
-                        dep_vulnerability_id: None,
-                        dep_fixed_version: None,
-                        dep_source: None,
-                        dep_vulnerability_severity: None,
-                        dep_path: vec![],
-                        crypto_material: None,
-                    });
-                }
+                findings.push(Finding {
+                    rule_id: pattern.rule_id.to_string(),
+                    severity: pattern.severity,
+                    cwe: pattern.cwe.map(str::to_string),
+                    description: pattern.description.to_string(),
+                    file: path.display().to_string(),
+                    line: line_idx + 1,
+                    column: matched.start + 1,
+                    end_line: line_idx + 1,
+                    end_column: matched.end + 1,
+                    snippet: snippet.clone(),
+                    source_line: None,
+                    source_description: None,
+                    sink_line: None,
+                    sink_description: None,
+                    fix_suggestion: None,
+                    sink_start_byte: None,
+                    sink_end_byte: None,
+                    confidence: crate::default_confidence(),
+                    taint_hops: None,
+                    tags: vec![],
+                    crypto_algorithm: None,
+                    cnsa2_deadline: None,
+                    dep_name: None,
+                    dep_version: None,
+                    dep_ecosystem: None,
+                    dep_purl: None,
+                    dep_vulnerability_id: None,
+                    dep_fixed_version: None,
+                    dep_source: None,
+                    dep_vulnerability_severity: None,
+                    dep_path: vec![],
+                    crypto_material: None,
+                });
             }
         }
     }
@@ -340,20 +350,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn redact_match_mid_codepoint_start() {
-        // U+00E9 (e-acute) is 2 bytes. "pass\u{00e9}key" = pass + [c3 a9] + key.
-        // start=5 (mid-codepoint) snaps backward to 4 so the char gets redacted.
-        let line = "pass\u{00e9}key";
-        let result = redact_match(line, 5, 6);
-        assert_eq!(result, "pass[REDACTED]key");
+    fn every_finding_redacts_all_secrets_on_its_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = ["ghp_", &"a".repeat(36)].concat();
+        let second = ["ghp_", &"b".repeat(36)].concat();
+        let npm = ["npm_", &"c".repeat(36)].concat();
+        let path = dir.path().join("tokens.txt");
+        std::fs::write(&path, format!("é tokens: {first}, {second}, {npm}\n")).unwrap();
+
+        let findings = scan_paths(&[path], 1_000_000);
+        assert_eq!(findings.len(), 3);
+        for finding in findings {
+            assert_eq!(
+                finding.snippet,
+                "é tokens: [REDACTED], [REDACTED], [REDACTED]"
+            );
+        }
     }
 
     #[test]
-    fn redact_match_mid_codepoint_end() {
-        // end=1 (mid-codepoint of leading 2-byte char) snaps forward to 2.
-        let line = "\u{00e9}secret";
-        let result = redact_match(line, 0, 1);
-        assert_eq!(result, "[REDACTED]secret");
+    fn ignored_secret_rules_do_not_expose_neighboring_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let github = ["ghp_", &"a".repeat(36)].concat();
+        let npm = ["npm_", &"b".repeat(36)].concat();
+        let path = dir.path().join("tokens.txt");
+        std::fs::write(&path, format!("{github} {npm}\n")).unwrap();
+        let config =
+            SecretScanConfig::from_inputs(dir.path(), &[], None, &["secret/npm-token".to_string()])
+                .unwrap();
+
+        let findings = scan_paths_with_config(dir.path(), &[path], &config, 1_000_000);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "secret/github-token");
+        assert_eq!(findings[0].snippet, "[REDACTED] [REDACTED]");
+    }
+
+    #[test]
+    fn overlapping_secret_patterns_share_fully_redacted_snippets() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = ["glpat-", "npm_", &"a".repeat(36)].concat();
+        let path = dir.path().join("tokens.txt");
+        std::fs::write(&path, format!("TOKEN=\"{nested}\"\n")).unwrap();
+
+        let findings = scan_paths(&[path], 1_000_000);
+        assert_eq!(findings.len(), 2);
+        for finding in findings {
+            assert_eq!(finding.snippet, "TOKEN=\"[REDACTED]\"");
+        }
     }
 
     /// Issue #401: `scan_directory` must include hidden files such as `.env`.

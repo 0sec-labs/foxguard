@@ -127,6 +127,12 @@ fn scan_target_branch_files_with_warnings(
         max_file_size,
         None,
     );
+    if let Some(errors) = result.stats.error_summary() {
+        return Err(format!(
+            "Target branch scan incomplete: {errors}.\n{}",
+            warnings.join("\n")
+        ));
+    }
     // Rewrite temp-checkout findings back to repo-relative paths before diffing.
     for finding in &mut result.findings {
         finding.file = stored_path_key(temp_dir.path(), &finding.file);
@@ -233,6 +239,12 @@ pub fn run_diff_with_coccinelle_warnings(
     // Scan current working tree
     let (mut current_result, mut warnings) =
         scan_directory_with_notices(scan_path, registry, max_file_size, None);
+    if let Some(errors) = current_result.stats.error_summary() {
+        return Err(format!(
+            "Scan incomplete: {errors}.\n{}",
+            warnings.join("\n")
+        ));
+    }
     if !coccinelle_rules.is_empty() {
         append_coccinelle_scan(
             &mut current_result,

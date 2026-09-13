@@ -1,17 +1,19 @@
+use super::loading::LOADING_SHIMMER_CYCLE;
+use super::persist::{FilterSettings, SessionStore};
 use super::resolve_finding_path;
-use super::widgets::{
-    adjust_scroll, available_open_focuses, compare_findings_by, finding_review_key, scan_root_path,
-    LOADING_SHIMMER_CYCLE,
-};
+use super::review::{BatchMenu, SavedViewMenu};
+use super::widgets::{adjust_scroll, available_open_focuses, compare_findings_by, scan_root_path};
 use super::WorkerMessage;
 use crate::app::{TuiExecution, TuiMode};
+use crate::baseline::fingerprint_finding_at_root;
 use crate::cli::TuiArgs;
 use crate::config::load_for_scan;
 use crate::{Finding, Severity};
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Text};
 use ratatui::widgets::ListState;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
@@ -27,28 +29,20 @@ pub(super) struct TuiApp {
     pub(super) loading_tick: usize,
     pub(super) search_mode: bool,
     pub(super) search_query: String,
+    pub(super) search_restore_query: String,
+    pub(super) search_restore_selection: Option<usize>,
     pub(super) min_severity: Option<Severity>,
-    /// Session-only lower bound on [`Finding::confidence`]. Cycled via the
-    /// `c` keybind (feature C). This filters already-emitted findings in
-    /// the UI; it is intentionally independent from the `scan.min_confidence`
-    /// config field (which filters at scan time) and from `--show-confidence`
-    /// (which only controls non-TUI rendering of the score).
+    /// View-only lower bound on [`Finding::confidence`], saved with named filters.
     pub(super) session_min_confidence: f32,
-    /// Selected sort order for the findings list. Defaults to the
-    /// legacy severity-desc ordering; cycled via `Shift+C` (feature B).
     pub(super) sort_mode: SortMode,
     pub(super) selected: usize,
     pub(super) list_state: ListState,
     pub(super) list_area: Rect,
+    pub(super) detail_area: Rect,
     pub(super) hover_index: Option<usize>,
     pub(super) show_notices: bool,
     pub(super) show_help: bool,
     pub(super) help_scroll: u16,
-    /// When on, a CNSA 2.0 migration-readiness strip is drawn at the bottom
-    /// of the main scan body. Toggled by `Shift+N` (see `handle_key`). Chose
-    /// `Shift+N` instead of the issue's suggested `Shift+C` because the
-    /// latter is already bound to `cycle_sort_mode` (feature B) — `Shift+N`
-    /// reads as "cNsa" and keeps both toggles available.
     pub(super) show_compliance_panel: bool,
     pub(super) runtime_notices: Vec<String>,
     pub(super) active_request_id: u64,
@@ -62,12 +56,33 @@ pub(super) struct TuiApp {
     pub(super) export_menu: Option<ExportMenu>,
     pub(super) severity_picker: Option<SeverityPicker>,
     pub(super) review_states: HashMap<String, ReviewState>,
+    pub(super) review_filter: ReviewFilter,
+    /// Full-screen detail; otherwise split on wide terminals and list on narrow ones.
+    pub(super) show_detail_view: bool,
+    /// Derived once when results, filters, sort order, or review marks change.
+    cached_filtered: Vec<usize>,
+    cached_without_confidence: usize,
+    pub(super) reviewed_count: usize,
+    pub(super) identity_root: PathBuf,
+    pub(super) finding_keys: Vec<String>,
+    baseline_kinds: Vec<BaselineFilter>,
+    pub(super) baseline_filter: BaselineFilter,
+    pub(super) cached_resolved: Vec<usize>,
+    pub(super) checked_findings: HashSet<usize>,
+    pub(super) batch_menu: Option<BatchMenu>,
+    pub(super) saved_view_menu: Option<SavedViewMenu>,
+    pub(super) saved_filters: BTreeMap<String, FilterSettings>,
+    pub(super) session_root: Option<PathBuf>,
+    pub(super) session_store: Option<SessionStore>,
+    pub(super) session_error: Option<String>,
+    pub(super) session_dirty: bool,
 }
 
 impl TuiApp {
     pub(super) fn new(request: TuiArgs) -> Self {
         let mut request = request;
         request.explain = true;
+        let identity_root = scan_root_path(Path::new(&request.path));
         Self {
             show_launch: true,
             launch_mode: LaunchMode::from_args(&request),
@@ -79,12 +94,15 @@ impl TuiApp {
             loading_tick: 0,
             search_mode: false,
             search_query: String::new(),
+            search_restore_query: String::new(),
+            search_restore_selection: None,
             min_severity: None,
             session_min_confidence: 0.0,
             sort_mode: SortMode::default(),
             selected: 0,
             list_state: ListState::default(),
             list_area: Rect::default(),
+            detail_area: Rect::default(),
             hover_index: None,
             show_notices: true,
             show_help: false,
@@ -102,6 +120,24 @@ impl TuiApp {
             export_menu: None,
             severity_picker: None,
             review_states: HashMap::new(),
+            review_filter: ReviewFilter::All,
+            show_detail_view: false,
+            cached_filtered: Vec::new(),
+            cached_without_confidence: 0,
+            reviewed_count: 0,
+            identity_root,
+            finding_keys: Vec::new(),
+            baseline_kinds: Vec::new(),
+            baseline_filter: BaselineFilter::All,
+            cached_resolved: Vec::new(),
+            checked_findings: HashSet::new(),
+            batch_menu: None,
+            saved_view_menu: None,
+            saved_filters: BTreeMap::new(),
+            session_root: None,
+            session_store: None,
+            session_error: None,
+            session_dirty: false,
         }
     }
 
@@ -111,18 +147,35 @@ impl TuiApp {
         self.result = None;
         self.selected = 0;
         self.list_state = ListState::default();
+        self.list_area = Rect::default();
+        self.detail_area = Rect::default();
         self.hover_index = None;
         self.scanning = true;
         self.show_launch = false;
         self.show_help = false;
         self.runtime_notices.clear();
+        self.activate_review_session();
         self.scan_started_at = Instant::now();
         self.detail_scroll = 0;
         self.notices_scroll = 0;
         self.source_context_cache = None;
         self.open_focus = OpenFocus::Finding;
         self.action_menu = None;
+        self.export_menu = None;
         self.severity_picker = None;
+        self.checked_findings.clear();
+        self.batch_menu = None;
+        self.saved_view_menu = None;
+        self.finding_keys.clear();
+        self.baseline_kinds.clear();
+        self.cached_resolved.clear();
+        self.show_detail_view = false;
+        self.search_mode = false;
+        self.search_restore_query.clear();
+        self.search_restore_selection = None;
+        self.cached_filtered.clear();
+        self.cached_without_confidence = 0;
+        self.reviewed_count = 0;
         let request_id = self.next_request_id;
         self.next_request_id += 1;
         self.active_request_id = request_id;
@@ -154,7 +207,8 @@ impl TuiApp {
         }
     }
 
-    pub(super) fn handle_worker_messages(&mut self, rx: &Receiver<WorkerMessage>) {
+    pub(super) fn handle_worker_messages(&mut self, rx: &Receiver<WorkerMessage>) -> bool {
+        let mut changed = false;
         while let Ok(message) = rx.try_recv() {
             match message {
                 WorkerMessage::Scan { request_id, result } => {
@@ -162,18 +216,17 @@ impl TuiApp {
                         continue;
                     }
 
+                    changed = true;
                     self.scanning = false;
                     match result {
                         Ok(result) => {
                             self.error = None;
-                            self.result = Some(result);
-                            self.source_context_cache = None;
-                            self.normalize_open_focus();
-                            self.clamp_selection();
+                            self.install_scan_result(result);
                         }
                         Err(error) => {
                             self.result = None;
                             self.error = Some(error);
+                            self.clamp_selection();
                         }
                     }
                 }
@@ -190,34 +243,26 @@ impl TuiApp {
                         self.source_context_cache.as_ref(),
                         Some(SourceContextCache::Loading { key: pending }) if *pending == key
                     ) {
+                        changed = true;
                         self.source_context_cache = Some(SourceContextCache::Ready { key, lines });
                     }
                 }
             }
         }
+        changed
     }
 
     pub(super) fn prepare_source_context_load(
         &mut self,
     ) -> Option<(u64, SourceContextCacheKey, Finding)> {
-        if self.request.secrets {
+        // Selection changes and rescans invalidate this cache. Loading and ready
+        // entries both prevent duplicate requests and idle-frame finding clones.
+        if self.request.secrets || self.source_context_cache.is_some() {
             return None;
         }
 
         let finding = self.selected_finding()?.clone();
         let key = SourceContextCacheKey::from_finding(&self.request.path, &finding);
-
-        match self.source_context_cache.as_ref() {
-            Some(SourceContextCache::Ready {
-                key: cached_key, ..
-            })
-            | Some(SourceContextCache::Loading { key: cached_key })
-                if *cached_key == key =>
-            {
-                return None;
-            }
-            _ => {}
-        }
 
         self.source_context_cache = Some(SourceContextCache::Loading { key: key.clone() });
         Some((self.active_request_id, key, finding))
@@ -225,14 +270,89 @@ impl TuiApp {
 }
 
 impl TuiApp {
+    pub(super) fn install_scan_result(&mut self, result: TuiExecution) {
+        self.finding_keys = result
+            .findings
+            .iter()
+            .map(|finding| fingerprint_finding_at_root(finding, &self.identity_root))
+            .collect();
+        self.baseline_kinds = vec![BaselineFilter::All; result.findings.len()];
+        if let Some(comparison) = &result.baseline_comparison {
+            for &index in &comparison.introduced {
+                if let Some(kind) = self.baseline_kinds.get_mut(index) {
+                    *kind = BaselineFilter::Introduced;
+                }
+            }
+            for &index in &comparison.recurring {
+                if let Some(kind) = self.baseline_kinds.get_mut(index) {
+                    *kind = BaselineFilter::Recurring;
+                }
+            }
+        }
+        self.result = Some(result);
+        self.cached_filtered.clear();
+        self.cached_resolved.clear();
+        self.checked_findings.clear();
+        self.source_context_cache = None;
+        self.clamp_selection();
+    }
+
+    pub(super) fn review_state_at(&self, index: usize) -> Option<ReviewState> {
+        self.finding_keys
+            .get(index)
+            .and_then(|key| self.review_states.get(key))
+            .copied()
+    }
+
+    pub(super) fn visible_indices(&self) -> &[usize] {
+        if self.baseline_filter == BaselineFilter::Resolved {
+            &self.cached_resolved
+        } else {
+            &self.cached_filtered
+        }
+    }
+    pub(super) fn set_baseline_filter(&mut self, filter: BaselineFilter) {
+        if self.baseline_filter != filter {
+            self.baseline_filter = filter;
+            self.selected = 0;
+            self.list_state = ListState::default();
+            self.cached_filtered.clear();
+            self.cached_resolved.clear();
+            self.source_context_cache = None;
+            self.show_detail_view = false;
+            self.detail_scroll = 0;
+        }
+        self.clamp_selection();
+    }
+
+    pub(super) fn toggle_visible_selection(&mut self) {
+        if self.baseline_filter == BaselineFilter::Resolved {
+            return;
+        }
+        let all_checked = self
+            .cached_filtered
+            .iter()
+            .all(|index| self.checked_findings.contains(index));
+        for &index in &self.cached_filtered {
+            if all_checked {
+                self.checked_findings.remove(&index);
+            } else {
+                self.checked_findings.insert(index);
+            }
+        }
+    }
+
     pub(super) fn review_state_for(&self, finding: &Finding) -> Option<ReviewState> {
+        if self.review_states.is_empty() {
+            return None;
+        }
         self.review_states
-            .get(&finding_review_key(finding))
+            .get(&fingerprint_finding_at_root(finding, &self.identity_root))
             .copied()
     }
 
     pub(super) fn move_selection(&mut self, delta: isize) {
-        let filtered = self.filtered_indices();
+        let filtered = self.visible_indices();
         let previous = self.selected;
         if filtered.is_empty() {
             self.selected = 0;
@@ -250,7 +370,7 @@ impl TuiApp {
     }
 
     pub(super) fn select_filtered_index(&mut self, index: usize) {
-        let filtered_len = self.filtered_indices().len();
+        let filtered_len = self.visible_indices().len();
         if index >= filtered_len {
             return;
         }
@@ -265,19 +385,73 @@ impl TuiApp {
     }
 
     pub(super) fn clamp_selection(&mut self) {
-        let previous = self.selected;
-        let filtered_len = self.filtered_indices().len();
-        if filtered_len == 0 {
-            self.selected = 0;
-        } else if self.selected >= filtered_len {
-            self.selected = filtered_len - 1;
+        let previous = self.visible_indices().get(self.selected).copied();
+        self.cached_filtered.clear();
+        self.cached_resolved.clear();
+        self.cached_without_confidence = 0;
+        self.reviewed_count = 0;
+
+        if let Some(result) = self.result.as_ref() {
+            let needle = self.search_query.to_ascii_lowercase();
+            for (index, finding) in result.findings.iter().enumerate() {
+                let review = self.review_state_at(index);
+                self.reviewed_count += usize::from(review == Some(ReviewState::Reviewed));
+                if self.matches_non_confidence_filters(finding, &needle)
+                    && self.review_filter.matches(review)
+                    && (self.baseline_filter == BaselineFilter::All
+                        || self.baseline_kinds.get(index) == Some(&self.baseline_filter))
+                {
+                    self.cached_without_confidence += 1;
+                    if finding.confidence + 1e-6 >= self.session_min_confidence {
+                        self.cached_filtered.push(index);
+                    }
+                }
+            }
+            let sort_mode = self.sort_mode;
+            self.cached_filtered.sort_by(|left, right| {
+                compare_findings_by(&result.findings[*left], &result.findings[*right], sort_mode)
+            });
+            if self.baseline_filter == BaselineFilter::Resolved {
+                if let Some(comparison) = &result.baseline_comparison {
+                    self.cached_resolved = comparison
+                        .resolved
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, entry)| {
+                            entry.rule_id.to_ascii_lowercase().contains(&needle)
+                                || entry.file.to_ascii_lowercase().contains(&needle)
+                        })
+                        .map(|(index, _)| index)
+                        .collect();
+                    self.cached_resolved.sort_by(|left, right| {
+                        let left = &comparison.resolved[*left];
+                        let right = &comparison.resolved[*right];
+                        (&left.file, left.line, &left.rule_id).cmp(&(
+                            &right.file,
+                            right.line,
+                            &right.rule_id,
+                        ))
+                    });
+                }
+            }
         }
 
-        if self.selected != previous {
+        self.selected = previous
+            .and_then(|index| {
+                self.visible_indices()
+                    .iter()
+                    .position(|item| *item == index)
+            })
+            .unwrap_or_else(|| {
+                self.selected
+                    .min(self.visible_indices().len().saturating_sub(1))
+            });
+        if self.visible_indices().get(self.selected).copied() != previous {
             self.detail_scroll = 0;
             self.source_context_cache = None;
-            self.normalize_open_focus();
         }
+        self.hover_index = None;
+        self.normalize_open_focus();
     }
 
     pub(super) fn cycle_open_focus(&mut self) {
@@ -310,52 +484,32 @@ impl TuiApp {
         self.loading_tick = (self.loading_tick + 1) % LOADING_SHIMMER_CYCLE;
     }
 
-    pub(super) fn filtered_indices(&self) -> Vec<usize> {
-        let Some(result) = self.result.as_ref() else {
-            return Vec::new();
-        };
-
-        let needle = self.search_query.to_ascii_lowercase();
-        let mut indices = result
-            .findings
-            .iter()
-            .enumerate()
-            .filter(|(_, finding)| self.matches_filters(finding, &needle))
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-
-        let sort_mode = self.sort_mode;
-        indices.sort_by(|left, right| {
-            compare_findings_by(&result.findings[*left], &result.findings[*right], sort_mode)
-        });
-
-        indices
+    pub(super) fn filtered_indices(&self) -> &[usize] {
+        &self.cached_filtered
     }
 
-    /// Count of findings rejected by the session confidence filter alone.
-    /// Used in the footer to show "12 of 45" style progress when a filter
-    /// is active. Note: search + severity filters also run; this only
-    /// tracks the confidence slice so the footer reads naturally.
+    /// Findings matching the other active filters, before confidence is applied.
     pub(super) fn total_after_severity_and_search(&self) -> usize {
-        let Some(result) = self.result.as_ref() else {
-            return 0;
-        };
-        let needle = self.search_query.to_ascii_lowercase();
-        result
-            .findings
-            .iter()
-            .filter(|finding| self.matches_non_confidence_filters(finding, &needle))
-            .count()
+        self.cached_without_confidence
     }
 
-    pub(super) fn matches_filters(&self, finding: &Finding, needle: &str) -> bool {
-        if !self.matches_non_confidence_filters(finding, needle) {
-            return false;
-        }
-        // Confidence filter is last so it reads naturally as the "final
-        // cut" and so the footer counts above (non-confidence filtered)
-        // stay independent of the `c` keybind.
-        finding.confidence + 1e-6 >= self.session_min_confidence
+    /// Whether any non-default filter is active that could be cleared.
+    pub(super) fn has_active_filter(&self) -> bool {
+        !self.search_query.is_empty()
+            || self.min_severity.is_some()
+            || self.session_min_confidence > 0.0
+            || self.review_filter != ReviewFilter::All
+            || self.baseline_filter != BaselineFilter::All
+    }
+
+    /// Clear all non-default filters: search query, severity, confidence, review.
+    pub(super) fn clear_active_filters(&mut self) {
+        self.search_query.clear();
+        self.search_mode = false;
+        self.min_severity = None;
+        self.session_min_confidence = 0.0;
+        self.review_filter = ReviewFilter::All;
+        self.set_baseline_filter(BaselineFilter::All);
     }
 
     pub(super) fn matches_non_confidence_filters(&self, finding: &Finding, needle: &str) -> bool {
@@ -379,11 +533,37 @@ impl TuiApp {
         .any(|value| value.to_ascii_lowercase().contains(needle))
     }
 
+    pub(super) fn cycle_review_filter(&mut self) {
+        self.review_filter = match self.review_filter {
+            ReviewFilter::All => ReviewFilter::Unreviewed,
+            ReviewFilter::Unreviewed => ReviewFilter::Todo,
+            ReviewFilter::Todo => ReviewFilter::Reviewed,
+            ReviewFilter::Reviewed => ReviewFilter::IgnoreCandidate,
+            ReviewFilter::IgnoreCandidate => ReviewFilter::All,
+        };
+        self.clamp_selection();
+    }
+
     pub(super) fn selected_finding(&self) -> Option<&Finding> {
+        if self.baseline_filter == BaselineFilter::Resolved {
+            return None;
+        }
         let result = self.result.as_ref()?;
-        let filtered = self.filtered_indices();
-        let finding_index = *filtered.get(self.selected)?;
+        let finding_index = *self.cached_filtered.get(self.selected)?;
         result.findings.get(finding_index)
+    }
+
+    /// Toggle full-screen detail without changing the selected finding.
+    pub(super) fn toggle_detail_view(&mut self) {
+        self.show_detail_view = !self.show_detail_view;
+    }
+
+    /// Review filter summary string for display.
+    pub(super) fn review_filter_label(&self) -> Option<&'static str> {
+        match self.review_filter {
+            ReviewFilter::All => None,
+            _ => Some(self.review_filter.label()),
+        }
     }
 }
 
@@ -436,11 +616,12 @@ impl TuiApp {
 
     pub(super) fn review_summary_for_finding(&self, finding: &Finding) -> Option<String> {
         self.review_state_for(finding)
-            .map(|state| format!("session {}", state.label()))
+            .map(|state| format!("review {}", state.label()))
     }
 
     pub(super) fn push_runtime_notice(&mut self, notice: String) {
         self.runtime_notices.push(notice);
+        self.notices_scroll = 0;
     }
 
     pub(super) fn scroll_detail(&mut self, delta: i32) {
@@ -452,7 +633,10 @@ impl TuiApp {
     }
 
     pub(super) fn notice_count(&self) -> usize {
-        self.combined_notices().len()
+        self.result
+            .as_ref()
+            .map_or(0, |result| result.notices.len())
+            + self.runtime_notices.len()
     }
 
     pub(super) fn notice_text(&self) -> Text<'static> {
@@ -462,8 +646,9 @@ impl TuiApp {
         }
 
         let lines = notices
-            .iter()
-            .map(|notice| Line::from(notice.clone()))
+            .into_iter()
+            .rev()
+            .map(Line::from)
             .collect::<Vec<_>>();
         Text::from(lines)
     }
@@ -538,12 +723,8 @@ pub(super) enum TriageAction {
     AddToBaseline,
     IgnoreRuleInFile,
     IgnoreSecretRule,
-    /// Open the severity picker for the selected finding's rule. The picker
-    /// dispatches an `ApplySeverityOverride(_)` once a severity is chosen.
     LowerSeverity,
-    /// Emitted by the severity picker — writes `scan.severity_overrides`.
     ApplySeverityOverride(Severity),
-    /// Append the rule to `scan.disable_rules` (global denylist).
     DisableRuleGlobally,
     MarkReviewed,
     MarkTodo,
@@ -570,7 +751,8 @@ impl TriageAction {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub(super) enum ReviewState {
     Reviewed,
     Todo,
@@ -583,6 +765,39 @@ impl ReviewState {
             ReviewState::Reviewed => "reviewed",
             ReviewState::Todo => "todo",
             ReviewState::IgnoreCandidate => "ignore-candidate",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum ReviewFilter {
+    #[default]
+    All,
+    Unreviewed,
+    Todo,
+    Reviewed,
+    IgnoreCandidate,
+}
+
+impl ReviewFilter {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Unreviewed => "unreviewed",
+            Self::Todo => "todo",
+            Self::Reviewed => "reviewed",
+            Self::IgnoreCandidate => "ignore",
+        }
+    }
+
+    fn matches(self, state: Option<ReviewState>) -> bool {
+        match self {
+            Self::All => true,
+            Self::Unreviewed => state.is_none(),
+            Self::Todo => state == Some(ReviewState::Todo),
+            Self::Reviewed => state == Some(ReviewState::Reviewed),
+            Self::IgnoreCandidate => state == Some(ReviewState::IgnoreCandidate),
         }
     }
 }
@@ -620,18 +835,14 @@ impl ExportFormat {
 pub(super) struct ExportMenu {
     pub(super) formats: Vec<ExportFormat>,
     pub(super) selected: usize,
+    pub(super) overwrite: Option<PathBuf>,
 }
 
-/// Modal sub-picker shown when the user chooses "Lower severity" from the
-/// triage menu. Owns a highlight cursor over `SEVERITY_PICKER_CHOICES` and
-/// remembers the rule's current override (if any) so the UI can show it.
 pub(super) struct SeverityPicker {
     pub(super) selected: usize,
     pub(super) current: Option<Severity>,
 }
 
-/// Severities the "Lower severity" picker offers, ordered low → critical to
-/// match how humans tend to think about "dialing down" a noisy rule.
 pub(super) const SEVERITY_PICKER_CHOICES: [Severity; 4] = [
     Severity::Low,
     Severity::Medium,
@@ -639,12 +850,11 @@ pub(super) const SEVERITY_PICKER_CHOICES: [Severity; 4] = [
     Severity::Critical,
 ];
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub(super) enum SortMode {
-    /// Severity desc, then path/line (the pre-existing default behaviour).
     #[default]
     SeverityDesc,
-    /// Confidence desc, with severity-desc as a stable tiebreaker.
     ConfidenceDesc,
 }
 
@@ -660,6 +870,27 @@ impl SortMode {
         match self {
             SortMode::SeverityDesc => "severity",
             SortMode::ConfidenceDesc => "confidence",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum BaselineFilter {
+    #[default]
+    All,
+    Introduced,
+    Recurring,
+    Resolved,
+}
+
+impl BaselineFilter {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Introduced => "introduced",
+            Self::Recurring => "recurring",
+            Self::Resolved => "resolved",
         }
     }
 }

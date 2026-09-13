@@ -3535,6 +3535,116 @@ mod features {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn test_unreadable_files_fail_without_overwriting_reports() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let blocked = dir.path().join("blocked.py");
+        let baseline = dir.path().join("baseline.json");
+        let report = dir.path().join("report.json");
+        fs::write(&blocked, "eval(input())\n").unwrap();
+        fs::write(dir.path().join("clean.py"), "print('hello')\n").unwrap();
+        fs::write(&baseline, "previous baseline\n").unwrap();
+        fs::write(&report, "previous report\n").unwrap();
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Root and capability-enabled runners can bypass file permissions.
+        if fs::read(&blocked).is_ok() {
+            fs::set_permissions(&blocked, fs::Permissions::from_mode(0o600)).unwrap();
+            return;
+        }
+
+        let output = foxguard_cmd_isolated()
+            .arg(dir.path())
+            .args(["-f", "json", "--write-baseline"])
+            .arg(&baseline)
+            .arg("--output")
+            .arg(&report)
+            .output()
+            .expect("failed to execute foxguard");
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "incomplete scans must fail operationally: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stdout.is_empty(), "must not emit a clean report");
+        assert_eq!(fs::read_to_string(baseline).unwrap(), "previous baseline\n");
+        assert_eq!(fs::read_to_string(report).unwrap(), "previous report\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_unreadable_directories_fail_unless_the_subtree_is_excluded() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let blocked = dir.path().join("blocked");
+        fs::create_dir(&blocked).unwrap();
+        fs::write(blocked.join("hidden.py"), "eval(input())\n").unwrap();
+        fs::write(dir.path().join("visible.py"), "eval(input())\n").unwrap();
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read_dir(&blocked).is_ok() {
+            fs::set_permissions(&blocked, fs::Permissions::from_mode(0o700)).unwrap();
+            return;
+        }
+
+        let failed = foxguard_cmd_isolated()
+            .arg(dir.path())
+            .args(["-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+        let excluded = foxguard_cmd_isolated()
+            .arg(dir.path())
+            .args(["-f", "json", "--exclude", "blocked/**"])
+            .output()
+            .expect("failed to execute foxguard");
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert_eq!(failed.status.code(), Some(2));
+        assert!(failed.stdout.is_empty(), "must not emit a partial report");
+        assert_eq!(
+            excluded.status.code(),
+            Some(1),
+            "excluded subtrees must not hide findings elsewhere: {}",
+            String::from_utf8_lossy(&excluded.stderr)
+        );
+        let findings = scan_json_findings_from_slice(&excluded.stdout);
+        assert!(findings.iter().any(|finding| {
+            finding["rule_id"] == "py/no-eval"
+                && finding["file"]
+                    .as_str()
+                    .is_some_and(|file| file.ends_with("visible.py"))
+        }));
+    }
+
+    #[test]
+    fn test_file_extension_exclusions_do_not_prune_matching_directory_names() {
+        let dir = TempDir::new().unwrap();
+        let source_dir = dir.path().join("assets.js");
+        fs::create_dir(&source_dir).unwrap();
+        fs::write(source_dir.join("unsafe.py"), "eval(input())\n").unwrap();
+
+        let output = foxguard_cmd_isolated()
+            .arg(dir.path())
+            .args(["-f", "json", "--exclude", "**/*.js"])
+            .output()
+            .expect("failed to execute foxguard");
+
+        assert_eq!(output.status.code(), Some(1));
+        let findings = scan_json_findings_from_slice(&output.stdout);
+        assert!(findings.iter().any(|finding| {
+            finding["rule_id"] == "py/no-eval"
+                && finding["file"]
+                    .as_str()
+                    .is_some_and(|file| file.ends_with("unsafe.py"))
+        }));
+    }
+
     #[test]
     fn test_no_builtins_without_external_rules_finds_nothing() {
         let output = foxguard_cmd_isolated()

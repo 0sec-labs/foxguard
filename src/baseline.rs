@@ -1,6 +1,7 @@
 use crate::Finding;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +16,101 @@ pub struct BaselineEntry {
     pub rule_id: String,
     pub file: String,
     pub line: usize,
+}
+
+/// A report delta under the current scan's scope and configuration.
+/// Missing entries are not proof that the underlying issue was remediated.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct BaselineComparison {
+    pub introduced: Vec<usize>,
+    pub recurring: Vec<usize>,
+    pub resolved: Vec<BaselineEntry>,
+}
+
+struct BaselineMatcher<'a> {
+    fingerprints: HashSet<&'a str>,
+    paths: HashMap<String, HashSet<&'a str>>,
+}
+
+impl<'a> BaselineMatcher<'a> {
+    fn new(baseline: &'a BaselineFile, root: &Path) -> Self {
+        let mut paths: HashMap<String, HashSet<&str>> = HashMap::new();
+        let mut seen_paths = HashSet::new();
+        for entry in &baseline.entries {
+            if seen_paths.insert(entry.file.as_str()) {
+                paths
+                    .entry(crate::path_identity::stored_path_key(root, &entry.file))
+                    .or_default()
+                    .insert(entry.file.as_str());
+            }
+        }
+        Self {
+            fingerprints: baseline
+                .entries
+                .iter()
+                .map(|entry| entry.fingerprint.as_str())
+                .collect(),
+            paths,
+        }
+    }
+
+    fn visit_matches(
+        &self,
+        finding: &Finding,
+        root: &Path,
+        mut matched: impl FnMut(&'a str),
+    ) -> bool {
+        let normalized = crate::path_identity::finding_path_key(root, &finding.file);
+        let mut found = false;
+        let mut visit = |file: &str| {
+            let fingerprint = fingerprint_finding_with_file(finding, file);
+            if let Some(&stored) = self.fingerprints.get(fingerprint.as_str()) {
+                found = true;
+                matched(stored);
+            }
+        };
+        visit(&normalized);
+        if finding.file != normalized {
+            visit(&finding.file);
+        }
+        // Legacy spellings are accepted only for the same normalized file.
+        // Substituting an unrelated entry's path would suppress identical code
+        // in a different file and produce a false recurring/resolved result.
+        if let Some(spellings) = self.paths.get(&normalized) {
+            for &file in spellings {
+                if file != normalized && file != finding.file {
+                    visit(file);
+                }
+            }
+        }
+        found
+    }
+}
+
+pub fn compare_with_baseline_at_root(
+    findings: &[Finding],
+    baseline: &BaselineFile,
+    identity_root: &Path,
+) -> BaselineComparison {
+    let matcher = BaselineMatcher::new(baseline, identity_root);
+    let mut comparison = BaselineComparison::default();
+    let mut matched = HashSet::new();
+    for (index, finding) in findings.iter().enumerate() {
+        if matcher.visit_matches(finding, identity_root, |fingerprint| {
+            matched.insert(fingerprint);
+        }) {
+            comparison.recurring.push(index);
+        } else {
+            comparison.introduced.push(index);
+        }
+    }
+    comparison.resolved = baseline
+        .entries
+        .iter()
+        .filter(|entry| !matched.contains(entry.fingerprint.as_str()))
+        .cloned()
+        .collect();
+    comparison
 }
 
 impl BaselineFile {
@@ -143,20 +239,26 @@ pub fn write_baseline_at_root(
 }
 
 fn write_baseline_file(path: &Path, baseline: BaselineFile) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            format!(
-                "Failed to create baseline directory {}: {}",
-                parent.display(),
-                e
-            )
-        })?;
-    }
-
-    let content = serde_json::to_string_pretty(&baseline)
-        .map_err(|e| format!("Failed to serialize baseline: {}", e))?;
-    std::fs::write(path, content)
-        .map_err(|e| format!("Failed to write baseline {}: {}", path.display(), e))
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let write = || -> Result<(), Box<dyn std::error::Error>> {
+        std::fs::create_dir_all(parent)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            temporary
+                .as_file()
+                .set_permissions(metadata.permissions())?;
+        }
+        serde_json::to_writer_pretty(temporary.as_file_mut(), &baseline)?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(path)?;
+        #[cfg(unix)]
+        std::fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    };
+    write().map_err(|error| format!("Failed to write baseline {}: {error}", path.display()))
 }
 
 pub fn append_finding_to_baseline(path: &Path, finding: &Finding) -> Result<bool, String> {
@@ -169,6 +271,35 @@ pub fn append_finding_to_baseline_at_root(
     identity_root: &Path,
 ) -> Result<bool, String> {
     append_finding_to_baseline_inner(path, finding, Some(identity_root))
+}
+
+/// Append a confirmed batch with one read and one atomic replacement.
+pub fn append_findings_to_baseline_at_root<'a>(
+    path: &Path,
+    findings: impl IntoIterator<Item = &'a Finding>,
+    identity_root: &Path,
+) -> Result<usize, String> {
+    let mut baseline = load_baseline(path)?.unwrap_or(BaselineFile {
+        version: 1,
+        entries: Vec::new(),
+    });
+    let mut fingerprints: std::collections::HashSet<String> = baseline
+        .entries
+        .iter()
+        .map(|entry| entry.fingerprint.clone())
+        .collect();
+    let mut added = 0;
+    for finding in findings {
+        let entry = BaselineEntry::from_finding_at_root(finding, identity_root);
+        if fingerprints.insert(entry.fingerprint.clone()) {
+            baseline.entries.push(entry);
+            added += 1;
+        }
+    }
+    if added > 0 {
+        write_baseline_file(path, baseline)?;
+    }
+    Ok(added)
 }
 
 fn append_finding_to_baseline_inner(
@@ -196,10 +327,7 @@ fn append_finding_to_baseline_inner(
         baseline.add_finding(finding)
     };
 
-    let content = serde_json::to_string_pretty(&baseline)
-        .map_err(|e| format!("Failed to serialize baseline: {}", e))?;
-    std::fs::write(path, content)
-        .map_err(|e| format!("Failed to write baseline {}: {}", path.display(), e))?;
+    write_baseline_file(path, baseline)?;
 
     Ok(added)
 }
@@ -228,19 +356,11 @@ fn suppress_with_baseline_inner(
         return findings;
     };
 
+    let root = identity_root.unwrap_or_else(|| Path::new("."));
+    let matcher = BaselineMatcher::new(baseline, root);
     findings
         .into_iter()
-        .filter(|finding| {
-            let fingerprint = identity_root
-                .map(|root| fingerprint_finding_at_root(finding, root))
-                .unwrap_or_else(|| fingerprint_finding(finding));
-            let legacy_fingerprint = fingerprint_finding(finding);
-            !baseline.entries.iter().any(|entry| {
-                entry.fingerprint == fingerprint
-                    || entry.fingerprint == legacy_fingerprint
-                    || entry.fingerprint == fingerprint_finding_with_file(finding, &entry.file)
-            })
-        })
+        .filter(|finding| !matcher.visit_matches(finding, root, |_| {}))
         .collect()
 }
 
@@ -285,6 +405,69 @@ mod tests {
             dep_path: vec![],
             crypto_material: None,
         }
+    }
+
+    #[test]
+    fn baseline_delta_does_not_suppress_identical_findings_in_other_files() {
+        let temp = TempDir::new().expect("temporary project");
+        let mut recurring = finding();
+        recurring.file = temp.path().join("a.py").to_string_lossy().into_owned();
+        let mut introduced = recurring.clone();
+        introduced.file = temp.path().join("b.py").to_string_lossy().into_owned();
+        let mut absent = recurring.clone();
+        absent.file = temp
+            .path()
+            .join("removed.py")
+            .to_string_lossy()
+            .into_owned();
+        let baseline =
+            BaselineFile::from_findings_at_root(&[recurring.clone(), absent], temp.path());
+        let findings = vec![recurring, introduced];
+
+        let comparison = compare_with_baseline_at_root(&findings, &baseline, temp.path());
+        assert_eq!(comparison.recurring, vec![0]);
+        assert_eq!(comparison.introduced, vec![1]);
+        assert_eq!(
+            comparison
+                .resolved
+                .iter()
+                .map(|entry| entry.file.as_str())
+                .collect::<Vec<_>>(),
+            vec!["removed.py"]
+        );
+        let remaining = suppress_with_baseline_at_root(findings, Some(&baseline), temp.path());
+        assert_eq!(
+            remaining
+                .iter()
+                .map(|finding| Path::new(&finding.file).file_name().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["b.py"]
+        );
+    }
+
+    #[test]
+    fn baseline_delta_matches_legacy_path_aliases_but_not_changed_locations() {
+        let temp = TempDir::new().expect("temporary project");
+        let mut current = finding();
+        current.file = temp.path().join("app.py").to_string_lossy().into_owned();
+        let baseline = BaselineFile {
+            version: 1,
+            entries: vec![
+                BaselineEntry::from_finding(&current),
+                BaselineEntry::from_finding_at_root(&current, temp.path()),
+            ],
+        };
+        let unchanged =
+            compare_with_baseline_at_root(std::slice::from_ref(&current), &baseline, temp.path());
+        assert_eq!(unchanged.recurring, vec![0]);
+        assert!(unchanged.resolved.is_empty());
+
+        current.line += 1;
+        current.end_line += 1;
+        let moved = compare_with_baseline_at_root(&[current], &baseline, temp.path());
+        assert_eq!(moved.introduced, vec![0]);
+        assert!(moved.recurring.is_empty());
+        assert_eq!(moved.resolved.len(), 2);
     }
 
     #[test]

@@ -210,6 +210,8 @@ pub struct ScanStats {
     pub read_error_files: usize,
     pub minified_files: usize,
     pub parse_error_files: usize,
+    /// Failed traversals; the number of files hidden by them is unknown.
+    pub walk_errors: usize,
 }
 
 impl ScanStats {
@@ -249,6 +251,7 @@ impl ScanStats {
         self.read_error_files += other.read_error_files;
         self.minified_files += other.minified_files;
         self.parse_error_files += other.parse_error_files;
+        self.walk_errors += other.walk_errors;
     }
 
     pub fn skipped_summary(&self) -> Option<String> {
@@ -268,6 +271,18 @@ impl ScanStats {
         push_count(&mut parts, self.parse_error_files, "parse error");
 
         Some(parts.join(", "))
+    }
+
+    pub fn error_summary(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        push_count(&mut parts, self.read_error_files, "file read error");
+        push_count(&mut parts, self.metadata_error_files, "file metadata error");
+        push_count(&mut parts, self.walk_errors, "directory traversal error");
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(", "))
+        }
     }
 }
 
@@ -319,10 +334,11 @@ fn push_count(parts: &mut Vec<String>, count: usize, label: &str) {
     ));
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PathExcludeMatcher {
     prefixes: Vec<String>,
     globset: Option<GlobSet>,
+    directory_globset: Option<GlobSet>,
 }
 
 impl PathExcludeMatcher {
@@ -333,7 +349,9 @@ impl PathExcludeMatcher {
 
         let mut prefixes = Vec::new();
         let mut builder = GlobSetBuilder::new();
+        let mut directory_builder = GlobSetBuilder::new();
         let mut has_globs = false;
+        let mut has_directory_globs = false;
 
         for pattern in patterns {
             let normalized = normalize_match_path(Path::new(pattern));
@@ -344,6 +362,16 @@ impl PathExcludeMatcher {
             if has_glob_metacharacters(pattern) {
                 let glob = Glob::new(&normalized)
                     .map_err(|e| format!("Invalid exclude glob '{}': {}", pattern, e))?;
+                // Only prune globs that cover the entire subtree, not file-only
+                // patterns such as `**/*.js` that happen to match a directory.
+                if normalized == "*"
+                    || normalized == "**"
+                    || normalized.ends_with("/*")
+                    || normalized.ends_with("/**")
+                {
+                    directory_builder.add(glob.clone());
+                    has_directory_globs = true;
+                }
                 builder.add(glob);
                 has_globs = true;
             } else {
@@ -361,21 +389,50 @@ impl PathExcludeMatcher {
             None
         };
 
-        Ok(Self { prefixes, globset })
+        let directory_globset = if has_directory_globs {
+            Some(
+                directory_builder
+                    .build()
+                    .map_err(|e| format!("Failed to build directory exclude patterns: {}", e))?,
+            )
+        } else {
+            None
+        };
+
+        Ok(Self {
+            prefixes,
+            globset,
+            directory_globset,
+        })
     }
 
     pub(crate) fn is_excluded(&self, path: &Path) -> bool {
         let normalized = normalize_match_path(path);
+        self.has_excluded_prefix(&normalized)
+            || self
+                .globset
+                .as_ref()
+                .is_some_and(|globset| globset.is_match(&normalized))
+    }
 
-        self.prefixes.iter().any(|prefix| {
-            normalized == *prefix
-                || normalized
-                    .strip_prefix(prefix)
-                    .is_some_and(|suffix| suffix.starts_with('/'))
-        }) || self
-            .globset
+    fn is_excluded_directory(&self, path: &Path) -> bool {
+        let mut normalized = normalize_match_path(path);
+        if self.has_excluded_prefix(&normalized) {
+            return true;
+        }
+        normalized.push('/');
+        self.directory_globset
             .as_ref()
             .is_some_and(|globset| globset.is_match(&normalized))
+    }
+
+    fn has_excluded_prefix(&self, normalized: &str) -> bool {
+        self.prefixes.iter().any(|prefix| {
+            normalized == prefix.as_str()
+                || normalized
+                    .strip_prefix(prefix.as_str())
+                    .is_some_and(|suffix| suffix.starts_with('/'))
+        })
     }
 }
 
@@ -500,8 +557,11 @@ pub fn scan_directory_with_notices(
     let root_path = Path::new(root);
     let scan_root = scan_root(root_path);
 
-    let (files, stats) = collect_scan_files(root_path, scan_root, excludes);
-    scan_files(scan_root, files, registry, max_file_size, stats)
+    let mut discovery_notices = Vec::new();
+    let (files, stats) = collect_scan_files(root_path, scan_root, excludes, &mut discovery_notices);
+    let (result, mut notices) = scan_files(scan_root, files, registry, max_file_size, stats);
+    notices.extend(discovery_notices);
+    (result, notices)
 }
 
 /// Scan an explicit list of paths.
@@ -541,6 +601,7 @@ fn collect_scan_files(
     root_path: &Path,
     scan_root: &Path,
     excludes: Option<&PathExcludeMatcher>,
+    notices: &mut Vec<String>,
 ) -> (Vec<(PathBuf, Language)>, ScanStats) {
     let mut files = Vec::new();
     let mut stats = ScanStats::default();
@@ -557,14 +618,30 @@ fn collect_scan_files(
         return (files, stats);
     }
 
-    for entry in WalkBuilder::new(root_path)
-        .follow_links(false) // never follow symlinks
-        .hidden(true) // skip hidden files
-        .git_ignore(true) // respect .gitignore
-        .build()
-    {
-        let Ok(entry) = entry else {
-            continue;
+    let mut walker = WalkBuilder::new(root_path);
+    walker.follow_links(false).hidden(true).git_ignore(true);
+    if let Some(excludes) = excludes {
+        let excludes = excludes.clone();
+        let scan_root = scan_root.to_path_buf();
+        walker.filter_entry(move |entry| {
+            !entry.file_type().is_some_and(|kind| kind.is_dir())
+                || !excludes.is_excluded_directory(
+                    entry
+                        .path()
+                        .strip_prefix(&scan_root)
+                        .unwrap_or(entry.path()),
+                )
+        });
+    }
+
+    for entry in walker.build() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                stats.walk_errors += 1;
+                notices.push(format!("warning: cannot traverse scan path: {error}"));
+                continue;
+            }
         };
         if !entry.file_type().is_some_and(|ft| ft.is_file()) {
             continue;

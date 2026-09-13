@@ -48,7 +48,9 @@ sha2 = "0.10"
 uuid = { version = "1", features = ["v5"] }
 globset = "0.4"
 tempfile = "3"
-ratatui = "0.30"
+fs2 = "0.4"
+# Use Ratatui's own wrapping measurements to bound terminal scrolling.
+ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 crossterm = "0.29"
 toml = "0.8"
 shlex = "1"

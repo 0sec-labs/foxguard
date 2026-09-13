@@ -1,4 +1,7 @@
-use crate::baseline::{load_baseline, suppress_with_baseline_at_root, write_baseline_at_root};
+use crate::baseline::{
+    compare_with_baseline_at_root, load_baseline, suppress_with_baseline_at_root,
+    write_baseline_at_root, BaselineComparison, BaselineFile,
+};
 use crate::cli::{DiffArgs, OutputFormat, PrSecurityPolicyArgs, ScanArgs, SecretsArgs, TuiArgs};
 use crate::config::{
     apply_scan_defaults, apply_secrets_defaults, apply_severity_overrides, config_root_for_scan,
@@ -81,7 +84,35 @@ pub struct TuiExecution {
     pub duration: std::time::Duration,
     pub explain: bool,
     pub diff_summary: Option<DiffSummary>,
+    pub baseline_comparison: Option<BaselineComparison>,
     pub notices: Vec<String>,
+}
+
+enum BaselineMode {
+    Suppress,
+    Compare,
+}
+
+impl BaselineMode {
+    fn apply(
+        self,
+        findings: Vec<Finding>,
+        baseline: Option<&BaselineFile>,
+        identity_root: &Path,
+    ) -> (Vec<Finding>, Option<BaselineComparison>) {
+        match self {
+            Self::Suppress => (
+                suppress_with_baseline_at_root(findings, baseline, identity_root),
+                None,
+            ),
+            Self::Compare => {
+                let comparison = baseline.map(|baseline| {
+                    compare_with_baseline_at_root(&findings, baseline, identity_root)
+                });
+                (findings, comparison)
+            }
+        }
+    }
 }
 
 pub fn resolve_scan_args(scan: &ScanArgs) -> Result<ScanArgs, String> {
@@ -140,7 +171,7 @@ pub fn scan_findings(scan: &ScanArgs) -> Result<ScanResult, String> {
 }
 
 pub fn scan_findings_resolved(scan: ScanArgs) -> Result<ScanResult, String> {
-    let execution = execute_scan_resolved(scan)?;
+    let (execution, _) = execute_scan_resolved(scan, BaselineMode::Suppress)?;
     Ok(ScanResult {
         findings: execution.findings,
         files_scanned: execution.files_scanned,
@@ -150,10 +181,14 @@ pub fn scan_findings_resolved(scan: ScanArgs) -> Result<ScanResult, String> {
 }
 
 pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
-    execute_scan_resolved(resolve_scan_args(scan)?)
+    execute_scan_resolved(resolve_scan_args(scan)?, BaselineMode::Suppress)
+        .map(|(execution, _)| execution)
 }
 
-fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
+fn execute_scan_resolved(
+    scan: ScanArgs,
+    baseline_mode: BaselineMode,
+) -> Result<(ScanExecution, Option<BaselineComparison>), String> {
     let config = load_for_scan(Path::new(&scan.path), scan.config.as_deref())?;
     validate_root_path(&scan.path)?;
     validate_rules_path(scan.rules.as_deref())?;
@@ -282,6 +317,12 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
     } else {
         scan_directory_with_notices(&scan.path, &registry, scan.max_file_size, Some(&excludes))
     };
+    if let Some(errors) = result.stats.error_summary() {
+        return Err(format!(
+            "Scan incomplete: {errors}.\n{}",
+            notices.join("\n")
+        ));
+    }
     notices.append(&mut coccinelle_notices);
     notices.append(&mut codeql_notices);
 
@@ -448,7 +489,8 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
         None => None,
     };
 
-    findings = suppress_with_baseline_at_root(findings, baseline.as_ref(), &identity_root);
+    let (findings, baseline_comparison) =
+        baseline_mode.apply(findings, baseline.as_ref(), &identity_root);
 
     if files_scanned == 0 && coccinelle_candidate_files == 0 && codeql_candidate_rules == 0 {
         if stats.files_discovered == 0 {
@@ -469,20 +511,30 @@ fn execute_scan_resolved(scan: ScanArgs) -> Result<ScanExecution, String> {
         notices.push(policy.to_string());
     }
 
-    Ok(ScanExecution {
-        args: scan,
-        findings,
-        files_scanned,
-        stats,
-        duration,
-        pr_security_policy,
-        pr_security_policy_not_evaluated,
-        notices,
-    })
+    Ok((
+        ScanExecution {
+            args: scan,
+            findings,
+            files_scanned,
+            stats,
+            duration,
+            pr_security_policy,
+            pr_security_policy_not_evaluated,
+            notices,
+        },
+        baseline_comparison,
+    ))
 }
 
 pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
-    let args = resolve_secrets_args(args)?;
+    execute_secrets_resolved(resolve_secrets_args(args)?, BaselineMode::Suppress)
+        .map(|(execution, _)| execution)
+}
+
+fn execute_secrets_resolved(
+    args: SecretsArgs,
+    baseline_mode: BaselineMode,
+) -> Result<(SecretsExecution, Option<BaselineComparison>), String> {
     let config_for_identity = load_for_scan(Path::new(&args.path), args.config.as_deref())?;
     let identity_root = finding_identity_root(Path::new(&args.path), config_for_identity.as_ref());
     validate_root_path(&args.path)?;
@@ -501,7 +553,7 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
         .map(ScanTargetRequest::GitChanges)
         .unwrap_or(ScanTargetRequest::FullTree);
     let plan = ScanPlan::resolve(&args.path, target_request, vec![], args.max_file_size)?;
-    let (mut findings, mut notices, files_scanned, duration) = match plan.paths() {
+    let (findings, mut notices, files_scanned, duration) = match plan.paths() {
         Some(files) => {
             let file_count = files.len();
             let started = std::time::Instant::now();
@@ -527,15 +579,19 @@ pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
         Some(path) => load_baseline(Path::new(path))?,
         None => None,
     };
-    findings = suppress_with_baseline_at_root(findings, baseline.as_ref(), &identity_root);
+    let (findings, baseline_comparison) =
+        baseline_mode.apply(findings, baseline.as_ref(), &identity_root);
 
-    Ok(SecretsExecution {
-        args,
-        findings,
-        files_scanned,
-        duration,
-        notices,
-    })
+    Ok((
+        SecretsExecution {
+            args,
+            findings,
+            files_scanned,
+            duration,
+            notices,
+        },
+        baseline_comparison,
+    ))
 }
 
 pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
@@ -750,7 +806,10 @@ fn append_scan_stats_notice(notices: &mut Vec<String>, stats: &ScanStats) {
 
 pub fn execute_tui(args: &TuiArgs) -> Result<TuiExecution, String> {
     if args.secrets {
-        let result = execute_secrets(&tui_secrets_args(args))?;
+        let (result, baseline_comparison) = execute_secrets_resolved(
+            resolve_secrets_args(&tui_secrets_args(args))?,
+            BaselineMode::Compare,
+        )?;
         return Ok(TuiExecution {
             mode: TuiMode::Secrets,
             path: result.args.path.clone(),
@@ -759,6 +818,7 @@ pub fn execute_tui(args: &TuiArgs) -> Result<TuiExecution, String> {
             duration: result.duration,
             explain: false,
             diff_summary: None,
+            baseline_comparison,
             notices: result.notices,
         });
     }
@@ -779,11 +839,15 @@ pub fn execute_tui(args: &TuiArgs) -> Result<TuiExecution, String> {
                 total_current: result.total_current,
                 existing_count: result.existing_count,
             }),
+            baseline_comparison: None,
             notices: result.notices,
         });
     }
 
-    let result = execute_scan(&tui_scan_args(args))?;
+    let (result, baseline_comparison) = execute_scan_resolved(
+        resolve_scan_args(&tui_scan_args(args))?,
+        BaselineMode::Compare,
+    )?;
     Ok(TuiExecution {
         mode: TuiMode::Scan,
         path: result.args.path.clone(),
@@ -792,6 +856,7 @@ pub fn execute_tui(args: &TuiArgs) -> Result<TuiExecution, String> {
         duration: result.duration,
         explain: result.args.explain,
         diff_summary: None,
+        baseline_comparison,
         notices: result.notices,
     })
 }
@@ -995,6 +1060,49 @@ mod tests {
     use super::*;
     use crate::cli::Cli;
     use clap::Parser;
+
+    #[test]
+    fn tui_keeps_baselined_findings_reviewable_while_cli_suppresses_them() {
+        let temp = tempfile::tempdir().expect("temporary project");
+        let source = temp.path().join("app.py");
+        std::fs::write(&source, "import os\nos.system(input())\n")
+            .expect("write vulnerable source");
+        let source = source.to_string_lossy().into_owned();
+        let baseline = temp
+            .path()
+            .join("baseline.json")
+            .to_string_lossy()
+            .into_owned();
+        let seed = Cli::try_parse_from(["foxguard", &source, "--write-baseline", &baseline])
+            .expect("parse baseline creation");
+        let original = execute_scan(&seed.scan).expect("create baseline");
+        assert!(original
+            .findings
+            .iter()
+            .any(|finding| finding.rule_id.contains("command-injection")));
+
+        let cli = Cli::try_parse_from(["foxguard", &source, "--baseline", &baseline])
+            .expect("parse CLI comparison");
+        assert!(execute_scan(&cli.scan)
+            .expect("CLI scan")
+            .findings
+            .is_empty());
+
+        let tui = Cli::try_parse_from(["foxguard", "tui", &source, "--baseline", &baseline])
+            .expect("parse TUI comparison");
+        let Some(crate::cli::Command::Tui(args)) = tui.command else {
+            panic!("expected TUI");
+        };
+        let review = execute_tui(&args).expect("TUI scan");
+        let comparison = review.baseline_comparison.expect("baseline comparison");
+        assert_eq!(review.findings.len(), original.findings.len());
+        assert_eq!(
+            comparison.recurring,
+            (0..review.findings.len()).collect::<Vec<_>>()
+        );
+        assert!(comparison.introduced.is_empty());
+        assert!(comparison.resolved.is_empty());
+    }
 
     #[test]
     fn pq_rule_ids_include_coccinelle_rules() {

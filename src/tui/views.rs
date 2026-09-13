@@ -1,5 +1,5 @@
 use super::state::{
-    LaunchMode, SortMode, SourceContextCache, SourceContextCacheKey, TuiApp,
+    BaselineFilter, LaunchMode, SortMode, SourceContextCache, SourceContextCacheKey, TuiApp,
     SEVERITY_PICKER_CHOICES,
 };
 use super::widgets::*;
@@ -13,6 +13,10 @@ use ratatui::widgets::{
 
 impl TuiApp {
     pub(super) fn draw(&mut self, frame: &mut ratatui::Frame) {
+        frame.render_widget(
+            Block::default().style(Style::default().bg(APP_BG).fg(TEXT_PRIMARY)),
+            frame.area(),
+        );
         if self.show_launch {
             self.draw_launch(frame);
             if self.show_help {
@@ -24,10 +28,22 @@ impl TuiApp {
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),
-                Constraint::Length(1),
-                Constraint::Min(10),
-                Constraint::Length(1),
+                Constraint::Length(
+                    if frame.area().height >= 16
+                        && self
+                            .result
+                            .as_ref()
+                            .and_then(|result| result.baseline_comparison.as_ref())
+                            .is_some()
+                    {
+                        4
+                    } else {
+                        3
+                    },
+                ),
+                Constraint::Length(if frame.area().height >= 20 { 1 } else { 0 }),
+                Constraint::Min(1),
+                Constraint::Length(if self.search_mode { 2 } else { 1 }),
             ])
             .split(frame.area());
 
@@ -38,13 +54,34 @@ impl TuiApp {
         );
 
         if self.scanning {
-            self.draw_loading(frame, layout[2]);
+            super::loading::draw_loading(self, frame, layout[2]);
         } else if let Some(error) = self.error.as_ref() {
-            let error = Paragraph::new(error.as_str())
-                .style(Style::default().fg(Color::Red))
-                .block(panel_block(Some("Scan Error"), PANEL_BG))
-                .wrap(Wrap { trim: false });
-            frame.render_widget(error, layout[2]);
+            let notice_height =
+                if self.show_notices && self.notice_count() > 0 && layout[2].height >= 7 {
+                    layout[2].height.saturating_sub(4).min(5)
+                } else {
+                    0
+                };
+            let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(notice_height)])
+                .split(layout[2]);
+            self.list_area = Rect::default();
+            self.detail_area = parts[0];
+            render_scrollable_panel(
+                frame,
+                parts[0],
+                Paragraph::new(error.as_str()).style(Style::default().fg(ERROR_TEXT)),
+                panel_block(Some("Scan Error - PgUp/Dn scroll"), PANEL_BG),
+                &mut self.detail_scroll,
+            );
+            if notice_height > 0 {
+                render_scrollable_panel(
+                    frame,
+                    parts[1],
+                    Paragraph::new(self.notice_text()),
+                    panel_block(Some("Notices - [/] scroll"), NOTICE_BG),
+                    &mut self.notices_scroll,
+                );
+            }
         } else {
             self.draw_body(frame, layout[2]);
         }
@@ -66,61 +103,7 @@ impl TuiApp {
         if self.severity_picker.is_some() {
             self.draw_severity_picker(frame);
         }
-    }
-
-    pub(super) fn draw_loading(&self, frame: &mut ratatui::Frame, area: Rect) {
-        let elapsed = self.scan_started_at.elapsed().as_secs_f32();
-        let loading_area = centered_rect(62, 44, area);
-        let block = panel_block(Some("Scanning"), PANEL_BG);
-        let inner = block.inner(loading_area);
-        frame.render_widget(block, loading_area);
-
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Min(1),
-            ])
-            .split(inner);
-
-        let (headline, subline) = loading_copy(self);
-        frame.render_widget(
-            Paragraph::new(Text::from(vec![
-                Line::from(Span::styled(
-                    headline,
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(Span::styled(
-                    subline,
-                    Style::default().fg(Color::Rgb(158, 140, 112)),
-                )),
-                Line::from(Span::styled(
-                    format!("elapsed {:.1}s", elapsed),
-                    Style::default().fg(Color::Rgb(124, 108, 84)),
-                )),
-            ]))
-            .style(Style::default().bg(PANEL_BG)),
-            layout[0],
-        );
-
-        let phases = loading_phase_labels(self);
-        for (index, label) in phases.iter().enumerate() {
-            frame.render_widget(
-                Paragraph::new(Line::from(loading_shimmer_line(
-                    label,
-                    LOADING_SKELETON_WIDTH,
-                    self.loading_tick,
-                )))
-                .style(Style::default().bg(PANEL_BG)),
-                layout[2 + index],
-            );
-        }
+        self.draw_review_modals(frame);
     }
 
     pub(super) fn draw_launch(&self, frame: &mut ratatui::Frame) {
@@ -128,93 +111,98 @@ impl TuiApp {
             Block::default().style(Style::default().bg(APP_BG)),
             frame.area(),
         );
-
         let page = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(10), Constraint::Length(1)])
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
             .split(frame.area());
-
-        let area = centered_rect(54, 52, page[0]);
+        let width = page[0].width.saturating_sub(4).min(88);
+        let compact = page[0].height < 18;
+        let logo_height = if page[0].height >= 26 && width >= 44 {
+            5
+        } else {
+            0
+        };
+        let heading_height = if logo_height > 0 { 1 } else { 2 };
+        let path_height = if compact { 1 } else { 2 };
+        let card_height = if compact { 1 } else { 2 };
+        let target_height = if compact { 1 } else { 2 };
+        let height = (logo_height + heading_height + path_height + card_height * 4 + target_height)
+            .min(page[0].height);
+        let area = Rect::new(
+            page[0].x + (page[0].width - width) / 2,
+            page[0].y + (page[0].height - height) / 2,
+            width,
+            height,
+        );
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(5),
-                Constraint::Length(3),
-                Constraint::Length(11),
-                Constraint::Length(2),
-                Constraint::Min(1),
+                Constraint::Length(logo_height),
+                Constraint::Length(heading_height),
+                Constraint::Length(path_height),
+                Constraint::Length(card_height * 4),
+                Constraint::Length(target_height),
             ])
             .split(area);
-
-        let logo = Paragraph::new(Text::from(vec![
-            Line::from(Span::styled(
+        if logo_height > 0 {
+            let logo = [
                 "   ___                               __",
-                Style::default()
-                    .fg(LOGO_PRIMARY)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(
                 "  / _/__ __ _____ ___ _____ ________/ /",
-                Style::default()
-                    .fg(LOGO_PRIMARY)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(
                 r" / _/ _ \\ \ / _ `/ // / _ `/ __/ _  / ",
-                Style::default()
-                    .fg(LOGO_SECONDARY)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(
                 r"/_/ \___/_\_\\_, /\_,_/\_,_/_/  \_,_/  ",
-                Style::default()
-                    .fg(LOGO_SECONDARY)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(
                 "            /___/                      ",
+            ];
+            frame.render_widget(
+                Paragraph::new(Text::from(
+                    logo.into_iter().map(Line::from).collect::<Vec<_>>(),
+                ))
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(LOGO_PRIMARY)),
+                layout[0],
+            );
+        }
+        frame.render_widget(
+            Paragraph::new(if logo_height > 0 {
+                "Choose a scan mode"
+            } else {
+                "foxguard\nChoose a scan mode"
+            })
+            .alignment(Alignment::Center)
+            .style(
                 Style::default()
                     .fg(LOGO_PRIMARY)
                     .add_modifier(Modifier::BOLD),
-            )),
-        ]))
-        .alignment(Alignment::Center)
-        .style(Style::default().bg(APP_BG));
-        frame.render_widget(logo, layout[0]);
-
-        let intro = Paragraph::new(Text::from(vec![
-            Line::from(Span::styled(
-                "a security scanner as fast as your linter",
-                Style::default()
-                    .fg(Color::Rgb(208, 190, 150))
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(
-                "foxguard.dev",
-                Style::default().fg(Color::Rgb(130, 112, 88)),
-            )),
-        ]))
-        .alignment(Alignment::Center)
-        .style(Style::default().bg(APP_BG));
-        frame.render_widget(intro, layout[1]);
-
-        let selector_area = centered_rect(84, 100, layout[2]);
-        let selector_block = Block::default()
-            .style(Style::default().bg(LIST_BG))
-            .padding(Padding::new(2, 2, 1, 1));
-        let selector_inner = selector_block.inner(selector_area);
-        frame.render_widget(selector_block, selector_area);
-
+            ),
+            layout[1],
+        );
+        let path = short_path(&self.request.path);
+        let available = width.saturating_sub(6) as usize;
+        let path = if unicode_width::UnicodeWidthStr::width(path.as_str()) > available {
+            let mut remaining = available.saturating_sub(1);
+            let mut start = path.len();
+            for (offset, grapheme) in
+                unicode_segmentation::UnicodeSegmentation::grapheme_indices(path.as_str(), true)
+                    .rev()
+            {
+                let cells = unicode_width::UnicodeWidthStr::width(grapheme);
+                if cells > remaining {
+                    break;
+                }
+                remaining -= cells;
+                start = offset;
+            }
+            format!("…{}", &path[start..])
+        } else {
+            path
+        };
+        frame.render_widget(
+            Paragraph::new(format!("Path: {path}")).style(Style::default().fg(TEXT_MUTED)),
+            layout[2],
+        );
         let cards = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(2),
-                Constraint::Length(2),
-                Constraint::Length(2),
-                Constraint::Length(2),
-                Constraint::Min(1),
-            ])
-            .split(selector_inner);
+            .constraints([Constraint::Length(card_height); 4])
+            .split(layout[3]);
         for (index, mode) in [
             LaunchMode::Scan,
             LaunchMode::Diff,
@@ -224,39 +212,19 @@ impl TuiApp {
         .into_iter()
         .enumerate()
         {
-            self.draw_launch_card(frame, cards[index], mode);
+            self.draw_launch_card(frame, cards[index], mode, width < 50);
         }
-
-        if self.launch_mode == LaunchMode::Diff {
-            let diff_target = if self.launch_diff_target.trim().is_empty() {
-                "main".to_string()
-            } else {
-                self.launch_diff_target.clone()
-            };
-            let diff_area = centered_rect(72, 100, layout[3]);
-            let diff = Paragraph::new(Text::from(vec![
-                Line::from(Span::styled(
-                    "target branch",
-                    Style::default()
-                        .fg(Color::Rgb(186, 157, 104))
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled(
-                        diff_target,
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(TITLE_BG)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]),
-            ]))
-            .alignment(Alignment::Center)
-            .style(Style::default().bg(APP_BG));
-            frame.render_widget(diff, diff_area);
-        }
-
+        let target = if self.launch_mode == LaunchMode::Diff {
+            format!("Target: {}_", self.launch_diff_target)
+        } else {
+            "1–4 select a mode · Enter starts".to_string()
+        };
+        frame.render_widget(
+            Paragraph::new(target)
+                .style(Style::default().fg(LOGO_PRIMARY))
+                .wrap(Wrap { trim: false }),
+            layout[4],
+        );
         self.draw_launch_footer(frame, page[1]);
     }
 
@@ -265,47 +233,20 @@ impl TuiApp {
         frame: &mut ratatui::Frame,
         area: Rect,
         mode: LaunchMode,
+        compact: bool,
     ) {
         let selected = self.launch_mode == mode;
-        let (title, subtitle, accent, shortcut) = match mode {
-            LaunchMode::Scan => (
-                "Scan",
-                "full repository scan",
-                Color::Rgb(186, 157, 104),
-                "1",
-            ),
-            LaunchMode::Diff => (
-                "Diff",
-                "new issues vs target branch",
-                Color::Rgb(167, 131, 88),
-                "2",
-            ),
-            LaunchMode::Secrets => (
-                "Secrets",
-                "credentials and token leaks",
-                Color::Rgb(176, 112, 92),
-                "3",
-            ),
-            LaunchMode::Pqc => (
-                "Pqc",
-                "post-quantum crypto audit",
-                Color::Rgb(96, 168, 176),
-                "4",
-            ),
+        let (title, subtitle, shortcut) = match mode {
+            LaunchMode::Scan => ("Scan", "full repository scan", "1"),
+            LaunchMode::Diff => ("Diff", "new issues vs target branch", "2"),
+            LaunchMode::Secrets => ("Secrets", "credentials and token leaks", "3"),
+            LaunchMode::Pqc => ("PQC", "post-quantum crypto audit", "4"),
         };
         let background = if selected { DETAIL_BG } else { LAUNCH_CARD_BG };
-        let title_style = if selected {
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(accent).add_modifier(Modifier::BOLD)
-        };
-        let subtitle_style = if selected {
-            Style::default().fg(Color::Rgb(208, 190, 150))
-        } else {
-            Style::default().fg(Color::Rgb(158, 140, 112))
-        };
+        let title_style = Style::default()
+            .fg(if selected { LOGO_PRIMARY } else { TEXT_PRIMARY })
+            .add_modifier(Modifier::BOLD);
+        let subtitle_style = Style::default().fg(TEXT_MUTED);
         let block = Block::default()
             .style(Style::default().bg(background))
             .padding(Padding::new(2, 2, 0, 0));
@@ -313,7 +254,7 @@ impl TuiApp {
         frame.render_widget(block, area);
         if selected {
             frame.render_widget(
-                Block::default().style(Style::default().bg(accent)),
+                Block::default().style(Style::default().bg(LOGO_PRIMARY)),
                 Rect {
                     x: area.x,
                     y: area.y,
@@ -322,19 +263,26 @@ impl TuiApp {
                 },
             );
         }
+        let subtitle_text = if compact { "" } else { subtitle };
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(
                     shortcut.to_string(),
-                    Style::default().fg(accent).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(if selected { LOGO_PRIMARY } else { TEXT_MUTED })
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),
                 Span::styled(
                     format!("{}{}", if selected { "> " } else { "  " }, title),
                     title_style,
                 ),
-                Span::raw("   "),
-                Span::styled(subtitle, subtitle_style),
+                if !compact {
+                    Span::raw("   ")
+                } else {
+                    Span::raw("")
+                },
+                Span::styled(subtitle_text, subtitle_style),
             ]))
             .style(Style::default().bg(background))
             .wrap(Wrap { trim: true }),
@@ -343,91 +291,130 @@ impl TuiApp {
     }
 
     pub(super) fn draw_header(&self, frame: &mut ratatui::Frame, area: Rect) {
-        let filter = self
-            .min_severity
-            .map(severity_name)
-            .unwrap_or("all severities");
-        let mut summary_spans = vec![
-            Span::styled(
-                "foxguard tui",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                request_mode_label(&self.request),
-                Style::default().fg(Color::Cyan),
-            ),
-            Span::raw("  "),
-            Span::raw(short_path(&self.request.path)),
-            Span::raw("  "),
-            footer_label_span("filter"),
-            Span::raw(" "),
-            footer_value_span(filter),
-        ];
-
-        let mut badge_spans = Vec::new();
-
-        if let Some(result) = self.result.as_ref() {
-            let counts = severity_counts(&result.findings);
-            summary_spans.push(Span::raw("  "));
-            summary_spans.push(Span::styled(
-                format!(
-                    "{} issues | {} files | {:.2}s",
-                    result.findings.len(),
-                    result.files_scanned,
-                    result.duration.as_secs_f64()
-                ),
-                Style::default().fg(Color::Gray),
-            ));
-            badge_spans = severity_badge_spans(&counts);
-
-            if let Some(summary) = result.diff_summary.as_ref() {
-                append_diff_summary(&mut summary_spans, summary);
+        let mut filters = Vec::new();
+        if !self.search_query.is_empty() {
+            filters.push(format!("/{}", self.search_query));
+        }
+        if self.baseline_filter != BaselineFilter::Resolved {
+            if let Some(severity) = self.min_severity {
+                filters.push(format!(">= {}", severity_name(severity)));
             }
-
-            if result.files_scanned == 0 {
-                summary_spans.push(Span::raw("  "));
-                summary_spans.push(Span::styled(
-                    "no files found",
-                    Style::default().fg(Color::Yellow),
+            if self.session_min_confidence > 0.0 {
+                filters.push(format!(
+                    "confidence >= {:.0}%",
+                    self.session_min_confidence * 100.0
                 ));
             }
-        } else if self.scanning {
-            summary_spans.push(Span::raw("  "));
-            summary_spans.push(Span::styled(
-                format!(
-                    "elapsed {:.1}s",
-                    self.scan_started_at.elapsed().as_secs_f32()
-                ),
-                Style::default().fg(Color::Gray),
+            if let Some(review) = self.review_filter_label() {
+                filters.push(review.to_string());
+            }
+            if self.sort_mode != SortMode::default() {
+                filters.push(format!("sort {}", self.sort_mode.label()));
+            }
+        }
+        let comparison = self
+            .result
+            .as_ref()
+            .and_then(|result| result.baseline_comparison.as_ref());
+        let mut summary = vec![Span::styled(
+            "foxguard",
+            Style::default()
+                .fg(LOGO_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        )];
+        if self.session_dirty {
+            summary.push(Span::styled(
+                " UNSAVED",
+                Style::default()
+                    .fg(LOGO_PRIMARY)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else if self.session_error.is_some() {
+            summary.push(Span::styled(
+                " state error",
+                Style::default().fg(ERROR_TEXT),
             ));
         }
-
-        let mut lines = vec![Line::from(summary_spans)];
-        if !badge_spans.is_empty() {
-            lines.push(Line::from(badge_spans));
+        summary.push(Span::raw(format!(
+            " {} ",
+            request_mode_label(&self.request)
+        )));
+        if comparison.is_some() && area.height < 4 && !filters.is_empty() {
+            summary.push(Span::raw(filters.join(" | ")));
+        } else {
+            summary.push(Span::raw(short_path(&self.request.path)));
+            if let Some(result) = &self.result {
+                summary.push(Span::styled(
+                    format!(
+                        "  {} findings  {} files  {:.2}s",
+                        result.findings.len(),
+                        result.files_scanned,
+                        result.duration.as_secs_f64()
+                    ),
+                    Style::default().fg(TEXT_MUTED),
+                ));
+                if let Some(diff) = &result.diff_summary {
+                    append_diff_summary(&mut summary, diff);
+                }
+            }
         }
-
-        let header = Paragraph::new(Text::from(lines)).block(panel_block(None, HEADER_BG));
-        frame.render_widget(header, area);
+        let mut lines = vec![Line::from(summary)];
+        if let Some(comparison) = comparison {
+            let counts = if area.width < 76 {
+                format!(
+                    "b {} | +{} ={} -{}",
+                    self.baseline_filter.label(),
+                    comparison.introduced.len(),
+                    comparison.recurring.len(),
+                    comparison.resolved.len()
+                )
+            } else {
+                format!(
+                    "b {} | introduced {} | recurring {} | resolved {}",
+                    self.baseline_filter.label(),
+                    comparison.introduced.len(),
+                    comparison.recurring.len(),
+                    comparison.resolved.len()
+                )
+            };
+            lines.push(Line::from(Span::styled(
+                counts,
+                Style::default().fg(LOGO_PRIMARY),
+            )));
+        }
+        if comparison.is_none() || area.height >= 4 {
+            if !filters.is_empty() {
+                lines.push(Line::from(filters.join(" | ")));
+            } else if self.baseline_filter == BaselineFilter::Resolved {
+                lines.push(Line::from("Historical metadata; only search applies"));
+            } else if let Some(result) = &self.result {
+                let mut badges = severity_badge_spans(&severity_counts(&result.findings));
+                if self.baseline_filter != BaselineFilter::All {
+                    badges.insert(0, Span::raw("Current scan: "));
+                }
+                lines.push(Line::from(badges));
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(Text::from(lines))
+                .block(panel_block(None, HEADER_BG))
+                .style(Style::default().fg(TEXT_PRIMARY)),
+            area,
+        );
     }
 
     pub(super) fn draw_body(&mut self, frame: &mut ratatui::Frame, area: Rect) {
-        // Vertical slot plan for the scan body:
-        //   [0] findings + detail (main content, always present)
-        //   [1] notices panel (optional)
-        //   [2] CNSA 2.0 compliance strip (optional, 4 rows)
-        // The compliance strip sits *below* notices so notices never shrink
-        // when it is toggled on.
-        let show_notices = self.show_notices && self.notice_count() > 0;
+        let show_notices = self.show_notices && self.notice_count() > 0 && area.height >= 6;
         let show_compliance =
             self.show_compliance_panel && self.result.is_some() && self.request.pq_mode;
 
-        let mut body_constraints: Vec<Constraint> = vec![Constraint::Min(8)];
+        let mut body_constraints: Vec<Constraint> = vec![Constraint::Min(1)];
         if show_notices {
-            body_constraints.push(Constraint::Length(6));
+            body_constraints.push(Constraint::Length(
+                (self.notice_count().saturating_add(2).min(5) as u16)
+                    .min(area.height / 3)
+                    .max(3),
+            ));
         }
         if show_compliance {
             body_constraints.push(Constraint::Length(4));
@@ -437,88 +424,176 @@ impl TuiApp {
             .constraints(body_constraints)
             .split(area);
 
-        let direction = if body_layout[0].width < 110 {
-            Direction::Vertical
+        if self.baseline_filter == BaselineFilter::Resolved {
+            self.draw_resolved(frame, body_layout[0]);
         } else {
-            Direction::Horizontal
-        };
-        let constraints = if matches!(direction, Direction::Vertical) {
-            vec![Constraint::Percentage(45), Constraint::Percentage(55)]
-        } else {
-            vec![Constraint::Percentage(42), Constraint::Percentage(58)]
-        };
-        let layout = Layout::default()
-            .direction(direction)
-            .constraints(constraints)
-            .split(body_layout[0]);
+            let (findings_area, detail_area) = if self.show_detail_view {
+                (None, Some(body_layout[0]))
+            } else if body_layout[0].width >= 100 {
+                let constraints = [Constraint::Percentage(42), Constraint::Percentage(58)];
+                let layout = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints(constraints)
+                    .split(body_layout[0]);
+                (Some(layout[0]), Some(layout[1]))
+            } else {
+                (Some(body_layout[0]), None)
+            };
 
-        let filtered = self.filtered_indices();
-        let hover = self.hover_index;
-        let items = if let Some(result) = self.result.as_ref() {
-            filtered
-                .iter()
-                .enumerate()
-                .map(|(display_index, index)| {
-                    let finding = &result.findings[*index];
-                    let mut item = list_item(finding, self.review_state_for(finding));
-                    if hover == Some(display_index) && self.selected != display_index {
-                        item = item.style(Style::default().bg(Color::Rgb(40, 40, 50)));
-                    }
-                    item
-                })
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
+            self.list_area = Rect::default();
+            self.detail_area = detail_area.unwrap_or_default();
+            if let Some(findings_area) = findings_area {
+                let filtered = self.filtered_indices();
+                let hover = self.hover_index;
+                let items = if let Some(result) = self.result.as_ref() {
+                    filtered
+                        .iter()
+                        .enumerate()
+                        .map(|(display_index, index)| {
+                            let finding = &result.findings[*index];
+                            let mut item = list_item(
+                                finding,
+                                self.review_state_at(*index),
+                                self.checked_findings.contains(index),
+                            );
+                            if hover == Some(display_index) && self.selected != display_index {
+                                item = item.style(Style::default().bg(PANEL_BG));
+                            }
+                            item
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
 
-        let list_title = self
-            .result
-            .as_ref()
-            .map(|result| {
-                format!(
-                    "{} ({}/{})",
-                    mode_findings_title(&result.mode),
-                    if filtered.is_empty() {
-                        0
+                let filtered_len = filtered.len();
+                let list_title = self
+                    .result
+                    .as_ref()
+                    .map(|result| {
+                        let review = self.review_filter_label().unwrap_or("all");
+                        if !self.checked_findings.is_empty() {
+                            format!(
+                                "{} {filtered_len}/{} | {} selected",
+                                self.baseline_filter.label(),
+                                result.findings.len(),
+                                self.checked_findings.len()
+                            )
+                        } else if result.baseline_comparison.is_some() {
+                            format!(
+                                "{} {filtered_len}/{} | {review} | {} reviewed",
+                                self.baseline_filter.label(),
+                                result.findings.len(),
+                                self.reviewed_count
+                            )
+                        } else if findings_area.width < 64 {
+                            format!(
+                                "{filtered_len}/{} {review} · {} reviewed",
+                                result.findings.len(),
+                                self.reviewed_count
+                            )
+                        } else {
+                            format!(
+                                "{} {filtered_len}/{} · {review} · {} reviewed",
+                                mode_findings_title(&result.mode),
+                                result.findings.len(),
+                                self.reviewed_count
+                            )
+                        }
+                    })
+                    .unwrap_or_else(|| "findings".to_string());
+
+                if items.is_empty() && self.result.is_some() {
+                    // Empty state with recovery hints
+                    let empty_text = if self.has_active_filter() {
+                        Text::from(vec![
+                            Line::from(Span::styled(
+                                "No findings match the current filters.",
+                                Style::default().fg(Color::Gray),
+                            )),
+                            Line::from(""),
+                            Line::from(Span::styled(
+                                "Esc  clear all filters",
+                                Style::default().fg(LOGO_PRIMARY),
+                            )),
+                            Line::from(Span::styled(
+                                "/    adjust search",
+                                Style::default().fg(LOGO_PRIMARY),
+                            )),
+                            Line::from(Span::styled(
+                                "0-4  adjust severity",
+                                Style::default().fg(LOGO_PRIMARY),
+                            )),
+                        ])
                     } else {
-                        self.selected + 1
-                    },
-                    filtered.len()
-                )
-            })
-            .unwrap_or_else(|| "findings".to_string());
-        let list = List::new(items)
-            .block(panel_block(Some(&list_title), LIST_BG))
-            .highlight_style(
-                Style::default()
-                    .fg(Color::White)
-                    .bg(DETAIL_BG)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol(">> ")
-            .scroll_padding(0);
+                        Text::from(vec![
+                            Line::from(Span::styled(
+                                "No findings were detected.",
+                                Style::default().fg(Color::Gray),
+                            )),
+                            Line::from(""),
+                            Line::from(Span::styled(
+                                "r  rescan",
+                                Style::default().fg(LOGO_PRIMARY),
+                            )),
+                            Line::from(Span::styled("q  quit", Style::default().fg(LOGO_PRIMARY))),
+                        ])
+                    };
 
-        if !filtered.is_empty() {
-            self.list_state.select(Some(self.selected));
-        } else {
-            self.list_state.select(None);
+                    let empty_block = panel_block(Some(&list_title), LIST_BG);
+                    frame.render_widget(
+                        Paragraph::new(empty_text)
+                            .block(empty_block)
+                            .wrap(Wrap { trim: false }),
+                        findings_area,
+                    );
+                } else {
+                    let list = List::new(items)
+                        .block(panel_block(Some(&list_title), LIST_BG))
+                        .highlight_style(
+                            Style::default()
+                                .fg(Color::White)
+                                .bg(DETAIL_BG)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .highlight_symbol(">> ")
+                        .scroll_padding(0);
+
+                    if filtered_len > 0 {
+                        self.list_state.select(Some(self.selected));
+                    } else {
+                        self.list_state.select(None);
+                    }
+                    self.list_area = findings_area;
+                    frame.render_stateful_widget(list, findings_area, &mut self.list_state);
+                }
+            }
+
+            if let Some(detail_area) = detail_area {
+                let title = if self.show_detail_view {
+                    "Detail · PgUp/PgDn scroll · Esc back"
+                } else {
+                    "Detail · v expand · PgUp/PgDn scroll"
+                };
+                render_scrollable_panel(
+                    frame,
+                    detail_area,
+                    Paragraph::new(self.detail_text()),
+                    panel_block(Some(title), DETAIL_BG),
+                    &mut self.detail_scroll,
+                );
+            }
         }
-        self.list_area = layout[0];
-        frame.render_stateful_widget(list, layout[0], &mut self.list_state);
-
-        let detail = Paragraph::new(self.detail_text())
-            .block(panel_block(Some("Detail"), DETAIL_BG))
-            .scroll((self.detail_scroll, 0))
-            .wrap(Wrap { trim: false });
-        frame.render_widget(detail, layout[1]);
 
         let mut next_slot: usize = 1;
         if show_notices {
-            let notices = Paragraph::new(self.notice_text())
-                .block(panel_block(Some("Notices"), NOTICE_BG))
-                .scroll((self.notices_scroll, 0))
-                .wrap(Wrap { trim: false });
-            frame.render_widget(notices, body_layout[next_slot]);
+            render_scrollable_panel(
+                frame,
+                body_layout[next_slot],
+                Paragraph::new(self.notice_text()),
+                panel_block(Some("Notices - [/] scroll"), NOTICE_BG),
+                &mut self.notices_scroll,
+            );
             next_slot += 1;
         }
         if show_compliance {
@@ -529,13 +604,6 @@ impl TuiApp {
         }
     }
 
-    /// Build the CNSA 2.0 compliance strip content.
-    ///
-    /// Mirrors the terminal reporter's `print_cnsa2_summary` block so both
-    /// surfaces render the same information from the same source — see
-    /// `src/report/terminal.rs`. The function is intentionally pure (takes
-    /// only `&self` and returns a `Text`) so it can be unit-tested without
-    /// spinning up a terminal backend.
     pub(super) fn compliance_panel_text(&self) -> Text<'static> {
         let findings: &[Finding] = self
             .result
@@ -599,8 +667,9 @@ impl TuiApp {
         ])
     }
 
-    pub(super) fn detail_text(&mut self) -> Text<'static> {
-        let Some(finding) = self.selected_finding().cloned() else {
+    /// Keep every actionable section available through scrolling at every size.
+    pub(super) fn detail_text(&self) -> Text<'static> {
+        let Some(finding) = self.selected_finding() else {
             if self.result.is_some() {
                 return Text::from("No findings match the current filters.");
             }
@@ -635,15 +704,10 @@ impl TuiApp {
         if !finding.tags.is_empty() {
             lines.push(metadata_line("Tags", &finding.tags.join(", ")));
         }
-        if let Some(review) = self.review_summary_for_finding(&finding) {
+        if let Some(review) = self.review_summary_for_finding(finding) {
             lines.push(metadata_line("Review", &review));
         }
 
-        // Crypto-agility metadata (#248). These belong with the header block,
-        // not the snippet, so they sit between the review/tags metadata and
-        // the source-context section. Dimmed to read as advisory context
-        // rather than a primary severity signal. Skipped entirely when both
-        // fields are `None`, so non-crypto findings look unchanged.
         if let Some(algorithm) = finding.crypto_algorithm.as_ref() {
             lines.push(Line::from(Span::styled(
                 format!("Algorithm: {}", algorithm),
@@ -661,7 +725,7 @@ impl TuiApp {
             )));
         }
 
-        if let Some(context_lines) = self.source_context_lines(&finding) {
+        if let Some(context_lines) = self.source_context_lines(finding) {
             lines.push(Line::from(""));
             lines.push(section_heading("Context", Color::Yellow));
             lines.extend(context_lines);
@@ -678,12 +742,12 @@ impl TuiApp {
 
         lines.push(Line::from(""));
         lines.push(section_heading("Open", Color::Cyan));
-        lines.extend(open_target_lines(&finding, self.open_focus));
+        lines.extend(open_target_lines(finding, self.open_focus));
 
-        if finding_has_dataflow(&finding) {
+        if finding_has_dataflow(finding) {
             lines.push(Line::from(""));
             lines.push(section_heading("Dataflow", Color::Cyan));
-            lines.extend(dataflow_lines(&finding, self.open_focus));
+            lines.extend(dataflow_lines(finding, self.open_focus));
         }
 
         if let Some(fix) = finding.fix_suggestion.as_ref() {
@@ -712,49 +776,138 @@ impl TuiApp {
         }
     }
 
-    pub(super) fn draw_footer(&self, frame: &mut ratatui::Frame, area: Rect) {
-        let key_spans = vec![
-            footer_key_span("j/k"),
-            Span::raw(" move  "),
-            footer_key_span("/"),
-            Span::raw(" search  "),
-            footer_key_span("i"),
-            Span::raw(" triage  "),
-            footer_key_span("c"),
-            Span::raw(" conf  "),
-            footer_key_span("C"),
-            Span::raw(" sort  "),
-            footer_key_span("w"),
-            Span::raw(" notices  "),
-            footer_key_span("?"),
-            Span::raw(" help  "),
-            footer_key_span("Enter"),
-            Span::raw(" open"),
+    pub(super) fn draw_footer(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        if self.scanning {
+            frame.render_widget(
+                Paragraph::new("Ctrl+C quit  ? help")
+                    .style(Style::default().bg(FOOTER_BG).fg(TEXT_MUTED)),
+                area,
+            );
+            return;
+        }
+        if self.error.is_some() {
+            frame.render_widget(
+                Paragraph::new("PgUp/Dn error  [/] notices  r retry  q")
+                    .style(Style::default().bg(FOOTER_BG).fg(TEXT_PRIMARY)),
+                area,
+            );
+            return;
+        }
+        if self.search_mode {
+            let query = Line::from(format!("/{}", self.search_query));
+            let width = query.width();
+            let scroll = width.saturating_sub(area.width.saturating_sub(1) as usize);
+            frame.render_widget(
+                Paragraph::new(query)
+                    .scroll((0, scroll.min(u16::MAX as usize) as u16))
+                    .style(Style::default().bg(FOOTER_BG).fg(Color::Cyan)),
+                Rect::new(area.x, area.y, area.width, 1),
+            );
+            frame.set_cursor_position((
+                area.x + width.min(area.width.saturating_sub(1) as usize) as u16,
+                area.y,
+            ));
+            frame.render_widget(
+                Paragraph::new("Enter apply  Esc cancel  Ctrl+U clear")
+                    .style(Style::default().bg(FOOTER_BG).fg(Color::Gray)),
+                Rect::new(
+                    area.x,
+                    area.y.saturating_add(1),
+                    area.width,
+                    area.height.saturating_sub(1),
+                ),
+            );
+            return;
+        }
+        if self.baseline_filter == BaselineFilter::Resolved {
+            frame.render_widget(
+                Paragraph::new("b category  / find  v detail  ? help  q")
+                    .style(Style::default().bg(FOOTER_BG).fg(TEXT_PRIMARY)),
+                area,
+            );
+            return;
+        }
+        let is_narrow = area.width < 80;
+
+        let mut shortcuts = vec![
+            ("/", "find"),
+            ("Space", "select"),
+            ("x", "batch"),
+            ("F", "views"),
         ];
+        if area.width >= 64 {
+            shortcuts.extend([("v", "detail"), ("a", "all")]);
+            if self
+                .result
+                .as_ref()
+                .and_then(|result| result.baseline_comparison.as_ref())
+                .is_some()
+            {
+                shortcuts.push(("b", "base"));
+            }
+        }
+        if area.width >= 104 {
+            shortcuts.extend([("i", "triage"), ("f", "review"), ("e", "export")]);
+        }
+        if area.width >= 150 {
+            shortcuts.extend([("c", "confidence"), ("C", "sort"), ("w", "notices")]);
+        }
+        shortcuts.extend([("?", ""), ("q", "")]);
+        let mut key_spans = Vec::new();
+        for (index, (key, description)) in shortcuts.into_iter().enumerate() {
+            if index > 0 {
+                key_spans.push(Span::raw(" "));
+            }
+            key_spans.push(footer_key_span(key));
+            if !description.is_empty() {
+                key_spans.push(Span::raw(format!(" {description}")));
+            }
+        }
 
         let mut right_spans: Vec<Span<'static>> = Vec::new();
 
-        // Confidence filter summary — only surfaces when non-zero so users
-        // whose session matches the default see an uncluttered footer.
+        // Right-side status indicators — compress on narrow
         if self.session_min_confidence > 0.0 {
             let filtered_len = self.filtered_indices().len();
             let total = self.total_after_severity_and_search();
-            right_spans.push(footer_label_span("conf"));
-            right_spans.push(Span::raw(" "));
-            right_spans.push(footer_value_span(&format!(
-                "≥ {:.2} ({}/{})",
-                self.session_min_confidence, filtered_len, total
-            )));
+            if is_narrow {
+                right_spans.push(footer_value_span(&format!(
+                    "c{:.0} {}/{}",
+                    self.session_min_confidence * 100.0,
+                    filtered_len,
+                    total
+                )));
+            } else {
+                right_spans.push(footer_label_span("conf"));
+                right_spans.push(Span::raw(" "));
+                right_spans.push(footer_value_span(&format!(
+                    "≥ {:.2} ({}/{})",
+                    self.session_min_confidence, filtered_len, total
+                )));
+            }
             right_spans.push(Span::raw("  "));
         }
 
-        // Only surface the sort label when it's off-default; the legacy
-        // severity-desc ordering is the least surprising starting point so
-        // we don't advertise it until the user explicitly cycles.
         if self.sort_mode != SortMode::default() {
-            right_spans.push(footer_label_span("sort"));
-            right_spans.push(Span::raw(" "));
-            right_spans.push(footer_value_span(self.sort_mode.label()));
+            if is_narrow {
+                right_spans.push(footer_value_span(self.sort_mode.label()));
+            } else {
+                right_spans.push(footer_label_span("sort"));
+                right_spans.push(Span::raw(" "));
+                right_spans.push(footer_value_span(self.sort_mode.label()));
+            }
+            right_spans.push(Span::raw("  "));
+        }
+
+        // Review filter status
+        if let Some(rf) = self.review_filter_label() {
+            if is_narrow {
+                right_spans.push(footer_value_span(rf));
+            } else {
+                right_spans.push(footer_label_span("review"));
+                right_spans.push(Span::raw(" "));
+                right_spans.push(footer_value_span(rf));
+            }
             right_spans.push(Span::raw("  "));
         }
 
@@ -766,9 +919,13 @@ impl TuiApp {
             self.search_query.clone()
         };
         if !search_text.is_empty() {
-            right_spans.push(footer_label_span("search"));
-            right_spans.push(Span::raw(" "));
-            right_spans.push(footer_value_span(&search_text));
+            if is_narrow {
+                right_spans.push(footer_value_span(&search_text));
+            } else {
+                right_spans.push(footer_label_span("search"));
+                right_spans.push(Span::raw(" "));
+                right_spans.push(footer_value_span(&search_text));
+            }
         }
 
         let right_line = if right_spans.is_empty() {
@@ -780,53 +937,36 @@ impl TuiApp {
     }
 
     pub(super) fn draw_launch_footer(&self, frame: &mut ratatui::Frame, area: Rect) {
-        let left = Line::from(vec![
-            footer_key_span(if self.launch_mode == LaunchMode::Diff {
-                "up/down"
-            } else {
-                "j/k"
-            }),
-            Span::raw(" move  "),
-            footer_key_span(if self.launch_mode == LaunchMode::Diff {
-                "type"
-            } else {
-                "1-4"
-            }),
-            Span::raw(if self.launch_mode == LaunchMode::Diff {
-                " target  "
-            } else {
-                " jump  "
-            }),
-            footer_key_span("Tab"),
-            Span::raw(" cycle  "),
+        let navigation = if self.launch_mode == LaunchMode::Diff {
+            "↑↓"
+        } else {
+            "j/k"
+        };
+        let mut hints = Vec::new();
+        if area.width >= 50 {
+            hints.extend([
+                footer_key_span(navigation),
+                Span::raw(" "),
+                footer_key_span("Tab"),
+                Span::raw("  "),
+            ]);
+        }
+        hints.extend([
             footer_key_span("Enter"),
-            Span::raw(" launch  "),
+            Span::raw(" start  "),
             footer_key_span("?"),
             Span::raw(" help  "),
             footer_key_span("Esc"),
             Span::raw(" quit"),
         ]);
-        let right = Line::from(vec![
-            footer_label_span("mode"),
-            Span::raw(" "),
-            footer_value_span(match self.launch_mode {
-                LaunchMode::Scan => "scan",
-                LaunchMode::Diff => "diff",
-                LaunchMode::Secrets => "secrets",
-                LaunchMode::Pqc => "pqc",
-            }),
-            Span::raw("  "),
-            footer_label_span("path"),
-            Span::raw(" "),
-            footer_value_span(&short_path(&self.request.path)),
-        ]);
-        draw_status_bar(frame, area, left, right);
+        let left = Line::from(hints);
+        draw_status_bar(frame, area, left, Line::from(""));
     }
 
     pub(super) fn draw_help(&mut self, frame: &mut ratatui::Frame) {
         let bounds = frame.area();
         let width = bounds.width.saturating_sub(2).min(88);
-        let height = bounds.height.saturating_sub(2).min(32);
+        let height = bounds.height.saturating_sub(2).min(36);
         let area = Rect::new(
             bounds.x + (bounds.width - width) / 2,
             bounds.y + (bounds.height - height) / 2,
@@ -836,6 +976,7 @@ impl TuiApp {
         frame.render_widget(Clear, area);
         let inner_width = width.saturating_sub(2).max(1) as usize;
         let visible_rows = height.saturating_sub(2) as usize;
+
         let shortcuts: &[&str] = if self.show_launch && self.launch_mode == LaunchMode::Diff {
             &[
                 "Arrows/Tab     Select scan mode",
@@ -860,19 +1001,41 @@ impl TuiApp {
                 "j/k or arrows  Move between findings",
                 "Home/End       First/last finding",
                 "/              Search findings",
-                "Enter/Esc      Leave search",
+                "Esc            Cancel search / back / clear filters",
+                "Enter          Confirm search filter",
+                "Ctrl+U         Clear search text",
                 "0-4            Minimum severity",
                 "c              Confidence filter",
                 "Shift+C        Cycle sort order",
                 "Tab            Finding/source/sink",
+                "Space          Toggle finding selection",
+                "a              Select / clear visible findings",
+                "x              Batch actions for ALL selections",
+                "Enter previews; y confirms; Esc cancels without writes.",
+                "Hidden selections are included and counted in previews.",
+                "Rule-wide changes can affect unselected findings.",
+                "Successful batch writes are not rolled back on failure.",
+                "Shift+F        Saved filters and review-state controls",
+                "In saved filters: s save, Enter load, d delete, w retry",
+                "r reload discards unsaved changes; R backs up and resets.",
+                "b              All > Introduced > Recurring > Resolved",
+                "Baseline counts: + introduced, = recurring, - resolved.",
+                "Resolved means absent from this scan, not verified fixed.",
+                "Historical rows are read-only; only search applies.",
+                "v expands historical metadata; PgUp/Down scrolls it.",
                 "i              Triage selected finding",
+                "v              Toggle detail/list view",
                 "Enter or o     Open in your editor",
+                "Editor choice  VISUAL, EDITOR, then nvim/vim/nano/vi",
                 "w              Toggle notices",
                 "Shift+N        CNSA 2.0 panel",
                 "e              Export CBOM/JSON/SARIF",
-                "PageUp/Down    Scroll detail",
+                "f              All > Unreviewed > Todo > Reviewed > Ignore",
+                "Review marks persist per project and mode; reviewed is done.",
+                "Existing exports require y to replace; Esc cancels.",
+                "PageUp/Down    Page list / scroll visible detail",
                 "[/]            Scroll notices",
-                "Mouse wheel    Move between findings",
+                "Mouse wheel    Move findings / scroll expanded detail",
                 "Mouse click    Select a finding",
                 "Shift-drag     Select terminal text",
                 "r              Rescan",
@@ -880,7 +1043,7 @@ impl TuiApp {
                 "Ctrl+C         Quit from any view",
             ]
         };
-        // Explicit ASCII wrapping keeps scroll bounds identical to rendered rows.
+
         let lines: Vec<Line<'_>> = shortcuts
             .iter()
             .flat_map(|text| {
@@ -899,7 +1062,7 @@ impl TuiApp {
             .title(title)
             .title_bottom("Esc/? close | j/k PgUp/Dn scroll")
             .borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(22, 24, 29)).fg(Color::White));
+            .style(Style::default().bg(PANEL_BG).fg(TEXT_PRIMARY));
         frame.render_widget(
             Paragraph::new(lines)
                 .block(block)
@@ -913,7 +1076,15 @@ impl TuiApp {
             return;
         };
 
-        let area = centered_rect(56, 42, frame.area());
+        let bounds = frame.area();
+        let width = bounds.width.saturating_sub(2).min(88);
+        let height = bounds.height.saturating_sub(2).min(26);
+        let area = Rect::new(
+            bounds.x + (bounds.width - width) / 2,
+            bounds.y + (bounds.height - height) / 2,
+            width,
+            height,
+        );
         let summary = self
             .selected_finding()
             .map(|finding| {
@@ -960,9 +1131,9 @@ impl TuiApp {
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2),
-                Constraint::Length(menu.actions.len() as u16 + 2),
-                Constraint::Length(4),
+                Constraint::Length(if height >= 14 { 2 } else { 1 }),
+                Constraint::Min(2),
+                Constraint::Length(if height >= 18 { 4 } else { 2 }),
                 Constraint::Length(1),
             ])
             .split(inner);
@@ -1013,7 +1184,35 @@ impl TuiApp {
             return;
         };
 
-        let area = centered_rect(40, 40, frame.area());
+        let size = frame.area();
+        let width = size.width.saturating_sub(2).min(58);
+        let height = size.height.saturating_sub(2).min(10);
+        let area = Rect::new(
+            size.x + (size.width - width) / 2,
+            size.y + (size.height - height) / 2,
+            width,
+            height,
+        );
+        if let Some(path) = menu.overwrite.as_ref() {
+            frame.render_widget(Clear, area);
+            frame.render_widget(
+                Paragraph::new(Text::from(vec![
+                    Line::from("Replace the existing report?"),
+                    Line::from(path.display().to_string()),
+                    Line::from(""),
+                    Line::from("y replace   n / Esc cancel"),
+                ]))
+                .block(
+                    Block::default()
+                        .title("Confirm overwrite")
+                        .borders(Borders::ALL),
+                )
+                .style(Style::default().bg(PANEL_BG).fg(Color::Yellow))
+                .wrap(Wrap { trim: false }),
+                area,
+            );
+            return;
+        }
         let items = menu
             .formats
             .iter()
@@ -1051,7 +1250,12 @@ impl TuiApp {
         );
         frame.render_widget(
             Paragraph::new(Span::styled(
-                "export findings as",
+                format!(
+                    "Export all {} findings",
+                    self.result
+                        .as_ref()
+                        .map_or(0, |result| result.findings.len())
+                ),
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),

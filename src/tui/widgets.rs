@@ -1,4 +1,4 @@
-use super::state::{LaunchMode, OpenFocus, ReviewState, SeverityCounts, SortMode, TuiApp};
+use super::state::{OpenFocus, ReviewState, SeverityCounts, SortMode};
 use crate::app::{DiffSummary, TuiMode};
 use crate::cli::TuiArgs;
 use crate::{Finding, Severity};
@@ -29,17 +29,6 @@ pub(super) fn finding_has_dataflow(finding: &Finding) -> bool {
         || finding.source_description.is_some()
         || finding.sink_line.is_some()
         || finding.sink_description.is_some()
-}
-
-#[cfg(test)]
-pub(super) fn truncate_text(text: &str, max_chars: usize) -> String {
-    let mut chars = text.chars();
-    let truncated = chars.by_ref().take(max_chars).collect::<String>();
-    if chars.next().is_some() {
-        format!("{}...", truncated)
-    } else {
-        truncated
-    }
 }
 
 pub(super) fn adjust_scroll(current: u16, delta: i32) -> u16 {
@@ -166,8 +155,16 @@ pub(super) fn append_diff_summary(spans: &mut Vec<Span<'static>>, summary: &Diff
     ));
 }
 
-pub(super) fn list_item(finding: &Finding, review_state: Option<ReviewState>) -> ListItem<'static> {
+pub(super) fn list_item(
+    finding: &Finding,
+    review_state: Option<ReviewState>,
+    checked: bool,
+) -> ListItem<'static> {
     let mut title_spans = vec![
+        Span::styled(
+            if checked { "[x] " } else { "[ ] " },
+            Style::default().fg(LOGO_PRIMARY),
+        ),
         severity_badge_span(finding.severity),
         Span::raw(" "),
         Span::styled(
@@ -175,11 +172,6 @@ pub(super) fn list_item(finding: &Finding, review_state: Option<ReviewState>) ->
             Style::default().add_modifier(Modifier::BOLD),
         ),
     ];
-    // Feature B: confidence badge — list-only, low-confidence-only. We render
-    // nothing when confidence is 1.0 because 95%+ of findings are high-
-    // confidence and a badge on every row would be pure noise. This display
-    // is independent of the `--show-confidence` CLI flag (which only affects
-    // non-TUI output) and of `scan.min_confidence` (scan-time filter).
     if let Some(span) = confidence_badge_span(finding.confidence) {
         title_spans.push(Span::raw(" "));
         title_spans.push(span);
@@ -902,125 +894,24 @@ fn review_badge_span(state: ReviewState) -> Span<'static> {
     Span::styled(format!(" {} ", state.label()), style)
 }
 
-pub(super) fn finding_review_key(finding: &Finding) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}",
-        finding.rule_id,
-        finding.file,
-        finding.line,
-        finding.column,
-        finding.end_line,
-        finding.end_column
-    )
-}
-
 pub(super) fn footer_label_span(label: &str) -> Span<'static> {
     Span::styled(
         label.to_string(),
-        Style::default()
-            .fg(Color::Rgb(145, 126, 99))
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(TEXT_MUTED).add_modifier(Modifier::BOLD),
     )
 }
 
 pub(super) fn footer_value_span(value: &str) -> Span<'static> {
-    Span::styled(value.to_string(), Style::default().fg(Color::White))
+    Span::styled(value.to_string(), Style::default().fg(TEXT_PRIMARY))
 }
 
 pub(super) fn footer_key_span(key: &str) -> Span<'static> {
     Span::styled(
-        format!(" {} ", key),
+        key.to_string(),
         Style::default()
-            .fg(Color::Rgb(33, 25, 17))
-            .bg(Color::Rgb(186, 157, 104))
+            .fg(LOGO_PRIMARY)
             .add_modifier(Modifier::BOLD),
     )
-}
-
-pub(super) fn loading_copy(app: &TuiApp) -> (&'static str, String) {
-    match app.launch_mode {
-        LaunchMode::Scan => (
-            "Scanning code",
-            format!("{}  built-in + custom rules", short_path(&app.request.path)),
-        ),
-        LaunchMode::Diff => (
-            "Scanning diff",
-            format!(
-                "{}  against {}",
-                short_path(&app.request.path),
-                app.request.diff.as_deref().unwrap_or("main")
-            ),
-        ),
-        LaunchMode::Secrets => (
-            "Scanning secrets",
-            format!(
-                "{}  credential and token heuristics",
-                short_path(&app.request.path)
-            ),
-        ),
-        LaunchMode::Pqc => (
-            "Scanning crypto",
-            format!(
-                "{}  post-quantum vulnerable algorithms",
-                short_path(&app.request.path)
-            ),
-        ),
-    }
-}
-
-pub(super) fn loading_phase_labels(app: &TuiApp) -> [&'static str; 3] {
-    match app.launch_mode {
-        LaunchMode::Scan => ["walking files", "matching rules", "assembling findings"],
-        LaunchMode::Diff => [
-            "collecting changed files",
-            "matching new issues",
-            "building diff view",
-        ],
-        LaunchMode::Secrets => ["walking files", "checking patterns", "redacting snippets"],
-        LaunchMode::Pqc => ["walking files", "filtering PQ rules", "assembling findings"],
-    }
-}
-
-pub(super) fn loading_shimmer_line(label: &str, width: usize, tick: usize) -> Vec<Span<'static>> {
-    let mut spans = vec![Span::styled(
-        format!("{label:<22}"),
-        Style::default().fg(Color::Rgb(145, 126, 99)),
-    )];
-    spans.push(Span::raw("  "));
-
-    let cycle = width + LOADING_SHIMMER_GAP * 2;
-    let highlight = tick % cycle;
-
-    for index in 0..width {
-        let distance = (index + LOADING_SHIMMER_GAP).abs_diff(highlight) as f32;
-        let intensity = shimmer_intensity(distance, LOADING_SHIMMER_BAND);
-        spans.push(Span::styled(".", loading_shimmer_style(intensity)));
-    }
-
-    spans
-}
-
-fn shimmer_intensity(distance: f32, band_half_width: f32) -> f32 {
-    if distance > band_half_width {
-        return 0.0;
-    }
-
-    let angle = std::f32::consts::PI * (distance / band_half_width);
-    0.5 * (1.0 + angle.cos())
-}
-
-fn loading_shimmer_style(intensity: f32) -> Style {
-    if intensity >= 0.82 {
-        Style::default()
-            .fg(LOADING_SHIMMER_HIGHLIGHT)
-            .add_modifier(Modifier::BOLD)
-    } else if intensity >= 0.56 {
-        Style::default().fg(LOADING_SHIMMER_MID)
-    } else if intensity >= 0.24 {
-        Style::default().fg(LOADING_SHIMMER_LOW)
-    } else {
-        Style::default().fg(LOADING_SHIMMER_BASE)
-    }
 }
 
 pub(super) fn draw_status_bar(
@@ -1037,9 +928,17 @@ pub(super) fn draw_status_bar(
         width: area.width.saturating_sub(2),
         height: area.height,
     };
+
+    // Key hints, especially quit/help, take precedence over optional status.
+    let left_width = left.width().min(inner.width as usize) as u16;
+    let right_width = right
+        .width()
+        .min(inner.width.saturating_sub(left_width.saturating_add(2)) as usize)
+        as u16;
+
     let layout = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(24), Constraint::Length(34)])
+        .constraints([Constraint::Min(left_width), Constraint::Length(right_width)])
         .split(inner);
 
     frame.render_widget(
@@ -1048,13 +947,15 @@ pub(super) fn draw_status_bar(
             .wrap(Wrap { trim: true }),
         layout[0],
     );
-    frame.render_widget(
-        Paragraph::new(right)
-            .style(Style::default().bg(FOOTER_BG))
-            .alignment(Alignment::Right)
-            .wrap(Wrap { trim: true }),
-        layout[1],
-    );
+    if right_width > 0 {
+        frame.render_widget(
+            Paragraph::new(right)
+                .style(Style::default().bg(FOOTER_BG))
+                .alignment(Alignment::Right)
+                .wrap(Wrap { trim: true }),
+            layout[1],
+        );
+    }
 }
 
 pub(super) fn panel_block(title: Option<&str>, background: Color) -> Block<'static> {
@@ -1072,6 +973,25 @@ pub(super) fn panel_block(title: Option<&str>, background: Color) -> Block<'stat
     };
 
     block.padding(Padding::new(1, 1, 1, 0))
+}
+
+pub(super) fn render_scrollable_panel(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    paragraph: Paragraph<'_>,
+    block: Block<'_>,
+    scroll: &mut u16,
+) {
+    let inner = block.inner(area);
+    let paragraph = paragraph.wrap(Wrap { trim: false });
+    // Measure unblocked content at the same padded width used for rendering.
+    let maximum = paragraph
+        .line_count(inner.width)
+        .saturating_sub(inner.height as usize)
+        .min(u16::MAX as usize) as u16;
+    *scroll = (*scroll).min(maximum);
+    frame.render_widget(block, area);
+    frame.render_widget(paragraph.scroll((*scroll, 0)), inner);
 }
 
 pub(super) fn mode_findings_title(mode: &TuiMode) -> &'static str {
@@ -1106,6 +1026,9 @@ pub(super) fn severity_name(severity: Severity) -> &'static str {
 pub(super) fn short_path(path: &str) -> String {
     if let Ok(cwd) = std::env::current_dir() {
         if let Ok(relative) = Path::new(path).strip_prefix(&cwd) {
+            if relative.as_os_str().is_empty() {
+                return ".".to_string();
+            }
             return relative.display().to_string();
         }
     }
@@ -1141,24 +1064,20 @@ pub(super) fn scan_root_path(path: &Path) -> PathBuf {
 pub(super) const CONTEXT_LINE_MAX_CHARS: usize = 96;
 pub(super) const CONTEXT_FOCUS_LEAD: usize = 28;
 const CONTEXT_TAB_WIDTH: usize = 4;
-pub(super) const LOADING_SKELETON_WIDTH: usize = 28;
-pub(super) const LOADING_SHIMMER_GAP: usize = 8;
-pub(super) const LOADING_SHIMMER_CYCLE: usize = LOADING_SKELETON_WIDTH + LOADING_SHIMMER_GAP * 2;
-pub(super) const LOADING_SHIMMER_BAND: f32 = 7.0;
 // `list_item` renders exactly two lines: title/metadata and file:line.
 pub(super) const FINDING_LIST_ITEM_HEIGHT: u16 = 2;
-pub(super) const APP_BG: Color = Color::Rgb(20, 17, 14);
-pub(super) const HEADER_BG: Color = Color::Rgb(44, 37, 28);
-pub(super) const PANEL_BG: Color = Color::Rgb(27, 23, 18);
-pub(super) const LIST_BG: Color = Color::Rgb(34, 28, 21);
-pub(super) const DETAIL_BG: Color = Color::Rgb(24, 20, 16);
-pub(super) const NOTICE_BG: Color = Color::Rgb(38, 29, 24);
-pub(super) const FOOTER_BG: Color = Color::Rgb(58, 47, 34);
-pub(super) const TITLE_BG: Color = Color::Rgb(201, 172, 114);
-pub(super) const LOGO_PRIMARY: Color = Color::Rgb(221, 191, 122);
-pub(super) const LOGO_SECONDARY: Color = Color::Rgb(181, 136, 88);
-pub(super) const LAUNCH_CARD_BG: Color = Color::Rgb(34, 28, 21);
-pub(super) const LOADING_SHIMMER_BASE: Color = Color::Rgb(82, 67, 50);
-pub(super) const LOADING_SHIMMER_LOW: Color = Color::Rgb(106, 87, 64);
-pub(super) const LOADING_SHIMMER_MID: Color = Color::Rgb(145, 119, 84);
-pub(super) const LOADING_SHIMMER_HIGHLIGHT: Color = Color::Rgb(214, 185, 131);
+pub(super) const APP_BG: Color = Color::Rgb(15, 20, 29);
+pub(super) const HEADER_BG: Color = Color::Rgb(23, 31, 43);
+pub(super) const PANEL_BG: Color = Color::Rgb(24, 32, 44);
+pub(super) const LIST_BG: Color = Color::Rgb(18, 25, 36);
+pub(super) const DETAIL_BG: Color = Color::Rgb(15, 22, 32);
+pub(super) const NOTICE_BG: Color = Color::Rgb(29, 35, 46);
+pub(super) const FOOTER_BG: Color = Color::Rgb(24, 33, 47);
+pub(super) const TITLE_BG: Color = Color::Rgb(244, 153, 68);
+pub(super) const LOGO_PRIMARY: Color = Color::Rgb(255, 169, 77);
+pub(super) const LAUNCH_CARD_BG: Color = Color::Rgb(24, 33, 47);
+/// Primary text color for readable body content.
+pub(super) const TEXT_PRIMARY: Color = Color::Rgb(230, 236, 244);
+/// Muted/secondary text color for metadata, hints, and less prominent info.
+pub(super) const TEXT_MUTED: Color = Color::Rgb(155, 173, 195);
+pub(super) const ERROR_TEXT: Color = Color::Rgb(255, 133, 133);
