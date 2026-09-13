@@ -1,0 +1,15 @@
+# Only the Rust sources and embedded rules belong in this build context.
+**
+!Cargo.toml
+!Cargo.lock
+!src/
+!src/**
+!rules/
+!rules/**
+
+# Keep nested development state and environment files out as well.
+**/.git
+**/.worktrees
+**/node_modules
+**/target
+**/.env*

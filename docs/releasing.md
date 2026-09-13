@@ -55,7 +55,20 @@
    - publishes npm
    - publishes native CLI wheels to PyPI using trusted publishing
    - publishes the VS Code extension
-   - publishes the GitHub App image to GHCR
+   - builds the GitHub App container image natively on amd64 and arm64
+     runners, smoke-tests each architecture independently, then publishes
+     a multi-arch manifest so `docker pull ghcr.io/0sec-labs/foxguard-github-app:latest`
+     resolves to the correct image for the host architecture
+
+   The main-branch image workflow and releases share
+   `build-github-app-image.yml`. Pull requests build and smoke-test without
+   publication permissions. Publishing jobs push the exact smoke-tested image
+   under a run-specific tag, then assemble public tags from immutable digests
+   only after both native architecture jobs succeed.
+
+   `Dockerfile.github-app.dockerignore` allowlists the Cargo manifests, Rust
+   sources, and embedded rules. Local worktrees, build output, website/editor
+   dependencies, and environment files are excluded from the build context.
 
 ## Required GitHub secrets
 

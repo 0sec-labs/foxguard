@@ -1,0 +1,146 @@
+# Shared reusable workflow: build, smoke-test, and optionally publish the
+# foxguard-github-app container image. Both architectures (amd64, arm64) build
+# and smoke-test in parallel on native runners. No multi-arch manifest tag is
+# pushed until both architectures pass.
+#
+# Callers grant contents: read for verification, adding packages: write only
+# for publication. The built-in GITHUB_TOKEN requires no secrets inheritance.
+
+name: Build GitHub App Image
+
+on:
+  workflow_call:
+    inputs:
+      push:
+        description: Push images to GHCR
+        required: false
+        default: false
+        type: boolean
+      tags:
+        description: >-
+          Newline-separated full image tags (ghcr.io/org/repo:tag). Required
+          when push is true.
+        required: false
+        default: ""
+        type: string
+      cache-scope:
+        description: Cache namespace (avoids cross-workflow collisions)
+        required: false
+        type: string
+
+
+jobs:
+
+  build-and-smoke:
+    name: ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and load
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.github-app
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: foxguard-github-app:${{ matrix.arch }}-smoke
+          cache-from: type=gha,scope=${{ inputs.cache-scope != '' && inputs.cache-scope || github.workflow }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.cache-scope != '' && inputs.cache-scope || github.workflow }}-${{ matrix.arch }}
+
+      - name: Smoke test
+        run: scripts/smoke-github-app-image.sh foxguard-github-app:${{ matrix.arch }}-smoke
+
+      - name: Login to GHCR
+        if: inputs.push
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the smoke-tested image and record its digest
+        if: inputs.push
+        env:
+          TAGS: ${{ inputs.tags }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          image=""
+          while IFS= read -r tag; do
+            [[ -z "$tag" ]] && continue
+            repository="${tag%:*}"
+            if [[ -n "$image" && "$repository" != "$image" ]]; then
+              echo "All image tags must use the same repository." >&2
+              exit 1
+            fi
+            image="$repository"
+          done <<< "$TAGS"
+          if [[ -z "$image" ]]; then
+            echo "Image tags are required for publication." >&2
+            exit 1
+          fi
+          arch_tag="${image}:build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${ARCH}"
+          docker tag "foxguard-github-app:${ARCH}-smoke" "$arch_tag"
+          docker push "$arch_tag"
+          mkdir -p "$RUNNER_TEMP/github-app-image-digests"
+          docker image inspect "$arch_tag" --format '{{index .RepoDigests 0}}' \
+            > "$RUNNER_TEMP/github-app-image-digests/${ARCH}.txt"
+
+      - name: Upload immutable image reference
+        if: inputs.push
+        uses: actions/upload-artifact@v7
+        with:
+          name: github-app-image-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/github-app-image-digests/${{ matrix.arch }}.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    name: Create multi-arch manifest
+    needs: build-and-smoke
+    if: inputs.push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: github-app-image-digest-*
+          path: digests
+          merge-multiple: true
+
+      - name: Assemble manifests from verified digests
+        env:
+          TAGS: ${{ inputs.tags }}
+        run: |
+          set -euo pipefail
+          amd64="$(cat digests/amd64.txt)"
+          arm64="$(cat digests/arm64.txt)"
+          if [[ "$amd64" != *@sha256:* || "$arm64" != *@sha256:* ]]; then
+            echo "Expected immutable image digest references." >&2
+            exit 1
+          fi
+          tag_args=()
+          while IFS= read -r tag; do
+            [[ -z "$tag" ]] || tag_args+=(--tag "$tag")
+          done <<< "$TAGS"
+          docker buildx imagetools create "${tag_args[@]}" "$amd64" "$arm64"

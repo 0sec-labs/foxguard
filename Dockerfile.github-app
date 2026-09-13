@@ -5,20 +5,24 @@
 # Build:
 #   docker build -f Dockerfile.github-app -t ghcr.io/0sec-labs/foxguard-github-app:latest .
 #
-# Run:
-#   docker run --rm -p 8080:8080 \
-#     -e FOXGUARD_WEBHOOK_SECRET=$(openssl rand -hex 32) \
-#     ghcr.io/0sec-labs/foxguard-github-app:latest
+# Check startup with isolated, non-production credentials:
+#   scripts/smoke-github-app-image.sh ghcr.io/0sec-labs/foxguard-github-app:latest
+# For deployment credentials and durable state, see src/github_app/README.md
+# and the hosted GitHub App operations section in README.md.
 
 FROM rust:1.88-slim AS builder
 WORKDIR /usr/src/foxguard
-COPY . .
-# Build only the github-app binary; --features turns on the optional
-# axum/tokio/hmac/etc. closure required for the receiver.
+
+# Cache OS dependencies separately from source changes.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && cargo build --locked --release --features github-app --bin foxguard --bin foxguard-github-app
+    && rm -rf /var/lib/apt/lists/*
+
+# Dockerfile.github-app.dockerignore allowlists the Rust build inputs.
+COPY . .
+
+# Build the scanner and the feature-gated webhook receiver.
+RUN cargo build --locked --release --features github-app --bin foxguard --bin foxguard-github-app
 
 FROM debian:bookworm-slim
 RUN apt-get update \
