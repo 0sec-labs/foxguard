@@ -1,5 +1,7 @@
 # Contributing to foxguard
 
+> Status: 2026-09-14. Living document.
+
 ## Adding a rule
 
 Each language has its own rule file in `src/rules/`. To add a new rule:
@@ -25,7 +27,7 @@ Add a Rust rule (per the steps above) when the detection needs cross-file taint,
 
 ## Adding a language
 
-1. Add the tree-sitter grammar to `Cargo.toml`
+1. Add the tree-sitter grammar to `Cargo.toml`, or bundle patched sources under `vendor/` and register them in `build.rs`
 2. Add a `Language` variant in `src/lib.rs`
 3. Update `src/engine/parser.rs` and `src/engine/scanner.rs`
 4. Update `src/rules/semgrep_compat.rs` language mapping
@@ -41,6 +43,42 @@ cargo test               # run tests
 cargo clippy -- -D warnings  # lint
 cargo fmt                # format
 ```
+
+### Updating bundled grammars
+
+`build.rs` compiles the bundled parsers with namespaced entrypoints. Normal Cargo
+builds use the committed C sources and do not require Node or the grammar generator.
+Each vendor directory retains its upstream MIT license.
+
+| Grammar | Upstream source |
+| --- | --- |
+| Bash | [tree-sitter-bash v0.23.3](https://github.com/tree-sitter/tree-sitter-bash/tree/v0.23.3) |
+| C | [tree-sitter-c v0.24.2](https://github.com/tree-sitter/tree-sitter-c/tree/v0.24.2) |
+| JavaScript | [tree-sitter-javascript v0.23.1](https://github.com/tree-sitter/tree-sitter-javascript/tree/v0.23.1) |
+| TypeScript and TSX | [tree-sitter-typescript v0.23.2](https://github.com/tree-sitter/tree-sitter-typescript/tree/v0.23.2) |
+
+Edit the grammar or external scanner, then regenerate with Node and npm:
+
+```sh
+node vendor/generate.mjs
+cargo test --locked --test parser_coverage
+cargo test --locked
+```
+
+The script pins tree-sitter CLI 0.25.10 and ABI 14. It also corrects the generated
+ECMAScript lexers' implicit EOF guards to use `lexer->eof` rather than treating
+every NUL as EOF. External template scanners use the same distinction. Scanned
+source bytes and finding positions remain unchanged.
+
+The TypeScript patch retains import-type call alternatives until the surrounding
+syntax resolves them. The C patch pairs separately guarded linkage braces and
+allows GNU register bindings with initializers. Bash retains its POSIX `<>`
+read-write redirection patch and uses a separate concatenation token inside
+parameter expansions so URL punctuation does not become shell syntax.
+
+Keep `parser_coverage` passing when updating these sources: valid constructs must
+retain security findings at their original positions, and malformed source must
+still produce parse errors. Commit regenerated parser files with the source edits.
 
 ## Project structure
 

@@ -29,7 +29,7 @@ fn parse_source_for_path(
         Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
         Language::Swift => tree_sitter_swift::LANGUAGE.into(),
         Language::Kotlin => tree_sitter_kotlin_sg::LANGUAGE.into(),
-        Language::C => tree_sitter_c::LANGUAGE.into(),
+        Language::C => super::language::C_LANGUAGE.into(),
         Language::Hcl => tree_sitter_hcl::LANGUAGE.into(),
         Language::Solidity => tree_sitter_solidity::LANGUAGE.into(),
         Language::Yaml => tree_sitter_yaml::LANGUAGE.into(),
@@ -62,9 +62,9 @@ fn javascript_language_for_path(path: Option<&Path>) -> tree_sitter::Language {
         .and_then(|path| path.extension())
         .and_then(|ext| ext.to_str())
     {
-        Some("ts" | "mts" | "cts") => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        Some("tsx") => tree_sitter_typescript::LANGUAGE_TSX.into(),
-        _ => tree_sitter_javascript::LANGUAGE.into(),
+        Some("ts" | "mts" | "cts") => super::language::TYPESCRIPT_LANGUAGE.into(),
+        Some("tsx") => super::language::TSX_LANGUAGE.into(),
+        _ => super::language::JAVASCRIPT_LANGUAGE.into(),
     }
 }
 

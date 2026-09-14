@@ -36,6 +36,7 @@ enum TokenType {
     OPENING_PAREN,
     ESAC,
     ERROR_RECOVERY,
+    CONCAT_IN_EXPANSION,
 };
 
 typedef Array(char) String;
@@ -347,13 +348,16 @@ static bool scan_heredoc_content(Scanner *scanner, TSLexer *lexer, enum TokenTyp
 }
 
 static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
-    if (valid_symbols[CONCAT] && !in_error_recovery(valid_symbols)) {
-        if (!(lexer->lookahead == 0 || iswspace(lexer->lookahead) || lexer->lookahead == '>' ||
-              lexer->lookahead == '<' || lexer->lookahead == ')' || lexer->lookahead == '(' ||
-              lexer->lookahead == ';' || lexer->lookahead == '&' || lexer->lookahead == '|' ||
+    bool expansion_concat = valid_symbols[CONCAT_IN_EXPANSION];
+    if ((valid_symbols[CONCAT] || expansion_concat) && !in_error_recovery(valid_symbols)) {
+        if (!(lexer->lookahead == 0 || iswspace(lexer->lookahead) ||
+              lexer->lookahead == ')' || lexer->lookahead == '(' ||
+              (!expansion_concat &&
+               (lexer->lookahead == '>' || lexer->lookahead == '<' || lexer->lookahead == ';' ||
+                lexer->lookahead == '&' || lexer->lookahead == '|')) ||
               (lexer->lookahead == '}' && valid_symbols[CLOSING_BRACE]) ||
               (lexer->lookahead == ']' && valid_symbols[CLOSING_BRACKET]))) {
-            lexer->result_symbol = CONCAT;
+            lexer->result_symbol = expansion_concat ? CONCAT_IN_EXPANSION : CONCAT;
             // So for a`b`, we want to return a concat. We check if the
             // 2nd backtick has whitespace after it, and if it does we
             // return concat.
@@ -387,7 +391,7 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
             }
         }
         if (iswspace(lexer->lookahead) && valid_symbols[CLOSING_BRACE] && !valid_symbols[EXPANSION_WORD]) {
-            lexer->result_symbol = CONCAT;
+            lexer->result_symbol = expansion_concat ? CONCAT_IN_EXPANSION : CONCAT;
             return true;
         }
     }
