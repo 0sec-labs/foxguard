@@ -10,6 +10,9 @@ node_modules/
 vscode-extension/out/
 vscode-extension/*.vsix
 
+# Python
+__pycache__/
+
 # Build output
 www/dist/
 www/.astro/
@@ -24,6 +27,8 @@ www/.astro/
 *.local.md
 benchmarks/repos/
 benchmarks/results*.md
+benchmarks/.version-worktrees-*/
+rules/kernel/dirty-frag-class/queries/.scratch.*/
 .claude/
 
 # Registry-coverage harness snapshot (cloned semgrep-rules; never committed).

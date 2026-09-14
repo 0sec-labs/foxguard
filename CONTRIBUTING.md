@@ -44,6 +44,18 @@ cargo clippy -- -D warnings  # lint
 cargo fmt                # format
 ```
 
+### Tooling safety regressions
+
+```sh
+python3 -m unittest benchmarks.test_compare_versions
+node --test scripts/linux-codeql-dirty-frag.test.mjs
+```
+
+The benchmark tests use real local Git worktrees and Cargo builds to check
+ownership and cleanup. The CodeQL tests exercise Bash counting, failure
+propagation, and scratch cleanup with fixture commands; they do not run a
+CodeQL database build.
+
 ### Updating bundled grammars
 
 `build.rs` compiles the bundled parsers with namespaced entrypoints. Normal Cargo

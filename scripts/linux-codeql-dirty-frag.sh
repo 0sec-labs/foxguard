@@ -17,7 +17,6 @@ read -r -a make_args_array <<<"$make_args"
 kernel_tree="${workdir}/linux"
 database_dir="${workdir}/linux-codeql-db"
 query_pack_dir="${repo_root}/rules/kernel/dirty-frag-class/queries"
-scratch_dir="${query_pack_dir}/.scratch-${kernel_ref}"
 sarif_path="${out_dir}/dirty-frag-${kernel_ref}.sarif"
 
 log() {
@@ -34,11 +33,11 @@ require_cmd() {
 count_query_rows() {
   local ql_file="$1"
   local bqrs_file="$2"
-  local csv_file="$3"
+  # Command substitution can disable errexit, so propagate query failure explicitly.
 
-  "$codeql_bin" query run --database "$database_dir" --output "$bqrs_file" "$ql_file" >/dev/null
-  "$codeql_bin" bqrs decode --format=csv --output "$csv_file" "$bqrs_file" >/dev/null
-  tail -n +2 "$csv_file" | sed '/^[[:space:]]*$/d' | wc -l | tr -d '[:space:]'
+  "$codeql_bin" query run --database "$database_dir" --output "$bqrs_file" "$ql_file" >/dev/null || return
+  "$codeql_bin" bqrs decode --format=csv "$bqrs_file" \
+    | tail -n +2 | sed '/^[[:space:]]*$/d' | wc -l | tr -d '[:space:]'
 }
 
 result_count() {
@@ -87,6 +86,9 @@ require_cmd git
 require_cmd make
 require_cmd python3
 require_cmd "$codeql_bin"
+require_cmd mktemp
+
+scratch_dir="$(mktemp -d "${query_pack_dir}/.scratch.XXXXXXXX")"
 
 cleanup() {
   rm -rf "$scratch_dir"
@@ -94,7 +96,7 @@ cleanup() {
 
 trap cleanup EXIT
 
-mkdir -p "$workdir" "$out_dir" "$scratch_dir"
+mkdir -p "$workdir" "$out_dir"
 
 if [ ! -d "$kernel_tree/.git" ]; then
   log "cloning Linux into ${kernel_tree}"
@@ -141,9 +143,9 @@ from FunctionCall c
 select c, c.toString()
 QL
 
-files_count="$(count_query_rows "${scratch_dir}/files.ql" "${scratch_dir}/files.bqrs" "${scratch_dir}/files.csv")"
-functions_count="$(count_query_rows "${scratch_dir}/functions.ql" "${scratch_dir}/functions.bqrs" "${scratch_dir}/functions.csv")"
-calls_count="$(count_query_rows "${scratch_dir}/calls.ql" "${scratch_dir}/calls.bqrs" "${scratch_dir}/calls.csv")"
+files_count="$(count_query_rows "${scratch_dir}/files.ql" "${scratch_dir}/files.bqrs")"
+functions_count="$(count_query_rows "${scratch_dir}/functions.ql" "${scratch_dir}/functions.bqrs")"
+calls_count="$(count_query_rows "${scratch_dir}/calls.ql" "${scratch_dir}/calls.bqrs")"
 
 log "database inventory: files=${files_count} functions=${functions_count} calls=${calls_count}"
 
