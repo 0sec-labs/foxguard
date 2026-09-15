@@ -66,9 +66,9 @@
    under a run-specific tag, then assemble public tags from immutable digests
    only after both native architecture jobs succeed.
 
-   `Dockerfile.github-app.dockerignore` allowlists the Cargo manifests, Rust
-   sources, and embedded rules. Local worktrees, build output, website/editor
-   dependencies, and environment files are excluded from the build context.
+   `Dockerfile.github-app.dockerignore` allowlists the Cargo manifests, build
+   script, Rust sources, bundled grammars, and embedded rules. Local worktrees,
+   build output, website/editor dependencies, and environment files are excluded.
 
 ## Required GitHub secrets
 
