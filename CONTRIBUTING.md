@@ -8,12 +8,11 @@ Each language has its own rule file in `src/rules/`. To add a new rule:
 2. Use the `impl_rule!` macro to define rule metadata and the check body — see any existing rule for the pattern
 3. Register it in `src/rules/mod.rs` inside `RuleRegistry::new()`
 4. Add a test case to the corresponding fixture in `tests/fixtures/`
-5. Regenerate the website rule inventory: `cargo run --bin gen_rules_ts > www/src/data/rules.ts`
-6. Run `cargo test` and `cargo clippy -- -D warnings`
+5. Run `cargo test` and `cargo clippy -- -D warnings`
 
 The `impl_rule!` macro (defined in `src/rules/mod.rs`) eliminates boilerplate — each rule is a one-liner for metadata plus the check logic. Look at any existing rule in `src/rules/go.rs` for the pattern.
 
-The Rust registry is the single source of truth for rule metadata. `www/src/data/rules.ts` is generated from it by `src/bin/gen_rules_ts.rs` and must not be hand-edited. The `rule-inventory-check` CI job and the `rule_inventory` cargo test both fail if the committed file drifts from the generator output.
+The Rust registry is the single source of truth for rule metadata. The `Rule Inventory` CI job exercises native registration and filtering; rule behavior is covered by the Rust and fixture suites. There is no website catalog to regenerate.
 
 ### Rust vs YAML rule packs
 
@@ -51,7 +50,7 @@ src/              # Rust source
   report/         # Terminal, JSON, SARIF output
   secrets.rs      # Secrets scanning
 www/              # foxguard.dev (Astro)
-  src/data/       # Rule data for the website
+  src/data/       # Website feature and comparison content
   src/content/    # Blog posts (markdown)
 vscode-extension/ # VS Code extension
 packages/npm/     # npm wrapper (downloads binary)
@@ -61,8 +60,10 @@ benchmarks/       # Benchmark suite
 
 ## Releasing
 
+Prepare releases on a dedicated branch after writing the versioned release notes:
+
 ```sh
-./scripts/release.sh 0.6.1
+./scripts/release.sh 0.14.0
 ```
 
 This prepares a tag-driven release:
@@ -70,15 +71,14 @@ This prepares a tag-driven release:
 - bumps Cargo, npm, and VS Code extension versions
 - refreshes the tracked VS Code lockfile
 - runs the verification suite
-- commits the release metadata
-- pushes `main` and the `v*` tag
+- prints commit, pull-request, and tagging instructions without publishing
 
 The GitHub `Release` workflow then:
 
 - verifies the tag matches all package versions
 - builds the release binaries
 - creates the GitHub Release
-- publishes crates.io, npm, and the VS Code extension
+- publishes crates.io, npm, native CLI wheels on PyPI, the VS Code extension, and the GitHub App image
 
 For the full runbook and recovery rules, see the [release runbook](./docs/releasing.md).
 
@@ -93,4 +93,3 @@ Required GitHub repository secrets:
 - One feature or fix per PR
 - Include tests for new rules
 - Run `cargo fmt` and `cargo clippy` before submitting
-- If you added or modified rules, regenerate `www/src/data/rules.ts` with `cargo run --bin gen_rules_ts > www/src/data/rules.ts` and commit the result

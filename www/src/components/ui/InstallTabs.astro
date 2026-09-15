@@ -4,7 +4,7 @@ interface Props {
 }
 const { id = 'install' } = Astro.props;
 const commands = {
-  npx: { label: 'npx', command: 'npx foxguard .', description: 'Run without a global install. Requires Node.js.' },
+  npx: { label: 'npx', command: 'npx foxguard .', description: '' },
   pypi: { label: 'PyPI', command: 'pipx install foxguard', description: 'Python 3.9+ native wheels: Linux (glibc 2.28+), macOS, and Windows x86_64. No Rust compiler needed.' },
   curl: { label: 'curl', command: 'curl -fsSL https://foxguard.dev/install.sh | sh', description: 'Install a checksum-verified standalone binary on macOS or Linux.' },
   cargo: { label: 'cargo', command: 'cargo install foxguard', description: 'Build the CLI from source with the Rust toolchain.' },
@@ -31,8 +31,8 @@ const rootId = `${id}-installation`;
     <button type="button" data-copy-command aria-label={`Copy command: ${commands.npx.command}`} class="w-full px-5 py-3 font-mono text-sm flex items-center justify-center cursor-pointer hover:bg-noir-900/30 active:scale-95 transition-all">
       <code data-command class="text-fox-light whitespace-nowrap overflow-hidden text-ellipsis">{commands.npx.command}</code>
     </button>
-    <p data-install-description class="px-5 pb-2 text-xs text-noir-400">{commands.npx.description}</p>
-    <p data-copy-status role="status" aria-live="polite" class="px-5 pb-3 text-xs text-noir-400">Click the command to copy.</p>
+    <p data-install-description hidden={!commands.npx.description} class="px-5 pb-2 text-xs text-noir-400">{commands.npx.description}</p>
+    <p data-copy-status role="status" aria-live="polite" class="sr-only"></p>
   </div>
 </div>
 
@@ -54,9 +54,11 @@ const rootId = `${id}-installation`;
       currentCommand = option.command;
       commandEl.textContent = option.command;
       descriptionEl.textContent = option.description;
+      descriptionEl.hidden = !option.description;
       copyButton.setAttribute('aria-label', `Copy command: ${option.command}`);
       panel.setAttribute('aria-labelledby', tab.id);
-      statusEl.textContent = 'Click the command to copy.';
+      statusEl.textContent = '';
+      statusEl.className = 'sr-only';
       tabs.forEach(candidate => {
         const selected = candidate === tab;
         candidate.setAttribute('aria-selected', String(selected));
@@ -87,9 +89,15 @@ const rootId = `${id}-installation`;
       const command = currentCommand;
       try {
         await navigator.clipboard.writeText(command);
-        if (currentCommand === command) statusEl.textContent = 'Copied to clipboard.';
+        if (currentCommand === command) {
+          statusEl.className = 'sr-only';
+          statusEl.textContent = 'Command copied';
+        }
       } catch {
-        if (currentCommand === command) statusEl.textContent = 'Clipboard unavailable. Select and copy the command manually.';
+        if (currentCommand === command) {
+          statusEl.className = 'px-5 pb-3 text-xs text-noir-400';
+          statusEl.textContent = 'Clipboard unavailable. Select and copy the command manually.';
+        }
       }
     });
   })();
