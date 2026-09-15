@@ -894,7 +894,7 @@ impl_rule! {
     language = Language::Manifest,
     applies_to_filename = "Cargo.lock",
     fn check(_self, source, _tree) {
-        crate::rules::pq::pq_ready_findings(_self.id(), source)
+        crate::rules::pq::pq_ready_findings(_self.id(), source, _self.language())
     }
 }
 
@@ -909,7 +909,7 @@ impl_rule! {
     language = Language::Manifest,
     applies_to_filename = "requirements.txt",
     fn check(_self, source, _tree) {
-        crate::rules::pq::pq_ready_findings(_self.id(), source)
+        crate::rules::pq::pq_ready_findings(_self.id(), source, _self.language())
     }
 }
 
