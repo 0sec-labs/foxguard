@@ -302,7 +302,7 @@ impl_rule! {
     description = "Nginx TLS configuration negotiates a post-quantum / hybrid key exchange (X25519MLKEM768)",
     language = Language::NginxConf,
     fn check(_self, source, _tree) {
-        crate::rules::pq::pq_ready_findings(_self.id(), &strip_comments(source))
+        crate::rules::pq::pq_ready_findings(_self.id(), &strip_comments(source), _self.language())
     }
 }
 
@@ -316,7 +316,7 @@ impl_rule! {
     description = "Apache TLS configuration negotiates a post-quantum / hybrid key exchange (X25519MLKEM768)",
     language = Language::ApacheConf,
     fn check(_self, source, _tree) {
-        crate::rules::pq::pq_ready_findings(_self.id(), &strip_comments(source))
+        crate::rules::pq::pq_ready_findings(_self.id(), &strip_comments(source), _self.language())
     }
 }
 
@@ -330,7 +330,7 @@ impl_rule! {
     description = "HAProxy TLS configuration negotiates a post-quantum / hybrid key exchange (X25519MLKEM768)",
     language = Language::HAProxyConf,
     fn check(_self, source, _tree) {
-        crate::rules::pq::pq_ready_findings(_self.id(), &strip_comments(source))
+        crate::rules::pq::pq_ready_findings(_self.id(), &strip_comments(source), _self.language())
     }
 }
 
