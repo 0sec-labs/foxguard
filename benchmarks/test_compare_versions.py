@@ -104,6 +104,7 @@ class WorktreeOwnershipTests(unittest.TestCase):
         ):
             self.assertEqual(compare.main(), 0)
         self.assertEqual(marker.read_text(), "unrelated data")
+        self.assertEqual(list(benches.glob(".version-worktrees-*")), [])
 
 
 if __name__ == "__main__":
