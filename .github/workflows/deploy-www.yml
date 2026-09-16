@@ -6,8 +6,6 @@ on:
       - main
     paths:
       - "www/**"
-      - "src/rules/**"
-      - "src/bin/gen_rules_ts.rs"
       - ".github/workflows/deploy-www.yml"
   workflow_dispatch:
 

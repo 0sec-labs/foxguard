@@ -911,7 +911,7 @@ fn is_comment_only_line(trimmed_line: &str, language: Language) -> bool {
         .any(|marker| trimmed_line.starts_with(marker))
 }
 
-fn comment_markers(language: Language) -> &'static [&'static str] {
+pub(crate) fn comment_markers(language: Language) -> &'static [&'static str] {
     match language {
         Language::Python | Language::Ruby | Language::Yaml => &["#"],
         Language::Hcl => &["#", "//"],

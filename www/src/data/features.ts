@@ -1,5 +1,3 @@
-import { ruleGroups } from './rules';
-
 export interface Feature {
   icon: string;
   title: string;
@@ -43,74 +41,58 @@ export interface FrameworkGroup {
   title: string;
   desc: string;
   badges: string[];
-  ruleCount: number;
 }
-
-const countForSlugs = (...slugs: string[]) =>
-  ruleGroups
-    .filter((group) => slugs.includes(group.slug))
-    .reduce((sum, group) => sum + group.rules.length, 0);
 
 export const frameworkGroups: FrameworkGroup[] = [
   {
     title: 'Express / Node',
     desc: 'Session secrets, cookie flags, JWT hardening, reflected response writes.',
     badges: ['session', 'cookies', 'jwt', 'xss'],
-    ruleCount: countForSlugs('js'),
   },
   {
     title: 'Flask / Django',
     desc: 'Secret keys, debug mode, CSRF protection, session cookie flags, and Django host/redirect hardening.',
     badges: ['secret keys', 'csrf', 'session', 'debug'],
-    ruleCount: countForSlugs('py'),
   },
   {
     title: 'Gin / net/http',
     desc: 'Trusted proxies, missing timeouts, SSRF, TLS verification bypass.',
     badges: ['proxies', 'timeouts', 'ssrf', 'tls'],
-    ruleCount: countForSlugs('go'),
   },
   {
     title: 'Rails / Ruby',
     desc: 'Mass assignment, CSRF bypass, unsafe deserialization, XSS escaping.',
     badges: ['params', 'csrf', 'marshal', 'xss'],
-    ruleCount: countForSlugs('rb'),
   },
   {
     title: 'Spring / Java',
     desc: 'SQL injection, XXE, deserialization, CSRF config, CORS policy.',
     badges: ['sql', 'xxe', 'csrf', 'cors'],
-    ruleCount: countForSlugs('java'),
   },
   {
     title: 'PHP / Laravel',
     desc: 'Eval, file inclusion, unserialize, command injection, extract.',
     badges: ['eval', 'include', 'unserialize', 'ssrf'],
-    ruleCount: countForSlugs('php'),
   },
   {
     title: 'Rust',
     desc: 'Unsafe blocks, transmute, command injection, TLS verification.',
     badges: ['unsafe', 'transmute', 'tls', 'unwrap'],
-    ruleCount: countForSlugs('rs'),
   },
   {
     title: 'C# / .NET',
     desc: 'SQL injection, deserialization, XXE, LDAP injection, CORS.',
     badges: ['sql', 'xxe', 'ldap', 'cors'],
-    ruleCount: countForSlugs('cs'),
   },
   {
     title: 'Kotlin / Ktor',
     desc: 'SQL injection, command injection, SSRF, deserialization, JWT, taint tracking with Ktor + Spring Boot sources.',
     badges: ['sql', 'cmd', 'ssrf', 'taint'],
-    ruleCount: countForSlugs('kt'),
   },
   {
     title: 'Swift / iOS',
     desc: 'Keychain security, transport security, JS injection, TLS.',
     badges: ['keychain', 'tls', 'transport', 'webview'],
-    ruleCount: countForSlugs('swift'),
   },
 ];
 

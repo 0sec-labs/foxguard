@@ -478,7 +478,7 @@ impl_rule! {
     description = "Post-quantum / hybrid cryptographic algorithm in use (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or hybrid KEM)",
     language = Language::Rust,
     fn check(_self, source, _tree) {
-        crate::rules::pq::pq_ready_findings(_self.id(), source)
+        crate::rules::pq::pq_ready_findings(_self.id(), source, _self.language())
     }
 }
 

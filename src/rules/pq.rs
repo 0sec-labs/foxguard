@@ -26,8 +26,9 @@
 //! - **Hybrids** — `X25519MLKEM768` (RFC 9370 / TLS) and the earlier
 //!   `X25519Kyber768` draft: classical + PQ key exchange run in combination.
 
+use crate::engine::scanner::comment_markers;
 use crate::rules::common::make_finding_from_offsets;
-use crate::{Finding, Severity, PQ_READY_TAG};
+use crate::{Finding, Language, Severity, PQ_READY_TAG};
 
 /// A recognised post-quantum (or hybrid) cryptographic algorithm and the
 /// spellings that identify it in source, config, and dependency manifests.
@@ -50,10 +51,8 @@ pub struct PqAlgorithm {
 
 /// The canonical post-quantum algorithm table.
 ///
-/// Order matters: hybrids and multi-token spellings are listed first so that a
-/// line like `x25519mlkem768` is attributed to the hybrid rather than to bare
-/// `mlkem` (whose boundary check fails against the surrounding digits anyway,
-/// but the ordering keeps intent explicit).
+/// Order matters: hybrids claim their byte ranges before base algorithms,
+/// including spellings whose separators would otherwise admit a base match.
 pub const PQ_ALGORITHMS: &[PqAlgorithm] = &[
     // ── Hybrids (classical + PQ key exchange) ────────────────────────────
     PqAlgorithm {
@@ -65,6 +64,12 @@ pub const PQ_ALGORITHMS: &[PqAlgorithm] = &[
             "x25519mlkem768",
             "x25519_mlkem768",
             "x25519-mlkem768",
+            "x25519_ml_kem_768",
+            "x25519-ml-kem-768",
+            "x25519_ml_kem768",
+            "x25519-ml-kem768",
+            "x25519_mlkem_768",
+            "x25519-mlkem-768",
             "secp256r1mlkem768",
             "x25519mlkem",
         ],
@@ -81,6 +86,8 @@ pub const PQ_ALGORITHMS: &[PqAlgorithm] = &[
             "x25519-kyber768",
             "p256_kyber768",
             "p256-kyber768",
+            "x25519_kyber_768",
+            "x25519-kyber-768",
         ],
     },
     // ── FIPS 203 — ML-KEM (Kyber) ────────────────────────────────────────
@@ -177,6 +184,7 @@ pub const PQ_ALGORITHMS: &[PqAlgorithm] = &[
             "pqcrystals",
             "pq-crystals",
             "pqclean",
+            "oqs",
         ],
     },
 ];
@@ -197,34 +205,33 @@ fn is_boundary_ident(b: u8) -> bool {
     b.is_ascii_alphanumeric()
 }
 
-/// Find `needle` in `haystack_lower` with alphanumeric word boundaries.
-/// Returns the byte offset of the match within the line, if any.
-fn boundary_find(haystack_lower: &str, needle: &str) -> Option<usize> {
+/// Find every occurrence of `needle` with alphanumeric word boundaries.
+fn boundary_matches<'a>(
+    haystack_lower: &'a str,
+    needle: &'a str,
+) -> impl Iterator<Item = std::ops::Range<usize>> + 'a {
     let bytes = haystack_lower.as_bytes();
-    let mut start = 0;
-    while let Some(pos) = haystack_lower[start..].find(needle) {
-        let idx = start + pos;
-        let end = idx + needle.len();
-        let before_ok = idx == 0 || !is_boundary_ident(bytes[idx - 1]);
-        let after_ok = end >= bytes.len() || !is_boundary_ident(bytes[end]);
-        if before_ok && after_ok {
-            return Some(idx);
-        }
-        start = idx + needle.len().max(1);
-    }
-    None
+    haystack_lower
+        .match_indices(needle)
+        .filter_map(move |(start, _)| {
+            let end = start + needle.len();
+            let before_ok = start == 0 || !is_boundary_ident(bytes[start - 1]);
+            let after_ok = end == bytes.len() || !is_boundary_ident(bytes[end]);
+            (before_ok && after_ok).then_some(start..end)
+        })
 }
 
-/// `true` when a trimmed line begins with a comment marker.
-///
-/// Detection is a positive *usage* inventory, so prose mentions of "ML-KEM" or
-/// "Kyber" in a header comment or docstring must not inflate the counts. This
-/// covers whole-line comments across the languages/configs the audit scans
-/// (`#`, `//`, `/*`, ` * `, `--`, `<!--`, `%`). Inline trailing comments are
-/// not stripped — an acknowledged, documented limitation.
-fn is_comment_line(trimmed: &str) -> bool {
-    const MARKERS: &[&str] = &["#", "//", "/*", "*/", "*", "--", "<!--", "%", ";;"];
-    MARKERS.iter().any(|m| trimmed.starts_with(m))
+/// Exclude whole-line comment prose using the scanner's language conventions.
+/// Rust attributes and C preprocessor directives are code, not hash comments.
+/// C-style block-comment markers are also excluded in languages that use them.
+/// Inline trailing comments are not stripped.
+fn is_comment_line(trimmed: &str, language: Language) -> bool {
+    let markers = comment_markers(language);
+    markers.iter().any(|marker| trimmed.starts_with(marker))
+        || ((markers.contains(&"//") || markers.contains(&"/*"))
+            && ["/*", "*/", "*"]
+                .iter()
+                .any(|marker| trimmed.starts_with(marker)))
 }
 
 /// Scan a source/config/manifest buffer for post-quantum algorithm usage.
@@ -232,31 +239,39 @@ fn is_comment_line(trimmed: &str) -> bool {
 /// Line oriented so match positions are reportable. At most one match per
 /// `(line, canonical algorithm)` pair is emitted, so `use ml_kem::{MlKem768}`
 /// yields a single ML-KEM finding rather than one per spelling.
-pub fn scan(source: &str) -> Vec<PqMatch> {
+pub fn scan(source: &str, language: Language) -> Vec<PqMatch> {
     let mut matches = Vec::new();
     let mut line_start = 0usize;
+    let mut lower = String::new();
+    let mut claimed = Vec::new();
     for line in source.split_inclusive('\n') {
-        if is_comment_line(line.trim_start()) {
+        if is_comment_line(line.trim_start(), language) {
             line_start += line.len();
             continue;
         }
-        let lower = line.to_ascii_lowercase();
-        // Track which canonicals already matched on this line to avoid
-        // duplicate findings for the same algorithm.
-        let mut seen: Vec<&'static str> = Vec::new();
+        lower.clear();
+        lower.push_str(line);
+        lower.make_ascii_lowercase();
+        claimed.clear();
+        claimed.resize(line.len(), false);
         for algo in PQ_ALGORITHMS {
-            if seen.contains(&algo.canonical) {
-                continue;
-            }
+            let mut emitted = false;
             for spelling in algo.spellings {
-                if let Some(off) = boundary_find(&lower, spelling) {
-                    matches.push(PqMatch {
-                        start_byte: line_start + off,
-                        end_byte: line_start + off + spelling.len(),
-                        algo,
-                    });
-                    seen.push(algo.canonical);
-                    break;
+                for range in boundary_matches(&lower, spelling) {
+                    if claimed[range.clone()].iter().any(|&byte| byte) {
+                        continue;
+                    }
+                    if !emitted {
+                        matches.push(PqMatch {
+                            start_byte: line_start + range.start,
+                            end_byte: line_start + range.end,
+                            algo,
+                        });
+                        emitted = true;
+                    }
+                    // Claim every occurrence, even after emitting this algorithm:
+                    // a second hybrid must not leak a base-algorithm finding.
+                    claimed[range].fill(true);
                 }
             }
         }
@@ -271,8 +286,8 @@ pub fn scan(source: &str) -> Vec<PqMatch> {
 /// canonical algorithm name in `crypto_algorithm`, and declares no CNSA 2.0
 /// deadline. Callers pass their own `rule_id` so the finding attributes to the
 /// language-specific rule.
-pub fn pq_ready_findings(rule_id: &str, source: &str) -> Vec<Finding> {
-    scan(source)
+pub fn pq_ready_findings(rule_id: &str, source: &str, language: Language) -> Vec<Finding> {
+    scan(source, language)
         .into_iter()
         .map(|m| {
             let aka = if m.algo.aka.is_empty() {
@@ -311,10 +326,76 @@ mod tests {
     use super::*;
 
     fn canonicals(source: &str) -> Vec<&'static str> {
-        let mut v: Vec<&'static str> = scan(source).into_iter().map(|m| m.algo.canonical).collect();
+        let mut v: Vec<&'static str> = scan(source, Language::Rust)
+            .into_iter()
+            .map(|m| m.algo.canonical)
+            .collect();
         v.sort_unstable();
         v.dedup();
         v
+    }
+
+    #[test]
+    fn recognizes_bare_oqs_without_matching_unrelated_identifiers() {
+        let source = "use oqs::kem::Kem;\nOQS_KEM_new(OQS_KEM_alg_bike_l1);\nliboqs_version();\nfooqs_value(); oqsish();\n";
+        let matches = scan(source, Language::Rust);
+        assert_eq!(
+            matches
+                .iter()
+                .map(|m| (&source[m.start_byte..m.end_byte], m.algo.canonical))
+                .collect::<Vec<_>>(),
+            vec![("oqs", "liboqs"), ("OQS", "liboqs"), ("liboqs", "liboqs")]
+        );
+    }
+
+    #[test]
+    fn separated_hybrids_claim_every_occurrence_before_base_algorithms() {
+        let source = "x25519_ml_kem_768 x25519-ml-kem-768 x25519_mlkem_768\nx25519_kyber_768 x25519-kyber-768\n";
+        let matches = scan(source, Language::Rust);
+        assert_eq!(
+            matches.iter().map(|m| m.algo.canonical).collect::<Vec<_>>(),
+            vec!["X25519MLKEM768", "X25519Kyber768"]
+        );
+    }
+
+    #[test]
+    fn independent_base_algorithm_after_hybrid_keeps_its_own_byte_range() {
+        let source = "let café = \"x25519_ml_kem_768 ml_kem\";\n";
+        let matches = scan(source, Language::Rust);
+        assert_eq!(
+            matches
+                .iter()
+                .map(|m| (m.start_byte, m.end_byte, m.algo.canonical))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    source.find("x25519").unwrap(),
+                    source.find("x25519").unwrap() + "x25519_ml_kem_768".len(),
+                    "X25519MLKEM768"
+                ),
+                (
+                    source.rfind("ml_kem").unwrap(),
+                    source.rfind("ml_kem").unwrap() + "ml_kem".len(),
+                    "ML-KEM"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn rust_attributes_are_inventory_but_hash_comment_prose_is_not() {
+        let source = "#[cfg(feature = \"ml-kem\")]\n#![cfg_attr(feature = \"slh-dsa\", allow(dead_code))]\n// ML-KEM in prose\n/* ML-DSA in prose */\n";
+        let findings = pq_ready_findings("rs/pq-ready-crypto", source, Language::Rust);
+        assert_eq!(
+            findings
+                .iter()
+                .map(|f| (f.line, f.crypto_algorithm.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![(1, Some("ML-KEM")), (2, Some("SLH-DSA"))]
+        );
+        let comments = "#if you want ML-KEM, import ml_kem\n#[cfg(feature = \"ml-kem\")]\n";
+        assert!(scan(comments, Language::Python).is_empty());
+        assert!(scan(comments, Language::Bash).is_empty());
     }
 
     #[test]
@@ -360,7 +441,11 @@ mod tests {
 
     #[test]
     fn pq_ready_findings_are_informational() {
-        let findings = pq_ready_findings("py/pq-ready-crypto", "from kyber_py import ml_kem\n");
+        let findings = pq_ready_findings(
+            "py/pq-ready-crypto",
+            "from kyber_py import ml_kem\n",
+            Language::Python,
+        );
         assert_eq!(findings.len(), 1);
         let f = &findings[0];
         assert!(f.is_pq_ready());
