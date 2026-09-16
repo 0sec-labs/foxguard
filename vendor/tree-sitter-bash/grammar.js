@@ -98,6 +98,7 @@ module.exports = grammar({
     '(',
     'esac',
     $.__error_recovery,
+    $._concat_in_expansion,
   ],
 
   extras: $ => [
@@ -1049,7 +1050,7 @@ module.exports = grammar({
         $.process_substitution,
       ),
       repeat1(seq(
-        choice($._concat, alias(/`\s*`/, '``')),
+        choice($._concat_in_expansion, alias(/`\s*`/, '``')),
         choice(
           $.word,
           $.variable_name,

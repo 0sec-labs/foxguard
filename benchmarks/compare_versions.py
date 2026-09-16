@@ -8,10 +8,10 @@ binary against the same repository fixtures.
 from __future__ import annotations
 
 import argparse
-import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -49,15 +49,13 @@ def ensure_repo_checkout(path: Path, url: str) -> None:
     run(["git", "clone", "--depth", "1", url, str(path)])
 
 
-def sanitize_ref(ref: str) -> str:
-    return ref.replace("/", "-").replace(" ", "-")
-
-
 def build_ref(repo_root: Path, ref: str, worktree_root: Path) -> Path:
-    worktree = worktree_root / sanitize_ref(ref)
-    if worktree.exists():
-        run(["git", "worktree", "remove", "--force", str(worktree)], cwd=repo_root)
-    run(["git", "worktree", "add", "--detach", str(worktree), ref], cwd=repo_root)
+    commit = run(
+        ["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
+        cwd=repo_root,
+    ).stdout.strip()
+    worktree = Path(tempfile.mkdtemp(prefix=f"{commit[:12]}-", dir=worktree_root))
+    run(["git", "worktree", "add", "--detach", str(worktree), commit], cwd=repo_root)
     run(["cargo", "build", "--release"], cwd=worktree)
     binary = worktree / "target" / "release" / "foxguard"
     if not binary.exists():
@@ -162,7 +160,6 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     benchmarks_root = repo_root / "benchmarks"
     repos_root = benchmarks_root / "repos"
-    worktree_root = benchmarks_root / ".version-worktrees"
     output_path = repo_root / args.output
 
     refs = [part.strip() for part in args.refs.split(",") if part.strip()]
@@ -176,7 +173,10 @@ def main() -> int:
     for name, url in REPOS.items():
         ensure_repo_checkout(repos_root / name, url)
 
-    worktree_root.mkdir(parents=True, exist_ok=True)
+    worktree_root = Path(
+        tempfile.mkdtemp(prefix=".version-worktrees-", dir=benchmarks_root)
+    )
+    print(f"[worktrees] {worktree_root}")
     results: dict[tuple[str, str], BenchSummary] = {}
 
     try:
@@ -209,23 +209,21 @@ def main() -> int:
         return 0
     finally:
         if not args.keep_worktrees and worktree_root.exists():
+            cleanup_failed = False
             for child in worktree_root.iterdir():
                 if child.is_dir():
-                    subprocess.run(
+                    removed = subprocess.run(
                         ["git", "worktree", "remove", "--force", str(child)],
                         cwd=repo_root,
                         check=False,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                     )
-            shutil.rmtree(worktree_root, ignore_errors=True)
-            subprocess.run(
-                ["git", "worktree", "prune"],
-                cwd=repo_root,
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+                    if removed.returncode != 0:
+                        cleanup_failed = True
+                        print(f"Could not remove owned worktree {child}; retaining it", file=sys.stderr)
+            if not cleanup_failed:
+                worktree_root.rmdir()
 
 
 if __name__ == "__main__":

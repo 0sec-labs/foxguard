@@ -1,5 +1,7 @@
 # foxguard Benchmarks
 
+> Status: 2026-09-14. Living document.
+
 Comparative benchmarks for foxguard against other security linters.
 
 ## Quick Start
@@ -66,6 +68,20 @@ What it does:
 4. Writes a markdown report to `benchmarks/results-version-compare.md` with `avg/p50/p95` in milliseconds
 
 This keeps the benchmark apples-to-apples when validating regressions like #174.
+
+Refs are resolved to commit IDs before checkout. Each run creates a private
+`.version-worktrees-*` directory and prints its path; cleanup removes only that
+run's owned checkouts. Use `--keep-worktrees` to retain them. Existing worktree
+pools are not reused or pruned.
+
+Run the ownership regressions from the repository root:
+
+```sh
+python3 -m unittest benchmarks.test_compare_versions
+```
+
+These tests use local Git repositories and compile a minimal Rust executable.
+They do not fetch remote repositories.
 
 ### What is measured
 
