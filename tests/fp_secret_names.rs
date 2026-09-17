@@ -79,3 +79,107 @@ fp_fixture_test!(no_fp_secret_names_php, "safe_secret_names.php");
 fp_fixture_test!(no_fp_secret_names_kotlin, "safe_secret_names.kt");
 fp_fixture_test!(no_fp_secret_names_javascript, "safe_secret_names.js");
 fp_fixture_test!(no_fp_secret_names_ruby, "safe_secret_names.rb");
+
+fn javascript_secret_lines(source: &str, filename: &str) -> Vec<u64> {
+    let directory = tempfile::tempdir().expect("create source directory");
+    let path = directory.path().join(filename);
+    std::fs::write(&path, source).expect("write source");
+    let output = foxguard_cmd()
+        .arg(&path)
+        .args(["--format", "json"])
+        .output()
+        .expect("run scanner");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("scanner must return JSON");
+    report["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .filter(|finding| finding["rule_id"] == "js/no-hardcoded-secret")
+        .map(|finding| finding["line"].as_u64().expect("finding line"))
+        .collect()
+}
+
+#[test]
+fn typescript_metadata_has_the_same_noncredential_proof() {
+    let source = include_str!("fixtures/safe_secret_names.js")
+        .replace("providerForModel(model)", "providerForModel(model: string)");
+    assert_eq!(
+        javascript_secret_lines(&source, "metadata.ts"),
+        Vec::<u64>::new()
+    );
+}
+
+#[test]
+fn test_files_and_metadata_names_do_not_hide_credentials() {
+    let source = [
+        r#"const secret = "sk-live-K9xP2mV7qR4tN8wA6zY3";"#,
+        r#"const REDACTED_SECRET = "sk-live-K9xP2mV7qR4tN8wA6zY3";"#,
+        r#"const PASSWORD_MODEL = "correct horse battery staple";"#,
+        r#"const TOKEN_MODEL = "vendor-v4-0731";"#,
+        r#"const CREDENTIAL_NAME = "secret|token"; sendCredential(CREDENTIAL_NAME);"#,
+        r#"process.env.DEEPSEEK_API_KEY = "ds-key";"#,
+        r#"process.env.API_KEY = "<REDACTED-SECRET>";"#,
+    ]
+    .join("\n");
+    for filename in ["credentials.js", "credentials.test.ts"] {
+        assert_eq!(
+            javascript_secret_lines(&source, filename),
+            vec![1, 2, 3, 4, 5, 6, 7]
+        );
+    }
+}
+
+#[test]
+fn regex_metadata_must_not_have_credential_consumers() {
+    let source = r#"const CREDENTIAL_NAME = "password|secret";
+const matcher = new RegExp(CREDENTIAL_NAME);
+sendCredential({ CREDENTIAL_NAME });"#;
+    assert_eq!(javascript_secret_lines(source, "mixed.ts"), vec![1]);
+}
+
+#[test]
+fn shadowed_regexp_is_not_a_metadata_consumer() {
+    let source = r#"function consume(RegExp) {
+  const CREDENTIAL_NAME = "password|secret";
+  return new RegExp(CREDENTIAL_NAME);
+}"#;
+    assert_eq!(javascript_secret_lines(source, "shadowed.ts"), vec![2]);
+}
+
+#[test]
+fn mutated_model_parameter_does_not_prove_model_metadata() {
+    let source = r#"const TOKEN_MODEL = "vendor-v4-0731";
+function route(model) {
+  model = process.env.PASSWORD;
+  return model === TOKEN_MODEL;
+}"#;
+    assert_eq!(javascript_secret_lines(source, "mutated.ts"), vec![1]);
+}
+
+#[test]
+fn regex_data_proofs_do_not_hide_credential_values() {
+    let source = r#"const password = "hunter2|Tr0ub4dor";
+const passwordMatcher = new RegExp(password);
+const CREDENTIAL_NAME = "sk-live-K9xP2mV7qR4tN8wA6zY3|fallback";
+const credentialMatcher = new RegExp(CREDENTIAL_NAME);"#;
+    assert_eq!(
+        javascript_secret_lines(source, "credentials.ts"),
+        vec![1, 3]
+    );
+}
+
+#[test]
+fn modified_regexp_globals_do_not_prove_metadata() {
+    for mutation in [
+        "RegExp = sendCredential;",
+        "globalThis.RegExp = sendCredential;",
+        "globalThis[selector] = sendCredential;",
+        "({ RegExp } = options);",
+    ] {
+        let source = format!(
+            "const CREDENTIAL_NAME = \"password|secret\";\n{mutation}\nnew RegExp(CREDENTIAL_NAME);"
+        );
+        assert_eq!(javascript_secret_lines(&source, "modified.ts"), vec![1]);
+    }
+}
