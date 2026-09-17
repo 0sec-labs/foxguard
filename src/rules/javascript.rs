@@ -96,6 +96,359 @@ fn value_is_static_string(node: tree_sitter::Node) -> bool {
     }
 }
 
+// These proofs retain lexical binding identity. The legacy name-only set above
+// is not suitable for proving an outbound authority or a metadata consumer.
+struct JsBinding<'tree> {
+    name: tree_sitter::Node<'tree>,
+    scope: tree_sitter::Node<'tree>,
+    value: Option<tree_sitter::Node<'tree>>,
+    parameter: bool,
+}
+
+struct JsBindings<'tree, 'source> {
+    root: tree_sitter::Node<'tree>,
+    source: &'source str,
+    bindings: Vec<JsBinding<'tree>>,
+}
+
+fn walk_js_nodes<'tree>(
+    node: tree_sitter::Node<'tree>,
+    visit: &mut impl FnMut(tree_sitter::Node<'tree>),
+) {
+    visit(node);
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        walk_js_nodes(child, visit);
+    }
+}
+
+fn js_function_scope(node: tree_sitter::Node) -> bool {
+    matches!(
+        node.kind(),
+        "function_declaration" | "function_expression" | "generator_function"
+            | "generator_function_declaration" | "arrow_function" | "method_definition"
+    )
+}
+
+fn js_binding_scope(mut node: tree_sitter::Node, function_only: bool) -> tree_sitter::Node {
+    loop {
+        if node.kind() == "program"
+            || js_function_scope(node)
+            || (!function_only && matches!(
+                node.kind(),
+                "statement_block" | "catch_clause" | "for_statement" | "for_in_statement"
+                    | "switch_body"
+            ))
+        {
+            return node;
+        }
+        match node.parent() {
+            Some(parent) => node = parent,
+            None => return node,
+        }
+    }
+}
+
+impl<'tree, 'source> JsBindings<'tree, 'source> {
+    fn new(root: tree_sitter::Node<'tree>, source: &'source str) -> Self {
+        let mut result = Self { root, source, bindings: Vec::new() };
+        walk_js_nodes(root, &mut |node| {
+            match node.kind() {
+                "variable_declarator" => {
+                    if let (Some(name), Some(declaration)) =
+                        (node.child_by_field_name("name"), node.parent())
+                    {
+                        let immutable = declaration.child(0).is_some_and(|n| n.kind() == "const");
+                        let scope = js_binding_scope(
+                            declaration,
+                            declaration.kind() == "variable_declaration",
+                        );
+                        let value = if immutable && name.kind() == "identifier" {
+                            node.child_by_field_name("value")
+                        } else {
+                            None
+                        };
+                        result.add_pattern(name, scope, value, false);
+                    }
+                }
+                "formal_parameters" => {
+                    if let Some(parent) = node.parent() {
+                        result.add_pattern(node, parent, None, true);
+                    }
+                }
+                "arrow_function" | "catch_clause" => {
+                    if let Some(parameter) = node.child_by_field_name("parameter") {
+                        result.add_pattern(parameter, node, None, true);
+                    }
+                }
+                "for_in_statement" => {
+                    if let Some(left) = node.child_by_field_name("left") {
+                        let mut cursor = node.walk();
+                        let hoisted = node.children(&mut cursor).any(|child| child.kind() == "var");
+                        let scope = if hoisted { js_binding_scope(node, true) } else { node };
+                        result.add_pattern(left, scope, None, false);
+                    }
+                }
+                "function_declaration" | "generator_function_declaration" | "class_declaration"
+                    | "abstract_class_declaration" | "function_signature" | "enum_declaration"
+                    | "internal_module" => {
+                    if let (Some(name), Some(parent)) =
+                        (node.child_by_field_name("name"), node.parent())
+                    {
+                        result.add_pattern(name, js_binding_scope(parent, false), None, false);
+                    }
+                }
+                "function_expression" | "generator_function" | "class" => {
+                    if let Some(name) = node.child_by_field_name("name") {
+                        result.add_pattern(name, node, None, false);
+                    }
+                }
+                "import_statement" => result.add_pattern(node, root, None, false),
+                _ => {}
+            }
+        });
+        // Reject writes even to an apparent const (invalid/recovered source).
+        // Mutable declarations already have no usable value.
+        walk_js_nodes(root, &mut |node| {
+            let written = match node.kind() {
+                "assignment_expression" | "augmented_assignment_expression" =>
+                    node.child_by_field_name("left"),
+                "update_expression" => node.child_by_field_name("argument"),
+                _ => None,
+            };
+            if let Some(written) = written {
+                walk_js_nodes(written, &mut |name| {
+                    if matches!(name.kind(), "identifier" | "shorthand_property_identifier_pattern") {
+                        if let Some(index) = result.resolve(name) {
+                            result.bindings[index].value = None;
+                            result.bindings[index].parameter = false;
+                        }
+                    }
+                });
+            }
+        });
+        result
+    }
+
+    fn add_pattern(
+        &mut self,
+        pattern: tree_sitter::Node<'tree>,
+        scope: tree_sitter::Node<'tree>,
+        value: Option<tree_sitter::Node<'tree>>,
+        parameter: bool,
+    ) {
+        // Including identifiers in defaults/type annotations is conservative:
+        // ambiguity blocks a proof, never grants one.
+        walk_js_nodes(pattern, &mut |name| {
+            if matches!(name.kind(), "identifier" | "shorthand_property_identifier_pattern") {
+                self.bindings.push(JsBinding { name, scope, value, parameter });
+            }
+        });
+    }
+
+    fn resolve(&self, reference: tree_sitter::Node<'_>) -> Option<usize> {
+        let name = &self.source[reference.byte_range()];
+        let mut ancestor = Some(reference);
+        let mut nearest = None;
+        while let Some(scope) = ancestor {
+            if scope.kind() == "with_statement" {
+                return None;
+            }
+            if nearest.is_none() {
+                let mut matches = self.bindings.iter().enumerate().filter(|(_, binding)| {
+                    binding.scope == scope && &self.source[binding.name.byte_range()] == name
+                });
+                if let Some((index, _)) = matches.next() {
+                    if matches.next().is_some() {
+                        return None;
+                    }
+                    nearest = Some(index);
+                }
+            }
+            ancestor = scope.parent();
+        }
+        nearest
+    }
+
+    fn literal(&self, reference: tree_sitter::Node<'_>) -> Option<&'source str> {
+        let binding = &self.bindings[self.resolve(reference)?];
+        let value = binding.value?;
+        if value.end_byte() > reference.start_byte() {
+            return None;
+        }
+        js_plain_string(value, self.source)
+    }
+
+    fn model_input(&self, expression: tree_sitter::Node<'_>, depth: usize) -> bool {
+        if depth > 2 {
+            return false;
+        }
+        if expression.kind() == "identifier" {
+            let Some(index) = self.resolve(expression) else { return false };
+            let binding = &self.bindings[index];
+            if binding.parameter && &self.source[binding.name.byte_range()] == "model" {
+                return true;
+            }
+            return binding.value.is_some_and(|value| {
+                value.end_byte() < expression.start_byte() && self.model_input(value, depth + 1)
+            });
+        }
+        if expression.kind() == "call_expression" {
+            if let (Some(function), Some(arguments)) = (
+                expression.child_by_field_name("function"),
+                expression.child_by_field_name("arguments"),
+            ) {
+                if arguments.named_child_count() == 0 && function.kind() == "member_expression" {
+                    if let (Some(object), Some(property)) = (
+                        function.child_by_field_name("object"),
+                        function.child_by_field_name("property"),
+                    ) {
+                        return matches!(&self.source[property.byte_range()], "toLowerCase" | "trim")
+                            && self.model_input(object, depth + 1);
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn metadata(&self, name: tree_sitter::Node<'_>, value: tree_sitter::Node<'_>) -> bool {
+        let Some(index) = self.resolve(name) else { return false };
+        if self.bindings[index].value != Some(value) {
+            return false;
+        }
+        let Some(literal) = js_plain_string(value, self.source) else { return false };
+        let identifier = &self.source[name.byte_range()];
+        if identifier.starts_with("REDACTED_")
+            && literal.strip_prefix('<').and_then(|s| s.strip_suffix('>')).is_some_and(|marker| {
+                marker.bytes().eq(identifier.bytes().map(|b| if b == b'_' { b'-' } else { b }))
+            })
+        {
+            return true;
+        }
+        let model = identifier.ends_with("_MODEL")
+            && !is_high_signal_secret_name(identifier)
+            && literal.contains('-')
+            && literal.bytes().any(|b| b.is_ascii_digit())
+            && literal.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-.".contains(&b))
+            && !literal.starts_with("sk-");
+        let pattern = literal.contains('|') || literal.contains('[');
+        if !model && !pattern {
+            return false;
+        }
+        let mut used = false;
+        let mut safe = true;
+        walk_js_nodes(self.root, &mut |reference| {
+            if !safe || reference == name
+                || !matches!(reference.kind(), "identifier" | "shorthand_property_identifier")
+                || &self.source[reference.byte_range()] != identifier
+                || self.resolve(reference) != Some(index)
+            {
+                return;
+            }
+            used = true;
+            safe = if model {
+                reference.parent().is_some_and(|parent| {
+                    if parent.kind() != "binary_expression" {
+                        return false;
+                    }
+                    let operator = parent.child_by_field_name("operator");
+                    if !operator.is_some_and(|op| matches!(&self.source[op.byte_range()], "===" | "==")) {
+                        return false;
+                    }
+                    let other = if parent.child_by_field_name("left") == Some(reference) {
+                        parent.child_by_field_name("right")
+                    } else {
+                        parent.child_by_field_name("left")
+                    };
+                    other.is_some_and(|other| self.model_input(other, 0))
+                })
+            } else {
+                self.regexp_input(reference)
+            };
+        });
+        used && safe
+    }
+
+    fn regexp_input(&self, mut node: tree_sitter::Node<'_>) -> bool {
+        while let Some(parent) = node.parent() {
+            if parent.kind() == "arguments" {
+                if parent.named_child(0) != Some(node) {
+                    return false;
+                }
+                let Some(call) = parent.parent() else { return false };
+                let constructor = call.child_by_field_name("constructor")
+                    .or_else(|| call.child_by_field_name("function"));
+                return matches!(call.kind(), "new_expression" | "call_expression")
+                    && constructor.is_some_and(|constructor| {
+                        constructor.kind() == "identifier"
+                            && &self.source[constructor.byte_range()] == "RegExp"
+                            && !self.bindings.iter().any(|binding| {
+                                &self.source[binding.name.byte_range()] == "RegExp"
+                            })
+                    });
+            }
+            if !matches!(parent.kind(), "template_substitution" | "template_string") {
+                return false;
+            }
+            node = parent;
+        }
+        false
+    }
+}
+
+fn js_plain_string<'source>(node: tree_sitter::Node, source: &'source str) -> Option<&'source str> {
+    if !value_is_static_string(node) {
+        return None;
+    }
+    let text = &source[node.byte_range()];
+    let inner = text.get(1..text.len().checked_sub(1)?)?;
+    // Do not guess at JS escapes or URL-parser whitespace normalization.
+    (!inner.contains('\\') && !inner.chars().any(char::is_control)).then_some(inner)
+}
+
+fn js_fixed_origin_template(node: tree_sitter::Node, bindings: &JsBindings<'_, '_>) -> bool {
+    let mut prefix = String::new();
+    let mut cursor = node.walk();
+    for part in node.named_children(&mut cursor) {
+        match part.kind() {
+            "string_fragment" => prefix.push_str(&bindings.source[part.byte_range()]),
+            "template_substitution" => {
+                if js_complete_authority(&prefix, false) {
+                    return true;
+                }
+                let Some(expression) = part.named_child(0) else { return false };
+                let literal = match expression.kind() {
+                    "identifier" => bindings.literal(expression),
+                    "string" => js_plain_string(expression, bindings.source),
+                    _ => None,
+                };
+                let Some(literal) = literal else { return false };
+                prefix.push_str(literal);
+            }
+            _ => return false,
+        }
+    }
+    js_complete_authority(&prefix, true)
+}
+
+fn js_complete_authority(prefix: &str, end_of_template: bool) -> bool {
+    let Some(rest) = prefix.strip_prefix("https://").or_else(|| prefix.strip_prefix("http://")) else {
+        return false;
+    };
+    if prefix.contains('\\') || prefix.chars().any(char::is_whitespace) || prefix.chars().any(char::is_control) {
+        return false;
+    }
+    // A slash/query/fragment delimiter must end authority BEFORE unknown data:
+    // `https://trusted.example${input}` can still replace/extend the host.
+    let Some(end) = rest.find(['/', '?', '#'])
+        .or_else(|| end_of_template.then_some(rest.len())) else { return false };
+    let authority = &rest[..end];
+    !authority.is_empty()
+        && !authority.contains('@')
+        && authority.bytes().all(|b| b.is_ascii_alphanumeric() || b".-:[]".contains(&b))
+}
+
 /// True if the call expression node is a recognized sanitizer/encoder call
 /// (e.g. `DOMPurify.sanitize(...)`, `escapeHtml(...)`, `encodeURIComponent(...)`).
 fn is_sanitizer_call(node: tree_sitter::Node, src: &str) -> bool {
@@ -204,6 +557,7 @@ impl_rule! {
 
         let mut findings = Vec::new();
         let secret_pattern = hardcoded_secret_re();
+        let mut bindings = None;
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // variable_declarator: const password = "hardcoded"
@@ -216,6 +570,10 @@ impl_rule! {
                     let value_kind = value_node.kind();
                     if secret_pattern.is_match(name)
                         && (value_kind == "string" || value_kind == "template_string")
+                        && !((name.starts_with("REDACTED_") || name.ends_with("_MODEL")
+                            || src[value_node.byte_range()].contains(['|', '[']))
+                            && bindings.get_or_insert_with(|| JsBindings::new(tree.root_node(), source))
+                                .metadata(name_node, value_node))
                     {
                         let val = &src[value_node.byte_range()];
                         // Skip empty strings and short placeholders
@@ -934,9 +1292,8 @@ impl_rule! {
             "https.get",
             "https.request",
         ];
+        let mut bindings = None;
 
-        // Identifiers proven to hold a constant string are not SSRF sinks.
-        let consts = collect_const_string_idents(tree.root_node(), source);
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             if node.kind() != "call_expression" {
@@ -960,12 +1317,8 @@ impl_rule! {
 
             let is_dynamic = match first_arg.kind() {
                 "string" => false,
-                // Identifier bound to a constant string or a sanitizer call: safe.
-                "identifier" | "call_expression"
-                    if expr_is_safe(first_arg, src, &consts) =>
-                {
-                    false
-                }
+                "identifier" => bindings.get_or_insert_with(|| JsBindings::new(tree.root_node(), source))
+                    .literal(first_arg).is_none(),
                 "object" => {
                     let arg_text = &src[first_arg.byte_range()];
                     arg_text.contains("url:")
@@ -977,10 +1330,12 @@ impl_rule! {
                     let has_sub = first_arg
                         .children(&mut cursor)
                         .any(|c| c.kind() == "template_substitution");
-                    has_sub
+                    has_sub && !js_fixed_origin_template(
+                        first_arg,
+                        bindings.get_or_insert_with(|| JsBindings::new(tree.root_node(), source)),
+                    )
                 }
                 "binary_expression"
-                | "identifier"
                 | "member_expression"
                 | "call_expression"
                 | "subscript_expression" => true,

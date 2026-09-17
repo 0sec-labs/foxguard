@@ -34,3 +34,17 @@ module.exports = {
   apiKey,
   secretKey,
 };
+
+// Noncredential metadata: evidence comes from the value and its consumer,
+// not just the presence of MODEL/NAME/REDACTED in an identifier.
+const TOKEN_PLAN_ROUTING_MODEL = "vendor-v4-flash-0731";
+function providerForModel(model) {
+  const normalized = model.toLowerCase();
+  return normalized === TOKEN_PLAN_ROUTING_MODEL;
+}
+const CREDENTIAL_NAME = "password|secret|api[_-]?key";
+const credentialPattern = new RegExp(`(?:^|[^A-Za-z])(?:${CREDENTIAL_NAME})$`, "i");
+const REDACTED_SECRET = "<REDACTED-SECRET>";
+function redactValue(value) {
+  return value.replace(credentialPattern, REDACTED_SECRET);
+}
