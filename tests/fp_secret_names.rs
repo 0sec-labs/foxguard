@@ -89,9 +89,12 @@ fn javascript_secret_lines(source: &str, filename: &str) -> Vec<u64> {
         .args(["--format", "json"])
         .output()
         .expect("run scanner");
-    let report: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .expect("scanner must return JSON");
-    report["findings"].as_array().expect("findings array").iter()
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("scanner must return JSON");
+    report["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
         .filter(|finding| finding["rule_id"] == "js/no-hardcoded-secret")
         .map(|finding| finding["line"].as_u64().expect("finding line"))
         .collect()
@@ -101,7 +104,10 @@ fn javascript_secret_lines(source: &str, filename: &str) -> Vec<u64> {
 fn typescript_metadata_has_the_same_noncredential_proof() {
     let source = include_str!("fixtures/safe_secret_names.js")
         .replace("providerForModel(model)", "providerForModel(model: string)");
-    assert_eq!(javascript_secret_lines(&source, "metadata.ts"), Vec::<u64>::new());
+    assert_eq!(
+        javascript_secret_lines(&source, "metadata.ts"),
+        Vec::<u64>::new()
+    );
 }
 
 #[test]
@@ -114,9 +120,13 @@ fn test_files_and_metadata_names_do_not_hide_credentials() {
         r#"const CREDENTIAL_NAME = "secret|token"; sendCredential(CREDENTIAL_NAME);"#,
         r#"process.env.DEEPSEEK_API_KEY = "ds-key";"#,
         r#"process.env.API_KEY = "<REDACTED-SECRET>";"#,
-    ].join("\n");
+    ]
+    .join("\n");
     for filename in ["credentials.js", "credentials.test.ts"] {
-        assert_eq!(javascript_secret_lines(&source, filename), vec![1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(
+            javascript_secret_lines(&source, filename),
+            vec![1, 2, 3, 4, 5, 6, 7]
+        );
     }
 }
 
@@ -145,4 +155,31 @@ function route(model) {
   return model === TOKEN_MODEL;
 }"#;
     assert_eq!(javascript_secret_lines(source, "mutated.ts"), vec![1]);
+}
+
+#[test]
+fn regex_data_proofs_do_not_hide_credential_values() {
+    let source = r#"const password = "hunter2|Tr0ub4dor";
+const passwordMatcher = new RegExp(password);
+const CREDENTIAL_NAME = "sk-live-K9xP2mV7qR4tN8wA6zY3|fallback";
+const credentialMatcher = new RegExp(CREDENTIAL_NAME);"#;
+    assert_eq!(
+        javascript_secret_lines(source, "credentials.ts"),
+        vec![1, 3]
+    );
+}
+
+#[test]
+fn modified_regexp_globals_do_not_prove_metadata() {
+    for mutation in [
+        "RegExp = sendCredential;",
+        "globalThis.RegExp = sendCredential;",
+        "globalThis[selector] = sendCredential;",
+        "({ RegExp } = options);",
+    ] {
+        let source = format!(
+            "const CREDENTIAL_NAME = \"password|secret\";\n{mutation}\nnew RegExp(CREDENTIAL_NAME);"
+        );
+        assert_eq!(javascript_secret_lines(&source, "modified.ts"), vec![1]);
+    }
 }

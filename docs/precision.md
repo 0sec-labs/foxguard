@@ -1,5 +1,7 @@
 # Precision and false-positive methodology
 
+> Status: 2026-09-17. Source behavior; release and hosted deployment are separate.
+
 This document describes how foxguard measures rule precision, how the built-in
 rules are classified, and the known false-positive patterns we have seen and
 tuned for. It is the honest, technical counterpart to the marketing-facing
@@ -347,6 +349,19 @@ tuned for. Every item here is verifiable in the code or the git log.
   (`src/rules/python_aliases.rs`). `from pickle import loads as deserialize`
   followed by `deserialize(x)` fires the rule; `from safe_module import loads`
   followed by `loads(x)` does not.
+- **JavaScript and TypeScript credential metadata.** The secret rule recognizes
+  matching `REDACTED_*` sentinel values, structured model identifiers used only
+  in comparisons with model inputs, and lowercase field-name pattern data used
+  only by an unshadowed, unmodified `RegExp`. A metadata suffix alone is not
+  enough. Credential-shaped values, other consumers, and mutations retain the
+  finding. Test files receive no automatic credential exemption. See
+  `tests/fp_secret_names.rs`.
+- **JavaScript and TypeScript fixed-origin templates.** The SSRF rule accepts
+  path or query interpolation only after it proves a complete, fixed HTTP(S)
+  authority. Literal bindings must be immutable and resolve in the closest
+  lexical scope. Dynamic authorities, mutable bindings, shadowing, and arbitrary
+  method calls remain reported. This does not establish redirect safety or
+  runtime authorization. See `tests/js_ssrf_precision.rs`.
 
 ## Section 4: How to report a false positive
 

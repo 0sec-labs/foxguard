@@ -12,9 +12,12 @@ fn ssrf_lines(source: &str, filename: &str) -> Vec<u64> {
         .args(["--format", "json"])
         .output()
         .expect("run scanner");
-    let report: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .expect("scanner must return JSON");
-    report["findings"].as_array().expect("findings array").iter()
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("scanner must return JSON");
+    report["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
         .filter(|finding| finding["rule_id"] == "js/no-ssrf")
         .map(|finding| finding["line"].as_u64().expect("finding line"))
         .collect()

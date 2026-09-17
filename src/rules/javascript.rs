@@ -109,6 +109,7 @@ struct JsBindings<'tree, 'source> {
     root: tree_sitter::Node<'tree>,
     source: &'source str,
     bindings: Vec<JsBinding<'tree>>,
+    regexp_unmodified: bool,
 }
 
 fn walk_js_nodes<'tree>(
@@ -125,8 +126,12 @@ fn walk_js_nodes<'tree>(
 fn js_function_scope(node: tree_sitter::Node) -> bool {
     matches!(
         node.kind(),
-        "function_declaration" | "function_expression" | "generator_function"
-            | "generator_function_declaration" | "arrow_function" | "method_definition"
+        "function_declaration"
+            | "function_expression"
+            | "generator_function"
+            | "generator_function_declaration"
+            | "arrow_function"
+            | "method_definition"
     )
 }
 
@@ -134,11 +139,15 @@ fn js_binding_scope(mut node: tree_sitter::Node, function_only: bool) -> tree_si
     loop {
         if node.kind() == "program"
             || js_function_scope(node)
-            || (!function_only && matches!(
-                node.kind(),
-                "statement_block" | "catch_clause" | "for_statement" | "for_in_statement"
-                    | "switch_body"
-            ))
+            || (!function_only
+                && matches!(
+                    node.kind(),
+                    "statement_block"
+                        | "catch_clause"
+                        | "for_statement"
+                        | "for_in_statement"
+                        | "switch_body"
+                ))
         {
             return node;
         }
@@ -151,74 +160,113 @@ fn js_binding_scope(mut node: tree_sitter::Node, function_only: bool) -> tree_si
 
 impl<'tree, 'source> JsBindings<'tree, 'source> {
     fn new(root: tree_sitter::Node<'tree>, source: &'source str) -> Self {
-        let mut result = Self { root, source, bindings: Vec::new() };
-        walk_js_nodes(root, &mut |node| {
-            match node.kind() {
-                "variable_declarator" => {
-                    if let (Some(name), Some(declaration)) =
-                        (node.child_by_field_name("name"), node.parent())
-                    {
-                        let immutable = declaration.child(0).is_some_and(|n| n.kind() == "const");
-                        let scope = js_binding_scope(
-                            declaration,
-                            declaration.kind() == "variable_declaration",
-                        );
-                        let value = if immutable && name.kind() == "identifier" {
-                            node.child_by_field_name("value")
-                        } else {
-                            None
-                        };
-                        result.add_pattern(name, scope, value, false);
-                    }
+        let mut result = Self {
+            root,
+            source,
+            bindings: Vec::new(),
+            regexp_unmodified: true,
+        };
+        walk_js_nodes(root, &mut |node| match node.kind() {
+            "variable_declarator" => {
+                if let (Some(name), Some(declaration)) =
+                    (node.child_by_field_name("name"), node.parent())
+                {
+                    let immutable = declaration.child(0).is_some_and(|n| n.kind() == "const");
+                    let scope =
+                        js_binding_scope(declaration, declaration.kind() == "variable_declaration");
+                    let value = if immutable && name.kind() == "identifier" {
+                        node.child_by_field_name("value")
+                    } else {
+                        None
+                    };
+                    result.add_pattern(name, scope, value, false);
                 }
-                "formal_parameters" => {
-                    if let Some(parent) = node.parent() {
-                        result.add_pattern(node, parent, None, true);
-                    }
-                }
-                "arrow_function" | "catch_clause" => {
-                    if let Some(parameter) = node.child_by_field_name("parameter") {
-                        result.add_pattern(parameter, node, None, true);
-                    }
-                }
-                "for_in_statement" => {
-                    if let Some(left) = node.child_by_field_name("left") {
-                        let mut cursor = node.walk();
-                        let hoisted = node.children(&mut cursor).any(|child| child.kind() == "var");
-                        let scope = if hoisted { js_binding_scope(node, true) } else { node };
-                        result.add_pattern(left, scope, None, false);
-                    }
-                }
-                "function_declaration" | "generator_function_declaration" | "class_declaration"
-                    | "abstract_class_declaration" | "function_signature" | "enum_declaration"
-                    | "internal_module" => {
-                    if let (Some(name), Some(parent)) =
-                        (node.child_by_field_name("name"), node.parent())
-                    {
-                        result.add_pattern(name, js_binding_scope(parent, false), None, false);
-                    }
-                }
-                "function_expression" | "generator_function" | "class" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        result.add_pattern(name, node, None, false);
-                    }
-                }
-                "import_statement" => result.add_pattern(node, root, None, false),
-                _ => {}
             }
+            "formal_parameters" => {
+                if let Some(parent) = node.parent() {
+                    result.add_pattern(node, parent, None, true);
+                }
+            }
+            "arrow_function" | "catch_clause" => {
+                if let Some(parameter) = node.child_by_field_name("parameter") {
+                    result.add_pattern(parameter, node, None, true);
+                }
+            }
+            "for_in_statement" => {
+                if let Some(left) = node.child_by_field_name("left") {
+                    let mut cursor = node.walk();
+                    let hoisted = node
+                        .children(&mut cursor)
+                        .any(|child| child.kind() == "var");
+                    let scope = if hoisted {
+                        js_binding_scope(node, true)
+                    } else {
+                        node
+                    };
+                    result.add_pattern(left, scope, None, false);
+                }
+            }
+            "function_declaration"
+            | "generator_function_declaration"
+            | "class_declaration"
+            | "abstract_class_declaration"
+            | "function_signature"
+            | "enum_declaration"
+            | "internal_module" => {
+                if let (Some(name), Some(parent)) =
+                    (node.child_by_field_name("name"), node.parent())
+                {
+                    result.add_pattern(name, js_binding_scope(parent, false), None, false);
+                }
+            }
+            "function_expression" | "generator_function" | "class" => {
+                if let Some(name) = node.child_by_field_name("name") {
+                    result.add_pattern(name, node, None, false);
+                }
+            }
+            "import_statement" => result.add_pattern(node, root, None, false),
+            _ => {}
         });
         // Reject writes even to an apparent const (invalid/recovered source).
         // Mutable declarations already have no usable value.
         walk_js_nodes(root, &mut |node| {
             let written = match node.kind() {
-                "assignment_expression" | "augmented_assignment_expression" =>
-                    node.child_by_field_name("left"),
+                "assignment_expression" | "augmented_assignment_expression" => {
+                    node.child_by_field_name("left")
+                }
                 "update_expression" => node.child_by_field_name("argument"),
                 _ => None,
             };
             if let Some(written) = written {
                 walk_js_nodes(written, &mut |name| {
-                    if matches!(name.kind(), "identifier" | "shorthand_property_identifier_pattern") {
+                    let global_object = name.child_by_field_name("object").is_some_and(|object| {
+                        matches!(
+                            &source[object.byte_range()],
+                            "globalThis" | "global" | "window"
+                        )
+                    });
+                    let regexp_property = name
+                        .child_by_field_name("property")
+                        .is_some_and(|property| &source[property.byte_range()] == "RegExp");
+                    let regexp_index =
+                        name.child_by_field_name("index").is_some_and(
+                            |index| match js_plain_string(index, source) {
+                                Some(property) => property == "RegExp",
+                                None => true,
+                            },
+                        );
+                    if (matches!(
+                        name.kind(),
+                        "identifier" | "shorthand_property_identifier_pattern"
+                    ) && &source[name.byte_range()] == "RegExp")
+                        || (global_object && (regexp_property || regexp_index))
+                    {
+                        result.regexp_unmodified = false;
+                    }
+                    if matches!(
+                        name.kind(),
+                        "identifier" | "shorthand_property_identifier_pattern"
+                    ) {
                         if let Some(index) = result.resolve(name) {
                             result.bindings[index].value = None;
                             result.bindings[index].parameter = false;
@@ -240,8 +288,16 @@ impl<'tree, 'source> JsBindings<'tree, 'source> {
         // Including identifiers in defaults/type annotations is conservative:
         // ambiguity blocks a proof, never grants one.
         walk_js_nodes(pattern, &mut |name| {
-            if matches!(name.kind(), "identifier" | "shorthand_property_identifier_pattern") {
-                self.bindings.push(JsBinding { name, scope, value, parameter });
+            if matches!(
+                name.kind(),
+                "identifier" | "shorthand_property_identifier_pattern"
+            ) {
+                self.bindings.push(JsBinding {
+                    name,
+                    scope,
+                    value,
+                    parameter,
+                });
             }
         });
     }
@@ -284,7 +340,9 @@ impl<'tree, 'source> JsBindings<'tree, 'source> {
             return false;
         }
         if expression.kind() == "identifier" {
-            let Some(index) = self.resolve(expression) else { return false };
+            let Some(index) = self.resolve(expression) else {
+                return false;
+            };
             let binding = &self.bindings[index];
             if binding.parameter && &self.source[binding.name.byte_range()] == "model" {
                 return true;
@@ -303,8 +361,10 @@ impl<'tree, 'source> JsBindings<'tree, 'source> {
                         function.child_by_field_name("object"),
                         function.child_by_field_name("property"),
                     ) {
-                        return matches!(&self.source[property.byte_range()], "toLowerCase" | "trim")
-                            && self.model_input(object, depth + 1);
+                        return matches!(
+                            &self.source[property.byte_range()],
+                            "toLowerCase" | "trim"
+                        ) && self.model_input(object, depth + 1);
                     }
                 }
             }
@@ -313,16 +373,25 @@ impl<'tree, 'source> JsBindings<'tree, 'source> {
     }
 
     fn metadata(&self, name: tree_sitter::Node<'_>, value: tree_sitter::Node<'_>) -> bool {
-        let Some(index) = self.resolve(name) else { return false };
+        let Some(index) = self.resolve(name) else {
+            return false;
+        };
         if self.bindings[index].value != Some(value) {
             return false;
         }
-        let Some(literal) = js_plain_string(value, self.source) else { return false };
+        let Some(literal) = js_plain_string(value, self.source) else {
+            return false;
+        };
         let identifier = &self.source[name.byte_range()];
         if identifier.starts_with("REDACTED_")
-            && literal.strip_prefix('<').and_then(|s| s.strip_suffix('>')).is_some_and(|marker| {
-                marker.bytes().eq(identifier.bytes().map(|b| if b == b'_' { b'-' } else { b }))
-            })
+            && literal
+                .strip_prefix('<')
+                .and_then(|s| s.strip_suffix('>'))
+                .is_some_and(|marker| {
+                    marker
+                        .bytes()
+                        .eq(identifier.bytes().map(|b| if b == b'_' { b'-' } else { b }))
+                })
         {
             return true;
         }
@@ -330,17 +399,29 @@ impl<'tree, 'source> JsBindings<'tree, 'source> {
             && !is_high_signal_secret_name(identifier)
             && literal.contains('-')
             && literal.bytes().any(|b| b.is_ascii_digit())
-            && literal.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-.".contains(&b))
+            && literal
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-.".contains(&b))
             && !literal.starts_with("sk-");
-        let pattern = literal.contains('|') || literal.contains('[');
+        // Field-name pattern data is not an arbitrary password/token regexp.
+        // Credential-shaped values must remain findings even under metadata names.
+        let pattern = identifier.ends_with("_NAME")
+            && (literal.contains('|') || literal.contains('['))
+            && literal
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b"|[]_-?():".contains(&b));
         if !model && !pattern {
             return false;
         }
         let mut used = false;
         let mut safe = true;
         walk_js_nodes(self.root, &mut |reference| {
-            if !safe || reference == name
-                || !matches!(reference.kind(), "identifier" | "shorthand_property_identifier")
+            if !safe
+                || reference == name
+                || !matches!(
+                    reference.kind(),
+                    "identifier" | "shorthand_property_identifier"
+                )
                 || &self.source[reference.byte_range()] != identifier
                 || self.resolve(reference) != Some(index)
             {
@@ -353,7 +434,9 @@ impl<'tree, 'source> JsBindings<'tree, 'source> {
                         return false;
                     }
                     let operator = parent.child_by_field_name("operator");
-                    if !operator.is_some_and(|op| matches!(&self.source[op.byte_range()], "===" | "==")) {
+                    if !operator
+                        .is_some_and(|op| matches!(&self.source[op.byte_range()], "===" | "=="))
+                    {
                         return false;
                     }
                     let other = if parent.child_by_field_name("left") == Some(reference) {
@@ -376,16 +459,21 @@ impl<'tree, 'source> JsBindings<'tree, 'source> {
                 if parent.named_child(0) != Some(node) {
                     return false;
                 }
-                let Some(call) = parent.parent() else { return false };
-                let constructor = call.child_by_field_name("constructor")
+                let Some(call) = parent.parent() else {
+                    return false;
+                };
+                let constructor = call
+                    .child_by_field_name("constructor")
                     .or_else(|| call.child_by_field_name("function"));
                 return matches!(call.kind(), "new_expression" | "call_expression")
                     && constructor.is_some_and(|constructor| {
                         constructor.kind() == "identifier"
                             && &self.source[constructor.byte_range()] == "RegExp"
-                            && !self.bindings.iter().any(|binding| {
-                                &self.source[binding.name.byte_range()] == "RegExp"
-                            })
+                            && self.regexp_unmodified
+                            && !self
+                                .bindings
+                                .iter()
+                                .any(|binding| &self.source[binding.name.byte_range()] == "RegExp")
                     });
             }
             if !matches!(parent.kind(), "template_substitution" | "template_string") {
@@ -417,7 +505,9 @@ fn js_fixed_origin_template(node: tree_sitter::Node, bindings: &JsBindings<'_, '
                 if js_complete_authority(&prefix, false) {
                     return true;
                 }
-                let Some(expression) = part.named_child(0) else { return false };
+                let Some(expression) = part.named_child(0) else {
+                    return false;
+                };
                 let literal = match expression.kind() {
                     "identifier" => bindings.literal(expression),
                     "string" => js_plain_string(expression, bindings.source),
@@ -433,20 +523,32 @@ fn js_fixed_origin_template(node: tree_sitter::Node, bindings: &JsBindings<'_, '
 }
 
 fn js_complete_authority(prefix: &str, end_of_template: bool) -> bool {
-    let Some(rest) = prefix.strip_prefix("https://").or_else(|| prefix.strip_prefix("http://")) else {
+    let Some(rest) = prefix
+        .strip_prefix("https://")
+        .or_else(|| prefix.strip_prefix("http://"))
+    else {
         return false;
     };
-    if prefix.contains('\\') || prefix.chars().any(char::is_whitespace) || prefix.chars().any(char::is_control) {
+    if prefix.contains('\\')
+        || prefix.chars().any(char::is_whitespace)
+        || prefix.chars().any(char::is_control)
+    {
         return false;
     }
     // A slash/query/fragment delimiter must end authority BEFORE unknown data:
     // `https://trusted.example${input}` can still replace/extend the host.
-    let Some(end) = rest.find(['/', '?', '#'])
-        .or_else(|| end_of_template.then_some(rest.len())) else { return false };
+    let Some(end) = rest
+        .find(['/', '?', '#'])
+        .or_else(|| end_of_template.then_some(rest.len()))
+    else {
+        return false;
+    };
     let authority = &rest[..end];
     !authority.is_empty()
         && !authority.contains('@')
-        && authority.bytes().all(|b| b.is_ascii_alphanumeric() || b".-:[]".contains(&b))
+        && authority
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b".-:[]".contains(&b))
 }
 
 /// True if the call expression node is a recognized sanitizer/encoder call
