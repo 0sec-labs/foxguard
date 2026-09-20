@@ -311,6 +311,17 @@ fn realistic_js_multihop_composed() {
     assert_fixture("js_multihop", 2, &[("js/taint-sql-injection", 1)]);
 }
 
+/// Parameterizing SQL template tags (Drizzle / postgres.js `sql`, Prisma
+/// `$queryRaw`) bind `${}` as parameters, so they are not concatenation sinks
+/// and must not be reported. The escape hatches and untagged forms in the same
+/// fixture must still be: `sql.raw(...)`, a plain interpolated template, a
+/// `"..." + userId` concatenation, and an unrecognised tag the rule cannot
+/// vouch for.
+#[test]
+fn realistic_js_sql_tagged_templates_only_flag_real_sinks() {
+    assert_fixture("js_sql_tagged_templates.js", 4, &[]);
+}
+
 /// The JS chain above must only resolve on a full-directory scan: scanning any
 /// single file in isolation finds no taint finding (the sink file still trips
 /// the single-file regex heuristic `js/no-sql-injection`, but no `*/taint-*`
