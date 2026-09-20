@@ -1075,6 +1075,42 @@ fn check_run_summary(
             " Showing the first {annotation_count} as check annotations."
         ));
     }
+
+    // Repository-scope policy blocks on findings anywhere in the tree, while
+    // annotations are filtered to the lines this PR touched. Without the list
+    // below, a PR that changes nothing near a blocking finding fails with no
+    // indication of what failed it. List them so the check is actionable.
+    let unannotated_blocking: Vec<&Finding> = match policy.blocking_threshold.severity() {
+        Some(threshold) => findings
+            .iter()
+            .filter(|finding| {
+                !is_summary_only_finding(finding) && finding.severity >= threshold
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    if annotation_count == 0 && !unannotated_blocking.is_empty() {
+        summary.push_str(&format!(
+            "\n\nBlocking findings (outside this PR's changed lines, so not annotated): {}",
+            unannotated_blocking.len()
+        ));
+        for finding in unannotated_blocking.iter().take(20) {
+            summary.push_str(&format!(
+                "\n- **{}** `{}` — {} ({}:{})",
+                finding.severity,
+                finding.rule_id,
+                finding.description,
+                percent_encoded_display_path(&finding.file),
+                finding.line
+            ));
+        }
+        if unannotated_blocking.len() > 20 {
+            summary.push_str(&format!(
+                "\n- ... {} more",
+                unannotated_blocking.len() - 20
+            ));
+        }
+    }
     let summary_only_findings: Vec<&Finding> = findings
         .iter()
         .filter(|finding| is_summary_only_finding(finding))
@@ -1499,6 +1535,34 @@ mod tests {
             crate::pr_policy::PrPolicyDecision::Fail
         );
         assert_eq!(check_run_title(&fail), "foxguard policy failed");
+    }
+
+    #[test]
+    fn check_run_summary_lists_blocking_findings_when_none_are_annotated() {
+        // A PR that touches nothing near the blocking finding: changed_lines
+        // filters every annotation away, so repository-scope blocking findings
+        // would otherwise fail the check with nothing shown.
+        let evaluation = evaluate(
+            crate::pr_policy::PrSecurityPolicy::default(),
+            vec![finding(Severity::Critical, 42)],
+        );
+        let mut changed_lines: HashMap<String, HashSet<usize>> = HashMap::new();
+        changed_lines.insert("src/unrelated.js".to_string(), HashSet::from([7]));
+
+        let (payload, annotation_count) = check_run_payload(
+            CheckRunPolicy::Evaluated(&evaluation),
+            Some(&changed_lines),
+        );
+
+        assert_eq!(annotation_count, 0);
+        let summary = payload["output"]["summary"]
+            .as_str()
+            .expect("check-run summary");
+        assert!(
+            summary.contains("Blocking findings (outside this PR's changed lines"),
+            "summary should list unannotated blocking findings: {summary}"
+        );
+        assert!(summary.contains("src/app.js:42"), "summary: {summary}");
     }
 
     #[test]
