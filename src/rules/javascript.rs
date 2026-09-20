@@ -738,6 +738,40 @@ impl_rule! {
     }
 }
 
+/// Template tags whose `${}` placeholders become bound parameters rather than
+/// interpolated text: Drizzle / postgres.js / slonik `sql`, Prisma's
+/// `$queryRaw`, and friends. A `.raw`/`.unsafe` escape hatch on the same tag
+/// does interpolate, so those are deliberately excluded.
+fn is_parameterizing_sql_tag(tag: &str) -> bool {
+    let tag = tag.trim();
+    let lowered = tag.to_ascii_lowercase();
+    if lowered.contains("raw") && !lowered.ends_with("$queryraw") && !lowered.ends_with("$executeraw")
+    {
+        return false;
+    }
+    if lowered.contains("unsafe") {
+        return false;
+    }
+    let last = tag.rsplit('.').next().unwrap_or(tag);
+    matches!(
+        last,
+        "sql" | "SQL" | "sqlFragment" | "postgres" | "$queryRaw" | "$executeRaw"
+    )
+}
+
+/// The tag of a tagged template literal, if this template is tagged.
+///
+/// tree-sitter models `` sql`...` `` as a `call_expression` whose `function`
+/// is the tag and whose argument is the `template_string`.
+fn sql_template_tag<'a>(node: tree_sitter::Node<'_>, src: &'a str) -> Option<&'a str> {
+    let parent = node.parent()?;
+    if parent.kind() != "call_expression" {
+        return None;
+    }
+    let function = parent.child_by_field_name("function")?;
+    Some(&src[function.byte_range()])
+}
+
 // ─── Rule 3: no-sql-injection ────────────────────────────────────────────────
 
 pub struct NoSqlInjection;
@@ -783,7 +817,12 @@ impl_rule! {
             // Detect template literals with SQL: `SELECT * FROM users WHERE id = ${id}`
             if node.kind() == "template_string" {
                 let text = &src[node.byte_range()];
-                if sql_pattern.is_match(text) {
+                // A parameterizing tag (Drizzle/postgres.js `sql`, Prisma
+                // `$queryRaw`) binds every `${}` as a parameter, so the
+                // interpolation below is not a concatenation sink.
+                let parameterized = sql_template_tag(node, src)
+                    .is_some_and(is_parameterizing_sql_tag);
+                if sql_pattern.is_match(text) && !parameterized {
                     // Check it has interpolation
                     let mut cursor = node.walk();
                     let has_substitution = node
