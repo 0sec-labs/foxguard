@@ -745,7 +745,9 @@ impl_rule! {
 fn is_parameterizing_sql_tag(tag: &str) -> bool {
     let tag = tag.trim();
     let lowered = tag.to_ascii_lowercase();
-    if lowered.contains("raw") && !lowered.ends_with("$queryraw") && !lowered.ends_with("$executeraw")
+    if lowered.contains("raw")
+        && !lowered.ends_with("$queryraw")
+        && !lowered.ends_with("$executeraw")
     {
         return false;
     }
