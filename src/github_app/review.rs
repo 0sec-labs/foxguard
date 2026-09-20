@@ -1083,9 +1083,7 @@ fn check_run_summary(
     let unannotated_blocking: Vec<&Finding> = match policy.blocking_threshold.severity() {
         Some(threshold) => findings
             .iter()
-            .filter(|finding| {
-                !is_summary_only_finding(finding) && finding.severity >= threshold
-            })
+            .filter(|finding| !is_summary_only_finding(finding) && finding.severity >= threshold)
             .collect(),
         None => Vec::new(),
     };
@@ -1105,10 +1103,7 @@ fn check_run_summary(
             ));
         }
         if unannotated_blocking.len() > 20 {
-            summary.push_str(&format!(
-                "\n- ... {} more",
-                unannotated_blocking.len() - 20
-            ));
+            summary.push_str(&format!("\n- ... {} more", unannotated_blocking.len() - 20));
         }
     }
     let summary_only_findings: Vec<&Finding> = findings
@@ -1549,10 +1544,8 @@ mod tests {
         let mut changed_lines: HashMap<String, HashSet<usize>> = HashMap::new();
         changed_lines.insert("src/unrelated.js".to_string(), HashSet::from([7]));
 
-        let (payload, annotation_count) = check_run_payload(
-            CheckRunPolicy::Evaluated(&evaluation),
-            Some(&changed_lines),
-        );
+        let (payload, annotation_count) =
+            check_run_payload(CheckRunPolicy::Evaluated(&evaluation), Some(&changed_lines));
 
         assert_eq!(annotation_count, 0);
         let summary = payload["output"]["summary"]
