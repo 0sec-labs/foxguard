@@ -711,6 +711,38 @@ mod javascript {
     use super::*;
 
     #[test]
+    fn sql_exec_requires_database_context_not_shell_command_text() {
+        let temp = TempDir::new().unwrap();
+        let target = temp.path().join("exec-context.js");
+        fs::write(
+            &target,
+            [
+                "const launchReview = cleanup ? `exec ${review}` : review;",
+                "const shell = 'exec ' + command;",
+                "db.query(`EXEC dbo.Lookup @id = ${id}`);",
+                "db.execute(('EXEC dbo.Lookup @id = ' + id));",
+                "const query = `SELECT * FROM users WHERE id = ${id}`;",
+                "const bound = sql`EXEC dbo.Lookup @id = ${id}`;",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let output = foxguard_cmd_isolated()
+            .arg(&target)
+            .args(["-f", "json"])
+            .output()
+            .expect("failed to execute foxguard");
+        let findings = scan_json_findings_from_slice(&output.stdout);
+        let mut sql_lines: Vec<_> = findings
+            .iter()
+            .filter(|finding| finding["rule_id"] == "js/no-sql-injection")
+            .map(|finding| finding["line"].as_u64().unwrap())
+            .collect();
+        sql_lines.sort_unstable();
+        assert_eq!(sql_lines, vec![3, 4, 5]);
+    }
+
+    #[test]
     fn test_vulnerable_js_finds_all_rules() {
         let output = foxguard_cmd_isolated()
             .args(["tests/fixtures/vulnerable.js", "-f", "json"])

@@ -13,6 +13,12 @@ use crate::{Finding, Language, Severity};
 
 // ─── Static regex helpers (compiled once) ────────────────────────────────────
 
+const SQL_METHODS: [(&str, &str); 3] = [
+    ("query", "SQL .query() call"),
+    ("execute", "SQL .execute() call"),
+    ("raw", "SQL .raw() call (knex-style)"),
+];
+
 fn js_sql_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -774,6 +780,43 @@ fn sql_template_tag<'a>(node: tree_sitter::Node<'_>, src: &'a str) -> Option<&'a
     Some(&src[function.byte_range()])
 }
 
+fn is_sql_execution_argument(mut node: tree_sitter::Node<'_>, source: &str) -> bool {
+    while let Some(parent) = node.parent() {
+        let call = match parent.kind() {
+            "binary_expression" | "parenthesized_expression" => {
+                node = parent;
+                continue;
+            }
+            "arguments" if parent.named_child(0) == Some(node) => parent.parent(),
+            "call_expression" if parent.child_by_field_name("arguments") == Some(node) => {
+                Some(parent)
+            }
+            _ => None,
+        };
+        let Some(call) = call.filter(|call| call.kind() == "call_expression") else {
+            return false;
+        };
+        let Some(property) = call
+            .child_by_field_name("function")
+            .and_then(|function| function.child_by_field_name("property"))
+        else {
+            return false;
+        };
+        let name = &source[property.byte_range()];
+        return SQL_METHODS.iter().any(|(method, _)| *method == name);
+    }
+    false
+}
+
+fn is_sql_literal(text: &str, expression: tree_sitter::Node<'_>, source: &str) -> bool {
+    js_sql_re().find_iter(text).any(|matched| {
+        // EXEC is also a shell builtin. Unlike SELECT ... FROM, the keyword
+        // alone is not SQL evidence; require an actual SQL execution argument.
+        !matched.as_str()[..4].eq_ignore_ascii_case("EXEC")
+            || is_sql_execution_argument(expression, source)
+    })
+}
+
 // ─── Rule 3: no-sql-injection ────────────────────────────────────────────────
 
 pub struct NoSqlInjection;
@@ -790,7 +833,6 @@ impl_rule! {
         let mut findings = Vec::new();
         // Require SQL keyword followed by SQL structure (FROM, INTO, SET, WHERE, TABLE, VALUES)
         // This avoids matching plain English like res.send('delete ' + name)
-        let sql_pattern = js_sql_re();
 
         walk_tree(tree.root_node(), source, &mut |node, src| {
             // Detect: query("SELECT * FROM users WHERE id = " + userId)
@@ -800,7 +842,7 @@ impl_rule! {
                         if let Some(left) = node.child_by_field_name("left") {
                             let left_text = &src[left.byte_range()];
                             if (left.kind() == "string" || left.kind() == "template_string")
-                                && sql_pattern.is_match(left_text)
+                                && is_sql_literal(left_text, node, src)
                             {
                                 findings.push(make_finding(
                                     _self.id(),
@@ -824,7 +866,7 @@ impl_rule! {
                 // interpolation below is not a concatenation sink.
                 let parameterized = sql_template_tag(node, src)
                     .is_some_and(is_parameterizing_sql_tag);
-                if sql_pattern.is_match(text) && !parameterized {
+                if is_sql_literal(text, node, src) && !parameterized {
                     // Check it has interpolation
                     let mut cursor = node.walk();
                     let has_substitution = node
@@ -2768,20 +2810,13 @@ impl TaintSqlInjection {
     fn spec() -> JsTaintSpec {
         JsTaintSpec {
             sources: javascript_taint_sources(),
-            sinks: vec![
-                JsNodeMatcher::MethodName {
-                    method: "query".into(),
-                    description: "SQL .query() call".into(),
-                },
-                JsNodeMatcher::MethodName {
-                    method: "execute".into(),
-                    description: "SQL .execute() call".into(),
-                },
-                JsNodeMatcher::MethodName {
-                    method: "raw".into(),
-                    description: "SQL .raw() call (knex-style)".into(),
-                },
-            ],
+            sinks: SQL_METHODS
+                .iter()
+                .map(|(method, description)| JsNodeMatcher::MethodName {
+                    method: (*method).into(),
+                    description: (*description).into(),
+                })
+                .collect(),
             sanitizers: vec![
                 JsNodeMatcher::MethodName {
                     method: "escape".into(),
