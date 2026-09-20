@@ -945,15 +945,11 @@ fn filter_findings_to_changed_lines(
     findings: &[Finding],
     changed_lines: &HashMap<String, HashSet<usize>>,
 ) -> Vec<Finding> {
+    // Same predicate the diff-scope decision uses, so annotations can never
+    // disagree with what blocked the check.
     findings
         .iter()
-        .filter(|finding| {
-            // HashMap::get on the local changed-lines map; not a network call.
-            // foxguard: ignore[rs/no-ssrf]
-            changed_lines
-                .get(&finding.file)
-                .is_some_and(|lines| finding.line == 0 || lines.contains(&finding.line))
-        })
+        .filter(|finding| crate::pr_policy::finding_in_changed_lines(finding, changed_lines))
         .cloned()
         .collect()
 }

@@ -1,15 +1,24 @@
 use crate::{Finding, Severity};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 /// Stable identifier for the first PR-security-policy contract.
 pub const PR_SECURITY_POLICY_V1: &str = "v1";
+/// Second contract: adds the diff scope. V1 remains repository-only.
+pub const PR_SECURITY_POLICY_V2: &str = "v2";
+
+/// Lines a pull request touched, keyed by the finding-relative file path.
+pub type ChangedLines = HashMap<String, HashSet<usize>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 pub enum PrSecurityPolicyVersion {
     #[serde(rename = "v1")]
     #[value(name = "v1")]
     V1,
+    #[serde(rename = "v2")]
+    #[value(name = "v2")]
+    V2,
 }
 
 impl Default for PrSecurityPolicyVersion {
@@ -20,20 +29,29 @@ impl Default for PrSecurityPolicyVersion {
 
 impl std::fmt::Display for PrSecurityPolicyVersion {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(PR_SECURITY_POLICY_V1)
+        formatter.write_str(match self {
+            Self::V1 => PR_SECURITY_POLICY_V1,
+            Self::V2 => PR_SECURITY_POLICY_V2,
+        })
     }
 }
 
-/// The set of findings a v1 policy evaluates.
+/// The set of findings a policy evaluates.
 ///
-/// V1 deliberately evaluates the complete result of a PR scan. This is the
-/// only scope every current surface can derive identically; a future policy
-/// version can add a diff-specific scope without changing this contract.
+/// V1 deliberately evaluates the complete result of a PR scan — the only
+/// scope every surface could derive identically at the time. V2 adds
+/// [`PrSecurityPolicyScope::Diff`], which judges a pull request by the lines
+/// it actually changed, so a pre-existing finding elsewhere in the tree no
+/// longer blocks an unrelated change. V1's meaning is unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 pub enum PrSecurityPolicyScope {
     #[serde(rename = "repository")]
     #[value(name = "repository")]
     Repository,
+    /// Only findings on lines this pull request changed. Requires v2.
+    #[serde(rename = "diff")]
+    #[value(name = "diff")]
+    Diff,
 }
 
 impl Default for PrSecurityPolicyScope {
@@ -44,7 +62,10 @@ impl Default for PrSecurityPolicyScope {
 
 impl std::fmt::Display for PrSecurityPolicyScope {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("repository")
+        formatter.write_str(match self {
+            Self::Repository => "repository",
+            Self::Diff => "diff",
+        })
     }
 }
 
@@ -153,6 +174,14 @@ pub fn resolve(
         .or_else(|| configured.and_then(|policy| policy.blocking_threshold))
         .unwrap_or(defaults.blocking_threshold);
 
+    if scope == PrSecurityPolicyScope::Diff && version == PrSecurityPolicyVersion::V1 {
+        return Err(
+            "pr_security_policy.scope 'diff' requires pr_security_policy.version 'v2' — \
+             v1 evaluates the whole repository by contract"
+                .to_string(),
+        );
+    }
+
     if let Some(blocking) = blocking_threshold.severity() {
         if blocking < reporting_threshold {
             return Err(format!(
@@ -230,6 +259,9 @@ pub enum PrPolicyNotEvaluatedReason {
     PartialScan,
     DiffScan,
     ChangedFilesFallback,
+    /// A diff-scoped policy was requested but no changed-line information was
+    /// available, so there was nothing to narrow the decision against.
+    NoChangedLines,
 }
 
 impl std::fmt::Display for PrPolicyNotEvaluatedReason {
@@ -240,6 +272,10 @@ impl std::fmt::Display for PrPolicyNotEvaluatedReason {
             Self::DiffScan => "the scan produced only diff findings",
             Self::ChangedFilesFallback => {
                 "the full-repository scan timed out and used a changed-files fallback"
+            }
+            Self::NoChangedLines => {
+                "a diff-scoped policy was requested but the pull request's changed lines \
+                 were unavailable"
             }
         })
     }
@@ -290,6 +326,37 @@ impl PrPolicyEvaluation {
     pub fn report(&self) -> &PrPolicyReport {
         &self.report
     }
+}
+
+/// Whether a finding sits on a line this pull request changed.
+///
+/// One definition, shared by the diff-scope decision and the check-run
+/// annotations, so a finding can never block a PR while being filtered out of
+/// the annotations that would have explained it. A finding with no line
+/// (`line == 0`, e.g. a dependency finding) counts as in-scope when the PR
+/// touched the file at all.
+pub fn finding_in_changed_lines(finding: &Finding, changed_lines: &ChangedLines) -> bool {
+    changed_lines
+        .get(&finding.file)
+        .is_some_and(|lines| finding.line == 0 || lines.contains(&finding.line))
+}
+
+/// Evaluate a complete repository scan against a diff-scoped policy.
+///
+/// The scan input is still the whole repository — that is what makes the
+/// result reproducible — but only findings on changed lines are in scope, so
+/// a pre-existing finding elsewhere no longer blocks an unrelated pull
+/// request. `scoped_findings` reports how many survived that narrowing.
+pub fn evaluate_diff_scoped(
+    policy: PrSecurityPolicy,
+    findings: Vec<Finding>,
+    changed_lines: &ChangedLines,
+) -> PrPolicyEvaluation {
+    let in_scope: Vec<Finding> = findings
+        .into_iter()
+        .filter(|finding| finding_in_changed_lines(finding, changed_lines))
+        .collect();
+    evaluate(policy, in_scope)
 }
 
 /// Evaluate one already-resolved complete repository scan result.
@@ -565,5 +632,120 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(output).expect("read CLI policy output"))
                 .expect("parse CLI policy output");
         assert_eq!(written, expected);
+    }
+
+    fn finding_at(severity: Severity, file: &str, line: usize) -> Finding {
+        Finding {
+            file: file.to_string(),
+            line,
+            end_line: line,
+            ..finding(severity)
+        }
+    }
+
+    fn changed(file: &str, lines: &[usize]) -> ChangedLines {
+        let mut map = ChangedLines::new();
+        map.insert(file.to_string(), lines.iter().copied().collect());
+        map
+    }
+
+    #[test]
+    fn diff_scope_ignores_findings_outside_the_changed_lines() {
+        let policy = PrSecurityPolicy {
+            version: PrSecurityPolicyVersion::V2,
+            scope: PrSecurityPolicyScope::Diff,
+            ..PrSecurityPolicy::default()
+        };
+        // Pre-existing critical elsewhere in the tree + an untouched line in
+        // the same file the PR edits.
+        let findings = vec![
+            finding_at(Severity::Critical, "src/legacy.rs", 900),
+            finding_at(Severity::Critical, "src/app.rs", 12),
+        ];
+
+        let evaluation = evaluate_diff_scoped(policy, findings, &changed("src/app.rs", &[40, 41]));
+
+        assert_eq!(evaluation.report().decision, PrPolicyDecision::Pass);
+        assert_eq!(evaluation.report().scoped_findings, 0);
+        assert_eq!(evaluation.report().blocking_findings, 0);
+    }
+
+    #[test]
+    fn diff_scope_still_blocks_a_finding_the_pull_request_introduced() {
+        let policy = PrSecurityPolicy {
+            version: PrSecurityPolicyVersion::V2,
+            scope: PrSecurityPolicyScope::Diff,
+            ..PrSecurityPolicy::default()
+        };
+        let findings = vec![
+            finding_at(Severity::Critical, "src/legacy.rs", 900),
+            finding_at(Severity::High, "src/app.rs", 41),
+        ];
+
+        let evaluation = evaluate_diff_scoped(policy, findings, &changed("src/app.rs", &[40, 41]));
+
+        assert_eq!(evaluation.report().decision, PrPolicyDecision::Fail);
+        assert_eq!(evaluation.report().blocking_findings, 1);
+        assert_eq!(evaluation.findings.len(), 1);
+        assert_eq!(evaluation.findings[0].line, 41);
+    }
+
+    #[test]
+    fn diff_scope_keeps_line_less_findings_when_the_file_changed() {
+        // Dependency findings carry line 0; they belong to the file, not a
+        // line, so a PR that touches the manifest owns them.
+        let policy = PrSecurityPolicy {
+            version: PrSecurityPolicyVersion::V2,
+            scope: PrSecurityPolicyScope::Diff,
+            ..PrSecurityPolicy::default()
+        };
+        let findings = vec![finding_at(Severity::High, "package-lock.json", 0)];
+
+        let evaluation =
+            evaluate_diff_scoped(policy, findings, &changed("package-lock.json", &[3]));
+
+        assert_eq!(evaluation.report().decision, PrPolicyDecision::Fail);
+    }
+
+    #[test]
+    fn diff_scope_requires_v2() {
+        let error = resolve(
+            None,
+            &PrSecurityPolicyInput {
+                version: Some(PrSecurityPolicyVersion::V1),
+                scope: Some(PrSecurityPolicyScope::Diff),
+                ..PrSecurityPolicyInput::default()
+            },
+        )
+        .expect_err("v1 + diff scope must be rejected");
+        assert!(
+            error.contains("requires pr_security_policy.version 'v2'"),
+            "{error}"
+        );
+
+        let ok = resolve(
+            None,
+            &PrSecurityPolicyInput {
+                version: Some(PrSecurityPolicyVersion::V2),
+                scope: Some(PrSecurityPolicyScope::Diff),
+                ..PrSecurityPolicyInput::default()
+            },
+        )
+        .expect("v2 + diff scope is valid");
+        assert_eq!(ok.scope, PrSecurityPolicyScope::Diff);
+        assert_eq!(ok.scope.to_string(), "diff");
+    }
+
+    #[test]
+    fn repository_scope_is_unchanged_and_remains_the_default() {
+        let defaults = PrSecurityPolicy::default();
+        assert_eq!(defaults.version, PrSecurityPolicyVersion::V1);
+        assert_eq!(defaults.scope, PrSecurityPolicyScope::Repository);
+
+        let evaluation = evaluate(
+            defaults,
+            vec![finding_at(Severity::Critical, "src/legacy.rs", 900)],
+        );
+        assert_eq!(evaluation.report().decision, PrPolicyDecision::Fail);
     }
 }

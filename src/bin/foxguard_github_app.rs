@@ -41,8 +41,9 @@ use foxguard::github_app::review::{
 };
 use foxguard::github_app::webhook::{verify_signature, EventKind, SignatureError};
 use foxguard::pr_policy::{
-    evaluate, resolve as resolve_pr_security_policy, PrPolicyEvaluation, PrPolicyNotEvaluated,
-    PrPolicyNotEvaluatedReason, PrSecurityPolicyInput,
+    evaluate, evaluate_diff_scoped, resolve as resolve_pr_security_policy, ChangedLines,
+    PrPolicyEvaluation, PrPolicyNotEvaluated, PrPolicyNotEvaluatedReason, PrSecurityPolicyInput,
+    PrSecurityPolicyScope,
 };
 use foxguard::report::github_pr::relative_path;
 use foxguard::Finding;
@@ -2087,12 +2088,14 @@ async fn process_pull_request_delivery(
         .map(|lines| lines.keys().cloned().collect());
 
     let scan_token = token.clone();
+    let scan_changed_lines = changed_lines.clone();
     let mut result = tokio::task::spawn_blocking(move || {
         run_pull_request_scan(
             pull_request,
             &repository.full_name,
             &scan_token,
             changed_files,
+            scan_changed_lines,
         )
     })
     .await
@@ -2137,6 +2140,7 @@ fn run_pull_request_scan(
     target_repo: &str,
     installation_token: &str,
     changed_files: Option<Vec<String>>,
+    changed_lines: Option<ChangedLines>,
 ) -> Result<PullRequestScanResult, String> {
     let workspace =
         tempfile::tempdir().map_err(|error| format!("failed to create scan workspace: {error}"))?;
@@ -2215,10 +2219,23 @@ fn run_pull_request_scan(
         finding.file = relative_path(&finding.file, Some(&checkout));
     }
     let (findings, policy_outcome) = if full_repository_scan {
-        (
-            Vec::new(),
-            PullRequestPolicyOutcome::Evaluated(evaluate(policy, findings)),
-        )
+        // A diff-scoped policy still needs a whole-repository scan (that is
+        // what makes the result reproducible); it just narrows the decision to
+        // findings on the lines this PR touched. Without changed lines there
+        // is nothing to narrow against, so the policy is reported as not
+        // evaluated rather than silently judging the whole tree.
+        let outcome = match (policy.scope, changed_lines.as_ref()) {
+            (PrSecurityPolicyScope::Diff, Some(lines)) => {
+                PullRequestPolicyOutcome::Evaluated(evaluate_diff_scoped(policy, findings, lines))
+            }
+            (PrSecurityPolicyScope::Diff, None) => PullRequestPolicyOutcome::NotEvaluated(
+                PrPolicyNotEvaluated::new(policy, PrPolicyNotEvaluatedReason::NoChangedLines),
+            ),
+            (PrSecurityPolicyScope::Repository, _) => {
+                PullRequestPolicyOutcome::Evaluated(evaluate(policy, findings))
+            }
+        };
+        (Vec::new(), outcome)
     } else {
         (
             findings,
