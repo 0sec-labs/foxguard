@@ -232,8 +232,10 @@ context to confirm. They are where most known false positives live.
 
 - `js/no-sql-injection` — requires a SQL keyword followed by SQL structure
   (`SELECT ... FROM`, `INSERT INTO`, `UPDATE ... SET`, `DELETE FROM`,
-  `DROP/ALTER/CREATE TABLE`, `EXEC`) in the literal, plus string
-  concatenation or template interpolation. See commit `13ea1ae` — earlier
+  `DROP/ALTER/CREATE TABLE`) in the literal, plus string concatenation or
+  template interpolation. `EXEC`/`EXECUTE` additionally require the expression
+  to be the SQL argument of `.query()`, `.execute()`, or `.raw()`; the same
+  words in shell commands are not SQL evidence. See commit `13ea1ae` — earlier
   versions matched `res.send('delete ' + name)` and were retightened.
 - `py/no-sql-injection`, `go/no-sql-injection`, `rb/no-sql-injection`,
   `php/no-sql-injection`, `java/no-sql-injection`, `cs/no-sql-injection`,
