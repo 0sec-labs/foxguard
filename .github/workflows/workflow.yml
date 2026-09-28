@@ -160,6 +160,7 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
+          retention-days: 1
 
   github-release:
     name: Create GitHub Release
