@@ -64,3 +64,4 @@ jobs:
           name: python-wheel-${{ matrix.target }}
           path: dist/*.whl
           if-no-files-found: error
+          retention-days: 1
