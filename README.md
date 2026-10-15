@@ -278,4 +278,4 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for rule authoring, tests, and develo
 
 ## License
 
-MIT OR Apache-2.0 -- [0sec Labs](https://0sec.ai)
+MIT OR Apache-2.0 -- [0sec Labs](https://0.security)
