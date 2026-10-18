@@ -17,7 +17,7 @@
     "@fontsource-variable/outfit": "^5.2.8",
     "@tailwindcss/vite": "^4.2.2",
     "astro": "^7.2.8",
-    "sharp": "^0.35.3",
+    "sharp": "^0.35.5",
     "tailwindcss": "^4.2.2"
   },
   "overrides": {
