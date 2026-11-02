@@ -51,12 +51,8 @@ function runProcess(command: string, args: string[], options: ProcessOptions = {
       reject(new ScanCancelledError());
       return;
     }
-    const child = spawn(command, args, { // foxguard: ignore[js/no-command-injection]
-      cwd: options.cwd,
-      shell: process.platform === "win32",
-      detached: process.platform !== "win32",
-      windowsHide: true,
-    });
+    // A complete fix requires resolving Windows .cmd wrappers (notably npx)
+    // to direct executable entry points before invoking this process helper.
     let stdout = "";
     let stderr = "";
     let bytes = 0;
