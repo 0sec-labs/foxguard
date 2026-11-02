@@ -48,6 +48,29 @@ impl TimedOutput {
     }
 }
 
+const MAX_CAPTURED_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+
+/// Retain a bounded prefix while draining the entire stream so the child
+/// cannot block on a full pipe. The boolean reports that bytes were omitted.
+fn read_bounded(mut reader: impl Read) -> (Vec<u8>, bool) {
+    let mut captured = Vec::new();
+    let mut chunk = [0_u8; 8192];
+    let mut exceeded_limit = false;
+
+    loop {
+        let read = match reader.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        let available = MAX_CAPTURED_OUTPUT_BYTES.saturating_sub(captured.len());
+        let retained = read.min(available);
+        captured.extend_from_slice(&chunk[..retained]);
+        exceeded_limit |= retained < read;
+    }
+
+    (captured, exceeded_limit)
+}
+
 /// Drain stdout/stderr of `child` on background threads while enforcing
 /// `timeout` on the child process.
 ///
@@ -67,19 +90,11 @@ pub fn wait_with_output_timeout(
     let stderr_pipe = child.stderr.take();
 
     let stdout_thread = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut pipe) = stdout_pipe {
-            let _ = pipe.read_to_end(&mut buf);
-        }
-        buf
+        stdout_pipe.map(read_bounded).unwrap_or_default()
     });
 
     let stderr_thread = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut pipe) = stderr_pipe {
-            let _ = pipe.read_to_end(&mut buf);
-        }
-        buf
+        stderr_pipe.map(read_bounded).unwrap_or_default()
     });
 
     let status = child.wait_timeout(timeout)?;
@@ -88,8 +103,14 @@ pub fn wait_with_output_timeout(
         Some(exit_status) => {
             // Child exited within the deadline. The reader threads will
             // finish once the pipes hit EOF (which happens on child exit).
-            let stdout = stdout_thread.join().unwrap_or_default();
-            let stderr = stderr_thread.join().unwrap_or_default();
+            let (stdout, stdout_exceeded_limit) = stdout_thread.join().unwrap_or_default();
+            let (stderr, stderr_exceeded_limit) = stderr_thread.join().unwrap_or_default();
+            if stdout_exceeded_limit || stderr_exceeded_limit {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "child output exceeded the capture limit",
+                ));
+            }
 
             Ok(TimedOutput::Finished(Output {
                 status: exit_status,
@@ -102,8 +123,8 @@ pub fn wait_with_output_timeout(
             let _ = child.kill();
             let _ = child.wait();
 
-            let stdout = stdout_thread.join().unwrap_or_default();
-            let stderr = stderr_thread.join().unwrap_or_default();
+            let (stdout, _) = stdout_thread.join().unwrap_or_default();
+            let (stderr, _) = stderr_thread.join().unwrap_or_default();
 
             Ok(TimedOutput::TimedOut { stdout, stderr })
         }
