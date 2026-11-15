@@ -41,7 +41,13 @@ pub fn changed_files(scan_root: &Path, selection: ChangeSelection) -> Result<Vec
         collect_changed_paths(
             &repo_root,
             &scan_root,
-            &["diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+            &[
+                "diff",
+                "--cached",
+                "--name-only",
+                "-z",
+                "--diff-filter=ACMR",
+            ],
         )
     };
     let unstaged = || collect_unstaged_paths(&repo_root, &scan_root);
@@ -71,12 +77,12 @@ fn collect_unstaged_paths(repo_root: &Path, scan_root: &Path) -> Result<Vec<Path
     let mut paths = collect_changed_paths(
         repo_root,
         scan_root,
-        &["diff", "--name-only", "--diff-filter=ACMR"],
+        &["diff", "--name-only", "-z", "--diff-filter=ACMR"],
     )?;
     paths.extend(collect_changed_paths(
         repo_root,
         scan_root,
-        &["ls-files", "--others", "--exclude-standard"],
+        &["ls-files", "--others", "--exclude-standard", "-z"],
     )?);
     Ok(dedupe_paths(paths))
 }
@@ -99,12 +105,8 @@ fn collect_changed_paths(
     let stdout = run_git(repo_root, git_args)?;
     let mut files = Vec::new();
 
-    for line in stdout
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        let path = repo_root.join(line);
+    for name in stdout.split('\0').filter(|name| !name.is_empty()) {
+        let path = repo_root.join(name);
         if !path.exists() {
             continue;
         }
