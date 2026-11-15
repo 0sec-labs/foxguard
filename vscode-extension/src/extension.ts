@@ -4,6 +4,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { isSupportedFile } from "./supportedFiles";
+import { quoteForCmd } from "./shellArgs";
 import { extractFindings, type Finding } from "./report";
 import { ScanController } from "./scanController";
 
@@ -51,9 +52,18 @@ function runProcess(command: string, args: string[], options: ProcessOptions = {
       reject(new ScanCancelledError());
       return;
     }
-    const child = spawn(command, args, { // foxguard: ignore[js/no-command-injection]
+    const useShell = process.platform === "win32";
+    let spawnArgs = args;
+    try {
+      // cmd.exe re-parses arguments; reject metacharacters in file names.
+      if (useShell) spawnArgs = args.map(quoteForCmd);
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    const child = spawn(command, spawnArgs, { // foxguard: ignore[js/no-command-injection]
       cwd: options.cwd,
-      shell: process.platform === "win32",
+      shell: useShell,
       detached: process.platform !== "win32",
       windowsHide: true,
     });
