@@ -52,12 +52,18 @@ fn changed_files_vs_target(repo_root: &Path, target: &str) -> Result<Vec<PathBuf
 
     let stdout = run_git(
         repo_root,
-        &["diff", "--name-only", "--diff-filter=ACMR", merge_base],
+        &[
+            "diff",
+            "--name-only",
+            "-z",
+            "--diff-filter=ACMR",
+            merge_base,
+        ],
     )?;
 
     let mut files = Vec::new();
-    for line in stdout.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        let path = repo_root.join(line);
+    for name in stdout.split('\0').filter(|name| !name.is_empty()) {
+        let path = repo_root.join(name);
         if path.exists() {
             files.push(path);
         }

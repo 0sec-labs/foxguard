@@ -4839,6 +4839,120 @@ rules:
     }
 
     #[test]
+    fn test_change_modes_scan_files_with_non_ascii_names() {
+        let repo = TempDir::new().expect("failed to create temp repo");
+        Command::new("git")
+            .args(["init"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to initialize git repo");
+
+        fs::write(repo.path().join("modifié.js"), "const safe = 1;\n")
+            .expect("failed to write safe tracked fixture");
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to stage safe tracked fixture");
+        Command::new("git")
+            .args([
+                "-c",
+                "user.name=Foxguard Test",
+                "-c",
+                "user.email=foxguard@example.test",
+                "commit",
+                "-m",
+                "base",
+            ])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to commit base fixture");
+
+        fs::write(repo.path().join("indexé.js"), "eval(userInput);\n")
+            .expect("failed to write staged fixture");
+        Command::new("git")
+            .args(["add", "indexé.js"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to stage vulnerable fixture");
+        fs::write(repo.path().join("modifié.js"), "eval(userInput);\n")
+            .expect("failed to write unstaged fixture");
+        fs::write(
+            repo.path().join("nouveau fichier \"é\".js"),
+            "eval(userInput);\n",
+        )
+        .expect("failed to write untracked fixture");
+
+        for (flag, expected) in [
+            ("--staged", vec!["indexé.js"]),
+            ("--unstaged", vec!["modifié.js", "nouveau fichier \"é\".js"]),
+        ] {
+            let output = foxguard_cmd_isolated()
+                .args([flag, "-f", "json", "."])
+                .current_dir(repo.path())
+                .output()
+                .expect("failed to execute foxguard change-mode scan");
+
+            assert!(
+                !output.status.success(),
+                "{flag} should report findings in files with non-ASCII names"
+            );
+            let mut files = finding_file_names(&scan_json_findings_from_slice(&output.stdout));
+            files.sort();
+            files.dedup();
+            assert_eq!(files, expected, "{flag} scanned the wrong files");
+        }
+    }
+
+    #[test]
+    fn test_diff_reports_new_findings_in_files_with_non_ascii_names() {
+        let repo = TempDir::new().expect("failed to create temp repo");
+        Command::new("git")
+            .args(["init"])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to initialize git repo");
+        fs::write(repo.path().join("café.py"), "print('safe')\n")
+            .expect("failed to write safe Python file");
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to stage safe Python file");
+        Command::new("git")
+            .args([
+                "-c",
+                "user.name=Foxguard Test",
+                "-c",
+                "user.email=foxguard@example.test",
+                "commit",
+                "-m",
+                "base",
+            ])
+            .current_dir(repo.path())
+            .output()
+            .expect("failed to commit safe Python file");
+        fs::write(repo.path().join("café.py"), "eval(input())\n")
+            .expect("failed to write vulnerable Python file");
+
+        let output = foxguard_cmd_isolated()
+            .current_dir(repo.path())
+            .args(["diff", "HEAD", ".", "-f", "json"])
+            .output()
+            .expect("failed to execute foxguard diff");
+
+        assert!(
+            !output.status.success(),
+            "diff should fail on a finding introduced in a file with a non-ASCII name"
+        );
+        let files = finding_file_names(&scan_json_findings_from_slice(&output.stdout));
+        assert!(
+            files.iter().any(|file| file == "café.py"),
+            "diff should report the new finding in café.py, got {files:?}"
+        );
+    }
+
+    #[test]
     fn test_init_installs_hook_and_baseline() {
         let repo = setup_git_repo(&["vulnerable.js"]);
 
