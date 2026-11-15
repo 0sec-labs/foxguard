@@ -4,7 +4,7 @@ Marketing site for foxguard, built with Astro.
 
 ## Requirements
 
-- Node `22.12.0` or newer
+- Node `22.23.4` or newer
 - `nvm use` from the repo root if your shell picks an older Node binary
 
 ## Commands
@@ -20,5 +20,5 @@ npm run preview
 
 ## Notes
 
-- CI builds this site with Node `22.12.0`
+- CI builds this site with Node `22.23.4`
 - If `npm run build` reports Node `18.x`, your PATH is resolving the wrong `node` binary for npm scripts
