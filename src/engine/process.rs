@@ -89,13 +89,11 @@ pub fn wait_with_output_timeout(
     let stdout_pipe = child.stdout.take();
     let stderr_pipe = child.stderr.take();
 
-    let stdout_thread = std::thread::spawn(move || {
-        stdout_pipe.map(read_bounded).unwrap_or_default()
-    });
+    let stdout_thread =
+        std::thread::spawn(move || stdout_pipe.map(read_bounded).unwrap_or_default());
 
-    let stderr_thread = std::thread::spawn(move || {
-        stderr_pipe.map(read_bounded).unwrap_or_default()
-    });
+    let stderr_thread =
+        std::thread::spawn(move || stderr_pipe.map(read_bounded).unwrap_or_default());
 
     let status = child.wait_timeout(timeout)?;
 
