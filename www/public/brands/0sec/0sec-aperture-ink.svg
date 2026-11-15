@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -2 240 24" fill="none" role="img" aria-label="0.security">
+<path fill="#FD802E" d="M12.5 2 H17.5 L7.5 18 H2.5 Z"/>
+<path fill="#403D39" fill-rule="evenodd" d="M4 0 H16 L20 4 V16 L16 20 H4 L0 16 V4 Z M4 5 V15 L5 16 H15 L16 15 V5 L15 4 H5 Z"/>
+<path fill="#403D39" fill-rule="nonzero" transform="translate(28,0)" d="M0 0 H20 V4 H0 Z M0 4 H4 V8 H0 Z M0 8 H20 V12 H0 Z M16 12 H20 V16 H16 Z M0 16 H20 V20 H0 Z"/>
+<path fill="#403D39" fill-rule="nonzero" transform="translate(56,0)" d="M0 0 H20 V4 H0 Z M0 0 H4 V20 H0 Z M0 8 H16 V12 H0 Z M0 16 H20 V20 H0 Z"/>
+<path fill="#403D39" fill-rule="nonzero" transform="translate(84,0)" d="M0 0 H20 V4 H0 Z M0 0 H4 V20 H0 Z M0 16 H20 V20 H0 Z"/>
+<path fill="#403D39" fill-rule="nonzero" transform="translate(112,0)" d="M0 0H4V16H16V0H20V20H0Z"/>
+<path fill="#403D39" fill-rule="evenodd" transform="translate(140,0)" d="M0 0H20V12H12L20 20H14.4L6.4 12H4V20H0Z M4 4V8H16V4Z"/>
+<path fill="#403D39" fill-rule="nonzero" transform="translate(168,0)" d="M0 0H12V4H8V16H12V20H0V16H4V4H0Z"/>
+<path fill="#403D39" fill-rule="nonzero" transform="translate(188,0)" d="M0 0H20V4H12V20H8V4H0Z"/>
+<path fill="#403D39" fill-rule="nonzero" transform="translate(216,0)" d="M0 0H4V8H16V0H20V12H12V20H8V12H0Z"/>
+</svg>

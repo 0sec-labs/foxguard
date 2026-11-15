@@ -1,5 +1,10 @@
 <p align="center">
-  <img src="www/public/foxguard-logo.png" width="128" alt="foxguard" />
+  <a href="https://0.security">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="www/public/foxguard-lockup-dark.png" />
+      <img src="www/public/foxguard-lockup-light.png" width="460" alt="foxguard by 0security" />
+    </picture>
+  </a>
 </p>
 
 <h1 align="center">foxguard</h1>
