@@ -320,6 +320,58 @@ struct PreparedFile {
     tree: tree_sitter::Tree,
     aliases: AliasTable,
     canonical_path: PathBuf,
+    #[cfg(test)]
+    _tree_lease: PreparedTreeLease,
+}
+
+// Preserve the original source snapshot and compact aliases, but not every
+// tree-sitter tree until the end of a whole-repository scan. Each consumer
+// reparses the same bytes with the same path-specific grammar. In particular,
+// initial parallel collectors must return THIS type before collecting a Vec.
+struct StoredPreparedFile {
+    source: String,
+    language: Language,
+    aliases: AliasTable,
+    canonical_path: PathBuf,
+    #[cfg(test)]
+    tree_leases: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+}
+
+impl StoredPreparedFile {
+    fn prepare(&self, path: &Path) -> PreparedFile {
+        // The identical immutable source/grammar parsed successfully in pass 1.
+        // Refuse to publish a partial scan if that invariant ever breaks.
+        let tree = super::parser::parse_path(&self.source, self.language, path)
+            .expect("previously parsed immutable scanner source must reparse");
+        PreparedFile {
+            source: self.source.clone(),
+            tree,
+            aliases: self.aliases.clone(),
+            canonical_path: self.canonical_path.clone(),
+            #[cfg(test)]
+            _tree_lease: PreparedTreeLease::new(self.tree_leases.clone()),
+        }
+    }
+}
+
+#[cfg(test)]
+struct PreparedTreeLease(Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>);
+#[cfg(test)]
+impl PreparedTreeLease {
+    fn new(counter: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>) -> Self {
+        if let Some(counter) = &counter {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        Self(counter)
+    }
+}
+#[cfg(test)]
+impl Drop for PreparedTreeLease {
+    fn drop(&mut self) {
+        if let Some(counter) = &self.0 {
+            counter.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
 }
 
 fn push_count(parts: &mut Vec<String>, count: usize, label: &str) {
@@ -1004,7 +1056,7 @@ fn scan_files(
     let has_kotlin_taint_rules = taint_specs_by_lang
         .get(&Language::Kotlin)
         .is_some_and(|specs| !specs.is_empty());
-    let mut prepared_files: HashMap<PathBuf, PreparedFile> = HashMap::new();
+    let mut prepared_files: HashMap<PathBuf, StoredPreparedFile> = HashMap::new();
 
     // ── Pass 1: Extract cross-file taint summaries ────────────────────
     // Run pass 1 for Python, Go, and JS files when there are multiple
@@ -1063,11 +1115,13 @@ fn scan_files(
                     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
                     Some((
                         path.clone(),
-                        PreparedFile {
+                        StoredPreparedFile {
                             source,
-                            tree,
+                            language: Language::Python,
                             aliases,
                             canonical_path: canonical,
+                            #[cfg(test)]
+                            tree_leases: None,
                         },
                         summaries,
                     ))
@@ -1102,7 +1156,9 @@ fn scan_files(
                 let import_maps: HashMap<PathBuf, HashMap<String, PathBuf>> = python_files
                     .iter()
                     .filter_map(|(path, _)| {
-                        let prepared = prepared_files.get(path)?;
+                        let prepared = prepared_files
+                            .get(path)
+                            .map(|stored| stored.prepare(path))?;
                         let mut imports =
                             resolve_imports_to_paths(&prepared.source, &prepared.tree, path);
                         let canonical: HashMap<String, PathBuf> = imports
@@ -1122,7 +1178,9 @@ fn scan_files(
                     let snapshot = summaries.clone();
                     let mut changed = false;
                     for (path, _) in &python_files {
-                        let Some(prepared) = prepared_files.get(path) else {
+                        let Some(prepared) =
+                            prepared_files.get(path).map(|stored| stored.prepare(path))
+                        else {
                             continue;
                         };
                         let canonical = prepared.canonical_path.clone();
@@ -1204,11 +1262,13 @@ fn scan_files(
                 let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
                 Some((
                     path.clone(),
-                    PreparedFile {
+                    StoredPreparedFile {
                         source,
-                        tree,
+                        language: Language::JavaScript,
                         aliases,
                         canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
                     },
                     summaries,
                 ))
@@ -1240,7 +1300,9 @@ fn scan_files(
             let import_maps: HashMap<PathBuf, HashMap<String, PathBuf>> = js_files
                 .iter()
                 .filter_map(|(path, _)| {
-                    let prepared = prepared_files.get(path)?;
+                    let prepared = prepared_files
+                        .get(path)
+                        .map(|stored| stored.prepare(path))?;
                     let mut imports = javascript_taint::resolve_js_imports_to_paths(
                         &prepared.source,
                         &prepared.tree,
@@ -1261,7 +1323,9 @@ fn scan_files(
                 let snapshot = js_summaries.clone();
                 let mut changed = false;
                 for (path, _) in &js_files {
-                    let Some(prepared) = prepared_files.get(path) else {
+                    let Some(prepared) =
+                        prepared_files.get(path).map(|stored| stored.prepare(path))
+                    else {
                         continue;
                     };
                     let canonical = prepared.canonical_path.clone();
@@ -1339,11 +1403,13 @@ fn scan_files(
                 let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
                 Some((
                     path.clone(),
-                    PreparedFile {
+                    StoredPreparedFile {
                         source,
-                        tree,
+                        language: Language::Go,
                         aliases,
                         canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
                     },
                     summaries,
                 ))
@@ -1375,7 +1441,8 @@ fn scan_files(
             // directory belong to the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &go_files {
-                if let Some(prepared) = prepared_files.get(path) {
+                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
+                {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
@@ -1389,7 +1456,9 @@ fn scan_files(
                 let snapshot = go_summaries.clone();
                 let mut changed = false;
                 for (path, _) in &go_files {
-                    let Some(prepared) = prepared_files.get(path) else {
+                    let Some(prepared) =
+                        prepared_files.get(path).map(|stored| stored.prepare(path))
+                    else {
                         continue;
                     };
                     let canonical = prepared.canonical_path.clone();
@@ -1480,11 +1549,13 @@ fn scan_files(
                 let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
                 Some((
                     path.clone(),
-                    PreparedFile {
+                    StoredPreparedFile {
                         source,
-                        tree,
+                        language: Language::Java,
                         aliases: AliasTable::default(),
                         canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
                     },
                     summaries,
                 ))
@@ -1521,7 +1592,8 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &java_files {
-                if let Some(prepared) = prepared_files.get(path) {
+                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
+                {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
@@ -1535,7 +1607,9 @@ fn scan_files(
                 let snapshot = java_summaries.clone();
                 let mut changed = false;
                 for (path, _) in &java_files {
-                    let Some(prepared) = prepared_files.get(path) else {
+                    let Some(prepared) =
+                        prepared_files.get(path).map(|stored| stored.prepare(path))
+                    else {
                         continue;
                     };
                     let canonical = prepared.canonical_path.clone();
@@ -1626,11 +1700,13 @@ fn scan_files(
                 let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
                 Some((
                     path.clone(),
-                    PreparedFile {
+                    StoredPreparedFile {
                         source,
-                        tree,
+                        language: Language::Ruby,
                         aliases: AliasTable::default(),
                         canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
                     },
                     summaries,
                 ))
@@ -1666,7 +1742,8 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &ruby_files {
-                if let Some(prepared) = prepared_files.get(path) {
+                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
+                {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
@@ -1680,7 +1757,9 @@ fn scan_files(
                 let snapshot = ruby_summaries.clone();
                 let mut changed = false;
                 for (path, _) in &ruby_files {
-                    let Some(prepared) = prepared_files.get(path) else {
+                    let Some(prepared) =
+                        prepared_files.get(path).map(|stored| stored.prepare(path))
+                    else {
                         continue;
                     };
                     let canonical = prepared.canonical_path.clone();
@@ -1770,11 +1849,13 @@ fn scan_files(
                 let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
                 Some((
                     path.clone(),
-                    PreparedFile {
+                    StoredPreparedFile {
                         source,
-                        tree,
+                        language: Language::Php,
                         aliases: AliasTable::default(),
                         canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
                     },
                     summaries,
                 ))
@@ -1810,7 +1891,8 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &php_files {
-                if let Some(prepared) = prepared_files.get(path) {
+                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
+                {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
@@ -1824,7 +1906,9 @@ fn scan_files(
                 let snapshot = php_summaries.clone();
                 let mut changed = false;
                 for (path, _) in &php_files {
-                    let Some(prepared) = prepared_files.get(path) else {
+                    let Some(prepared) =
+                        prepared_files.get(path).map(|stored| stored.prepare(path))
+                    else {
                         continue;
                     };
                     let canonical = prepared.canonical_path.clone();
@@ -1914,11 +1998,13 @@ fn scan_files(
                 let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
                 Some((
                     path.clone(),
-                    PreparedFile {
+                    StoredPreparedFile {
                         source,
-                        tree,
+                        language: Language::CSharp,
                         aliases: AliasTable::default(),
                         canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
                     },
                     summaries,
                 ))
@@ -1953,7 +2039,8 @@ fn scan_files(
             // directory are treated as the same namespace and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &csharp_files {
-                if let Some(prepared) = prepared_files.get(path) {
+                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
+                {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
@@ -1967,7 +2054,9 @@ fn scan_files(
                 let snapshot = csharp_summaries.clone();
                 let mut changed = false;
                 for (path, _) in &csharp_files {
-                    let Some(prepared) = prepared_files.get(path) else {
+                    let Some(prepared) =
+                        prepared_files.get(path).map(|stored| stored.prepare(path))
+                    else {
                         continue;
                     };
                     let canonical = prepared.canonical_path.clone();
@@ -2057,11 +2146,13 @@ fn scan_files(
                 let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
                 Some((
                     path.clone(),
-                    PreparedFile {
+                    StoredPreparedFile {
                         source,
-                        tree,
+                        language: Language::Kotlin,
                         aliases: AliasTable::default(),
                         canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
                     },
                     summaries,
                 ))
@@ -2097,7 +2188,8 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &kotlin_files {
-                if let Some(prepared) = prepared_files.get(path) {
+                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
+                {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
@@ -2111,7 +2203,9 @@ fn scan_files(
                 let snapshot = kotlin_summaries.clone();
                 let mut changed = false;
                 for (path, _) in &kotlin_files {
-                    let Some(prepared) = prepared_files.get(path) else {
+                    let Some(prepared) =
+                        prepared_files.get(path).map(|stored| stored.prepare(path))
+                    else {
                         continue;
                     };
                     let canonical = prepared.canonical_path.clone();
@@ -2335,9 +2429,9 @@ fn scan_files(
                 _ => {}
             }
 
-            let prepared = prepared_files.get(path);
+            let prepared = prepared_files.get(path).map(|stored| stored.prepare(path));
             let owned_source;
-            let source = if let Some(prepared) = prepared {
+            let source = if let Some(prepared) = prepared.as_ref() {
                 prepared.source.as_str()
             } else {
                 let read_source = match std::fs::read_to_string(path) {
@@ -2368,7 +2462,7 @@ fn scan_files(
             let inline_ignores = inline_ignore_directives(source, *language);
 
             let owned_tree;
-            let tree = if let Some(prepared) = prepared {
+            let tree = if let Some(prepared) = prepared.as_ref() {
                 if treats_tree_errors_as_parse_failures(*language, path)
                     && prepared.tree.root_node().has_error()
                 {
@@ -2418,7 +2512,7 @@ fn scan_files(
             // back to their canonical dotted paths before sink matching.
             let owned_python_aliases;
             let python_aliases = if matches!(language, Language::Python) {
-                if let Some(prepared) = prepared {
+                if let Some(prepared) = prepared.as_ref() {
                     Some(&prepared.aliases)
                 } else {
                     owned_python_aliases = py_aliases_from_tree(source, tree);
@@ -2429,7 +2523,7 @@ fn scan_files(
             };
             let owned_javascript_aliases;
             let javascript_aliases = if matches!(language, Language::JavaScript) {
-                if let Some(prepared) = prepared {
+                if let Some(prepared) = prepared.as_ref() {
                     Some(&prepared.aliases)
                 } else {
                     owned_javascript_aliases = js_aliases_from_tree(source, tree);
@@ -2440,7 +2534,7 @@ fn scan_files(
             };
             let owned_go_aliases;
             let go_aliases = if matches!(language, Language::Go) {
-                if let Some(prepared) = prepared {
+                if let Some(prepared) = prepared.as_ref() {
                     Some(&prepared.aliases)
                 } else {
                     owned_go_aliases = go_aliases_from_tree(source, tree);
@@ -2490,6 +2584,7 @@ fn scan_files(
             let go_same_package_paths = if has_go_cross_file && matches!(language, Language::Go) {
                 path.parent().and_then(|dir| {
                     let canonical_self = prepared
+                        .as_ref()
                         .map(|prepared| prepared.canonical_path.clone())
                         .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
                     go_dir_index.get(dir).map(|siblings| {
@@ -2511,6 +2606,7 @@ fn scan_files(
             {
                 path.parent().and_then(|dir| {
                     let canonical_self = prepared
+                        .as_ref()
                         .map(|prepared| prepared.canonical_path.clone())
                         .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
                     java_dir_index.get(dir).map(|siblings| {
@@ -2532,6 +2628,7 @@ fn scan_files(
             {
                 path.parent().and_then(|dir| {
                     let canonical_self = prepared
+                        .as_ref()
                         .map(|prepared| prepared.canonical_path.clone())
                         .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
                     ruby_dir_index.get(dir).map(|siblings| {
@@ -2552,6 +2649,7 @@ fn scan_files(
             {
                 path.parent().and_then(|dir| {
                     let canonical_self = prepared
+                        .as_ref()
                         .map(|prepared| prepared.canonical_path.clone())
                         .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
                     php_dir_index.get(dir).map(|siblings| {
@@ -2573,6 +2671,7 @@ fn scan_files(
             {
                 path.parent().and_then(|dir| {
                     let canonical_self = prepared
+                        .as_ref()
                         .map(|prepared| prepared.canonical_path.clone())
                         .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
                     csharp_dir_index.get(dir).map(|siblings| {
@@ -2594,6 +2693,7 @@ fn scan_files(
             {
                 path.parent().and_then(|dir| {
                     let canonical_self = prepared
+                        .as_ref()
                         .map(|prepared| prepared.canonical_path.clone())
                         .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
                     kotlin_dir_index.get(dir).map(|siblings| {
@@ -2738,6 +2838,98 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Arc, Barrier,
     };
+
+    #[test]
+    fn prepared_snapshots_do_not_retain_trees_between_consumers() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let source = "const value: number = 1;\n".repeat(400);
+        let snapshots: Vec<_> = (0..128)
+            .map(|index| StoredPreparedFile {
+                source: source.clone(),
+                language: Language::JavaScript,
+                aliases: AliasTable::default(),
+                canonical_path: PathBuf::from(format!("file-{index}.ts")),
+                tree_leases: Some(Arc::clone(&active)),
+            })
+            .collect();
+        assert!(
+            snapshots
+                .iter()
+                .map(|entry| entry.source.len())
+                .sum::<usize>()
+                > 1024 * 1024
+        );
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            snapshots.par_iter().for_each(|snapshot| {
+                let prepared = snapshot.prepare(&snapshot.canonical_path);
+                peak.fetch_max(active.load(Ordering::SeqCst), Ordering::SeqCst);
+                assert!(!prepared.tree.root_node().has_error());
+            })
+        });
+        assert!(peak.load(Ordering::SeqCst) > 0);
+        assert!(peak.load(Ordering::SeqCst) <= 2);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        // Repeated fixpoint visits do not accumulate retained trees.
+        for _ in 0..5 {
+            for snapshot in &snapshots {
+                let prepared = snapshot.prepare(&snapshot.canonical_path);
+                assert!(!prepared.tree.root_node().has_error());
+                assert_eq!(active.load(Ordering::SeqCst), 1);
+            }
+            assert_eq!(active.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[test]
+    fn reparsed_snapshot_preserves_cross_file_summary_positive_and_negative_cases() {
+        let source = "def passthrough(value):\n    return value\n\ndef constant(value):\n    return 'safe'\n";
+        let path = Path::new("helpers.py");
+        let tree = super::super::parser::parse_file(source, Language::Python).unwrap();
+        let aliases = py_aliases_from_tree(source, &tree);
+        let registry = RuleRegistry::new();
+        let rule_specs: Vec<_> = registry
+            .taint_specs_for_language(Language::Python)
+            .into_iter()
+            .filter(|spec| matches!(spec.engine, TaintEngine::Python))
+            .map(|spec| (spec.rule_id, spec.spec.clone()))
+            .collect();
+        let baseline = python_taint::extract_cross_file_summaries(
+            tree.root_node(),
+            source,
+            Some(&aliases),
+            &rule_specs,
+        );
+        assert!(baseline
+            .iter()
+            .any(|summary| summary.name == "passthrough" && summary.params_to_return == vec![0]));
+        assert!(!baseline
+            .iter()
+            .any(|summary| summary.name == "constant" && !summary.params_to_return.is_empty()));
+        let snapshot = StoredPreparedFile {
+            source: source.to_owned(),
+            language: Language::Python,
+            aliases,
+            canonical_path: path.to_owned(),
+            tree_leases: None,
+        };
+        drop(tree);
+        for _ in 0..5 {
+            let prepared = snapshot.prepare(path);
+            let reparsed = python_taint::extract_cross_file_summaries(
+                prepared.tree.root_node(),
+                &prepared.source,
+                Some(&prepared.aliases),
+                &rule_specs,
+            );
+            assert_eq!(baseline, reparsed);
+        }
+    }
 
     struct CountingRule {
         id: &'static str,

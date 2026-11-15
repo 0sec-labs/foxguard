@@ -56,7 +56,7 @@ provided. Alpine/musl users should use the standalone Linux release binaries.
 **GitHub Action:**
 
 ```yaml
-- uses: 0sec-labs/foxguard/action@v0.14.0
+- uses: 0sec-labs/foxguard/action@v0.14.1
   with:
     path: .
     severity: medium
@@ -69,7 +69,7 @@ provided. Alpine/musl users should use the standalone Linux release binaries.
 ```yaml
 repos:
   - repo: https://github.com/0sec-labs/foxguard
-    rev: v0.14.0
+    rev: v0.14.1
     hooks:
       - id: foxguard
 ```
@@ -278,4 +278,4 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for rule authoring, tests, and develo
 
 ## License
 
-MIT OR Apache-2.0 -- [0sec Labs](https://0sec.ai)
+MIT OR Apache-2.0 -- [0sec Labs](https://0.security)

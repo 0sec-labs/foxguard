@@ -16,6 +16,6 @@ The canonical implementation is documented in the local 0sec site at:
 - `0sec-www/public/brands/0sec/0sec-aperture-ink.svg`
 
 When adding "by 0sec" provenance to foxguard surfaces, link it to
-`https://0sec.ai` and use the actual 0sec wordmark treatment. Do not
+`https://0.security` and use the actual 0sec wordmark treatment. Do not
 copy product icons from pwnkit, 0cloud, foxguard, or OpenSOAR and
 present them as the 0sec logo.
