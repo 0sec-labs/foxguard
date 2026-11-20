@@ -1,3 +1,4 @@
+pub mod budget;
 pub mod coccinelle;
 pub mod codeql;
 pub(crate) mod language;

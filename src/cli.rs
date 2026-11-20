@@ -5,6 +5,12 @@ use crate::pr_policy::{
 use clap::{Args, Parser, Subcommand};
 use serde::Deserialize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum FileTimeoutPolicy {
+    Fail,
+    Warn,
+}
+
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OutputFormat {
@@ -194,6 +200,16 @@ pub struct ScanArgs {
     /// Maximum file size in bytes to scan (default: 1 MB)
     #[arg(long, default_value_t = 1_048_576)]
     pub max_file_size: u64,
+
+    /// Per-file analysis time budget in seconds; 0 disables (default: 120).
+    /// Files that exceed it are reported as timed out, never dropped silently.
+    #[arg(long, default_value_t = crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS)]
+    pub file_timeout: u64,
+
+    /// What a timed-out file does to the exit code: `fail` treats the scan as
+    /// incomplete (exit 2), `warn` reports it and exits on findings only.
+    #[arg(long, value_enum, default_value = "fail")]
+    pub on_file_timeout: FileTimeoutPolicy,
 
     /// Show per-finding confidence scores in terminal output
     #[arg(long, default_value_t = false)]
@@ -730,6 +746,8 @@ impl PqcArgs {
             quiet: self.quiet,
             output: self.output.clone(),
             max_file_size: self.max_file_size,
+            file_timeout: crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS,
+            on_file_timeout: crate::cli::FileTimeoutPolicy::Fail,
             show_confidence: self.show_confidence,
             min_confidence: None,
             pq_mode: true,
@@ -767,6 +785,8 @@ impl ScaArgs {
             quiet: self.quiet,
             output: self.output.clone(),
             max_file_size: self.max_file_size,
+            file_timeout: crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS,
+            on_file_timeout: crate::cli::FileTimeoutPolicy::Fail,
             show_confidence: self.show_confidence,
             min_confidence: self.min_confidence,
             pq_mode: false,
@@ -801,6 +821,8 @@ impl BaselineScanArgs {
             quiet: self.quiet,
             output: None,
             max_file_size: self.max_file_size,
+            file_timeout: crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS,
+            on_file_timeout: crate::cli::FileTimeoutPolicy::Fail,
             show_confidence: self.show_confidence,
             min_confidence: self.min_confidence,
             pq_mode: self.pq_mode,

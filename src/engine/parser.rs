@@ -54,6 +54,16 @@ fn parse_source_for_path(
     };
 
     parser.set_language(&ts_language).ok()?;
+    if super::budget::has_deadline() {
+        // Halt parsing once the per-file budget is spent.
+        let bytes = source.as_bytes();
+        let mut halt = |_: &tree_sitter::ParseState| super::budget::expired();
+        return parser.parse_with_options(
+            &mut |i, _| bytes.get(i..).unwrap_or_default(),
+            None,
+            Some(tree_sitter::ParseOptions::new().progress_callback(&mut halt)),
+        );
+    }
     parser.parse(source, None)
 }
 

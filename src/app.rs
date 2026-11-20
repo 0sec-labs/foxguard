@@ -251,6 +251,9 @@ fn execute_scan_resolved(
         scan.max_file_size,
     )?;
     let excludes = plan.exclude_matcher()?;
+    crate::engine::budget::set_file_timeout(
+        (scan.file_timeout > 0).then(|| std::time::Duration::from_secs(scan.file_timeout)),
+    );
     let targets = plan.paths();
     let coccinelle_rule_ids = coccinelle::rule_ids(&coccinelle_rules);
     let codeql_rule_ids = codeql::rule_ids(&codeql_rules);
@@ -317,7 +320,8 @@ fn execute_scan_resolved(
     } else {
         scan_directory_with_notices(&scan.path, &registry, scan.max_file_size, Some(&excludes))
     };
-    if let Some(errors) = result.stats.error_summary() {
+    let timeouts_fatal = scan.on_file_timeout == crate::cli::FileTimeoutPolicy::Fail;
+    if let Some(errors) = result.stats.error_summary_with(timeouts_fatal) {
         return Err(format!(
             "Scan incomplete: {errors}.\n{}",
             notices.join("\n")
@@ -881,6 +885,8 @@ fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
         quiet: false,
         output: None,
         max_file_size: args.max_file_size,
+        file_timeout: crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS,
+        on_file_timeout: crate::cli::FileTimeoutPolicy::Fail,
         fix: false,
         show_confidence: false,
         min_confidence: None,
