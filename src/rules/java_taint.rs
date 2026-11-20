@@ -23,6 +23,7 @@ use crate::rules::taint_engine::{
 pub use crate::rules::taint_engine::{
     LabelPolicy, NodeMatcher, Propagator, TaintFinding, TaintSpec,
 };
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use tree_sitter::Node;
@@ -1169,7 +1170,47 @@ fn typed_assign_sink_description(spec: &TaintSpec, decl_type: &str) -> Option<St
     })
 }
 
+thread_local! {
+    /// Per-node memo for one top-level `expression_taint` evaluation. The
+    /// recursive scan visits shared sub-expressions several times per level,
+    /// which is exponential on deep call chains; within one top-level call the
+    /// spec, state and tree are fixed, so results are keyed by node id.
+    static EXPR_MEMO: RefCell<(usize, HashMap<usize, Option<TaintInfo>>)> =
+        RefCell::new((0, HashMap::new()));
+}
+
 fn expression_taint(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    policy: Option<&LabelPolicy>,
+    state: &TaintState,
+) -> Option<TaintInfo> {
+    let key = node.id();
+    let cached = EXPR_MEMO.with(|m| {
+        let mut m = m.borrow_mut();
+        let hit = m.1.get(&key).cloned();
+        if hit.is_none() {
+            m.0 += 1;
+        }
+        hit
+    });
+    if let Some(hit) = cached {
+        return hit;
+    }
+    let result = expression_taint_uncached(node, source, spec, policy, state);
+    EXPR_MEMO.with(|m| {
+        let mut m = m.borrow_mut();
+        m.0 -= 1;
+        m.1.insert(key, result.clone());
+        if m.0 == 0 {
+            m.1.clear();
+        }
+    });
+    result
+}
+
+fn expression_taint_uncached(
     node: Node<'_>,
     source: &str,
     spec: &TaintSpec,
@@ -1799,6 +1840,26 @@ mod tests {
             panic!("Java fixture should parse");
         };
         analyze_tree(tree.root_node(), src, spec, None)
+    }
+
+    #[test]
+    fn deep_call_chain_is_not_exponential() {
+        let n = 40;
+        let mut expr = String::from("request.getParameter(\"x\")");
+        for _ in 0..n {
+            expr = format!("{expr}.trim()");
+        }
+        let mut nested = String::from("\"safe\"");
+        for _ in 0..n {
+            nested = format!("wrap({nested})");
+        }
+        let src = format!(
+            "class C {{ String wrap(String s) {{ return s; }}\n void run(HttpServletRequest request, Statement stmt) throws Exception {{\n String a = {nested};\n String b = {expr};\n stmt.executeQuery(a);\n stmt.executeQuery(b);\n }} }}"
+        );
+        let start = std::time::Instant::now();
+        let findings = analyze(&src, &sql_injection_spec());
+        assert!(start.elapsed() < std::time::Duration::from_secs(1), "took {:?}", start.elapsed());
+        assert_eq!(findings.len(), 1, "{findings:?}");
     }
 
     #[test]
