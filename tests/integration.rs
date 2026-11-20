@@ -6807,3 +6807,79 @@ mod config_files {
         );
     }
 }
+
+const DEDUPE_JAVA: &str = r#"import javax.servlet.http.HttpServletRequest;
+import java.sql.Statement;
+class Dao {
+    void find(HttpServletRequest request, Statement stmt) throws Exception {
+        String name = request.getParameter("name");
+        stmt.executeQuery("SELECT * FROM users WHERE name = '" + name + "'");
+    }
+}
+"#;
+
+#[test]
+fn sarif_reports_pattern_and_taint_hit_on_same_sink_once() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("src/main/java")).unwrap();
+    fs::write(dir.path().join("src/main/java/Dao.java"), DEDUPE_JAVA).unwrap();
+
+    let json = foxguard_cmd_isolated()
+        .args(["-f", "json"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let findings = scan_json_findings_from_slice(&json.stdout);
+    let sql_json = findings
+        .iter()
+        .filter(|f| f["cwe"] == "CWE-89" && f["line"] == 6)
+        .count();
+    assert!(
+        sql_json >= 2,
+        "pattern and taint should both fire: {findings:?}"
+    );
+
+    let sarif = foxguard_cmd_isolated()
+        .args(["-f", "sarif"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&sarif.stdout).unwrap();
+    let results = report["runs"][0]["results"].as_array().unwrap();
+    let at_sink = results
+        .iter()
+        .filter(|r| r["locations"][0]["physicalLocation"]["region"]["startLine"] == 6)
+        .count();
+    assert_eq!(at_sink, 1, "same sink must be reported once: {results:?}");
+    assert_eq!(results[0]["ruleId"], "java/taint-sql-injection");
+}
+
+#[test]
+fn production_only_and_taint_only_views_filter_findings() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("src/main/java")).unwrap();
+    fs::create_dir_all(dir.path().join("src/test/java")).unwrap();
+    fs::write(dir.path().join("src/main/java/Dao.java"), DEDUPE_JAVA).unwrap();
+    fs::write(dir.path().join("src/test/java/Dao.java"), DEDUPE_JAVA).unwrap();
+
+    let run = |extra: &[&str]| {
+        let out = foxguard_cmd_isolated()
+            .args(["-f", "json"])
+            .args(extra)
+            .arg(dir.path())
+            .output()
+            .unwrap();
+        scan_json_findings_from_slice(&out.stdout)
+    };
+    let all = run(&[]);
+    let prod = run(&["--production-only"]);
+    let taint = run(&["--taint-only"]);
+    assert!(prod.len() < all.len());
+    assert!(prod
+        .iter()
+        .all(|f| !f["file"].as_str().unwrap().contains("src/test")));
+    assert!(!taint.is_empty());
+    assert!(taint
+        .iter()
+        .all(|f| f["rule_id"].as_str().unwrap().contains("taint")));
+}

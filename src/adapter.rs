@@ -406,6 +406,7 @@ fn diff_response(request: &AdapterRequest) -> AdapterResponse {
 
 fn adapter_diff_args(request: &AdapterRequest, path: &str, base: &str) -> DiffArgs {
     DiffArgs {
+        views: Default::default(),
         target: base.to_string(),
         path: resolve_workspace_path(path, request.workspace_root.as_deref()),
         config: resolve_optional_workspace_path(
@@ -464,6 +465,7 @@ fn suppress_response(request: &AdapterRequest) -> AdapterResponse {
 
 fn scan_args(request: &AdapterRequest, path: String, pq_mode: bool) -> ScanArgs {
     ScanArgs {
+        views: Default::default(),
         path,
         config: resolve_optional_workspace_path(
             request.config.as_deref(),
