@@ -34,7 +34,32 @@ pub fn fix_python(
         })
         .collect();
 
-    let replacement = format!("subprocess.run([{}])", list_items.join(", "));
+    // Keep a `subprocess.*` callee and its other arguments; only drop `shell=`
+    // (a list argv combined with shell=True would run just its first element).
+    let func_text = call_func_text(call_node, source)?;
+    let callee = if func_text.starts_with("subprocess.") {
+        func_text
+    } else {
+        "subprocess.run"
+    };
+    let mut call_args = vec![format!("[{}]", list_items.join(", "))];
+    if func_text.starts_with("subprocess.") {
+        let mut cursor = args.walk();
+        for arg in args.named_children(&mut cursor) {
+            if arg.id() == first_arg.id() {
+                continue;
+            }
+            if arg.kind() == "keyword_argument"
+                && arg
+                    .child_by_field_name("name")
+                    .is_some_and(|name| node_text(name, source) == "shell")
+            {
+                continue;
+            }
+            call_args.push(node_text(arg, source).to_string());
+        }
+    }
+    let replacement = format!("{}({})", callee, call_args.join(", "));
 
     let mut edits = vec![CodeEdit {
         start_byte: call_node.start_byte(),
@@ -126,11 +151,98 @@ pub fn fix_javascript(
 
     let replacement = format!("{}({}, [{}])", new_func, cmd_str, args_list.join(", "));
 
-    Some(vec![CodeEdit {
+    let mut edits = vec![CodeEdit {
         start_byte: call_node.start_byte(),
         end_byte: call_node.end_byte(),
         replacement,
-    }])
+    }];
+    // A bare `exec(...)` was imported by name; `execFile` must be imported too.
+    let (old_name, new_name) = if func_text == "execSync" {
+        ("execSync", "execFileSync")
+    } else {
+        ("exec", "execFile")
+    };
+    if func_text == old_name {
+        edits.extend(import_edit_for_js(root, source, old_name, new_name));
+    }
+    Some(edits)
+}
+
+/// If `old` is imported from `child_process` (CommonJS destructuring or ESM named
+/// import) and `new` is not, return an edit that adds `new` next to it.
+fn import_edit_for_js(
+    root: tree_sitter::Node,
+    source: &str,
+    old: &str,
+    new: &str,
+) -> Option<CodeEdit> {
+    fn is_child_process(text: &str) -> bool {
+        let text = text.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+        text == "child_process" || text == "node:child_process"
+    }
+    // Collect (specifier node of `old`, already_has_new) per matching import.
+    fn visit(
+        node: tree_sitter::Node,
+        source: &str,
+        old: &str,
+        new: &str,
+    ) -> Option<Option<CodeEdit>> {
+        let from_child_process = match node.kind() {
+            "import_statement" => node
+                .child_by_field_name("source")
+                .is_some_and(|s| is_child_process(node_text(s, source))),
+            "variable_declarator" => node.child_by_field_name("value").is_some_and(|v| {
+                v.kind() == "call_expression"
+                    && v.child_by_field_name("function")
+                        .is_some_and(|f| node_text(f, source) == "require")
+                    && v.child_by_field_name("arguments").is_some_and(|a| {
+                        is_child_process(
+                            node_text(a, source).trim_matches(|c| c == '(' || c == ')'),
+                        )
+                    })
+            }),
+            _ => false,
+        };
+        if from_child_process {
+            let mut found = None;
+            let mut has_new = false;
+            let mut stack = vec![node];
+            while let Some(current) = stack.pop() {
+                if matches!(
+                    current.kind(),
+                    "import_specifier" | "shorthand_property_identifier_pattern"
+                ) {
+                    let name = node_text(current, source);
+                    if name == old {
+                        found = Some(current);
+                    } else if name == new {
+                        has_new = true;
+                    }
+                    continue;
+                }
+                let mut cursor = current.walk();
+                stack.extend(current.named_children(&mut cursor));
+            }
+            if has_new {
+                return Some(None);
+            }
+            if let Some(spec) = found {
+                return Some(Some(CodeEdit {
+                    start_byte: spec.end_byte(),
+                    end_byte: spec.end_byte(),
+                    replacement: format!(", {new}"),
+                }));
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            if let Some(result) = visit(child, source, old, new) {
+                return Some(result);
+            }
+        }
+        None
+    }
+    visit(root, source, old, new).flatten()
 }
 
 /// Fix Go command injection: rewrite `exec.Command("sh", "-c", cmd + var)`
@@ -256,7 +368,9 @@ fn extract_command_parts(node: tree_sitter::Node, source: &str) -> Option<Vec<Co
         }
     }
 
-    if parts.is_empty() {
+    // A command that starts with a variable cannot be split safely: the value
+    // may itself contain arguments, so an argv rewrite would change behaviour.
+    if parts.is_empty() || matches!(parts[0], CommandPart::Variable(_)) {
         None
     } else {
         Some(parts)
@@ -375,5 +489,83 @@ mod tests {
         let edits = fix_javascript(source, &tree, 0, source.len()).unwrap();
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].replacement, r#"execFile("cmd", [input])"#);
+    }
+}
+
+#[cfg(test)]
+mod defect_tests {
+    use super::*;
+    use crate::engine::parse_file;
+    use crate::Language;
+
+    fn run(language: Language, source: &str, needle: &str) -> Option<String> {
+        let tree = parse_file(source, language).unwrap();
+        let start = source.find(needle).unwrap();
+        let end = start + source[start..].find(')').unwrap() + 1;
+        let mut edits = match language {
+            Language::Python => fix_python(source, &tree, start, end),
+            _ => fix_javascript(source, &tree, start, end),
+        }?;
+        let out = crate::fix::apply_edits(source, &mut edits);
+        let reparsed = parse_file(&out, language).unwrap();
+        assert!(
+            !reparsed.root_node().has_error(),
+            "fixed output must parse: {out}"
+        );
+        Some(out)
+    }
+
+    #[test]
+    fn shell_true_is_dropped_and_other_arguments_kept() {
+        let out = run(
+            Language::Python,
+            "import subprocess\nsubprocess.check_output(\"ls \" + x, shell=True, cwd=d)\n",
+            "subprocess.check_output",
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            "import subprocess\nsubprocess.check_output([\"ls\", x], cwd=d)\n"
+        );
+        assert!(!out.contains("shell"));
+    }
+
+    #[test]
+    fn variable_only_command_is_not_rewritten() {
+        assert!(run(
+            Language::Python,
+            "subprocess.run(cmd, shell=True)\n",
+            "subprocess.run"
+        )
+        .is_none());
+        assert!(run(Language::Python, "os.system(cmd)\n", "os.system").is_none());
+    }
+
+    #[test]
+    fn js_destructured_exec_import_gains_exec_file() {
+        let out = run(
+            Language::JavaScript,
+            "const { exec } = require('child_process');\nexec(\"ls \" + x);\n",
+            "exec(\"",
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            "const { exec, execFile } = require('child_process');\nexecFile(\"ls\", [x]);\n"
+        );
+    }
+
+    #[test]
+    fn js_esm_exec_import_gains_exec_file() {
+        let out = run(
+            Language::JavaScript,
+            "import { exec } from 'child_process';\nexec(\"ls \" + x);\n",
+            "exec(\"",
+        )
+        .unwrap();
+        assert!(
+            out.starts_with("import { exec, execFile } from 'child_process';"),
+            "{out}"
+        );
     }
 }

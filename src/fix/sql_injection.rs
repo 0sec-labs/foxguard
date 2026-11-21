@@ -128,6 +128,7 @@ fn fix_python_fstring(
         }
     }
     query.push(quote_char);
+    let query = unquote_placeholders(&query);
 
     // Build the params tuple
     let params_str = if params.len() == 1 {
@@ -170,6 +171,7 @@ fn fix_python_concat(
         }
     }
 
+    let query = unquote_placeholders(&query);
     let params_str = if var_parts.len() == 1 {
         format!("({},)", var_parts[0])
     } else {
@@ -228,6 +230,7 @@ fn fix_js_template(
         }
     }
     query.push('"');
+    let query = unquote_placeholders(&query);
 
     let func_text = call_func_text(call_node, source)?;
     let replacement = format!("{}({}, [{}])", func_text, query, params.join(", "));
@@ -259,6 +262,7 @@ fn fix_js_concat(
         }
     }
 
+    let query = unquote_placeholders(&query);
     let func_text = call_func_text(call_node, source)?;
     let replacement = format!("{}(\"{}\", [{}])", func_text, query, var_parts.join(", "));
 
@@ -291,6 +295,7 @@ fn fix_go_concat(
         }
     }
 
+    let query = unquote_placeholders(&query);
     let func_text = call_func_text(call_node, source)?;
     let replacement = format!("{}(\"{}\", {})", func_text, query, var_parts.join(", "));
 
@@ -302,6 +307,38 @@ fn fix_go_concat(
 }
 
 // ─── Shared helpers ──────────────────────────────────────────────────────
+
+/// Turn `'?'` / `'$1'` into `?` / `$1`. A quoted placeholder is a string
+/// literal, not a bind parameter, so the "fixed" query would never bind.
+fn unquote_placeholders(query: &str) -> String {
+    let chars: Vec<char> = query.chars().collect();
+    let mut out = String::with_capacity(query.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\'' {
+            let mut j = i + 1;
+            if j < chars.len() && chars[j] == '?' {
+                j += 1;
+            } else if j < chars.len() && chars[j] == '$' {
+                let digits = chars[j + 1..]
+                    .iter()
+                    .take_while(|c| c.is_ascii_digit())
+                    .count();
+                j = if digits > 0 { j + 1 + digits } else { 0 };
+            } else {
+                j = 0;
+            }
+            if j > 0 && j < chars.len() && chars[j] == '\'' {
+                out.extend(&chars[i + 1..j]);
+                i = j + 1;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
 
 /// Find the call expression node that covers the given byte range.
 fn find_call_at(root: tree_sitter::Node, start: usize, end: usize) -> Option<tree_sitter::Node> {
@@ -499,5 +536,49 @@ mod tests {
             assert_eq!(edits.len(), 1);
             assert!(edits[0].replacement.contains("$1"));
         }
+    }
+
+    fn assert_fix_parses(language: Language, source: &str, expected: &str) {
+        let tree = parse_file(source, language).unwrap();
+        let start = source.find(|c: char| c.is_alphabetic()).unwrap();
+        let end = source.trim_end().trim_end_matches(';').len();
+        let mut edits = match language {
+            Language::Python => fix_python(source, &tree, start, end),
+            Language::JavaScript => fix_javascript(source, &tree, start, end),
+            _ => fix_go(source, &tree, start, end),
+        }
+        .unwrap();
+        let out = crate::fix::apply_edits(source, &mut edits);
+        assert_eq!(out, expected);
+        assert!(!parse_file(&out, language).unwrap().root_node().has_error());
+    }
+
+    #[test]
+    fn quoted_placeholders_are_unquoted() {
+        assert_eq!(
+            unquote_placeholders("a = '?' and b = '$12'"),
+            "a = ? and b = $12"
+        );
+        assert_eq!(unquote_placeholders("a = 'x?y'"), "a = 'x?y'");
+        assert_fix_parses(
+            Language::Python,
+            "cursor.execute(\"SELECT * FROM t WHERE n = '\" + name + \"'\")\n",
+            "cursor.execute(\"SELECT * FROM t WHERE n = ?\", (name,))\n",
+        );
+        assert_fix_parses(
+            Language::Python,
+            "cursor.execute(f\"SELECT * FROM t WHERE n = '{name}'\")\n",
+            "cursor.execute(\"SELECT * FROM t WHERE n = ?\", (name,))\n",
+        );
+        assert_fix_parses(
+            Language::JavaScript,
+            "db.query(\"SELECT * FROM t WHERE n = '\" + name + \"'\");\n",
+            "db.query(\"SELECT * FROM t WHERE n = $1\", [name]);\n",
+        );
+        assert_fix_parses(
+            Language::JavaScript,
+            "db.query(`SELECT * FROM t WHERE n = '${name}'`);\n",
+            "db.query(\"SELECT * FROM t WHERE n = $1\", [name]);\n",
+        );
     }
 }

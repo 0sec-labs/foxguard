@@ -492,6 +492,8 @@ fn scan_args(request: &AdapterRequest, path: String, pq_mode: bool) -> ScanArgs 
         quiet: true,
         output: None,
         max_file_size: max_file_size(request),
+        file_timeout: crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS,
+        on_file_timeout: crate::cli::FileTimeoutPolicy::Fail,
         show_confidence: false,
         min_confidence: request.min_confidence,
         pq_mode,

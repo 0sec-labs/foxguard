@@ -2595,6 +2595,7 @@ fn resolved_entries_remain_read_only_and_reachable_in_a_narrow_terminal() {
                 rule_id: format!("historical/rule-{index}"),
                 file: format!("retired-{index}.js"),
                 line: index + 1,
+                stable_fingerprint: None,
             })
             .collect(),
     });

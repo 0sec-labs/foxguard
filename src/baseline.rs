@@ -16,6 +16,11 @@ pub struct BaselineEntry {
     pub rule_id: String,
     pub file: String,
     pub line: usize,
+    /// Line-insensitive fingerprint (rule, file, normalised snippet,
+    /// description). Absent in baselines written by older versions; those
+    /// entries keep matching through the positional `fingerprint`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stable_fingerprint: Option<String>,
 }
 
 /// A report delta under the current scan's scope and configuration.
@@ -29,6 +34,8 @@ pub struct BaselineComparison {
 
 struct BaselineMatcher<'a> {
     fingerprints: HashSet<&'a str>,
+    /// Line-insensitive fingerprint -> positional fingerprint of the entry.
+    stable: HashMap<&'a str, &'a str>,
     paths: HashMap<String, HashSet<&'a str>>,
 }
 
@@ -50,6 +57,16 @@ impl<'a> BaselineMatcher<'a> {
                 .iter()
                 .map(|entry| entry.fingerprint.as_str())
                 .collect(),
+            stable: baseline
+                .entries
+                .iter()
+                .filter_map(|entry| {
+                    entry
+                        .stable_fingerprint
+                        .as_deref()
+                        .map(|stable| (stable, entry.fingerprint.as_str()))
+                })
+                .collect(),
             paths,
         }
     }
@@ -67,6 +84,11 @@ impl<'a> BaselineMatcher<'a> {
             if let Some(&stored) = self.fingerprints.get(fingerprint.as_str()) {
                 found = true;
                 matched(stored);
+            } else if let Some(stable) = stable_fingerprint_with_file(finding, file) {
+                if let Some(&stored) = self.stable.get(stable.as_str()) {
+                    found = true;
+                    matched(stored);
+                }
             }
         };
         visit(&normalized);
@@ -169,6 +191,7 @@ impl BaselineEntry {
             rule_id: finding.rule_id.clone(),
             file: finding.file.clone(),
             line: finding.line,
+            stable_fingerprint: stable_fingerprint_with_file(finding, &finding.file),
         }
     }
 
@@ -177,6 +200,7 @@ impl BaselineEntry {
         Self {
             fingerprint: fingerprint_finding_with_file(finding, &normalized_file),
             rule_id: finding.rule_id.clone(),
+            stable_fingerprint: stable_fingerprint_with_file(finding, &normalized_file),
             file: normalized_file,
             line: finding.line,
         }
@@ -209,6 +233,37 @@ fn fingerprint_finding_with_file(finding: &Finding, file: &str) -> String {
     hasher.update(finding.description.as_bytes());
     let digest = hasher.finalize();
     digest.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// Fingerprint that ignores line/column so unrelated edits above a finding do
+/// not make it look new. Returns `None` when there is no snippet to anchor on.
+fn stable_fingerprint_with_file(finding: &Finding, file: &str) -> Option<String> {
+    let snippet = finding
+        .snippet
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if snippet.is_empty() {
+        return None;
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(b"stable-v1");
+    for part in [
+        finding.rule_id.as_str(),
+        file,
+        snippet.as_str(),
+        finding.description.as_str(),
+    ] {
+        hasher.update([0]);
+        hasher.update(part.as_bytes());
+    }
+    Some(
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect(),
+    )
 }
 
 pub fn load_baseline(path: &Path) -> Result<Option<BaselineFile>, String> {
@@ -453,8 +508,14 @@ mod tests {
         let baseline = BaselineFile {
             version: 1,
             entries: vec![
-                BaselineEntry::from_finding(&current),
-                BaselineEntry::from_finding_at_root(&current, temp.path()),
+                BaselineEntry {
+                    stable_fingerprint: None,
+                    ..BaselineEntry::from_finding(&current)
+                },
+                BaselineEntry {
+                    stable_fingerprint: None,
+                    ..BaselineEntry::from_finding_at_root(&current, temp.path())
+                },
             ],
         };
         let unchanged =
@@ -468,6 +529,44 @@ mod tests {
         assert_eq!(moved.introduced, vec![0]);
         assert!(moved.recurring.is_empty());
         assert_eq!(moved.resolved.len(), 2);
+    }
+
+    #[test]
+    fn inserting_lines_above_does_not_make_finding_new() {
+        let temp = TempDir::new().expect("temporary project");
+        let mut original = finding();
+        original.file = temp.path().join("app.py").to_string_lossy().into_owned();
+        let baseline =
+            BaselineFile::from_findings_at_root(std::slice::from_ref(&original), temp.path());
+        let mut shifted = original.clone();
+        shifted.line += 7;
+        shifted.end_line += 7;
+        let comparison =
+            compare_with_baseline_at_root(std::slice::from_ref(&shifted), &baseline, temp.path());
+        assert_eq!(comparison.recurring, vec![0]);
+        assert!(comparison.resolved.is_empty());
+        let mut edited = shifted;
+        edited.snippet = "os.system(other)".to_string();
+        let comparison = compare_with_baseline_at_root(&[edited], &baseline, temp.path());
+        assert_eq!(comparison.introduced, vec![0]);
+    }
+
+    #[test]
+    fn legacy_baseline_without_stable_fingerprint_still_loads_and_matches() {
+        let temp = TempDir::new().expect("temporary project");
+        let f = finding();
+        let json = format!(
+            r#"{{"version":1,"entries":[{{"fingerprint":"{}","rule_id":"{}","file":"{}","line":{}}}]}}"#,
+            fingerprint_finding(&f),
+            f.rule_id,
+            f.file,
+            f.line
+        );
+        let path = temp.path().join("b.json");
+        std::fs::write(&path, json).unwrap();
+        let baseline = load_baseline(&path).unwrap().unwrap();
+        assert!(baseline.entries[0].stable_fingerprint.is_none());
+        assert!(suppress_with_baseline(vec![f], Some(&baseline)).is_empty());
     }
 
     #[test]
