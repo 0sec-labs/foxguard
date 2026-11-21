@@ -1523,6 +1523,30 @@ fn is_sanitizer_call(node: Node<'_>, source: &str, spec: &TaintSpec) -> bool {
         .any(|matcher| matcher_matches_call(matcher, node, source))
 }
 
+/// True when an `execute(...)` call can plausibly be `Statement.execute`.
+///
+/// `execute` is also the name of `Executor.execute(Runnable)`, Struts
+/// `Action.execute(mapping, form, request, response)` and every
+/// `super.execute(...)` delegation in a framework subclass, none of which run
+/// SQL. JDBC's `execute` takes one argument (the SQL) or two (SQL plus
+/// auto-generated-keys flag / column indexes / column names).
+pub(crate) fn is_plausible_jdbc_execute(node: Node<'_>, source: &str) -> bool {
+    let arity = call_arguments(node).map_or(0, |args| args.named_child_count());
+    if !(1..=2).contains(&arity) {
+        return false;
+    }
+    match call_receiver_text(node, source) {
+        None => true,
+        Some(receiver) => {
+            let lower = receiver.trim().to_ascii_lowercase();
+            lower != "super"
+                && !["executor", "pool", "scheduler", "dispatcher"]
+                    .iter()
+                    .any(|hint| lower.contains(hint))
+        }
+    }
+}
+
 fn match_sink(node: Node<'_>, source: &str, spec: &TaintSpec) -> Option<String> {
     spec.sinks.iter().find_map(|matcher| {
         if matcher_matches_call(matcher, node, source) {
@@ -1538,6 +1562,7 @@ fn matcher_matches_call(matcher: &NodeMatcher, node: Node<'_>, source: &str) -> 
         NodeMatcher::MethodName { method, .. } => {
             node.kind() == "method_invocation"
                 && call_method_name(node, source).is_some_and(|actual| actual == method)
+                && (method != "execute" || is_plausible_jdbc_execute(node, source))
         }
         NodeMatcher::Call { canonical, .. } if node.kind() == "method_invocation" => {
             let Some(method) = call_method_name(node, source) else {
@@ -2142,5 +2167,25 @@ class Controller {
             findings.is_empty(),
             "nested lambda parameter should not taint parent scope: {findings:?}"
         );
+    }
+
+    #[test]
+    fn execute_sink_requires_jdbc_shape() {
+        let src = r#"
+class C extends Base {
+    void run(HttpServletRequest request, ExecutorService executor, Statement stmt) throws Exception {
+        String p = request.getParameter("p");
+        executor.execute(p);
+        super.execute(p);
+        super.execute(p, p, p, p);
+        stmt.execute(p);
+        stmt.execute(p, new String[] {"a"});
+    }
+}
+"#;
+        let findings = analyze(src, &sql_injection_spec());
+        let mut lines: Vec<usize> = findings.iter().map(|f| f.sink_line).collect();
+        lines.sort_unstable();
+        assert_eq!(lines, vec![8, 9], "{findings:?}");
     }
 }

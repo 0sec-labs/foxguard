@@ -52,9 +52,35 @@ fn java_cors_wildcard_re() -> &'static Regex {
     })
 }
 
+/// True when `node` is a compile-time constant: a literal, or a `+`
+/// concatenation / parenthesised expression made only of constants.
+fn is_constant_expression(node: tree_sitter::Node, src: &str) -> bool {
+    match node.kind() {
+        "parenthesized_expression" => node
+            .named_child(0)
+            .is_some_and(|inner| is_constant_expression(inner, src)),
+        "binary_expression" => {
+            node.child_by_field_name("operator")
+                .is_some_and(|op| &src[op.byte_range()] == "+")
+                && node
+                    .child_by_field_name("left")
+                    .is_some_and(|n| is_constant_expression(n, src))
+                && node
+                    .child_by_field_name("right")
+                    .is_some_and(|n| is_constant_expression(n, src))
+        }
+        _ => is_literal(node),
+    }
+}
+
 /// Check whether any descendant of `node` is a `binary_expression` with a `+`
-/// operator that involves a `string_literal`.
+/// operator that involves a `string_literal` and at least one non-constant
+/// operand. Pure literal concatenation (`"SELECT " + "1"`) cannot carry
+/// attacker input and is not reported.
 fn has_string_concat(node: tree_sitter::Node, src: &str) -> bool {
+    if node.kind() == "binary_expression" && is_constant_expression(node, src) {
+        return false;
+    }
     if node.kind() == "binary_expression" {
         if let Some(op) = node.child_by_field_name("operator") {
             if &src[op.byte_range()] == "+" {
@@ -330,7 +356,9 @@ impl_rule! {
             if node.kind() == "method_invocation" {
                 if let Some(name) = node.child_by_field_name("name") {
                     let name_text = &src[name.byte_range()];
-                    if sql_methods.is_match(name_text) {
+                    if sql_methods.is_match(name_text)
+                        && (name_text != "execute" || java_taint::is_plausible_jdbc_execute(node, src))
+                    {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if has_string_concat(args, src) {
                                 findings.push(make_finding(
@@ -1515,5 +1543,38 @@ impl_rule! {
             .map(|(_, spec)| spec)
             .unwrap_or_default();
         run_java_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+#[cfg(test)]
+mod precision_tests {
+    use super::*;
+    use crate::engine::parser::parse_file;
+    use crate::rules::{FileContext, Rule};
+
+    fn run(rule: &dyn Rule, src: &str) -> Vec<Finding> {
+        let tree = parse_file(src, Language::Java).expect("Java fixture should parse");
+        rule.check_with_context(src, &tree, &FileContext::default())
+    }
+
+    #[test]
+    fn constant_concatenation_sql_is_not_flagged() {
+        let src = r#"class C { void f(java.sql.Statement s, String p) throws Exception {
+            s.executeQuery("SELECT " + "a" + " FROM " + ("t" + "x"));
+            s.execute("SELECT " + "1");
+            s.executeQuery("SELECT * FROM t WHERE a=" + p);
+        } }"#;
+        let findings = run(&NoSqlInjection, src);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].line, 4);
+    }
+
+    #[test]
+    fn non_jdbc_execute_is_not_flagged() {
+        let src = r#"class C extends B { void f(java.util.concurrent.Executor executor, String p) {
+            executor.execute("job-" + p);
+            super.execute("x" + p);
+        } }"#;
+        assert!(run(&NoSqlInjection, src).is_empty());
     }
 }
