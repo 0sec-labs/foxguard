@@ -1,4 +1,4 @@
-use crate::rules::cross_file::CrossFileSummaryMap;
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary};
 use crate::rules::csharp_taint;
 use crate::rules::go_taint::{self, go_aliases_from_tree};
 use crate::rules::java_taint;
@@ -646,7 +646,9 @@ pub fn scan_directory_with_notices(
     let scan_root = scan_root(root_path);
 
     let mut discovery_notices = Vec::new();
+    let mut phase = Instant::now();
     let (files, stats) = collect_scan_files(root_path, scan_root, excludes, &mut discovery_notices);
+    timing_mark("directory walk", &mut phase);
     let (result, mut notices) = scan_files(
         scan_root,
         files,
@@ -1064,6 +1066,17 @@ fn apply_inline_ignores(
         .collect()
 }
 
+/// Print `label` and elapsed time to stderr when `FOXGUARD_TIMING=1`.
+fn timing_mark(label: &str, since: &mut Instant) {
+    if std::env::var_os("FOXGUARD_TIMING").is_some() {
+        eprintln!(
+            "foxguard-timing: {label}: {:.2}s",
+            since.elapsed().as_secs_f64()
+        );
+    }
+    *since = Instant::now();
+}
+
 fn scan_files(
     scan_root: &Path,
     files: Vec<(PathBuf, Language)>,
@@ -1073,6 +1086,7 @@ fn scan_files(
     file_budget: Option<std::time::Duration>,
 ) -> (ScanResult, Vec<String>) {
     let start = Instant::now();
+    let mut phase = Instant::now();
     let warnings = Mutex::new(Vec::new());
     let secret_thresholds = registry.secret_thresholds();
 
@@ -1228,54 +1242,75 @@ fn scan_files(
                     })
                     .collect();
 
+                // Canonical paths whose summaries changed in the previous round
+                // (`None` = first round, compose everything). A file's composition
+                // only reads its dependencies' summaries, so a file none of whose
+                // dependencies changed would recompute exactly what it already merged.
+                let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
                 for _round in 0..MAX_MULTIHOP_ROUNDS {
                     // Read from an immutable snapshot so each round advances the
                     // frontier by exactly one hop regardless of file order.
                     let snapshot = summaries.clone();
+                    let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                        python_files
+                            .par_iter()
+                            .map(|(path, _)| {
+                                let stored = prepared_files.get(path)?;
+                                let canonical = stored.canonical_path.clone();
+                                let import_to_path = import_maps.get(&canonical)?;
+                                if let Some(dirty) = &dirty {
+                                    if !import_to_path.values().any(|p| dirty.contains(p)) {
+                                        return None;
+                                    }
+                                }
+                                let prepared = stored.prepare(path);
+                                let composed = python_taint::compose_cross_file_summaries(
+                                    prepared.tree.root_node(),
+                                    &prepared.source,
+                                    Some(&prepared.aliases),
+                                    &rule_specs,
+                                    import_to_path,
+                                    &snapshot,
+                                    &allowed_rule_ids,
+                                );
+                                if composed.is_empty() {
+                                    None
+                                } else {
+                                    Some((canonical, composed))
+                                }
+                            })
+                            .collect();
                     let mut changed = false;
-                    for (path, _) in &python_files {
-                        let Some(prepared) =
-                            prepared_files.get(path).map(|stored| stored.prepare(path))
-                        else {
-                            continue;
-                        };
-                        let canonical = prepared.canonical_path.clone();
-                        let Some(import_to_path) = import_maps.get(&canonical) else {
-                            continue;
-                        };
-                        let composed = python_taint::compose_cross_file_summaries(
-                            prepared.tree.root_node(),
-                            &prepared.source,
-                            Some(&prepared.aliases),
-                            &rule_specs,
-                            import_to_path,
-                            &snapshot,
-                            &allowed_rule_ids,
-                        );
-                        if composed.is_empty() {
-                            continue;
-                        }
-                        let entry = summaries.entry(canonical).or_default();
+                    let mut next_dirty = std::collections::HashSet::new();
+                    for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                        let mut entry_changed = false;
+                        let entry = summaries.entry(canonical.clone()).or_default();
                         for new_summary in composed {
                             match entry.iter_mut().find(|s| s.name == new_summary.name) {
                                 Some(existing) => {
                                     if existing.merge_from(&new_summary) {
-                                        changed = true;
+                                        entry_changed = true;
                                     }
                                 }
                                 None => {
                                     entry.push(new_summary);
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                         }
+                        if entry_changed {
+                            changed = true;
+                            next_dirty.insert(canonical);
+                        }
                     }
+                    dirty = Some(next_dirty);
                     if !changed {
                         break;
                     }
                 }
             }
 
+            timing_mark("python pass1 + multi-hop compose", &mut phase);
             let has_summaries = !summaries.is_empty();
             (summaries, has_summaries)
         } else {
@@ -1378,52 +1413,72 @@ fn scan_files(
                 })
                 .collect();
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = js_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = js_files
+                    .par_iter()
+                    .map(|(path, _)| {
+                        let stored = prepared_files.get(path)?;
+                        let canonical = stored.canonical_path.clone();
+                        let import_to_path = import_maps.get(&canonical)?;
+                        if let Some(dirty) = &dirty {
+                            if !import_to_path.values().any(|p| dirty.contains(p)) {
+                                return None;
+                            }
+                        }
+                        let prepared = stored.prepare(path);
+                        let composed = javascript_taint::compose_cross_file_summaries(
+                            prepared.tree.root_node(),
+                            &prepared.source,
+                            Some(&prepared.aliases),
+                            &js_rule_specs,
+                            import_to_path,
+                            &snapshot,
+                            &allowed_rule_ids,
+                        );
+                        if composed.is_empty() {
+                            None
+                        } else {
+                            Some((canonical, composed))
+                        }
+                    })
+                    .collect();
                 let mut changed = false;
-                for (path, _) in &js_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    let Some(import_to_path) = import_maps.get(&canonical) else {
-                        continue;
-                    };
-                    let composed = javascript_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        Some(&prepared.aliases),
-                        &js_rule_specs,
-                        import_to_path,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
-                    let entry = js_summaries.entry(canonical).or_default();
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = js_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
             }
         }
 
+        timing_mark("js pass1 + multi-hop compose", &mut phase);
         has_js_cross_file = !js_summaries.is_empty();
         cross_file_summaries.extend(js_summaries);
     }
@@ -1501,75 +1556,96 @@ fn scan_files(
             // directory belong to the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &go_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = go_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = go_files
+                    .par_iter()
+                    .map(|(path, _)| {
+                        let stored = prepared_files.get(path)?;
+                        let canonical = stored.canonical_path.clone();
+                        // Same-package siblings (excluding self).
+                        let same_package_paths: Vec<PathBuf> = path
+                            .parent()
+                            .and_then(|dir| dir_index.get(dir))
+                            .map(|siblings| {
+                                siblings
+                                    .iter()
+                                    .filter(|p| **p != canonical)
+                                    .cloned()
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if same_package_paths.is_empty() {
+                            return None;
+                        }
+                        if let Some(dirty) = &dirty {
+                            if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                return None;
+                            }
+                        }
+                        let prepared = stored.prepare(path);
+                        let composed = go_taint::compose_cross_file_summaries(
+                            prepared.tree.root_node(),
+                            &prepared.source,
+                            Some(&prepared.aliases),
+                            &go_rule_specs,
+                            &same_package_paths,
+                            &snapshot,
+                            &allowed_rule_ids,
+                        );
+                        if composed.is_empty() {
+                            None
+                        } else {
+                            Some((canonical, composed))
+                        }
+                    })
+                    .collect();
                 let mut changed = false;
-                for (path, _) in &go_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    // Same-package siblings (excluding self).
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = go_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        Some(&prepared.aliases),
-                        &go_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
-                    let entry = go_summaries.entry(canonical).or_default();
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = go_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
             }
         }
 
+        timing_mark("go pass1 + multi-hop compose", &mut phase);
         has_go_cross_file = !go_summaries.is_empty();
         cross_file_summaries.extend(go_summaries);
     }
@@ -1622,6 +1698,7 @@ fn scan_files(
                 ))
             })
             .collect();
+        timing_mark("java pass1 extract (parallel)", &mut phase);
         let mut java_summaries = CrossFileSummaryMap::new();
         for (path, prepared, file_summaries) in prepared_java {
             if !file_summaries.is_empty() {
@@ -1653,75 +1730,101 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &java_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = java_summaries.clone();
-                let mut changed = false;
-                for (path, _) in &java_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    // Same-package siblings (excluding self).
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
+                // Every file composes against the immutable snapshot, so the
+                // per-file work is independent: compute it in parallel, then
+                // merge sequentially in file order (identical to the former
+                // serial loop, whose reads never saw same-round writes).
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    java_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            // Same-package siblings (excluding self).
+                            let same_package_paths: Vec<PathBuf> = path
+                                .parent()
+                                .and_then(|dir| dir_index.get(dir))
+                                .map(|siblings| {
+                                    siblings
+                                        .iter()
+                                        .filter(|p| **p != canonical)
+                                        .cloned()
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = java_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &java_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
                         })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = java_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        None,
-                        &java_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
-                    let entry = java_summaries.entry(canonical).or_default();
+                        .collect();
+                let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = java_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
             }
         }
 
+        timing_mark("java multi-hop compose", &mut phase);
         has_java_cross_file = !java_summaries.is_empty();
         cross_file_summaries.extend(java_summaries);
     }
@@ -1804,74 +1907,96 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &ruby_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = ruby_summaries.clone();
-                let mut changed = false;
-                for (path, _) in &ruby_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    ruby_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            let same_package_paths: Vec<PathBuf> = path
+                                .parent()
+                                .and_then(|dir| dir_index.get(dir))
+                                .map(|siblings| {
+                                    siblings
+                                        .iter()
+                                        .filter(|p| **p != canonical)
+                                        .cloned()
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = ruby_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &ruby_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
                         })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = ruby_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        None,
-                        &ruby_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
-                    let entry = ruby_summaries.entry(canonical).or_default();
+                        .collect();
+                let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = ruby_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
             }
         }
 
+        timing_mark("ruby pass1 + multi-hop compose", &mut phase);
         has_ruby_cross_file = !ruby_summaries.is_empty();
         cross_file_summaries.extend(ruby_summaries);
     }
@@ -1954,74 +2079,95 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &php_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = php_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = php_files
+                    .par_iter()
+                    .map(|(path, _)| {
+                        let stored = prepared_files.get(path)?;
+                        let canonical = stored.canonical_path.clone();
+                        let same_package_paths: Vec<PathBuf> = path
+                            .parent()
+                            .and_then(|dir| dir_index.get(dir))
+                            .map(|siblings| {
+                                siblings
+                                    .iter()
+                                    .filter(|p| **p != canonical)
+                                    .cloned()
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if same_package_paths.is_empty() {
+                            return None;
+                        }
+                        if let Some(dirty) = &dirty {
+                            if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                return None;
+                            }
+                        }
+                        let prepared = stored.prepare(path);
+                        let composed = php_taint::compose_cross_file_summaries(
+                            prepared.tree.root_node(),
+                            &prepared.source,
+                            None,
+                            &php_rule_specs,
+                            &same_package_paths,
+                            &snapshot,
+                            &allowed_rule_ids,
+                        );
+                        if composed.is_empty() {
+                            None
+                        } else {
+                            Some((canonical, composed))
+                        }
+                    })
+                    .collect();
                 let mut changed = false;
-                for (path, _) in &php_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = php_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        None,
-                        &php_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
-                    let entry = php_summaries.entry(canonical).or_default();
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = php_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
             }
         }
 
+        timing_mark("php pass1 + multi-hop compose", &mut phase);
         has_php_cross_file = !php_summaries.is_empty();
         cross_file_summaries.extend(php_summaries);
     }
@@ -2103,74 +2249,96 @@ fn scan_files(
             // directory are treated as the same namespace and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &csharp_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = csharp_summaries.clone();
-                let mut changed = false;
-                for (path, _) in &csharp_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    csharp_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            let same_package_paths: Vec<PathBuf> = path
+                                .parent()
+                                .and_then(|dir| dir_index.get(dir))
+                                .map(|siblings| {
+                                    siblings
+                                        .iter()
+                                        .filter(|p| **p != canonical)
+                                        .cloned()
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = csharp_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &csharp_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
                         })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = csharp_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        None,
-                        &csharp_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
-                    let entry = csharp_summaries.entry(canonical).or_default();
+                        .collect();
+                let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = csharp_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
             }
         }
 
+        timing_mark("csharp pass1 + multi-hop compose", &mut phase);
         has_csharp_cross_file = !csharp_summaries.is_empty();
         cross_file_summaries.extend(csharp_summaries);
     }
@@ -2253,74 +2421,96 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &kotlin_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = kotlin_summaries.clone();
-                let mut changed = false;
-                for (path, _) in &kotlin_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    kotlin_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            let same_package_paths: Vec<PathBuf> = path
+                                .parent()
+                                .and_then(|dir| dir_index.get(dir))
+                                .map(|siblings| {
+                                    siblings
+                                        .iter()
+                                        .filter(|p| **p != canonical)
+                                        .cloned()
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = kotlin_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &kotlin_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
                         })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = kotlin_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        None,
-                        &kotlin_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
-                    let entry = kotlin_summaries.entry(canonical).or_default();
+                        .collect();
+                let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = kotlin_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
             }
         }
 
+        timing_mark("kotlin pass1 + multi-hop compose", &mut phase);
         has_kotlin_cross_file = !kotlin_summaries.is_empty();
         cross_file_summaries.extend(kotlin_summaries);
     }
@@ -2466,6 +2656,7 @@ fn scan_files(
         HashMap::new()
     };
 
+    timing_mark("pre-pass2 setup (all langs, incl. indexes)", &mut phase);
     // ── Pass 2: Full analysis with cross-file summaries available ─────
     let outcomes: Vec<FileScanOutcome> = files
         .par_iter()
@@ -2850,6 +3041,7 @@ fn scan_files(
         })
         .collect();
 
+    timing_mark("pass2 per-file analysis (parallel)", &mut phase);
     let mut results = Vec::new();
     for outcome in outcomes {
         stats.extend(outcome.stats);
