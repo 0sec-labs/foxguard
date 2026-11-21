@@ -1,15 +1,17 @@
 {
   "aggregate": {
-    "false_positive": 20,
-    "labeled": 36,
-    "reviewed": 36,
-    "reviewed_noise_rate": 0.5556,
-    "reviewed_precision": 0.4444,
-    "total": 36,
+    "false_positive": 34,
+    "labeled": 50,
+    "reviewed": 50,
+    "reviewed_noise_rate": 0.68,
+    "reviewed_precision": 0.32,
+    "total": 50,
     "true_positive": 16,
     "unsure": 0
   },
+  "evaluator_digest": "sha256:6153b1650e5364ff52f78703e855e5974412916bbe6f8747f2638d188860684f",
   "generated_by": "benchmarks/precision/precision.py",
+  "negative_control_corpus_digest": "sha256:af2ae62a16ddd2fad476cf7559dd84d541fc978d890fa5b543a60c0fa562d669",
   "repos": {
     "echo": {
       "false_positive": 2,
@@ -50,10 +52,40 @@
       "total": 26,
       "true_positive": 15,
       "unsure": 0
+    },
+    "owasp-benchmark-java": {
+      "false_positive": 14,
+      "labeled": 14,
+      "reviewed": 14,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 14,
+      "true_positive": 0,
+      "unsure": 0
     }
   },
   "rules": {
     "go/math-random-used": {
+      "false_positive": 2,
+      "labeled": 2,
+      "reviewed": 2,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 2,
+      "true_positive": 0,
+      "unsure": 0
+    },
+    "java/no-path-traversal": {
+      "false_positive": 12,
+      "labeled": 12,
+      "reviewed": 12,
+      "reviewed_noise_rate": 1.0,
+      "reviewed_precision": 0.0,
+      "total": 12,
+      "true_positive": 0,
+      "unsure": 0
+    },
+    "java/no-xss": {
       "false_positive": 2,
       "labeled": 2,
       "reviewed": 2,

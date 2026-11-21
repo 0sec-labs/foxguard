@@ -5,7 +5,7 @@ use regex::Regex;
 use crate::impl_rule;
 use crate::rules::common::{
     confidence_for_hops, get_source_line, hardcoded_secret_re, is_secret_value_long_enough,
-    make_finding, make_finding_from_offsets, walk_tree,
+    looks_like_secret_value, make_finding, make_finding_from_offsets, walk_tree,
 };
 use crate::rules::java_taint;
 use crate::{Finding, Language, Severity};
@@ -52,9 +52,35 @@ fn java_cors_wildcard_re() -> &'static Regex {
     })
 }
 
+/// True when `node` is a compile-time constant: a literal, or a `+`
+/// concatenation / parenthesised expression made only of constants.
+fn is_constant_expression(node: tree_sitter::Node, src: &str) -> bool {
+    match node.kind() {
+        "parenthesized_expression" => node
+            .named_child(0)
+            .is_some_and(|inner| is_constant_expression(inner, src)),
+        "binary_expression" => {
+            node.child_by_field_name("operator")
+                .is_some_and(|op| &src[op.byte_range()] == "+")
+                && node
+                    .child_by_field_name("left")
+                    .is_some_and(|n| is_constant_expression(n, src))
+                && node
+                    .child_by_field_name("right")
+                    .is_some_and(|n| is_constant_expression(n, src))
+        }
+        _ => is_literal(node),
+    }
+}
+
 /// Check whether any descendant of `node` is a `binary_expression` with a `+`
-/// operator that involves a `string_literal`.
+/// operator that involves a `string_literal` and at least one non-constant
+/// operand. Pure literal concatenation (`"SELECT " + "1"`) cannot carry
+/// attacker input and is not reported.
 fn has_string_concat(node: tree_sitter::Node, src: &str) -> bool {
+    if node.kind() == "binary_expression" && is_constant_expression(node, src) {
+        return false;
+    }
     if node.kind() == "binary_expression" {
         if let Some(op) = node.child_by_field_name("operator") {
             if &src[op.byte_range()] == "+" {
@@ -330,7 +356,9 @@ impl_rule! {
             if node.kind() == "method_invocation" {
                 if let Some(name) = node.child_by_field_name("name") {
                     let name_text = &src[name.byte_range()];
-                    if sql_methods.is_match(name_text) {
+                    if sql_methods.is_match(name_text)
+                        && (name_text != "execute" || java_taint::is_plausible_jdbc_execute(node, src))
+                    {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if has_string_concat(args, src) {
                                 findings.push(make_finding(
@@ -867,6 +895,33 @@ impl_rule! {
     }
 }
 
+/// True when a string literal's contents look like a configuration or
+/// property *key* (the name of a secret) rather than a secret value:
+/// a dotted lower-case key (`db.password`, `app.secret-key`), an
+/// upper-case environment-variable name (`DB_PASSWORD`), or a Spring/Ant
+/// style `${placeholder}` reference. Real secrets almost always carry digits,
+/// mixed case or symbols in a shape these patterns do not accept.
+fn looks_like_property_key(value: &str) -> bool {
+    static DOTTED: OnceLock<Regex> = OnceLock::new();
+    static ENV: OnceLock<Regex> = OnceLock::new();
+    static PLACEHOLDER: OnceLock<Regex> = OnceLock::new();
+    let dotted = DOTTED.get_or_init(|| {
+        Regex::new(r"^[a-z][a-z_-]*(\.[a-z][a-z_-]*)+$").expect("dotted key regex compiles")
+    });
+    let env =
+        ENV.get_or_init(|| Regex::new(r"^[A-Z][A-Z]*(_[A-Z]+)+$").expect("env key regex compiles"));
+    let placeholder = PLACEHOLDER.get_or_init(|| {
+        Regex::new(r"^\$\{[A-Za-z0-9_.:-]+\}$").expect("placeholder regex compiles")
+    });
+    dotted.is_match(value) || env.is_match(value) || placeholder.is_match(value)
+}
+
+/// Reject literal values that are not plausible secrets (property keys,
+/// URLs, paths, prose).
+fn is_plausible_java_secret(value: &str) -> bool {
+    looks_like_secret_value(value) && !looks_like_property_key(value)
+}
+
 // ─── Rule 7: no-hardcoded-secret ────────────────────────────────────────────
 
 pub struct NoHardcodedSecret;
@@ -893,7 +948,8 @@ impl_rule! {
                             if value.kind() == "string_literal" {
                                 let val = &src[value.byte_range()];
                                 let inner = val.trim_matches('"');
-                                if is_secret_value_long_enough(inner, ctx.secret_thresholds) {
+                                if is_plausible_java_secret(inner)
+                                    && is_secret_value_long_enough(inner, ctx.secret_thresholds) {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),
@@ -921,7 +977,8 @@ impl_rule! {
                             if right.kind() == "string_literal" {
                                 let val = &src[right.byte_range()];
                                 let inner = val.trim_matches('"');
-                                if is_secret_value_long_enough(inner, ctx.secret_thresholds) {
+                                if is_plausible_java_secret(inner)
+                                    && is_secret_value_long_enough(inner, ctx.secret_thresholds) {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),
@@ -1060,7 +1117,7 @@ impl_rule! {
             if node.kind() == "method_invocation" {
                 if let Some(name) = node.child_by_field_name("name") {
                     let name_text = &src[name.byte_range()];
-                    if name_text == "write" || name_text == "println" || name_text == "print" {
+                    if matches!(name_text, "write" | "println" | "print") {
                         if let Some(obj) = node.child_by_field_name("object") {
                             let obj_text = &src[obj.byte_range()];
                             // Match response.getWriter().write/println, out.write/println,
@@ -1076,7 +1133,7 @@ impl_rule! {
                                         // Flag if the argument is not a pure literal
                                         // (i.e. it's a variable, concatenation, method call, etc.)
                                         if !is_literal(first_arg)
-                                            && first_arg.kind() != "string_literal"
+                                            && !is_encoded_or_constant_output(first_arg, src)
                                         {
                                             let mut f = make_finding(
                                                 _self.id(),
@@ -1099,6 +1156,54 @@ impl_rule! {
         });
         findings
 
+    }
+}
+
+/// Output-encoding methods (OWASP ESAPI / Java Encoder, Commons Text and
+/// Lang, Spring `HtmlUtils`) whose result is safe to write into a response.
+const HTML_ENCODER_METHODS: &[&str] = &[
+    "encodeForHTML",
+    "encodeForHTMLAttribute",
+    "encodeForJavaScript",
+    "encodeForCSS",
+    "encodeForURL",
+    "forHtml",
+    "forHtmlContent",
+    "forHtmlAttribute",
+    "forJavaScript",
+    "forCssString",
+    "escapeHtml",
+    "escapeHtml3",
+    "escapeHtml4",
+    "escapeXml",
+    "escapeXml10",
+    "escapeXml11",
+    "escapeEcmaScript",
+    "escapeJavaScript",
+    "htmlEscape",
+];
+
+/// True when every operand of `node` is a literal or a call to a known
+/// output encoder, so the written value cannot carry markup.
+fn is_encoded_or_constant_output(node: tree_sitter::Node, src: &str) -> bool {
+    match node.kind() {
+        "parenthesized_expression" => node
+            .named_child(0)
+            .is_some_and(|inner| is_encoded_or_constant_output(inner, src)),
+        "binary_expression" => {
+            node.child_by_field_name("operator")
+                .is_some_and(|op| &src[op.byte_range()] == "+")
+                && node
+                    .child_by_field_name("left")
+                    .is_some_and(|n| is_encoded_or_constant_output(n, src))
+                && node
+                    .child_by_field_name("right")
+                    .is_some_and(|n| is_encoded_or_constant_output(n, src))
+        }
+        "method_invocation" => node
+            .child_by_field_name("name")
+            .is_some_and(|name| HTML_ENCODER_METHODS.contains(&&src[name.byte_range()])),
+        _ => is_literal(node),
     }
 }
 
@@ -1515,5 +1620,67 @@ impl_rule! {
             .map(|(_, spec)| spec)
             .unwrap_or_default();
         run_java_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+#[cfg(test)]
+mod precision_tests {
+    use super::*;
+    use crate::engine::parser::parse_file;
+    use crate::rules::{FileContext, Rule};
+
+    fn run(rule: &dyn Rule, src: &str) -> Vec<Finding> {
+        let tree = parse_file(src, Language::Java).expect("Java fixture should parse");
+        rule.check_with_context(src, &tree, &FileContext::default())
+    }
+
+    #[test]
+    fn constant_concatenation_sql_is_not_flagged() {
+        let src = r#"class C { void f(java.sql.Statement s, String p) throws Exception {
+            s.executeQuery("SELECT " + "a" + " FROM " + ("t" + "x"));
+            s.execute("SELECT " + "1");
+            s.executeQuery("SELECT * FROM t WHERE a=" + p);
+        } }"#;
+        let findings = run(&NoSqlInjection, src);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].line, 4);
+    }
+
+    #[test]
+    fn non_jdbc_execute_is_not_flagged() {
+        let src = r#"class C extends B { void f(java.util.concurrent.Executor executor, String p) {
+            executor.execute("job-" + p);
+            super.execute("x" + p);
+        } }"#;
+        assert!(run(&NoSqlInjection, src).is_empty());
+    }
+
+    #[test]
+    fn encoded_or_constant_output_is_not_xss() {
+        let src = r#"class C { void f(javax.servlet.http.HttpServletResponse response, String p) throws Exception {
+            response.getWriter().println("a" + "b");
+            response.getWriter().println("x: " + org.owasp.esapi.ESAPI.encoder().encodeForHTML(p));
+            response.getWriter().write(Encode.forHtml(p) + ("<" + "b>"));
+            response.getWriter().println("x: " + p);
+            response.getWriter().println(p.trim());
+        } }"#;
+        let findings = run(&NoXss, src);
+        let lines: Vec<usize> = findings.iter().map(|f| f.line).collect();
+        assert_eq!(lines, vec![5, 6], "{findings:?}");
+    }
+
+    #[test]
+    fn property_key_strings_are_not_secrets() {
+        let src = r#"class C {
+            static final String A = "x";
+            String passwordKey = "db.password";
+            String secretEnv = "DB_PASSWORD_FILE";
+            String tokenRef = "${app.secret.token}";
+            String password = "hunter2-prod-Xk9";
+            String apiKey = "sk_live_abcdef123456";
+        }"#;
+        let findings = run(&NoHardcodedSecret, src);
+        let lines: Vec<usize> = findings.iter().map(|f| f.line).collect();
+        assert_eq!(lines, vec![6, 7], "{findings:?}");
     }
 }

@@ -30,11 +30,33 @@ is deliberately small enough for local and scheduled CI runs:
 | flask | Python | `src/flask` | Reference production framework code |
 | echo | Go | `.` excluding `*_test.go` | Production framework code with Go rules |
 | juice-shop | JavaScript | `routes` | Intentionally vulnerable route handlers |
+| owasp-benchmark-java | Java | `src/main/java/.../helpers` | Small reviewable Java slice (Benchmark support code, not the generated test cases) |
 
-The current blessed snapshot covers 36 findings: 16 true positives,
-20 false positives, and 0 unsure labels. Reviewed precision is 44.4%;
-reviewed noise is 55.6%. Treat this as a regression baseline and backlog map,
+The current blessed snapshot covers 50 findings: 16 true positives,
+34 false positives, and 0 unsure labels. Reviewed precision is 32.0%;
+reviewed noise is 68.0%. The Java slice contributes 14 reviewed false
+positives and no true positives, so it is a noise backlog, not a recall signal. Treat this as a regression baseline and backlog map,
 not as a global precision claim.
+
+## OWASP Benchmark (Java) tracker
+
+Per-finding labels do not scale to the ~1,500 findings the full OWASP
+Benchmark produces, so `owasp_java.py` joins findings to the Benchmark's own
+ground truth (`expectedresults-1.2.csv`) instead and tracks TPR, FPR and
+finding volume against `owasp_java_expected.json`:
+
+```sh
+git clone https://github.com/OWASP-Benchmark/BenchmarkJava.git /tmp/BenchmarkJava
+git -C /tmp/BenchmarkJava checkout 10dfcc54ad02dcfcb358b0ba4a0fef8c919a6d17
+python3 benchmarks/precision/owasp_java.py --foxguard target/release/foxguard \
+  --benchmark-dir /tmp/BenchmarkJava --check
+```
+
+A test file counts as detected when foxguard reports the category's CWE in it.
+`--check` fails if FPR rises or TPR falls by more than one point. A full run
+takes a few minutes. These numbers describe the deterministic pattern/taint
+layer only: use them as a regression signal and do not publish them as Java
+accuracy (the agent-layer benchmark in `0` is the publishable measurement).
 
 ## 0research fixed negative cases
 
