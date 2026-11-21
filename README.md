@@ -212,9 +212,13 @@ Use `foxguard tui --baseline .foxguard/baseline.json .` to review a saved
 baseline comparison. Unlike CLI suppression, terminal review retains current
 findings and separates **introduced**, **recurring**, and **resolved** entries.
 Resolved means absent from the current scan's output, not verified remediation:
-compare equivalent scope, rules, and thresholds. Baseline identity includes the
-file and source location, so moving a finding can appear as introduced plus
-resolved. Resolved rows are read-only historical metadata; only search applies,
+compare equivalent scope, rules, and thresholds. Baseline entries written by this
+version also carry a line-insensitive `stable_fingerprint` (rule, file,
+whitespace-normalised snippet, description), so inserting lines above a
+finding does not make it new. Older baselines (positional fingerprint only)
+still load and match as before; re-run `foxguard baseline` to add the stable
+fingerprints. Editing the flagged code itself, or moving it to another file,
+still appears as introduced plus resolved. Resolved rows are read-only historical metadata; only search applies,
 and `v` expands their scrollable details. Switch back to a current-finding category
 to triage or export the current scan.
 Git Diff remains a separate comparison against a branch.
