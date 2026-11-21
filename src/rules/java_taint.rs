@@ -987,6 +987,11 @@ fn find_sinks(
         let taint = sink_argument_taint(node, src, spec, policy, state)
             .or_else(|| read_object_receiver_taint(node, src, state));
         if let Some(info) = taint {
+            // Flow-sensitive veto: the insensitive walk above cannot see a value
+            // that was replaced or folded to a constant before this call.
+            if crate::rules::java_flow::sink_args_safe(node, src, false) {
+                return;
+            }
             // Taint-labels gating: when a `LabelPolicy` is active the sink fires
             // ONLY if the reaching value carries the required label (e.g.
             // `requires: CONCAT`). A value that reached the sink WITHOUT going
@@ -2187,5 +2192,34 @@ class C extends Base {
         let mut lines: Vec<usize> = findings.iter().map(|f| f.sink_line).collect();
         lines.sort_unstable();
         assert_eq!(lines, vec![8, 9], "{findings:?}");
+    }
+
+    #[test]
+    fn sql_flow_sensitive_constant_replacement() {
+        let src = r#"
+class C {
+    void tp(HttpServletRequest request, Statement stmt) throws Exception {
+        String p = request.getParameter("p");
+        int num = 106;
+        String bar = (7 * 42) - num > 200 ? "safe" : p;
+        stmt.executeQuery("SELECT " + bar);
+    }
+    void ok(HttpServletRequest request, Statement stmt) throws Exception {
+        String p = request.getParameter("p");
+        int num = 86;
+        String bar = (7 * 42) - num > 200 ? "safe" : p;
+        stmt.executeQuery("SELECT " + bar);
+    }
+    void ok_reassigned(HttpServletRequest request, Statement stmt) throws Exception {
+        String p = request.getParameter("p");
+        p = "constant";
+        stmt.executeQuery("SELECT " + p);
+    }
+}
+"#;
+        let findings = analyze(src, &sql_injection_spec());
+        let mut lines: Vec<usize> = findings.iter().map(|f| f.sink_line).collect();
+        lines.sort_unstable();
+        assert_eq!(lines, vec![7], "{findings:?}");
     }
 }

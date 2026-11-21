@@ -1,12 +1,12 @@
 {
   "aggregate": {
-    "benchmark_score": 0.0068,
+    "benchmark_score": 0.1177,
     "fn": 1210,
-    "fp": 183,
-    "fpr": 0.1381,
-    "precision": 0.5284,
-    "tn": 1142,
-    "total_findings": 1471,
+    "fp": 36,
+    "fpr": 0.0272,
+    "precision": 0.8506,
+    "tn": 1289,
+    "total_findings": 1324,
     "tp": 205,
     "tpr": 0.1449
   },
@@ -14,8 +14,8 @@
   "categories": {
     "cmdi": {
       "fn": 106,
-      "fp": 15,
-      "tn": 110,
+      "fp": 6,
+      "tn": 119,
       "tp": 20
     },
     "crypto": {
@@ -50,8 +50,8 @@
     },
     "sqli": {
       "fn": 226,
-      "fp": 44,
-      "tn": 188,
+      "fp": 5,
+      "tn": 227,
       "tp": 46
     },
     "trustbound": {
@@ -74,19 +74,19 @@
     },
     "xss": {
       "fn": 107,
-      "fp": 124,
-      "tn": 85,
+      "fp": 25,
+      "tn": 184,
       "tp": 139
     }
   },
   "findings_by_rule": {
-    "java/no-command-injection": 35,
+    "java/no-command-injection": 26,
     "java/no-hardcoded-secret": 1,
     "java/no-path-traversal": 13,
     "java/no-ssrf": 1,
-    "java/no-xss": 1324,
+    "java/no-xss": 1225,
     "java/no-xxe": 1,
     "java/taint-command-injection": 6,
-    "java/taint-sql-injection": 90
+    "java/taint-sql-injection": 51
   }
 }
