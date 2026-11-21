@@ -1117,7 +1117,10 @@ impl_rule! {
             if node.kind() == "method_invocation" {
                 if let Some(name) = node.child_by_field_name("name") {
                     let name_text = &src[name.byte_range()];
-                    if name_text == "write" || name_text == "println" || name_text == "print" {
+                    if matches!(
+                        name_text,
+                        "write" | "println" | "print" | "format" | "printf"
+                    ) {
                         if let Some(obj) = node.child_by_field_name("object") {
                             let obj_text = &src[obj.byte_range()];
                             // Match response.getWriter().write/println, out.write/println,
@@ -1133,7 +1136,7 @@ impl_rule! {
                                         // Flag if the argument is not a pure literal
                                         // (i.e. it's a variable, concatenation, method call, etc.)
                                         if !is_literal(first_arg)
-                                            && first_arg.kind() != "string_literal"
+                                            && !is_encoded_or_constant_output(first_arg, src)
                                         {
                                             let mut f = make_finding(
                                                 _self.id(),
@@ -1156,6 +1159,54 @@ impl_rule! {
         });
         findings
 
+    }
+}
+
+/// Output-encoding methods (OWASP ESAPI / Java Encoder, Commons Text and
+/// Lang, Spring `HtmlUtils`) whose result is safe to write into a response.
+const HTML_ENCODER_METHODS: &[&str] = &[
+    "encodeForHTML",
+    "encodeForHTMLAttribute",
+    "encodeForJavaScript",
+    "encodeForCSS",
+    "encodeForURL",
+    "forHtml",
+    "forHtmlContent",
+    "forHtmlAttribute",
+    "forJavaScript",
+    "forCssString",
+    "escapeHtml",
+    "escapeHtml3",
+    "escapeHtml4",
+    "escapeXml",
+    "escapeXml10",
+    "escapeXml11",
+    "escapeEcmaScript",
+    "escapeJavaScript",
+    "htmlEscape",
+];
+
+/// True when every operand of `node` is a literal or a call to a known
+/// output encoder, so the written value cannot carry markup.
+fn is_encoded_or_constant_output(node: tree_sitter::Node, src: &str) -> bool {
+    match node.kind() {
+        "parenthesized_expression" => node
+            .named_child(0)
+            .is_some_and(|inner| is_encoded_or_constant_output(inner, src)),
+        "binary_expression" => {
+            node.child_by_field_name("operator")
+                .is_some_and(|op| &src[op.byte_range()] == "+")
+                && node
+                    .child_by_field_name("left")
+                    .is_some_and(|n| is_encoded_or_constant_output(n, src))
+                && node
+                    .child_by_field_name("right")
+                    .is_some_and(|n| is_encoded_or_constant_output(n, src))
+        }
+        "method_invocation" => node
+            .child_by_field_name("name")
+            .is_some_and(|name| HTML_ENCODER_METHODS.contains(&&src[name.byte_range()])),
+        _ => is_literal(node),
     }
 }
 
@@ -1605,6 +1656,23 @@ mod precision_tests {
             super.execute("x" + p);
         } }"#;
         assert!(run(&NoSqlInjection, src).is_empty());
+    }
+
+    #[test]
+    fn encoded_or_constant_output_is_not_xss() {
+        let src = r#"class C { void f(javax.servlet.http.HttpServletResponse response, String p) throws Exception {
+            response.getWriter().println("a" + "b");
+            response.getWriter().println("x: " + org.owasp.esapi.ESAPI.encoder().encodeForHTML(p));
+            response.getWriter().write(Encode.forHtml(p) + ("<" + "b>"));
+            response.getWriter().println("x: " + p);
+            response.getWriter().println(p.trim());
+            response.getWriter().format(p, new Object[] {});
+            response.getWriter().printf("%s", p);
+            response.getWriter().format("<b>%s</b>", new Object[] {});
+        } }"#;
+        let findings = run(&NoXss, src);
+        let lines: Vec<usize> = findings.iter().map(|f| f.line).collect();
+        assert_eq!(lines, vec![5, 6, 7], "{findings:?}");
     }
 
     #[test]
