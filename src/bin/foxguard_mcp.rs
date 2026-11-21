@@ -471,6 +471,8 @@ fn scan_args(arguments: &Value, pq_mode: bool) -> Result<ScanArgs, String> {
         quiet: true,
         output: None,
         max_file_size: optional_u64(arguments, "max_file_size")?.unwrap_or(DEFAULT_MAX_FILE_SIZE),
+        file_timeout: foxguard::engine::budget::DEFAULT_FILE_TIMEOUT_SECS,
+        on_file_timeout: foxguard::cli::FileTimeoutPolicy::Fail,
         show_confidence: false,
         min_confidence: optional_f32(arguments, "min_confidence")?,
         pq_mode,

@@ -179,9 +179,18 @@ impl<'a> AstRuleBatch<'a> {
         self.entries.is_empty()
     }
 
-    fn run(&self, source: &str, tree: &tree_sitter::Tree, ctx: &FileContext<'_>) -> Vec<Finding> {
+    /// Returns `None` if the per-file time budget ran out between rules.
+    fn run(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Option<Vec<Finding>> {
         let mut findings = Vec::with_capacity(self.syntax_tree_rules + self.context_rules);
         for entry in &self.entries {
+            if super::budget::expired() {
+                return None;
+            }
             match entry.requirement {
                 AstAnalysisRequirement::SyntaxTree => {
                     findings.extend(entry.rule.check(source, tree));
@@ -191,7 +200,7 @@ impl<'a> AstRuleBatch<'a> {
                 }
             }
         }
-        findings
+        Some(findings)
     }
 }
 
@@ -210,6 +219,8 @@ pub struct ScanStats {
     pub read_error_files: usize,
     pub minified_files: usize,
     pub parse_error_files: usize,
+    /// Files abandoned because they exceeded the per-file time budget.
+    pub timed_out_files: usize,
     /// Failed traversals; the number of files hidden by them is unknown.
     pub walk_errors: usize,
 }
@@ -235,6 +246,7 @@ impl ScanStats {
             ScanSkipReason::ReadError => self.read_error_files += 1,
             ScanSkipReason::Minified => self.minified_files += 1,
             ScanSkipReason::ParseError => self.parse_error_files += 1,
+            ScanSkipReason::Timeout => self.timed_out_files += 1,
         }
     }
 
@@ -251,6 +263,7 @@ impl ScanStats {
         self.read_error_files += other.read_error_files;
         self.minified_files += other.minified_files;
         self.parse_error_files += other.parse_error_files;
+        self.timed_out_files += other.timed_out_files;
         self.walk_errors += other.walk_errors;
     }
 
@@ -269,12 +282,22 @@ impl ScanStats {
         push_count(&mut parts, self.read_error_files, "read error");
         push_count(&mut parts, self.minified_files, "minified");
         push_count(&mut parts, self.parse_error_files, "parse error");
+        push_count(&mut parts, self.timed_out_files, "timed out");
 
         Some(parts.join(", "))
     }
 
     pub fn error_summary(&self) -> Option<String> {
+        self.error_summary_with(true)
+    }
+
+    /// Like [`error_summary`](Self::error_summary); timed-out files count as
+    /// errors only when `timeouts_fatal` is set.
+    pub fn error_summary_with(&self, timeouts_fatal: bool) -> Option<String> {
         let mut parts = Vec::new();
+        if timeouts_fatal {
+            push_count(&mut parts, self.timed_out_files, "file timeout");
+        }
         push_count(&mut parts, self.read_error_files, "file read error");
         push_count(&mut parts, self.metadata_error_files, "file metadata error");
         push_count(&mut parts, self.walk_errors, "directory traversal error");
@@ -297,6 +320,7 @@ enum ScanSkipReason {
     ReadError,
     Minified,
     ParseError,
+    Timeout,
 }
 
 struct FileScanOutcome {
@@ -341,6 +365,9 @@ impl StoredPreparedFile {
     fn prepare(&self, path: &Path) -> PreparedFile {
         // The identical immutable source/grammar parsed successfully in pass 1.
         // Refuse to publish a partial scan if that invariant ever breaks.
+        // Re-parsing is bounded work already done once; keep the per-file
+        // budget from cancelling it.
+        let _unbudgeted = super::budget::FileBudgetGuard::start(None);
         let tree = super::parser::parse_path(&self.source, self.language, path)
             .expect("previously parsed immutable scanner source must reparse");
         PreparedFile {
@@ -611,7 +638,14 @@ pub fn scan_directory_with_notices(
 
     let mut discovery_notices = Vec::new();
     let (files, stats) = collect_scan_files(root_path, scan_root, excludes, &mut discovery_notices);
-    let (result, mut notices) = scan_files(scan_root, files, registry, max_file_size, stats);
+    let (result, mut notices) = scan_files(
+        scan_root,
+        files,
+        registry,
+        max_file_size,
+        stats,
+        super::budget::file_timeout(),
+    );
     notices.extend(discovery_notices);
     (result, notices)
 }
@@ -646,7 +680,14 @@ pub fn scan_paths_with_root_with_notices(
 ) -> (ScanResult, Vec<String>) {
     let scan_root = scan_root(root);
     let (files, stats) = collect_explicit_scan_files(scan_root, paths, excludes);
-    scan_files(scan_root, files, registry, max_file_size, stats)
+    scan_files(
+        scan_root,
+        files,
+        registry,
+        max_file_size,
+        stats,
+        super::budget::file_timeout(),
+    )
 }
 
 fn collect_scan_files(
@@ -1019,6 +1060,7 @@ fn scan_files(
     registry: &RuleRegistry,
     max_file_size: u64,
     mut stats: ScanStats,
+    file_budget: Option<std::time::Duration>,
 ) -> (ScanResult, Vec<String>) {
     let start = Instant::now();
     let warnings = Mutex::new(Vec::new());
@@ -1093,6 +1135,8 @@ fn scan_files(
             let prepared_python: Vec<_> = python_files
                 .par_iter()
                 .filter_map(|(path, _)| {
+                    let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                    let _budget = super::budget::FileBudgetGuard::start(file_budget);
                     if std::fs::metadata(path).ok()?.len() > max_file_size {
                         return None;
                     }
@@ -1156,6 +1200,8 @@ fn scan_files(
                 let import_maps: HashMap<PathBuf, HashMap<String, PathBuf>> = python_files
                     .iter()
                     .filter_map(|(path, _)| {
+                        let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                        let _budget = super::budget::FileBudgetGuard::start(file_budget);
                         let prepared = prepared_files
                             .get(path)
                             .map(|stored| stored.prepare(path))?;
@@ -1239,6 +1285,7 @@ fn scan_files(
         let prepared_js: Vec<_> = js_files
             .par_iter()
             .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
                 if std::fs::metadata(path).ok()?.len() > max_file_size {
                     return None;
                 }
@@ -1300,6 +1347,8 @@ fn scan_files(
             let import_maps: HashMap<PathBuf, HashMap<String, PathBuf>> = js_files
                 .iter()
                 .filter_map(|(path, _)| {
+                    let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                    let _budget = super::budget::FileBudgetGuard::start(file_budget);
                     let prepared = prepared_files
                         .get(path)
                         .map(|stored| stored.prepare(path))?;
@@ -1382,6 +1431,7 @@ fn scan_files(
         let prepared_go: Vec<_> = go_files
             .par_iter()
             .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
                 if std::fs::metadata(path).ok()?.len() > max_file_size {
                     return None;
                 }
@@ -1529,6 +1579,7 @@ fn scan_files(
         let prepared_java: Vec<_> = java_files
             .par_iter()
             .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
                 if std::fs::metadata(path).ok()?.len() > max_file_size {
                     return None;
                 }
@@ -1680,6 +1731,7 @@ fn scan_files(
         let prepared_ruby: Vec<_> = ruby_files
             .par_iter()
             .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
                 if std::fs::metadata(path).ok()?.len() > max_file_size {
                     return None;
                 }
@@ -1829,6 +1881,7 @@ fn scan_files(
         let prepared_php: Vec<_> = php_files
             .par_iter()
             .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
                 if std::fs::metadata(path).ok()?.len() > max_file_size {
                     return None;
                 }
@@ -1978,6 +2031,7 @@ fn scan_files(
         let prepared_csharp: Vec<_> = csharp_files
             .par_iter()
             .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
                 if std::fs::metadata(path).ok()?.len() > max_file_size {
                     return None;
                 }
@@ -2126,6 +2180,7 @@ fn scan_files(
         let prepared_kotlin: Vec<_> = kotlin_files
             .par_iter()
             .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
                 if std::fs::metadata(path).ok()?.len() > max_file_size {
                     return None;
                 }
@@ -2409,6 +2464,15 @@ fn scan_files(
             if is_noise_path(path) {
                 return FileScanOutcome::skipped(ScanSkipReason::Noise);
             }
+            let _budget = super::budget::FileBudgetGuard::start(file_budget);
+            let timed_out = || {
+                warnings.lock().expect("lock poisoned").push(format!(
+                    "warning: {} timed out after {:.1}s (--file-timeout); file not fully analysed",
+                    path.display(),
+                    file_budget.map_or(0.0, |b| b.as_secs_f64())
+                ));
+                FileScanOutcome::skipped(ScanSkipReason::Timeout)
+            };
 
             match std::fs::metadata(path) {
                 Ok(m) if m.len() > max_file_size => {
@@ -2475,6 +2539,9 @@ fn scan_files(
                 &prepared.tree
             } else {
                 let Some(parsed_tree) = super::parser::parse_path(source, *language, path) else {
+                    if super::budget::expired() {
+                        return timed_out();
+                    }
                     warnings.lock().expect("lock poisoned").push(format!(
                         "warning: skipping {} (parser could not build a syntax tree)",
                         path.display()
@@ -2493,6 +2560,9 @@ fn scan_files(
                 owned_tree = parsed_tree;
                 &owned_tree
             };
+            if super::budget::expired() {
+                return timed_out();
+            }
             let mut file_stats = ScanStats::default();
             file_stats.record_scanned();
 
@@ -2747,11 +2817,17 @@ fn scan_files(
                     .map(|spec| spec.rule_id)
                     .collect();
                 if !enabled_ids.is_empty() {
+                    if super::budget::expired() {
+                        return timed_out();
+                    }
                     file_findings.extend(runner(source, tree, &ctx, &enabled_ids));
                 }
             }
 
-            file_findings.extend(ast_rule_batch.run(source, tree, &ctx));
+            let Some(ast_findings) = ast_rule_batch.run(source, tree, &ctx) else {
+                return timed_out();
+            };
+            file_findings.extend(ast_findings);
 
             for finding in &mut file_findings {
                 finding.file = file_str.clone();
@@ -3055,7 +3131,7 @@ mod tests {
         let source = "const value = 1;\n";
         let tree = super::super::parser::parse_file(source, Language::JavaScript).expect("parse");
 
-        let findings = batch.run(source, &tree, &FileContext::default());
+        let findings = batch.run(source, &tree, &FileContext::default()).unwrap();
 
         assert!(findings.is_empty());
         assert_eq!(syntax_calls.load(Ordering::SeqCst), 1);
@@ -3199,6 +3275,50 @@ mod tests {
             detect_language(Path::new("Bindings.hsc")),
             Some(Language::Haskell)
         );
+    }
+
+    #[test]
+    fn exhausted_file_budget_reports_timeout_instead_of_dropping_file() {
+        let repo = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(repo.path().join("slow.js"), "var a = 1;\n").unwrap();
+        let files = vec![(repo.path().join("slow.js"), Language::JavaScript)];
+        let scan = |budget| {
+            scan_files(
+                repo.path(),
+                files.clone(),
+                &RuleRegistry::empty(),
+                1_048_576,
+                ScanStats::default(),
+                budget,
+            )
+        };
+
+        let (result, notices) = scan(Some(std::time::Duration::ZERO));
+        assert_eq!(result.stats.timed_out_files, 1);
+        assert_eq!(result.stats.files_scanned, 0);
+        assert!(result
+            .stats
+            .skipped_summary()
+            .unwrap()
+            .contains("timed out"));
+        assert!(
+            notices
+                .iter()
+                .any(|n| n.contains("slow.js") && n.contains("timed out")),
+            "expected timeout notice, got {notices:?}"
+        );
+        // Exit policy: fatal by default, tolerated when explicitly allowed.
+        assert!(result
+            .stats
+            .error_summary()
+            .unwrap()
+            .contains("file timeout"));
+        assert!(result.stats.error_summary_with(false).is_none());
+
+        let (result, notices) = scan(None);
+        assert_eq!(result.stats.timed_out_files, 0);
+        assert_eq!(result.stats.files_scanned, 1);
+        assert!(notices.is_empty());
     }
 
     #[test]
