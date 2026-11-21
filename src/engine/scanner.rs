@@ -1556,13 +1556,12 @@ fn scan_files(
             // directory belong to the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &go_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
@@ -1731,13 +1730,12 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &java_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
@@ -1909,13 +1907,12 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &ruby_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
@@ -2082,13 +2079,12 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &php_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
@@ -2253,13 +2249,12 @@ fn scan_files(
             // directory are treated as the same namespace and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &csharp_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
@@ -2426,13 +2421,12 @@ fn scan_files(
             // directory are treated as the same package and resolve each other.
             let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
             for (path, _) in &kotlin_files {
-                if let Some(prepared) = prepared_files.get(path).map(|stored| stored.prepare(path))
-                {
+                if let Some(stored) = prepared_files.get(path) {
                     if let Some(dir) = path.parent() {
                         dir_index
                             .entry(dir.to_path_buf())
                             .or_default()
-                            .push(prepared.canonical_path.clone());
+                            .push(stored.canonical_path.clone());
                     }
                 }
             }
