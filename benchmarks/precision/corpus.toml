@@ -43,3 +43,11 @@ ref = "1867b926c5f50e4e692dc9c8f61821413cebe0cd" # v17.3.0
 language = "javascript"
 scan_subdir = "routes"
 notes = "OWASP Juice Shop intentionally vulnerable route handlers."
+
+[[repos]]
+name = "owasp-benchmark-java"
+url = "https://github.com/OWASP-Benchmark/BenchmarkJava.git"
+ref = "10dfcc54ad02dcfcb358b0ba4a0fef8c919a6d17"
+language = "java"
+scan_subdir = "src/main/java/org/owasp/benchmark/helpers"
+notes = "OWASP Benchmark support code (not the generated test cases); a small reviewable Java slice. Whole-benchmark recall/FPR is tracked separately by owasp_java.py."

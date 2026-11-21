@@ -1,0 +1,92 @@
+{
+  "aggregate": {
+    "benchmark_score": 0.0069,
+    "fn": 1135,
+    "fp": 253,
+    "fpr": 0.1909,
+    "precision": 0.5253,
+    "tn": 1072,
+    "total_findings": 1616,
+    "tp": 280,
+    "tpr": 0.1979
+  },
+  "benchmark_ref": "10dfcc54ad02dcfcb358b0ba4a0fef8c919a6d17",
+  "categories": {
+    "cmdi": {
+      "fn": 106,
+      "fp": 15,
+      "tn": 110,
+      "tp": 20
+    },
+    "crypto": {
+      "fn": 130,
+      "fp": 0,
+      "tn": 116,
+      "tp": 0
+    },
+    "hash": {
+      "fn": 129,
+      "fp": 0,
+      "tn": 107,
+      "tp": 0
+    },
+    "ldapi": {
+      "fn": 27,
+      "fp": 0,
+      "tn": 32,
+      "tp": 0
+    },
+    "pathtraver": {
+      "fn": 133,
+      "fp": 0,
+      "tn": 135,
+      "tp": 0
+    },
+    "securecookie": {
+      "fn": 36,
+      "fp": 0,
+      "tn": 31,
+      "tp": 0
+    },
+    "sqli": {
+      "fn": 226,
+      "fp": 44,
+      "tn": 188,
+      "tp": 46
+    },
+    "trustbound": {
+      "fn": 83,
+      "fp": 0,
+      "tn": 43,
+      "tp": 0
+    },
+    "weakrand": {
+      "fn": 218,
+      "fp": 0,
+      "tn": 275,
+      "tp": 0
+    },
+    "xpathi": {
+      "fn": 15,
+      "fp": 0,
+      "tn": 20,
+      "tp": 0
+    },
+    "xss": {
+      "fn": 32,
+      "fp": 194,
+      "tn": 15,
+      "tp": 214
+    }
+  },
+  "findings_by_rule": {
+    "java/no-command-injection": 35,
+    "java/no-hardcoded-secret": 1,
+    "java/no-path-traversal": 13,
+    "java/no-ssrf": 1,
+    "java/no-xss": 1469,
+    "java/no-xxe": 1,
+    "java/taint-command-injection": 6,
+    "java/taint-sql-injection": 90
+  }
+}
