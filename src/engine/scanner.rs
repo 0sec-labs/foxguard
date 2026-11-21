@@ -1246,29 +1246,32 @@ fn scan_files(
                     // Read from an immutable snapshot so each round advances the
                     // frontier by exactly one hop regardless of file order.
                     let snapshot = summaries.clone();
+                    let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                        python_files
+                            .par_iter()
+                            .map(|(path, _)| {
+                                let stored = prepared_files.get(path)?;
+                                let canonical = stored.canonical_path.clone();
+                                let import_to_path = import_maps.get(&canonical)?;
+                                let prepared = stored.prepare(path);
+                                let composed = python_taint::compose_cross_file_summaries(
+                                    prepared.tree.root_node(),
+                                    &prepared.source,
+                                    Some(&prepared.aliases),
+                                    &rule_specs,
+                                    import_to_path,
+                                    &snapshot,
+                                    &allowed_rule_ids,
+                                );
+                                if composed.is_empty() {
+                                    None
+                                } else {
+                                    Some((canonical, composed))
+                                }
+                            })
+                            .collect();
                     let mut changed = false;
-                    for (path, _) in &python_files {
-                        let Some(prepared) =
-                            prepared_files.get(path).map(|stored| stored.prepare(path))
-                        else {
-                            continue;
-                        };
-                        let canonical = prepared.canonical_path.clone();
-                        let Some(import_to_path) = import_maps.get(&canonical) else {
-                            continue;
-                        };
-                        let composed = python_taint::compose_cross_file_summaries(
-                            prepared.tree.root_node(),
-                            &prepared.source,
-                            Some(&prepared.aliases),
-                            &rule_specs,
-                            import_to_path,
-                            &snapshot,
-                            &allowed_rule_ids,
-                        );
-                        if composed.is_empty() {
-                            continue;
-                        }
+                    for (canonical, composed) in composed_by_file.into_iter().flatten() {
                         let entry = summaries.entry(canonical).or_default();
                         for new_summary in composed {
                             match entry.iter_mut().find(|s| s.name == new_summary.name) {
@@ -1290,6 +1293,7 @@ fn scan_files(
                 }
             }
 
+            timing_mark("python pass1 + multi-hop compose", &mut phase);
             let has_summaries = !summaries.is_empty();
             (summaries, has_summaries)
         } else {
@@ -1394,29 +1398,31 @@ fn scan_files(
 
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = js_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = js_files
+                    .par_iter()
+                    .map(|(path, _)| {
+                        let stored = prepared_files.get(path)?;
+                        let canonical = stored.canonical_path.clone();
+                        let import_to_path = import_maps.get(&canonical)?;
+                        let prepared = stored.prepare(path);
+                        let composed = javascript_taint::compose_cross_file_summaries(
+                            prepared.tree.root_node(),
+                            &prepared.source,
+                            Some(&prepared.aliases),
+                            &js_rule_specs,
+                            import_to_path,
+                            &snapshot,
+                            &allowed_rule_ids,
+                        );
+                        if composed.is_empty() {
+                            None
+                        } else {
+                            Some((canonical, composed))
+                        }
+                    })
+                    .collect();
                 let mut changed = false;
-                for (path, _) in &js_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    let Some(import_to_path) = import_maps.get(&canonical) else {
-                        continue;
-                    };
-                    let composed = javascript_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        Some(&prepared.aliases),
-                        &js_rule_specs,
-                        import_to_path,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
                     let entry = js_summaries.entry(canonical).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
@@ -1438,6 +1444,7 @@ fn scan_files(
             }
         }
 
+        timing_mark("js pass1 + multi-hop compose", &mut phase);
         has_js_cross_file = !js_summaries.is_empty();
         cross_file_summaries.extend(js_summaries);
     }
@@ -1528,41 +1535,45 @@ fn scan_files(
 
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = go_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = go_files
+                    .par_iter()
+                    .map(|(path, _)| {
+                        let stored = prepared_files.get(path)?;
+                        let canonical = stored.canonical_path.clone();
+                        // Same-package siblings (excluding self).
+                        let same_package_paths: Vec<PathBuf> = path
+                            .parent()
+                            .and_then(|dir| dir_index.get(dir))
+                            .map(|siblings| {
+                                siblings
+                                    .iter()
+                                    .filter(|p| **p != canonical)
+                                    .cloned()
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if same_package_paths.is_empty() {
+                            return None;
+                        }
+                        let prepared = stored.prepare(path);
+                        let composed = go_taint::compose_cross_file_summaries(
+                            prepared.tree.root_node(),
+                            &prepared.source,
+                            Some(&prepared.aliases),
+                            &go_rule_specs,
+                            &same_package_paths,
+                            &snapshot,
+                            &allowed_rule_ids,
+                        );
+                        if composed.is_empty() {
+                            None
+                        } else {
+                            Some((canonical, composed))
+                        }
+                    })
+                    .collect();
                 let mut changed = false;
-                for (path, _) in &go_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    // Same-package siblings (excluding self).
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = go_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        Some(&prepared.aliases),
-                        &go_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
                     let entry = go_summaries.entry(canonical).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
@@ -1584,6 +1595,7 @@ fn scan_files(
             }
         }
 
+        timing_mark("go pass1 + multi-hop compose", &mut phase);
         has_go_cross_file = !go_summaries.is_empty();
         cross_file_summaries.extend(go_summaries);
     }
@@ -1842,40 +1854,45 @@ fn scan_files(
 
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = ruby_summaries.clone();
-                let mut changed = false;
-                for (path, _) in &ruby_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    ruby_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            let same_package_paths: Vec<PathBuf> = path
+                                .parent()
+                                .and_then(|dir| dir_index.get(dir))
+                                .map(|siblings| {
+                                    siblings
+                                        .iter()
+                                        .filter(|p| **p != canonical)
+                                        .cloned()
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = ruby_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &ruby_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
                         })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = ruby_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        None,
-                        &ruby_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
+                        .collect();
+                let mut changed = false;
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
                     let entry = ruby_summaries.entry(canonical).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
@@ -1897,6 +1914,7 @@ fn scan_files(
             }
         }
 
+        timing_mark("ruby pass1 + multi-hop compose", &mut phase);
         has_ruby_cross_file = !ruby_summaries.is_empty();
         cross_file_summaries.extend(ruby_summaries);
     }
@@ -1992,40 +2010,44 @@ fn scan_files(
 
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = php_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = php_files
+                    .par_iter()
+                    .map(|(path, _)| {
+                        let stored = prepared_files.get(path)?;
+                        let canonical = stored.canonical_path.clone();
+                        let same_package_paths: Vec<PathBuf> = path
+                            .parent()
+                            .and_then(|dir| dir_index.get(dir))
+                            .map(|siblings| {
+                                siblings
+                                    .iter()
+                                    .filter(|p| **p != canonical)
+                                    .cloned()
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if same_package_paths.is_empty() {
+                            return None;
+                        }
+                        let prepared = stored.prepare(path);
+                        let composed = php_taint::compose_cross_file_summaries(
+                            prepared.tree.root_node(),
+                            &prepared.source,
+                            None,
+                            &php_rule_specs,
+                            &same_package_paths,
+                            &snapshot,
+                            &allowed_rule_ids,
+                        );
+                        if composed.is_empty() {
+                            None
+                        } else {
+                            Some((canonical, composed))
+                        }
+                    })
+                    .collect();
                 let mut changed = false;
-                for (path, _) in &php_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = php_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        None,
-                        &php_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
                     let entry = php_summaries.entry(canonical).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
@@ -2047,6 +2069,7 @@ fn scan_files(
             }
         }
 
+        timing_mark("php pass1 + multi-hop compose", &mut phase);
         has_php_cross_file = !php_summaries.is_empty();
         cross_file_summaries.extend(php_summaries);
     }
@@ -2141,40 +2164,45 @@ fn scan_files(
 
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = csharp_summaries.clone();
-                let mut changed = false;
-                for (path, _) in &csharp_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    csharp_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            let same_package_paths: Vec<PathBuf> = path
+                                .parent()
+                                .and_then(|dir| dir_index.get(dir))
+                                .map(|siblings| {
+                                    siblings
+                                        .iter()
+                                        .filter(|p| **p != canonical)
+                                        .cloned()
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = csharp_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &csharp_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
                         })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = csharp_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        None,
-                        &csharp_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
+                        .collect();
+                let mut changed = false;
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
                     let entry = csharp_summaries.entry(canonical).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
@@ -2196,6 +2224,7 @@ fn scan_files(
             }
         }
 
+        timing_mark("csharp pass1 + multi-hop compose", &mut phase);
         has_csharp_cross_file = !csharp_summaries.is_empty();
         cross_file_summaries.extend(csharp_summaries);
     }
@@ -2291,40 +2320,45 @@ fn scan_files(
 
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = kotlin_summaries.clone();
-                let mut changed = false;
-                for (path, _) in &kotlin_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    kotlin_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            let same_package_paths: Vec<PathBuf> = path
+                                .parent()
+                                .and_then(|dir| dir_index.get(dir))
+                                .map(|siblings| {
+                                    siblings
+                                        .iter()
+                                        .filter(|p| **p != canonical)
+                                        .cloned()
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = kotlin_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &kotlin_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
                         })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = kotlin_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        None,
-                        &kotlin_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
+                        .collect();
+                let mut changed = false;
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
                     let entry = kotlin_summaries.entry(canonical).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
@@ -2346,6 +2380,7 @@ fn scan_files(
             }
         }
 
+        timing_mark("kotlin pass1 + multi-hop compose", &mut phase);
         has_kotlin_cross_file = !kotlin_summaries.is_empty();
         cross_file_summaries.extend(kotlin_summaries);
     }
