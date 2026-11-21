@@ -96,8 +96,16 @@ jobs:
           docker tag "foxguard-github-app:${ARCH}-smoke" "$arch_tag"
           docker push "$arch_tag"
           mkdir -p "$RUNNER_TEMP/github-app-image-digests"
-          docker image inspect "$arch_tag" --format '{{index .RepoDigests 0}}' \
-            > "$RUNNER_TEMP/github-app-image-digests/${ARCH}.txt"
+          # Read the digest the registry actually serves. `docker image inspect`
+          # RepoDigests can omit the registry host or report a local digest
+          # when the containerd image store is active, which breaks the
+          # manifest job ("pull access denied ... insufficient_scope").
+          digest="$(docker buildx imagetools inspect "$arch_tag" --format '{{.Manifest.Digest}}')"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Unexpected digest from registry: ${digest}" >&2
+            exit 1
+          fi
+          echo "${image}@${digest}" > "$RUNNER_TEMP/github-app-image-digests/${ARCH}.txt"
 
       - name: Upload immutable image reference
         if: inputs.push
