@@ -1242,6 +1242,11 @@ fn scan_files(
                     })
                     .collect();
 
+                // Canonical paths whose summaries changed in the previous round
+                // (`None` = first round, compose everything). A file's composition
+                // only reads its dependencies' summaries, so a file none of whose
+                // dependencies changed would recompute exactly what it already merged.
+                let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
                 for _round in 0..MAX_MULTIHOP_ROUNDS {
                     // Read from an immutable snapshot so each round advances the
                     // frontier by exactly one hop regardless of file order.
@@ -1253,6 +1258,11 @@ fn scan_files(
                                 let stored = prepared_files.get(path)?;
                                 let canonical = stored.canonical_path.clone();
                                 let import_to_path = import_maps.get(&canonical)?;
+                                if let Some(dirty) = &dirty {
+                                    if !import_to_path.values().any(|p| dirty.contains(p)) {
+                                        return None;
+                                    }
+                                }
                                 let prepared = stored.prepare(path);
                                 let composed = python_taint::compose_cross_file_summaries(
                                     prepared.tree.root_node(),
@@ -1271,22 +1281,29 @@ fn scan_files(
                             })
                             .collect();
                     let mut changed = false;
+                    let mut next_dirty = std::collections::HashSet::new();
                     for (canonical, composed) in composed_by_file.into_iter().flatten() {
-                        let entry = summaries.entry(canonical).or_default();
+                        let mut entry_changed = false;
+                        let entry = summaries.entry(canonical.clone()).or_default();
                         for new_summary in composed {
                             match entry.iter_mut().find(|s| s.name == new_summary.name) {
                                 Some(existing) => {
                                     if existing.merge_from(&new_summary) {
-                                        changed = true;
+                                        entry_changed = true;
                                     }
                                 }
                                 None => {
                                     entry.push(new_summary);
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                         }
+                        if entry_changed {
+                            changed = true;
+                            next_dirty.insert(canonical);
+                        }
                     }
+                    dirty = Some(next_dirty);
                     if !changed {
                         break;
                     }
@@ -1396,6 +1413,11 @@ fn scan_files(
                 })
                 .collect();
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = js_summaries.clone();
                 let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = js_files
@@ -1404,6 +1426,11 @@ fn scan_files(
                         let stored = prepared_files.get(path)?;
                         let canonical = stored.canonical_path.clone();
                         let import_to_path = import_maps.get(&canonical)?;
+                        if let Some(dirty) = &dirty {
+                            if !import_to_path.values().any(|p| dirty.contains(p)) {
+                                return None;
+                            }
+                        }
                         let prepared = stored.prepare(path);
                         let composed = javascript_taint::compose_cross_file_summaries(
                             prepared.tree.root_node(),
@@ -1422,22 +1449,29 @@ fn scan_files(
                     })
                     .collect();
                 let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
                 for (canonical, composed) in composed_by_file.into_iter().flatten() {
-                    let entry = js_summaries.entry(canonical).or_default();
+                    let mut entry_changed = false;
+                    let entry = js_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
@@ -1533,6 +1567,11 @@ fn scan_files(
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = go_summaries.clone();
                 let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = go_files
@@ -1555,6 +1594,11 @@ fn scan_files(
                         if same_package_paths.is_empty() {
                             return None;
                         }
+                        if let Some(dirty) = &dirty {
+                            if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                return None;
+                            }
+                        }
                         let prepared = stored.prepare(path);
                         let composed = go_taint::compose_cross_file_summaries(
                             prepared.tree.root_node(),
@@ -1573,22 +1617,29 @@ fn scan_files(
                     })
                     .collect();
                 let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
                 for (canonical, composed) in composed_by_file.into_iter().flatten() {
-                    let entry = go_summaries.entry(canonical).or_default();
+                    let mut entry_changed = false;
+                    let entry = go_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
@@ -1691,6 +1742,11 @@ fn scan_files(
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = java_summaries.clone();
                 // Every file composes against the immutable snapshot, so the
@@ -1718,6 +1774,11 @@ fn scan_files(
                             if same_package_paths.is_empty() {
                                 return None;
                             }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
                             let prepared = stored.prepare(path);
                             let composed = java_taint::compose_cross_file_summaries(
                                 prepared.tree.root_node(),
@@ -1736,22 +1797,29 @@ fn scan_files(
                         })
                         .collect();
                 let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
                 for (canonical, composed) in composed_by_file.into_iter().flatten() {
-                    let entry = java_summaries.entry(canonical).or_default();
+                    let mut entry_changed = false;
+                    let entry = java_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
@@ -1852,6 +1920,11 @@ fn scan_files(
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = ruby_summaries.clone();
                 let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
@@ -1874,6 +1947,11 @@ fn scan_files(
                             if same_package_paths.is_empty() {
                                 return None;
                             }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
                             let prepared = stored.prepare(path);
                             let composed = ruby_taint::compose_cross_file_summaries(
                                 prepared.tree.root_node(),
@@ -1892,22 +1970,29 @@ fn scan_files(
                         })
                         .collect();
                 let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
                 for (canonical, composed) in composed_by_file.into_iter().flatten() {
-                    let entry = ruby_summaries.entry(canonical).or_default();
+                    let mut entry_changed = false;
+                    let entry = ruby_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
@@ -2008,6 +2093,11 @@ fn scan_files(
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = php_summaries.clone();
                 let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = php_files
@@ -2029,6 +2119,11 @@ fn scan_files(
                         if same_package_paths.is_empty() {
                             return None;
                         }
+                        if let Some(dirty) = &dirty {
+                            if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                return None;
+                            }
+                        }
                         let prepared = stored.prepare(path);
                         let composed = php_taint::compose_cross_file_summaries(
                             prepared.tree.root_node(),
@@ -2047,22 +2142,29 @@ fn scan_files(
                     })
                     .collect();
                 let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
                 for (canonical, composed) in composed_by_file.into_iter().flatten() {
-                    let entry = php_summaries.entry(canonical).or_default();
+                    let mut entry_changed = false;
+                    let entry = php_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
@@ -2162,6 +2264,11 @@ fn scan_files(
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = csharp_summaries.clone();
                 let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
@@ -2184,6 +2291,11 @@ fn scan_files(
                             if same_package_paths.is_empty() {
                                 return None;
                             }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
                             let prepared = stored.prepare(path);
                             let composed = csharp_taint::compose_cross_file_summaries(
                                 prepared.tree.root_node(),
@@ -2202,22 +2314,29 @@ fn scan_files(
                         })
                         .collect();
                 let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
                 for (canonical, composed) in composed_by_file.into_iter().flatten() {
-                    let entry = csharp_summaries.entry(canonical).or_default();
+                    let mut entry_changed = false;
+                    let entry = csharp_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
@@ -2318,6 +2437,11 @@ fn scan_files(
                 }
             }
 
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = kotlin_summaries.clone();
                 let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
@@ -2340,6 +2464,11 @@ fn scan_files(
                             if same_package_paths.is_empty() {
                                 return None;
                             }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
                             let prepared = stored.prepare(path);
                             let composed = kotlin_taint::compose_cross_file_summaries(
                                 prepared.tree.root_node(),
@@ -2358,22 +2487,29 @@ fn scan_files(
                         })
                         .collect();
                 let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
                 for (canonical, composed) in composed_by_file.into_iter().flatten() {
-                    let entry = kotlin_summaries.entry(canonical).or_default();
+                    let mut entry_changed = false;
+                    let entry = kotlin_summaries.entry(canonical.clone()).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
                             Some(existing) => {
                                 if existing.merge_from(&new_summary) {
-                                    changed = true;
+                                    entry_changed = true;
                                 }
                             }
                             None => {
                                 entry.push(new_summary);
-                                changed = true;
+                                entry_changed = true;
                             }
                         }
                     }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
                 }
+                dirty = Some(next_dirty);
                 if !changed {
                     break;
                 }
