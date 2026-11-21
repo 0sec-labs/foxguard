@@ -40,7 +40,7 @@ not as a global precision claim.
 
 ## OWASP Benchmark (Java) tracker
 
-Per-finding labels do not scale to the ~1,600 findings the full OWASP
+Per-finding labels do not scale to the ~1,500 findings the full OWASP
 Benchmark produces, so `owasp_java.py` joins findings to the Benchmark's own
 ground truth (`expectedresults-1.2.csv`) instead and tracks TPR, FPR and
 finding volume against `owasp_java_expected.json`:

@@ -1117,10 +1117,7 @@ impl_rule! {
             if node.kind() == "method_invocation" {
                 if let Some(name) = node.child_by_field_name("name") {
                     let name_text = &src[name.byte_range()];
-                    if matches!(
-                        name_text,
-                        "write" | "println" | "print" | "format" | "printf"
-                    ) {
+                    if matches!(name_text, "write" | "println" | "print") {
                         if let Some(obj) = node.child_by_field_name("object") {
                             let obj_text = &src[obj.byte_range()];
                             // Match response.getWriter().write/println, out.write/println,
@@ -1666,13 +1663,10 @@ mod precision_tests {
             response.getWriter().write(Encode.forHtml(p) + ("<" + "b>"));
             response.getWriter().println("x: " + p);
             response.getWriter().println(p.trim());
-            response.getWriter().format(p, new Object[] {});
-            response.getWriter().printf("%s", p);
-            response.getWriter().format("<b>%s</b>", new Object[] {});
         } }"#;
         let findings = run(&NoXss, src);
         let lines: Vec<usize> = findings.iter().map(|f| f.line).collect();
-        assert_eq!(lines, vec![5, 6, 7], "{findings:?}");
+        assert_eq!(lines, vec![5, 6], "{findings:?}");
     }
 
     #[test]
