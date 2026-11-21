@@ -467,6 +467,7 @@ fn execute_scan_resolved(
     if let Some(min_conf) = scan.min_confidence {
         findings.retain(|f| f.confidence >= min_conf);
     }
+    crate::report::views::apply_views(&mut findings, &scan.views);
 
     // Filter taint findings exceeding max_hops threshold
     if let Some(ref cfg) = config {
@@ -727,6 +728,7 @@ pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
         let min = min_severity.to_severity();
         diff_result.new_findings.retain(|f| f.severity >= min);
     }
+    crate::report::views::apply_views(&mut diff_result.new_findings, &args.views);
 
     diff_result.new_findings =
         suppress_with_scan_ignores(diff_result.new_findings, config.as_ref(), &identity_root);
@@ -867,6 +869,7 @@ pub fn execute_tui(args: &TuiArgs) -> Result<TuiExecution, String> {
 
 fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
     ScanArgs {
+        views: Default::default(),
         path: args.path.clone(),
         config: args.config.clone(),
         format: OutputFormat::Terminal,
@@ -901,6 +904,7 @@ fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
 
 fn tui_diff_args(args: &TuiArgs, target: &str) -> DiffArgs {
     DiffArgs {
+        views: Default::default(),
         target: target.to_string(),
         path: args.path.clone(),
         format: OutputFormat::Terminal,
@@ -1259,6 +1263,7 @@ mod tests {
         std::fs::write(repo.join("app.py"), "print('after')\n").expect("modify source file");
 
         let result = execute_diff(&DiffArgs {
+            views: Default::default(),
             target: "HEAD".to_string(),
             path: repo.to_string_lossy().into_owned(),
             config: None,
