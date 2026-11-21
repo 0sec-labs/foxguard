@@ -1858,7 +1858,11 @@ mod tests {
         );
         let start = std::time::Instant::now();
         let findings = analyze(&src, &sql_injection_spec());
-        assert!(start.elapsed() < std::time::Duration::from_secs(1), "took {:?}", start.elapsed());
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(1),
+            "took {:?}",
+            start.elapsed()
+        );
         assert_eq!(findings.len(), 1, "{findings:?}");
     }
 
