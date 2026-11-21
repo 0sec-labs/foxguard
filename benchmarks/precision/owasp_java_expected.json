@@ -1,14 +1,14 @@
 {
   "aggregate": {
-    "benchmark_score": 0.1177,
-    "fn": 1210,
-    "fp": 36,
-    "fpr": 0.0272,
-    "precision": 0.8506,
-    "tn": 1289,
-    "total_findings": 1324,
-    "tp": 205,
-    "tpr": 0.1449
+    "benchmark_score": 0.1812,
+    "fn": 1103,
+    "fp": 52,
+    "fpr": 0.0392,
+    "precision": 0.8571,
+    "tn": 1273,
+    "total_findings": 1447,
+    "tp": 312,
+    "tpr": 0.2205
   },
   "benchmark_ref": "10dfcc54ad02dcfcb358b0ba4a0fef8c919a6d17",
   "categories": {
@@ -73,10 +73,10 @@
       "tp": 0
     },
     "xss": {
-      "fn": 107,
-      "fp": 25,
-      "tn": 184,
-      "tp": 139
+      "fn": 0,
+      "fp": 41,
+      "tn": 168,
+      "tp": 246
     }
   },
   "findings_by_rule": {
@@ -84,7 +84,7 @@
     "java/no-hardcoded-secret": 1,
     "java/no-path-traversal": 13,
     "java/no-ssrf": 1,
-    "java/no-xss": 1225,
+    "java/no-xss": 1348,
     "java/no-xxe": 1,
     "java/taint-command-injection": 6,
     "java/taint-sql-injection": 51
