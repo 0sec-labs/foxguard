@@ -5,7 +5,7 @@ use regex::Regex;
 use crate::impl_rule;
 use crate::rules::common::{
     confidence_for_hops, get_source_line, hardcoded_secret_re, is_secret_value_long_enough,
-    make_finding, make_finding_from_offsets, walk_tree,
+    looks_like_secret_value, make_finding, make_finding_from_offsets, walk_tree,
 };
 use crate::rules::java_taint;
 use crate::{Finding, Language, Severity};
@@ -895,6 +895,33 @@ impl_rule! {
     }
 }
 
+/// True when a string literal's contents look like a configuration or
+/// property *key* (the name of a secret) rather than a secret value:
+/// a dotted lower-case key (`db.password`, `app.secret-key`), an
+/// upper-case environment-variable name (`DB_PASSWORD`), or a Spring/Ant
+/// style `${placeholder}` reference. Real secrets almost always carry digits,
+/// mixed case or symbols in a shape these patterns do not accept.
+fn looks_like_property_key(value: &str) -> bool {
+    static DOTTED: OnceLock<Regex> = OnceLock::new();
+    static ENV: OnceLock<Regex> = OnceLock::new();
+    static PLACEHOLDER: OnceLock<Regex> = OnceLock::new();
+    let dotted = DOTTED.get_or_init(|| {
+        Regex::new(r"^[a-z][a-z_-]*(\.[a-z][a-z_-]*)+$").expect("dotted key regex compiles")
+    });
+    let env =
+        ENV.get_or_init(|| Regex::new(r"^[A-Z][A-Z]*(_[A-Z]+)+$").expect("env key regex compiles"));
+    let placeholder = PLACEHOLDER.get_or_init(|| {
+        Regex::new(r"^\$\{[A-Za-z0-9_.:-]+\}$").expect("placeholder regex compiles")
+    });
+    dotted.is_match(value) || env.is_match(value) || placeholder.is_match(value)
+}
+
+/// Reject literal values that are not plausible secrets (property keys,
+/// URLs, paths, prose).
+fn is_plausible_java_secret(value: &str) -> bool {
+    looks_like_secret_value(value) && !looks_like_property_key(value)
+}
+
 // ─── Rule 7: no-hardcoded-secret ────────────────────────────────────────────
 
 pub struct NoHardcodedSecret;
@@ -921,7 +948,8 @@ impl_rule! {
                             if value.kind() == "string_literal" {
                                 let val = &src[value.byte_range()];
                                 let inner = val.trim_matches('"');
-                                if is_secret_value_long_enough(inner, ctx.secret_thresholds) {
+                                if is_plausible_java_secret(inner)
+                                    && is_secret_value_long_enough(inner, ctx.secret_thresholds) {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),
@@ -949,7 +977,8 @@ impl_rule! {
                             if right.kind() == "string_literal" {
                                 let val = &src[right.byte_range()];
                                 let inner = val.trim_matches('"');
-                                if is_secret_value_long_enough(inner, ctx.secret_thresholds) {
+                                if is_plausible_java_secret(inner)
+                                    && is_secret_value_long_enough(inner, ctx.secret_thresholds) {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),
@@ -1576,5 +1605,20 @@ mod precision_tests {
             super.execute("x" + p);
         } }"#;
         assert!(run(&NoSqlInjection, src).is_empty());
+    }
+
+    #[test]
+    fn property_key_strings_are_not_secrets() {
+        let src = r#"class C {
+            static final String A = "x";
+            String passwordKey = "db.password";
+            String secretEnv = "DB_PASSWORD_FILE";
+            String tokenRef = "${app.secret.token}";
+            String password = "hunter2-prod-Xk9";
+            String apiKey = "sk_live_abcdef123456";
+        }"#;
+        let findings = run(&NoHardcodedSecret, src);
+        let lines: Vec<usize> = findings.iter().map(|f| f.line).collect();
+        assert_eq!(lines, vec![6, 7], "{findings:?}");
     }
 }
