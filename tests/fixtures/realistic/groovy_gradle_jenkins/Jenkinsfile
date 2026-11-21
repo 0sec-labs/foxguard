@@ -1,0 +1,37 @@
+// Realistic declarative Jenkins pipeline. Lines marked NEAR MISS must not fire.
+pipeline {
+    agent any
+    parameters {
+        string(name: 'BRANCH', defaultValue: 'main')
+        string(name: 'TARGET_ENV', defaultValue: 'staging')
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                // VULNERABLE: parameter interpolated into the shell by Groovy.
+                sh "git checkout ${params.BRANCH}"
+            }
+        }
+        stage('Build') {
+            steps {
+                // NEAR MISS: single-quoted, the shell expands the variable.
+                sh 'echo "building $BRANCH_NAME"'
+                // NEAR MISS: trusted build metadata only.
+                sh "make -j4 BUILD=${env.BUILD_NUMBER} DIR=${env.WORKSPACE}"
+                // NEAR MISS: echo is not a shell step.
+                echo "deploying ${params.TARGET_ENV}"
+            }
+        }
+        stage('Deploy') {
+            steps {
+                // VULNERABLE: script: form with a change-request field.
+                sh(script: "deploy.sh ${env.CHANGE_TITLE}", returnStdout: true)
+                // VULNERABLE: loads and evaluates a script at run time.
+                script {
+                    def body = readFile(params.SCRIPT_PATH)
+                    evaluate(body)
+                }
+            }
+        }
+    }
+}

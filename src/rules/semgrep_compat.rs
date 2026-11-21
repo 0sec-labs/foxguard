@@ -2256,6 +2256,7 @@ pub(crate) fn map_language(lang_str: &str) -> Option<Language> {
         "xml" => Some(Language::Xml),
         "dart" => Some(Language::Dart),
         "haskell" | "hs" => Some(Language::Haskell),
+        "groovy" => Some(Language::Groovy),
         _ => None,
     }
 }
@@ -2316,6 +2317,7 @@ const REGEX_MODE_ALL_LANGUAGES: &[Language] = &[
     Language::Xml,
     Language::Dart,
     Language::Haskell,
+    Language::Groovy,
 ];
 
 /// A compiled Semgrep `languages: [regex]` rule.

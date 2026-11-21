@@ -103,6 +103,16 @@ fn assert_fixture(file: &str, expected_total: usize, taint_counts: &[(&str, usiz
     }
 }
 
+/// Gradle build script + Jenkinsfile (Groovy). Three VULNERABLE sites in the
+/// Jenkinsfile (two shell-step interpolations, one `evaluate`) and two in
+/// `build.gradle` (literal credential, interpolated `execute()`); every NEAR
+/// MISS (single-quoted `sh`, trusted env interpolation, env-sourced
+/// credentials, constant `execute()`) must stay silent.
+#[test]
+fn realistic_groovy_gradle_jenkins() {
+    assert_fixture("groovy_gradle_jenkins", 5, &[]);
+}
+
 #[test]
 fn realistic_flask_app() {
     assert_fixture(
