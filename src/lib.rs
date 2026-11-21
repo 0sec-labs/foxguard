@@ -76,6 +76,7 @@ pub enum Language {
     Xml,
     Dart,
     Haskell,
+    Groovy,
     /// Pseudo-language for Semgrep `languages: [regex]` rules.
     ///
     /// A `Regex`-language rule carries only `pattern-regex` / `pattern-not-regex`
@@ -119,6 +120,7 @@ impl std::fmt::Display for Language {
             Language::Xml => write!(f, "xml"),
             Language::Dart => write!(f, "dart"),
             Language::Haskell => write!(f, "haskell"),
+            Language::Groovy => write!(f, "groovy"),
             Language::Regex => write!(f, "regex"),
         }
     }

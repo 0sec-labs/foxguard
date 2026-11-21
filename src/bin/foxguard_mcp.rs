@@ -452,6 +452,7 @@ fn tool_result(output: Value) -> Value {
 
 fn scan_args(arguments: &Value, pq_mode: bool) -> Result<ScanArgs, String> {
     Ok(ScanArgs {
+        views: Default::default(),
         path: required_string(arguments, "path")?,
         config: optional_string(arguments, "config")?,
         format: OutputFormat::Json,
@@ -502,6 +503,7 @@ fn secrets_args(arguments: &Value) -> Result<SecretsArgs, String> {
 
 fn diff_args(arguments: &Value) -> Result<DiffArgs, String> {
     Ok(DiffArgs {
+        views: Default::default(),
         target: required_string(arguments, "target")?,
         path: required_string(arguments, "path")?,
         config: optional_string(arguments, "config")?,

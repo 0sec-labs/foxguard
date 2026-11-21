@@ -586,6 +586,14 @@ pub fn detect_language(path: &Path) -> Option<Language> {
         return Some(lang);
     }
 
+    // Jenkins pipelines are conventionally extensionless (`Jenkinsfile`,
+    // `Jenkinsfile.release`) but are Groovy.
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if name == "Jenkinsfile" || name.starts_with("Jenkinsfile.") {
+            return Some(Language::Groovy);
+        }
+    }
+
     match path.extension()?.to_str()? {
         "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => Some(Language::JavaScript),
         "py" | "pyw" => Some(Language::Python),
@@ -613,6 +621,7 @@ pub fn detect_language(path: &Path) -> Option<Language> {
         "xml" => Some(Language::Xml),
         "dart" => Some(Language::Dart),
         "hs" | "lhs" | "hsc" => Some(Language::Haskell),
+        "groovy" | "gradle" | "gvy" | "gy" | "gsh" => Some(Language::Groovy),
         _ => None,
     }
 }
@@ -1017,6 +1026,7 @@ pub(crate) fn comment_markers(language: Language) -> &'static [&'static str] {
         | Language::CSharp
         | Language::Swift
         | Language::Kotlin
+        | Language::Groovy
         | Language::C => &["//"],
         Language::NginxConf
         | Language::ApacheConf
@@ -3259,6 +3269,28 @@ mod tests {
             Some(Language::Dockerfile),
             "'backend.dockerfile' should be detected via extension"
         );
+    }
+
+    #[test]
+    fn groovy_extension_and_jenkinsfile_detection() {
+        for name in [
+            "build.gradle",
+            "Foo.groovy",
+            "script.gvy",
+            "Jenkinsfile",
+            "Jenkinsfile.release",
+        ] {
+            assert_eq!(
+                detect_language(Path::new(name)),
+                Some(Language::Groovy),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            detect_language(Path::new("build.gradle.kts")),
+            Some(Language::Kotlin)
+        );
+        assert_eq!(detect_language(Path::new("Jenkinsfilex")), None);
     }
 
     #[test]

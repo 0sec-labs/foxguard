@@ -215,6 +215,9 @@ pub struct ScanArgs {
     #[arg(long, default_value_t = false)]
     pub show_confidence: bool,
 
+    #[command(flatten)]
+    pub views: crate::report::views::ViewArgs,
+
     /// Minimum confidence (0.0–1.0) to report. Findings below this
     /// threshold are suppressed. Defaults to 0.0 (report all).
     #[arg(long)]
@@ -492,6 +495,9 @@ pub struct DiffArgs {
     /// Maximum file size in bytes to scan (default: 1 MB)
     #[arg(long, default_value_t = 1_048_576)]
     pub max_file_size: u64,
+
+    #[command(flatten)]
+    pub views: crate::report::views::ViewArgs,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -727,6 +733,7 @@ impl PqcArgs {
     /// Convert to `ScanArgs` with `pq_mode` enabled.
     pub fn to_scan_args(&self) -> ScanArgs {
         ScanArgs {
+            views: Default::default(),
             path: self.path.clone(),
             config: self.config.clone(),
             format: self.format,
@@ -766,6 +773,7 @@ impl ScaArgs {
     /// Convert to `ScanArgs` with dependency vulnerability scanning enabled.
     pub fn to_scan_args(&self) -> ScanArgs {
         ScanArgs {
+            views: Default::default(),
             path: self.path.clone(),
             config: self.config.clone(),
             format: self.format,
@@ -802,6 +810,7 @@ impl ScaArgs {
 impl BaselineScanArgs {
     pub fn to_scan_args(&self) -> ScanArgs {
         ScanArgs {
+            views: Default::default(),
             path: self.path.clone(),
             config: self.config.clone(),
             format: self.format,

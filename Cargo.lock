@@ -626,6 +626,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
+name = "dekobon-tree-sitter-groovy"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad65fc9637f84f0baf90c88ac337ab068dd7a9260390e473d9496e380685e2d9"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "deltae"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -837,6 +847,7 @@ dependencies = [
  "clap",
  "colored",
  "crossterm",
+ "dekobon-tree-sitter-groovy",
  "fancy-regex 0.16.2",
  "fs2",
  "globset",
