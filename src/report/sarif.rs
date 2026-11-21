@@ -226,6 +226,9 @@ fn thread_flow_location(artifact_uri: &str, line: usize, message: &str) -> Value
 }
 
 pub fn build_sarif(findings: &[Finding]) -> serde_json::Value {
+    // One bug must not surface twice when pattern and taint rules both fire:
+    // collapse findings sharing (path, line, CWE).
+    let findings = &crate::report::views::dedupe_findings(findings);
     let (rules, rule_indices) = collect_rules(findings);
     let results: Vec<_> = findings
         .iter()

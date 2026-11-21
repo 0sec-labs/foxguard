@@ -34,6 +34,7 @@ use crate::rules::taint_engine::{
     cross_file_taint_finding, walk_scope_nodes as walk_taint_scope_nodes,
 };
 pub use crate::rules::taint_engine::{NodeMatcher, Propagator, TaintFinding, TaintSpec};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tree_sitter::Node;
@@ -986,7 +987,46 @@ fn is_string_concat(node: Node<'_>, source: &str) -> bool {
 
 // ─── Expression taint ────────────────────────────────────────────────────────
 
+thread_local! {
+    /// Per-node memo for one top-level `expression_taint` evaluation. The
+    /// recursive scan visits shared sub-expressions several times per level,
+    /// which is exponential on deep call chains; within one top-level call the
+    /// spec, state and tree are fixed, so results are keyed by node id.
+    static EXPR_MEMO: RefCell<(usize, HashMap<usize, Option<TaintInfo>>)> =
+        RefCell::new((0, HashMap::new()));
+}
+
 fn expression_taint(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    state: &TaintState,
+) -> Option<TaintInfo> {
+    let key = node.id();
+    let cached = EXPR_MEMO.with(|m| {
+        let mut m = m.borrow_mut();
+        let hit = m.1.get(&key).cloned();
+        if hit.is_none() {
+            m.0 += 1;
+        }
+        hit
+    });
+    if let Some(hit) = cached {
+        return hit;
+    }
+    let result = expression_taint_uncached(node, source, spec, state);
+    EXPR_MEMO.with(|m| {
+        let mut m = m.borrow_mut();
+        m.0 -= 1;
+        m.1.insert(key, result.clone());
+        if m.0 == 0 {
+            m.1.clear();
+        }
+    });
+    result
+}
+
+fn expression_taint_uncached(
     node: Node<'_>,
     source: &str,
     spec: &TaintSpec,
@@ -2128,6 +2168,29 @@ mod tests {
     }
 
     // ── direct-unit tests (analyze_tree) ─────────────────────────────────
+
+    #[test]
+    fn deep_call_chain_is_not_exponential() {
+        let n = 40;
+        let mut nested = String::from("\"safe\"");
+        for _ in 0..n {
+            nested = format!("Wrap({nested})");
+        }
+        let mut chain = String::from("Request.QueryString[\"x\"]");
+        for _ in 0..n {
+            chain = format!("{chain}.Trim()");
+        }
+        let src = format!(
+            "class C {{ string Wrap(string s) {{ return s; }}\n public void Run(System.Data.SqlClient.SqlCommand cmd) {{\n string a = {nested};\n string b = {chain};\n cmd.ExecuteReader(a);\n System.Diagnostics.Process.Start(b);\n }} }}"
+        );
+        let start = std::time::Instant::now();
+        let _ = analyze(&src, &command_injection_spec());
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(1),
+            "took {:?}",
+            start.elapsed()
+        );
+    }
 
     #[test]
     fn command_injection_request_querystring_to_process_start() {
