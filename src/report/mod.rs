@@ -1,4 +1,5 @@
 pub mod cbom;
+pub mod code_insights;
 pub mod github_pr;
 pub mod json;
 pub mod sarif;

@@ -22,6 +22,12 @@ pub enum OutputFormat {
     /// for pipelines that consume `semgrep --json`.
     #[value(name = "semgrep-json")]
     SemgrepJson,
+    /// Bitbucket Cloud Code Insights: report + batched annotations (JSON envelope).
+    #[value(name = "code-insights")]
+    CodeInsights,
+    /// Bitbucket Data Center Code Insights: report + batched annotations (JSON envelope).
+    #[value(name = "code-insights-dc")]
+    CodeInsightsDc,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Deserialize)]

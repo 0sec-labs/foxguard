@@ -52,6 +52,16 @@ pub fn emit_scan_report(
         OutputFormat::Sarif => emit_sarif(findings, args.output.as_deref()),
         OutputFormat::Cbom => emit_cbom(findings, args.output.as_deref()),
         OutputFormat::SemgrepJson => emit_semgrep_json(findings, args.output.as_deref()),
+        OutputFormat::CodeInsights => emit_code_insights(
+            findings,
+            args.output.as_deref(),
+            crate::report::code_insights::Platform::Cloud,
+        ),
+        OutputFormat::CodeInsightsDc => emit_code_insights(
+            findings,
+            args.output.as_deref(),
+            crate::report::code_insights::Platform::DataCenter,
+        ),
     }
 }
 
@@ -84,6 +94,16 @@ pub fn emit_secrets_report(
         OutputFormat::Sarif => emit_sarif(findings, args.output.as_deref()),
         OutputFormat::Cbom => emit_cbom(findings, args.output.as_deref()),
         OutputFormat::SemgrepJson => emit_semgrep_json(findings, args.output.as_deref()),
+        OutputFormat::CodeInsights => emit_code_insights(
+            findings,
+            args.output.as_deref(),
+            crate::report::code_insights::Platform::Cloud,
+        ),
+        OutputFormat::CodeInsightsDc => emit_code_insights(
+            findings,
+            args.output.as_deref(),
+            crate::report::code_insights::Platform::DataCenter,
+        ),
     }
 }
 
@@ -118,6 +138,16 @@ pub fn emit_diff_report(
         OutputFormat::Sarif => emit_sarif(findings, args.output.as_deref()),
         OutputFormat::Cbom => emit_cbom(findings, args.output.as_deref()),
         OutputFormat::SemgrepJson => emit_semgrep_json(findings, args.output.as_deref()),
+        OutputFormat::CodeInsights => emit_code_insights(
+            findings,
+            args.output.as_deref(),
+            crate::report::code_insights::Platform::Cloud,
+        ),
+        OutputFormat::CodeInsightsDc => emit_code_insights(
+            findings,
+            args.output.as_deref(),
+            crate::report::code_insights::Platform::DataCenter,
+        ),
     }
 }
 
@@ -144,6 +174,17 @@ fn emit_semgrep_json(findings: &[Finding], output_path: Option<&str>) -> Result<
     let content = serde_json::to_string_pretty(&doc)
         .map_err(|e| format!("Failed to serialize Semgrep JSON: {e}"))?;
     write_report(&content, output_path, "Semgrep JSON")
+}
+
+fn emit_code_insights(
+    findings: &[Finding],
+    output_path: Option<&str>,
+    platform: crate::report::code_insights::Platform,
+) -> Result<(), String> {
+    let doc = crate::report::code_insights::build_code_insights(findings, platform);
+    let content = serde_json::to_string_pretty(&doc)
+        .map_err(|e| format!("Failed to serialize Code Insights report: {e}"))?;
+    write_report(&content, output_path, "Code Insights")
 }
 
 fn emit_cbom(findings: &[Finding], output_path: Option<&str>) -> Result<(), String> {

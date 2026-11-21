@@ -1,0 +1,70 @@
+{
+  "annotation_batches": [
+    {
+      "annotations": [
+        {
+          "externalId": "foxguard-3fe41a8d8f818f7d",
+          "line": 12,
+          "message": "[py/sql-injection] (CWE-89) Untrusted input reaches a dangerous sink\nFix: Use parameterized queries",
+          "path": "app/db.py",
+          "severity": "HIGH",
+          "type": "VULNERABILITY"
+        },
+        {
+          "externalId": "foxguard-fff2575117319e34",
+          "line": 40,
+          "message": "[js/xss] (CWE-79) Untrusted input reaches a dangerous sink\nFix: Escape output",
+          "path": "web/view.js",
+          "severity": "HIGH",
+          "type": "VULNERABILITY"
+        },
+        {
+          "externalId": "foxguard-328b693293c87c40",
+          "line": 1,
+          "message": "[py/weak-hash] Untrusted input reaches a dangerous sink",
+          "path": "app/crypto.py",
+          "severity": "LOW",
+          "type": "VULNERABILITY"
+        }
+      ]
+    }
+  ],
+  "annotations_dropped": 0,
+  "annotations_emitted": 3,
+  "annotations_total": 3,
+  "platform": "bitbucket-data-center",
+  "report": {
+    "data": [
+      {
+        "title": "Findings",
+        "type": "NUMBER",
+        "value": 3
+      },
+      {
+        "title": "Critical",
+        "type": "NUMBER",
+        "value": 1
+      },
+      {
+        "title": "High",
+        "type": "NUMBER",
+        "value": 1
+      },
+      {
+        "title": "Medium",
+        "type": "NUMBER",
+        "value": 0
+      },
+      {
+        "title": "Low",
+        "type": "NUMBER",
+        "value": 1
+      }
+    ],
+    "details": "3 unique finding(s) after path+line+CWE dedupe.",
+    "reporter": "foxguard",
+    "result": "FAIL",
+    "title": "foxguard security scan"
+  },
+  "report_id": "foxguard"
+}

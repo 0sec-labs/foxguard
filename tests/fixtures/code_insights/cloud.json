@@ -1,0 +1,72 @@
+{
+  "annotation_batches": [
+    [
+      {
+        "annotation_type": "VULNERABILITY",
+        "details": "Rule: py/sql-injection\nCWE: CWE-89\nUntrusted input reaches a dangerous sink\nFix: Use parameterized queries",
+        "external_id": "foxguard-3fe41a8d8f818f7d",
+        "line": 12,
+        "path": "app/db.py",
+        "severity": "CRITICAL",
+        "summary": "[py/sql-injection] (CWE-89) Untrusted input reaches a dangerous sink"
+      },
+      {
+        "annotation_type": "VULNERABILITY",
+        "details": "Rule: js/xss\nCWE: CWE-79\nUntrusted input reaches a dangerous sink\nFix: Escape output",
+        "external_id": "foxguard-fff2575117319e34",
+        "line": 40,
+        "path": "web/view.js",
+        "severity": "HIGH",
+        "summary": "[js/xss] (CWE-79) Untrusted input reaches a dangerous sink"
+      },
+      {
+        "annotation_type": "VULNERABILITY",
+        "details": "Rule: py/weak-hash\nUntrusted input reaches a dangerous sink",
+        "external_id": "foxguard-328b693293c87c40",
+        "line": 1,
+        "path": "app/crypto.py",
+        "severity": "LOW",
+        "summary": "[py/weak-hash] Untrusted input reaches a dangerous sink"
+      }
+    ]
+  ],
+  "annotations_dropped": 0,
+  "annotations_emitted": 3,
+  "annotations_total": 3,
+  "platform": "bitbucket-cloud",
+  "report": {
+    "data": [
+      {
+        "title": "Findings",
+        "type": "NUMBER",
+        "value": 3
+      },
+      {
+        "title": "Critical",
+        "type": "NUMBER",
+        "value": 1
+      },
+      {
+        "title": "High",
+        "type": "NUMBER",
+        "value": 1
+      },
+      {
+        "title": "Medium",
+        "type": "NUMBER",
+        "value": 0
+      },
+      {
+        "title": "Low",
+        "type": "NUMBER",
+        "value": 1
+      }
+    ],
+    "details": "3 unique finding(s) after path+line+CWE dedupe.",
+    "report_type": "SECURITY",
+    "reporter": "foxguard",
+    "result": "FAILED",
+    "title": "foxguard security scan"
+  },
+  "report_id": "foxguard"
+}

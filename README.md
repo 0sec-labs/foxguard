@@ -118,6 +118,7 @@ foxguard sca .                          # dependency vulnerabilities from OSV
 foxguard pqc .                          # post-quantum crypto audit
 foxguard --format sarif . > results.sarif
 foxguard --format semgrep-json .        # Semgrep CLI-compatible JSON
+foxguard --format code-insights .       # Bitbucket Cloud Code Insights (code-insights-dc for Data Center)
 ```
 
 Use `foxguard --fix src/` or `foxguard --fix src/app.py` to apply supported taint
