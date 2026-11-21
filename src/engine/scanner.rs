@@ -1,4 +1,4 @@
-use crate::rules::cross_file::CrossFileSummaryMap;
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary};
 use crate::rules::csharp_taint;
 use crate::rules::go_taint::{self, go_aliases_from_tree};
 use crate::rules::java_taint;
@@ -646,7 +646,9 @@ pub fn scan_directory_with_notices(
     let scan_root = scan_root(root_path);
 
     let mut discovery_notices = Vec::new();
+    let mut phase = Instant::now();
     let (files, stats) = collect_scan_files(root_path, scan_root, excludes, &mut discovery_notices);
+    timing_mark("directory walk", &mut phase);
     let (result, mut notices) = scan_files(
         scan_root,
         files,
@@ -1064,6 +1066,17 @@ fn apply_inline_ignores(
         .collect()
 }
 
+/// Print `label` and elapsed time to stderr when `FOXGUARD_TIMING=1`.
+fn timing_mark(label: &str, since: &mut Instant) {
+    if std::env::var_os("FOXGUARD_TIMING").is_some() {
+        eprintln!(
+            "foxguard-timing: {label}: {:.2}s",
+            since.elapsed().as_secs_f64()
+        );
+    }
+    *since = Instant::now();
+}
+
 fn scan_files(
     scan_root: &Path,
     files: Vec<(PathBuf, Language)>,
@@ -1073,6 +1086,7 @@ fn scan_files(
     file_budget: Option<std::time::Duration>,
 ) -> (ScanResult, Vec<String>) {
     let start = Instant::now();
+    let mut phase = Instant::now();
     let warnings = Mutex::new(Vec::new());
     let secret_thresholds = registry.secret_thresholds();
 
@@ -1622,6 +1636,7 @@ fn scan_files(
                 ))
             })
             .collect();
+        timing_mark("java pass1 extract (parallel)", &mut phase);
         let mut java_summaries = CrossFileSummaryMap::new();
         for (path, prepared, file_summaries) in prepared_java {
             if !file_summaries.is_empty() {
@@ -1666,41 +1681,50 @@ fn scan_files(
 
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = java_summaries.clone();
-                let mut changed = false;
-                for (path, _) in &java_files {
-                    let Some(prepared) =
-                        prepared_files.get(path).map(|stored| stored.prepare(path))
-                    else {
-                        continue;
-                    };
-                    let canonical = prepared.canonical_path.clone();
-                    // Same-package siblings (excluding self).
-                    let same_package_paths: Vec<PathBuf> = path
-                        .parent()
-                        .and_then(|dir| dir_index.get(dir))
-                        .map(|siblings| {
-                            siblings
-                                .iter()
-                                .filter(|p| **p != canonical)
-                                .cloned()
-                                .collect()
+                // Every file composes against the immutable snapshot, so the
+                // per-file work is independent: compute it in parallel, then
+                // merge sequentially in file order (identical to the former
+                // serial loop, whose reads never saw same-round writes).
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    java_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            // Same-package siblings (excluding self).
+                            let same_package_paths: Vec<PathBuf> = path
+                                .parent()
+                                .and_then(|dir| dir_index.get(dir))
+                                .map(|siblings| {
+                                    siblings
+                                        .iter()
+                                        .filter(|p| **p != canonical)
+                                        .cloned()
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = java_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &java_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
                         })
-                        .unwrap_or_default();
-                    if same_package_paths.is_empty() {
-                        continue;
-                    }
-                    let composed = java_taint::compose_cross_file_summaries(
-                        prepared.tree.root_node(),
-                        &prepared.source,
-                        None,
-                        &java_rule_specs,
-                        &same_package_paths,
-                        &snapshot,
-                        &allowed_rule_ids,
-                    );
-                    if composed.is_empty() {
-                        continue;
-                    }
+                        .collect();
+                let mut changed = false;
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
                     let entry = java_summaries.entry(canonical).or_default();
                     for new_summary in composed {
                         match entry.iter_mut().find(|s| s.name == new_summary.name) {
@@ -1722,6 +1746,7 @@ fn scan_files(
             }
         }
 
+        timing_mark("java multi-hop compose", &mut phase);
         has_java_cross_file = !java_summaries.is_empty();
         cross_file_summaries.extend(java_summaries);
     }
@@ -2466,6 +2491,7 @@ fn scan_files(
         HashMap::new()
     };
 
+    timing_mark("pre-pass2 setup (all langs, incl. indexes)", &mut phase);
     // ── Pass 2: Full analysis with cross-file summaries available ─────
     let outcomes: Vec<FileScanOutcome> = files
         .par_iter()
@@ -2850,6 +2876,7 @@ fn scan_files(
         })
         .collect();
 
+    timing_mark("pass2 per-file analysis (parallel)", &mut phase);
     let mut results = Vec::new();
     for outcome in outcomes {
         stats.extend(outcome.stats);
