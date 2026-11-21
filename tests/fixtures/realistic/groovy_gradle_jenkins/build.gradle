@@ -1,0 +1,36 @@
+plugins {
+    id 'java'
+    id 'maven-publish'
+}
+
+publishing {
+    repositories {
+        maven {
+            url = 'https://repo.example.com/releases'
+            credentials {
+                username 'ci-publisher'
+                // VULNERABLE: literal credential in the build script.
+                password 'p4ssw0rd-0123456789'
+            }
+        }
+        maven {
+            url = 'https://repo.example.com/snapshots'
+            credentials {
+                // NEAR MISS: read from the environment.
+                username = System.getenv('REPO_USER')
+                password = System.getenv('REPO_PASSWORD')
+            }
+        }
+    }
+}
+
+task runTool {
+    doLast {
+        // VULNERABLE: interpolated command string executed with execute().
+        def out = "tool --out ${project.buildDir}/${project.findProperty('target')}".execute().text
+        println(out)
+        // NEAR MISS: constant command.
+        def version = 'git --version'.execute().text
+        println(version)
+    }
+}

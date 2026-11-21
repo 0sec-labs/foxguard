@@ -48,6 +48,7 @@ fn parse_source_for_path(
         Language::Xml => tree_sitter_xml::LANGUAGE_XML.into(),
         Language::Dart => tree_sitter_dart::LANGUAGE.into(),
         Language::Haskell => tree_sitter_haskell::LANGUAGE.into(),
+        Language::Groovy => dekobon_tree_sitter_groovy::LANGUAGE.into(),
         // Regex-mode rules never use a tree-sitter parser — they match raw text
         // only. Return `None` immediately so the scanner skips the tree build.
         Language::Regex => return None,
@@ -214,6 +215,15 @@ contract Token {
         let source = "module Main where\n\nmain :: IO ()\nmain = putStrLn \"hello\"\n";
         let tree = parse_path(source, Language::Haskell, Path::new("Main.hs"))
             .expect("Haskell parser should produce a tree");
+
+        assert!(!tree.root_node().has_error());
+    }
+
+    #[test]
+    fn parses_groovy_without_errors() {
+        let source = "pipeline {\n  stages {\n    stage('a') {\n      steps {\n        sh \"echo ${params.X}\"\n      }\n    }\n  }\n}\n";
+        let tree = parse_path(source, Language::Groovy, Path::new("Jenkinsfile"))
+            .expect("Groovy parser should produce a tree");
 
         assert!(!tree.root_node().has_error());
     }

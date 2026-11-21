@@ -12,6 +12,7 @@ pub mod csharp_taint;
 pub mod generic_mode;
 pub mod go;
 pub mod go_taint;
+pub mod groovy;
 pub mod java;
 pub mod java_taint;
 pub mod javascript;
@@ -710,6 +711,16 @@ impl RuleRegistry {
                 kotlin::TaintSqlInjection,
                 kotlin::TaintCommandInjection,
                 kotlin::TaintSsrf,
+            ]
+        );
+
+        register_rules!(
+            registry,
+            [
+                groovy::NoHardcodedSecret,
+                groovy::NoCommandInjection,
+                groovy::NoUnsafeEval,
+                groovy::JenkinsShInterpolation,
             ]
         );
 

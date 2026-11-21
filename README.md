@@ -34,7 +34,7 @@ npx foxguard .
 
 ## Why
 
-- <img height="14" src="https://raw.githubusercontent.com/0sec-labs/.github/main/profile/assets/icons/checklist.png" alt="">&nbsp; 200+ built-in rules across 12 source languages, plus config and manifest checks
+- <img height="14" src="https://raw.githubusercontent.com/0sec-labs/.github/main/profile/assets/icons/checklist.png" alt="">&nbsp; 200+ built-in rules across 13 source languages, plus config and manifest checks
 - <img height="14" src="https://raw.githubusercontent.com/0sec-labs/.github/main/profile/assets/icons/git-branch.png" alt="">&nbsp; Taint tracking for 14 languages, with cross-file analysis for Python, JavaScript, Go, Java, Ruby, PHP, C#, and Kotlin
 - <img height="14" src="https://raw.githubusercontent.com/0sec-labs/.github/main/profile/assets/icons/zap.png" alt="">&nbsp; Fast local and CI scans, with diff mode for “what did this branch add?”
 - <img height="14" src="https://raw.githubusercontent.com/0sec-labs/.github/main/profile/assets/icons/key.png" alt="">&nbsp; Secrets scanning, OSV-backed dependency scanning, and post-quantum crypto audit
@@ -238,6 +238,7 @@ Git Diff remains a separate comparison against a branch.
 | C# | Yes | Yes | .NET |
 | Swift | Yes | Yes | iOS |
 | Haskell | Yes | -- | Cardano seed rules |
+| Groovy (Gradle, Jenkinsfile, Grails) | Yes | -- | Jenkins pipelines |
 
 Taint tracking also covers C, Bash, and Solidity. Config, manifest, and external-rule scans cover Dockerfile, Nginx, Apache, HAProxy, HCL/Terraform, YAML/JSON/XML/HTML, C via Semgrep YAML/Coccinelle, and more.
 
