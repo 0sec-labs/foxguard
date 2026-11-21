@@ -7,6 +7,7 @@ use crate::rules::common::{
     confidence_for_hops, get_source_line, hardcoded_secret_re, is_secret_value_long_enough,
     looks_like_secret_value, make_finding, make_finding_from_offsets, walk_tree,
 };
+use crate::rules::java_flow;
 use crate::rules::java_taint;
 use crate::{Finding, Language, Severity};
 
@@ -406,7 +407,9 @@ impl_rule! {
                             if obj_text.contains("getRuntime()") || obj_text.contains("Runtime") {
                                 if let Some(args) = node.child_by_field_name("arguments") {
                                     if let Some(first_arg) = args.named_child(0) {
-                                        if !is_literal(first_arg) {
+                                        if !is_literal(first_arg)
+                                            && !java_flow::sink_args_safe(node, src, false)
+                                        {
                                             findings.push(make_finding(
                                                 _self.id(),
                                                 _self.severity(),
@@ -431,7 +434,9 @@ impl_rule! {
                     if type_text == "ProcessBuilder" {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
-                                if !is_literal(first_arg) {
+                                if !is_literal(first_arg)
+                                    && !java_flow::sink_args_safe(node, src, false)
+                                {
                                     findings.push(make_finding(
                                         _self.id(),
                                         _self.severity(),
@@ -1117,7 +1122,10 @@ impl_rule! {
             if node.kind() == "method_invocation" {
                 if let Some(name) = node.child_by_field_name("name") {
                     let name_text = &src[name.byte_range()];
-                    if matches!(name_text, "write" | "println" | "print") {
+                    if matches!(
+                        name_text,
+                        "write" | "println" | "print" | "format" | "printf"
+                    ) {
                         if let Some(obj) = node.child_by_field_name("object") {
                             let obj_text = &src[obj.byte_range()];
                             // Match response.getWriter().write/println, out.write/println,
@@ -1129,11 +1137,25 @@ impl_rule! {
                                 || obj_text == "pw"
                             {
                                 if let Some(args) = node.child_by_field_name("arguments") {
-                                    if let Some(first_arg) = args.named_child(0) {
-                                        // Flag if the argument is not a pure literal
+                                    // `format`/`printf` interpolate every argument, so any
+                                    // dynamic one can inject markup; the other sinks write
+                                    // their first argument.
+                                    let is_format = matches!(name_text, "format" | "printf");
+                                    let dynamic_arg = if is_format {
+                                        let mut cursor = args.walk();
+                                        let found = args.named_children(&mut cursor).find(|a| {
+                                            !is_literal(*a) && !is_encoded_or_constant_output(*a, src)
+                                        });
+                                        found
+                                    } else {
+                                        args.named_child(0).filter(|a| {
+                                            !is_literal(*a) && !is_encoded_or_constant_output(*a, src)
+                                        })
+                                    };
+                                    if let Some(_first_arg) = dynamic_arg {
+                                        // Flag if an argument is not a pure literal
                                         // (i.e. it's a variable, concatenation, method call, etc.)
-                                        if !is_literal(first_arg)
-                                            && !is_encoded_or_constant_output(first_arg, src)
+                                        if !java_flow::sink_args_safe(node, src, true)
                                         {
                                             let mut f = make_finding(
                                                 _self.id(),
@@ -1667,6 +1689,109 @@ mod precision_tests {
         let findings = run(&NoXss, src);
         let lines: Vec<usize> = findings.iter().map(|f| f.line).collect();
         assert_eq!(lines, vec![5, 6], "{findings:?}");
+    }
+
+    #[test]
+    fn xss_flow_constant_condition_and_collections() {
+        let src = r#"class C {
+            void tp1(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                String param = req.getParameter("p");
+                int num = 106;
+                String bar = (7 * 42) - num > 200 ? "safe" : param;
+                response.getWriter().println(bar);
+            }
+            void ok1(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                String param = req.getParameter("p");
+                int num = 106;
+                String bar = (7 * 18) + num > 200 ? "safe" : param;
+                response.getWriter().println(bar);
+            }
+            void tp2(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                String param = req.getParameter("p");
+                java.util.List<String> l = new java.util.ArrayList<String>();
+                l.add("a"); l.add(param); l.remove(1);
+                l.add(param);
+                response.getWriter().println(l.get(1));
+            }
+            void ok2(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                String param = req.getParameter("p");
+                java.util.List<String> l = new java.util.ArrayList<String>();
+                l.add("a"); l.add(param); l.remove(1);
+                response.getWriter().println(l.get(0));
+            }
+            void tp3(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                String param = req.getParameter("p");
+                String bar = "x";
+                switch ('B') { case 'A': bar = "a"; break; case 'B': bar = param; break; }
+                response.getWriter().println(bar);
+            }
+            void ok3(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                String param = req.getParameter("p");
+                String bar = param;
+                switch ('B') { case 'A': bar = param; break; case 'B': bar = "b"; break; }
+                response.getWriter().println(bar);
+            }
+            void tp4(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                String bar = req.getParameter("p");
+                response.getWriter().println(bar);
+            }
+            void ok4(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                String bar = req.getParameter("p");
+                bar = "fixed";
+                response.getWriter().println(bar);
+            }
+        }"#;
+        let lines: Vec<usize> = run(&NoXss, src).iter().map(|f| f.line).collect();
+        assert_eq!(lines, vec![6, 19, 31, 41], "{lines:?}");
+    }
+
+    #[test]
+    fn command_injection_flow_constant_condition() {
+        let src = r#"class C {
+            void tp(String param) throws Exception {
+                int n = 106;
+                String bar = (7 * 42) - n > 200 ? "x" : param;
+                Runtime.getRuntime().exec("echo " + bar);
+            }
+            void ok(String param) throws Exception {
+                int n = 86;
+                String bar = (7 * 42) - n > 200 ? "x" : param;
+                Runtime.getRuntime().exec("echo " + bar);
+            }
+        }"#;
+        let lines: Vec<usize> = run(&NoCommandInjection, src)
+            .iter()
+            .map(|f| f.line)
+            .collect();
+        assert_eq!(lines, vec![5], "{lines:?}");
+    }
+
+    #[test]
+    fn xss_format_sinks_need_unsanitised_value() {
+        let src = r#"class C {
+            void tp(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                String bar = req.getParameter("p");
+                Object[] obj = {"a", bar};
+                response.getWriter().format("Formatted like: %1$s and %2$s.", obj);
+            }
+            void tp_printf(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                response.getWriter().printf("hi %s", req.getParameter("p"));
+            }
+            void ok_replaced(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                String bar = req.getParameter("p");
+                bar = "fixed";
+                Object[] obj = {"a", bar};
+                response.getWriter().format("Formatted like: %1$s and %2$s.", obj);
+            }
+            void ok_encoded(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse response) throws Exception {
+                response.getWriter().printf("hi %s", Encode.forHtml(req.getParameter("p")));
+            }
+            void ok_literal(javax.servlet.http.HttpServletResponse response) throws Exception {
+                response.getWriter().format("static %s", "x");
+            }
+        }"#;
+        let lines: Vec<usize> = run(&NoXss, src).iter().map(|f| f.line).collect();
+        assert_eq!(lines, vec![5, 8], "{lines:?}");
     }
 
     #[test]
