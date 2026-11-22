@@ -1683,6 +1683,7 @@ fn scan_files(
                     None,
                     &java_rule_specs,
                 );
+                let invoked = java_taint::invoked_method_names(tree.root_node(), &source);
                 let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
                 Some((
                     path.clone(),
@@ -1695,12 +1696,15 @@ fn scan_files(
                         tree_leases: None,
                     },
                     summaries,
+                    invoked,
                 ))
             })
             .collect();
         timing_mark("java pass1 extract (parallel)", &mut phase);
         let mut java_summaries = CrossFileSummaryMap::new();
-        for (path, prepared, file_summaries) in prepared_java {
+        let mut java_invoked: HashMap<PathBuf, std::collections::HashSet<String>> = HashMap::new();
+        for (path, prepared, file_summaries, invoked) in prepared_java {
+            java_invoked.insert(prepared.canonical_path.clone(), invoked);
             if !file_summaries.is_empty() {
                 java_summaries.insert(prepared.canonical_path.clone(), file_summaries);
             }
@@ -1747,6 +1751,22 @@ fn scan_files(
             let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
             for _round in 0..MAX_MULTIHOP_ROUNDS {
                 let snapshot = java_summaries.clone();
+                // Per directory: summary name -> positions (in `dir_index`
+                // order) of the siblings that currently define it. A file only
+                // depends on siblings defining a name it invokes (resolution
+                // is name-based), not on every same-package sibling.
+                let mut name_index: HashMap<&Path, HashMap<&str, Vec<usize>>> = HashMap::new();
+                for (dir, siblings) in &dir_index {
+                    let mut by_name: HashMap<&str, Vec<usize>> = HashMap::new();
+                    for (pos, sibling) in siblings.iter().enumerate() {
+                        if let Some(summaries) = snapshot.get(sibling) {
+                            for s in summaries {
+                                by_name.entry(s.name.as_str()).or_default().push(pos);
+                            }
+                        }
+                    }
+                    name_index.insert(dir.as_path(), by_name);
+                }
                 // Every file composes against the immutable snapshot, so the
                 // per-file work is independent: compute it in parallel, then
                 // merge sequentially in file order (identical to the former
@@ -1757,18 +1777,27 @@ fn scan_files(
                         .map(|(path, _)| {
                             let stored = prepared_files.get(path)?;
                             let canonical = stored.canonical_path.clone();
-                            // Same-package siblings (excluding self).
-                            let same_package_paths: Vec<PathBuf> = path
-                                .parent()
-                                .and_then(|dir| dir_index.get(dir))
-                                .map(|siblings| {
-                                    siblings
-                                        .iter()
-                                        .filter(|p| **p != canonical)
-                                        .cloned()
-                                        .collect()
-                                })
-                                .unwrap_or_default();
+                            let dir = path.parent()?;
+                            let siblings = dir_index.get(dir)?;
+                            let by_name = name_index.get(dir)?;
+                            let invoked = java_invoked.get(&canonical)?;
+                            // Dependencies: siblings (excluding self) defining an
+                            // invoked name, kept in sibling order so the
+                            // first-match lookup is unchanged.
+                            let mut positions: Vec<usize> = invoked
+                                .iter()
+                                .filter_map(|name| by_name.get(name.as_str()))
+                                .flatten()
+                                .copied()
+                                .collect();
+                            positions.sort_unstable();
+                            positions.dedup();
+                            let same_package_paths: Vec<PathBuf> = positions
+                                .into_iter()
+                                .map(|pos| &siblings[pos])
+                                .filter(|p| **p != canonical)
+                                .cloned()
+                                .collect();
                             if same_package_paths.is_empty() {
                                 return None;
                             }
