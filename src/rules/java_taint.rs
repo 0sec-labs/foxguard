@@ -519,6 +519,20 @@ fn resolve_cross_file_scope(
     });
 }
 
+/// Every method name this file invokes (`method_invocation` nodes anywhere in
+/// the tree). Cross-file resolution is name-based, so a file can only depend on
+/// sibling files that define one of these names. The scanner uses this to
+/// narrow a file's same-package dependency set during multi-hop composition.
+pub fn invoked_method_names(root: Node<'_>, source: &str) -> HashSet<String> {
+    let mut names = HashSet::new();
+    walk_tree(root, source, &mut |node, src| {
+        if let Some(name) = call_method_name(node, src) {
+            names.insert(name.to_string());
+        }
+    });
+    names
+}
+
 fn lookup_cross_file_summary<'a>(
     cross_file: &'a CrossFileInfo<'_>,
     method_name: &str,
