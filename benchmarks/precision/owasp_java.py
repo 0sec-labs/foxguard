@@ -43,6 +43,34 @@ def load_truth(benchmark_dir: Path) -> dict[str, tuple[str, bool, str]]:
     return truth
 
 
+def sarif_report(path: Path) -> dict:
+    """Convert any scanner's SARIF 2.1.0 into the report shape `score` expects.
+
+    A result counts once per CWE it is tagged with (rule `properties.tags` such as
+    "CWE-89: ..." or `properties.cwe`), so tools can be scored on the same ground
+    truth as foxguard. Results with no CWE tag are kept but can never match a
+    category, which is the honest outcome for an untagged rule.
+    """
+    run = json.loads(path.read_text())["runs"][0]
+    cwes: dict[str, list[str]] = {}
+    for rule in run.get("tool", {}).get("driver", {}).get("rules", []) or []:
+        props = rule.get("properties", {}) or {}
+        found = []
+        for tag in list(props.get("tags", []) or []) + [props.get("cwe")] if props.get("cwe") else list(props.get("tags", []) or []):
+            m = re.search(r"CWE[-_ ]?(\d+)", str(tag), re.I)
+            if m:
+                found.append(f"CWE-{m.group(1)}")
+        cwes[rule["id"]] = sorted(set(found))
+    findings = []
+    for res in run.get("results", []):
+        locs = res.get("locations") or [{}]
+        uri = locs[0].get("physicalLocation", {}).get("artifactLocation", {}).get("uri", "")
+        ids = cwes.get(res.get("ruleId", ""), []) or [None]
+        for cwe in ids:
+            findings.append({"rule_id": res.get("ruleId", ""), "file": uri, "cwe": cwe})
+    return {"findings": findings}
+
+
 def scan(foxguard: Path, benchmark_dir: Path) -> dict:
     proc = subprocess.run(
         [str(foxguard), "-f", "json", "--file-timeout", "0",
@@ -89,7 +117,8 @@ def score(truth: dict, report: dict) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--foxguard", type=Path, required=True)
+    ap.add_argument("--foxguard", type=Path)
+    ap.add_argument("--sarif", type=Path, help="score another scanner from its SARIF 2.1.0 output instead of running foxguard")
     ap.add_argument("--benchmark-dir", type=Path, required=True,
                     help=f"checkout of {URL} at {PINNED_REF}")
     ap.add_argument("--check", action="store_true")
@@ -101,7 +130,10 @@ def main() -> int:
     if head != PINNED_REF:
         print(f"warning: benchmark checkout is {head or 'not a git repo'}, "
               f"baseline pinned to {PINNED_REF}", file=sys.stderr)
-    result = score(load_truth(args.benchmark_dir), scan(args.foxguard, args.benchmark_dir))
+    if bool(args.foxguard) == bool(args.sarif):
+        ap.error("give exactly one of --foxguard or --sarif")
+    report = sarif_report(args.sarif) if args.sarif else scan(args.foxguard, args.benchmark_dir)
+    result = score(load_truth(args.benchmark_dir), report)
     agg = result["aggregate"]
     print(f"TPR {agg['tpr']:.3f}  FPR {agg['fpr']:.3f}  precision {agg['precision']:.3f}  "
           f"findings {agg['total_findings']}")
